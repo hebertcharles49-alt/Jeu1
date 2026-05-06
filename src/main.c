@@ -71,23 +71,41 @@ static void apply_shake(Game *g, int *ox, int *oy) {
 
 void game_recompute_player_stats(Game *g) {
     Player *p = &g->player;
-    /* base stats from hero + meta */
+    /* defaults */
     float base_maxhp = 100.f, base_speed = 110.f, base_armor = 0.f;
     float base_dmg_mul = 1.0f, base_lifesteal = 0.f, base_regen = 0.f;
+    float base_flat_dmg = 0.f;
+    float base_melee = 1.f, base_range = 1.f, base_elem = 1.f;
+    float base_atkspeed = 1.f;
+    float base_crit_chance = 0.05f, base_crit_dmg = 1.5f;
+    float base_rangem = 1.f;
+    float base_dodge = 0.f;
+    float base_aff[EL_COUNT];
+    for (int i = 0; i < EL_COUNT; i++) base_aff[i] = 0.f;
+
+    /* hero archetype */
     switch (p->hero) {
-        case HERO_GUERRIER:  base_maxhp = 125.f; base_dmg_mul = 1.15f; break;
-        case HERO_VOLEUR:    base_speed = 130.f; break;
-        case HERO_MAGE:      base_maxhp = 80.f;  base_dmg_mul = 1.30f; break;
-        case HERO_BERSERKER: base_maxhp = 90.f;  base_dmg_mul = 1.20f; base_lifesteal = 0.08f; break;
-        case HERO_PALADIN:   base_armor = 2.f;   base_regen = 1.f; break;
+        case HERO_GUERRIER:  base_maxhp += 25.f; base_melee *= 1.15f; break;
+        case HERO_VOLEUR:    base_speed += 20.f; break;
+        case HERO_MAGE:      base_maxhp -= 20.f; base_elem  *= 1.30f; break;
+        case HERO_BERSERKER: base_maxhp -= 10.f; base_dmg_mul *= 1.20f; base_lifesteal = 0.08f; break;
+        case HERO_PALADIN:   base_armor += 2.f;  base_regen += 1.f; base_maxhp += 15.f; break;
+        case HERO_DRUIDE:    base_elem  *= 1.50f; base_melee *= 0.70f; break;
+        case HERO_ASSASSIN:  base_crit_chance += 0.25f; base_crit_dmg += 0.5f; base_maxhp -= 25.f; break;
+        case HERO_RANGER:    base_range *= 1.40f; base_melee *= 0.75f; break;
+        case HERO_TEMPLIER:  base_armor += 3.f; base_maxhp += 15.f; base_atkspeed *= 1.15f; break;
+        case HERO_NECROMANT: base_lifesteal = 0.15f; base_regen -= 1.f;
+                             base_aff[EL_VOID] += 0.20f; base_aff[EL_DARK] += 0.20f; break;
         default: break;
     }
-    /* meta perm bonuses */
+
+    /* meta perm bonuses (sanctuaire) */
     base_maxhp += g->meta.perm_hp;
     base_armor += g->meta.perm_armor;
     base_speed += g->meta.perm_speed;
     base_dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
-    /* equipped items */
+
+    /* equipement */
     for (int s = 0; s < EQUIP_SLOTS; s++) {
         if (!p->equipped[s].occupied) continue;
         float v = p->equipped[s].stat_value;
@@ -95,13 +113,42 @@ void game_recompute_player_stats(Game *g) {
             case SLOT_HELM:   base_maxhp   += v;          break;
             case SLOT_CHEST:  base_armor   += v;          break;
             case SLOT_LEGS:   base_speed   += v;          break;
-            case SLOT_BOOTS:  /* dash cd reduc, applied in update_player */ break;
+            case SLOT_BOOTS:  base_dodge   += v * 0.5f;   break;
             case SLOT_BELT:   base_regen   += v;          break;
             case SLOT_GLOVES: base_dmg_mul *= (1.f + v);  break;
             default: break;
         }
     }
-    /* save current hp ratio to scale */
+
+    /* shop items (effets cumulatifs) */
+    for (int i = 0; i < p->shop_purchased_count; i++) {
+        int rid = p->shop_purchased[i];
+        /* applique l'effet du recipe -- callback exterieur */
+        extern void shop_recipe_apply_effect(Game *g, int rid,
+                                             float *maxhp, float *speed, float *armor,
+                                             float *dmg_mul, float *lifesteal, float *regen,
+                                             float *flat_dmg, float *melee, float *range,
+                                             float *elem, float *atkspeed, float *crit_c,
+                                             float *crit_d, float *rangem, float *dodge,
+                                             float *aff);
+        shop_recipe_apply_effect(g, rid,
+            &base_maxhp, &base_speed, &base_armor,
+            &base_dmg_mul, &base_lifesteal, &base_regen,
+            &base_flat_dmg, &base_melee, &base_range,
+            &base_elem, &base_atkspeed, &base_crit_chance,
+            &base_crit_dmg, &base_rangem, &base_dodge,
+            base_aff);
+    }
+
+    /* clamp et applique */
+    if (base_maxhp < 1.f) base_maxhp = 1.f;
+    if (base_speed < 30.f) base_speed = 30.f;
+    if (base_atkspeed < 0.3f) base_atkspeed = 0.3f;
+    if (base_crit_chance < 0.f) base_crit_chance = 0.f;
+    if (base_crit_chance > 1.f) base_crit_chance = 1.f;
+    if (base_dodge < 0.f) base_dodge = 0.f;
+    if (base_dodge > 0.75f) base_dodge = 0.75f;
+
     float ratio = (p->maxhp > 0.f) ? (p->hp / p->maxhp) : 1.f;
     p->maxhp = base_maxhp;
     p->speed = base_speed;
@@ -109,6 +156,16 @@ void game_recompute_player_stats(Game *g) {
     p->dmg_mul = base_dmg_mul;
     p->lifesteal = base_lifesteal;
     p->regen_per_sec = base_regen;
+    p->flat_dmg = base_flat_dmg;
+    p->melee_dmg_mul = base_melee;
+    p->range_dmg_mul = base_range;
+    p->elem_dmg_mul = base_elem;
+    p->atk_speed_mul = base_atkspeed;
+    p->crit_chance = base_crit_chance;
+    p->crit_dmg = base_crit_dmg;
+    p->range_mul = base_rangem;
+    p->dodge = base_dodge;
+    for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = base_aff[i];
     if (p->hp <= 0.f || ratio > 1.f) p->hp = p->maxhp;
     else                              p->hp = ratio * p->maxhp;
 }
@@ -141,13 +198,15 @@ void game_init(Game *g) {
     if (!g->target) { fprintf(stderr, "Tex: %s\n", SDL_GetError()); exit(1); }
 
     save_load(&g->meta);
-    /* premiers debloques par defaut */
-    g->meta.hero_unlocked[HERO_GUERRIER] = true;
-    g->meta.weapon_unlocked[W_FISTS]  = true;
-    g->meta.weapon_unlocked[W_SWORD]  = true;
-    g->meta.element_unlocked[EL_FIRE] = true;
+    /* decouvertes de depart : un heros, deux armes, un element */
+    g->meta.hero_unlocked[HERO_GUERRIER]   = true;
+    g->meta.hero_discovered[HERO_GUERRIER] = true;
+    g->meta.weapon_discovered[W_FISTS]   = true;
+    g->meta.weapon_discovered[W_SWORD]   = true;
+    g->meta.element_discovered[EL_FIRE]  = true;
 
     audio_init(g);
+    mods_load(g);
 
     /* initialise la table des touches : evite memcpy depuis NULL au 1er frame */
     g->keys = SDL_GetKeyboardState(NULL);
@@ -189,6 +248,8 @@ void game_start_new_run(Game *g) {
     g->shake_t = 0.f;
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
+    g->shop_visits = 0;
+    g->shop_reroll_cost = 5;
 
     Player *p = &g->player;
     p->hero = (HeroClass)g->hero_cursor;
@@ -210,53 +271,7 @@ void game_start_new_run(Game *g) {
     g->state = GS_RUN;
 }
 
-/* shop generation */
-void shop_generate(Game *g) {
-    int cost[5];
-    for (int i = 0; i < 5; i++) {
-        ShopItem *si = &g->shop_items[i];
-        memset(si, 0, sizeof(*si));
-    }
-    /* slot 0: heart pack */
-    g->shop_items[0].kind = 0; g->shop_items[0].value = 30; g->shop_items[0].cost = 8 + g->floor_index;
-    /* slot 1: armor */
-    g->shop_items[1].kind = 1; g->shop_items[1].value = 1;  g->shop_items[1].cost = 10 + g->floor_index;
-    /* slot 2: dmg % */
-    g->shop_items[2].kind = 2; g->shop_items[2].value = 8;  g->shop_items[2].cost = 12 + g->floor_index;
-    /* slot 3: random equipment for sale */
-    g->shop_items[3].kind = 5;
-    g->shop_items[3].item = item_drop_for_floor(g, g->floor_index, true, false);
-    {
-        int base_cost = 10 + g->floor_index * 4;
-        g->shop_items[3].cost = base_cost * (int)(rarity_mul(g->shop_items[3].item.rarity) * 2);
-    }
-    /* slot 4: maxhp */
-    g->shop_items[4].kind = 4; g->shop_items[4].value = 15; g->shop_items[4].cost = 14 + g->floor_index * 2;
-    g->shop_cursor = 0;
-    (void)cost;
-}
-
-void shop_buy(Game *g, int idx) {
-    ShopItem *si = &g->shop_items[idx];
-    if (si->bought) return;
-    if (g->player.coins < si->cost) {
-        snprintf(g->inv_msg, sizeof(g->inv_msg), "Pas assez de pieces");
-        g->inv_msg_t = 1.5f;
-        return;
-    }
-    g->player.coins -= si->cost;
-    si->bought = true;
-    sfx_play(g, SFX_COIN);
-    switch (si->kind) {
-        case 0: g->player.hp += si->value; if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp; break;
-        case 1: g->meta.perm_armor += si->value; break;
-        case 2: g->meta.perm_dmg_pct += si->value; break;
-        case 4: g->meta.perm_hp += si->value; break;
-        case 5: inventory_pickup(g, si->item); break;
-    }
-    game_recompute_player_stats(g);
-    save_write(&g->meta);
-}
+/* shop_generate / shop_buy / shop_reroll : voir src/shop.c */
 
 void game_open_shop(Game *g) {
     shop_generate(g);
@@ -286,74 +301,78 @@ void game_next_floor(Game *g) {
 }
 
 /* hub navigation */
+/* ---------- HUB : codex + boutique de stats permanentes ---------- */
+/* 4 boutons de stats + zones bas pour debuter/options. */
+static int hub_perm_cost(int kind) {
+    /* cout fixe par achat ; tu peux acheter plusieurs fois */
+    switch (kind) {
+        case 0: return 40;   /* +10 PV */
+        case 1: return 60;   /* +1 ARMURE */
+        case 2: return 50;   /* +5 VITESSE */
+        case 3: return 70;   /* +5% DEGATS */
+        default: return 999;
+    }
+}
+static void hub_perm_apply(Game *g, int kind) {
+    int cost = hub_perm_cost(kind);
+    if (g->meta.shards < cost) return;
+    g->meta.shards -= cost;
+    switch (kind) {
+        case 0: g->meta.perm_hp     += 10; break;
+        case 1: g->meta.perm_armor  += 1;  break;
+        case 2: g->meta.perm_speed  += 5;  break;
+        case 3: g->meta.perm_dmg_pct+= 5;  break;
+    }
+    save_write(&g->meta);
+    sfx_play(g, SFX_COIN);
+}
+
 static void update_hub(Game *g) {
-    int total = W_COUNT - 1 + (EL_COUNT - 1);
-    if (g->keys[SDL_SCANCODE_W] && !g->keys_prev[SDL_SCANCODE_W])
-        g->hub_cursor = (g->hub_cursor + total - 1) % total;
-    if (g->keys[SDL_SCANCODE_S] && !g->keys_prev[SDL_SCANCODE_S])
-        g->hub_cursor = (g->hub_cursor + 1) % total;
-    if (g->keys[SDL_SCANCODE_UP] && !g->keys_prev[SDL_SCANCODE_UP])
-        g->hub_cursor = (g->hub_cursor + total - 1) % total;
-    if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
-        g->hub_cursor = (g->hub_cursor + 1) % total;
+    /* navigation curseur 0..3 sur les 4 boutons stats */
+    if (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
+        g->hub_cursor = (g->hub_cursor + 3) % 4;
+    if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
+        g->hub_cursor = (g->hub_cursor + 1) % 4;
+    if (g->keys[SDL_SCANCODE_A] && !g->keys_prev[SDL_SCANCODE_A])
+        g->hub_cursor = (g->hub_cursor + 3) % 4;
+    if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
+        g->hub_cursor = (g->hub_cursor + 1) % 4;
 
-    /* mouse hover : aligne curseur sur la ligne sous le pointeur */
-    int rowh = 11;
-    /* armes : x in [8, 260], y in [56 + i*rowh] */
-    for (int i = 0; i < W_COUNT - 1; i++) {
-        if (mouse_in_rect(g, 8, 54 + i * rowh, 260, rowh)) {
+    /* mouse hover sur les boutons (memes coords que render_hub) */
+    int boxw = 118, boxh = 50, gap = 6;
+    int total_w = 4 * boxw + 3 * gap;
+    int sx0 = (INTERNAL_W - total_w) / 2;
+    int sy  = 60;
+    for (int i = 0; i < 4; i++) {
+        int sx = sx0 + i * (boxw + gap);
+        if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
             g->hub_cursor = i;
+            if (mouse_clicked(g)) hub_perm_apply(g, i);
         }
     }
-    int colx = INTERNAL_W / 2;
-    for (int e = 0; e < EL_COUNT - 1; e++) {
-        if (mouse_in_rect(g, colx - 4, 54 + e * rowh, 260, rowh)) {
-            g->hub_cursor = (W_COUNT - 1) + e;
-        }
-    }
-
-    bool activate = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                    (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])      ||
-                    mouse_clicked(g);
-    if (activate) {
-        if (g->hub_cursor < W_COUNT - 1) {
-            int wi = g->hub_cursor + 1;
-            int cost = 30 + wi * 18;
-            if (!g->meta.weapon_unlocked[wi] && g->meta.shards >= cost) {
-                g->meta.shards -= cost;
-                g->meta.weapon_unlocked[wi] = true;
-                save_write(&g->meta);
-                sfx_play(g, SFX_LEVELUP);
-            }
-        } else {
-            int e = g->hub_cursor - (W_COUNT - 1) + 1;
-            int cost = 25 + e * 12;
-            if (!g->meta.element_unlocked[e] && g->meta.shards >= cost) {
-                g->meta.shards -= cost;
-                g->meta.element_unlocked[e] = true;
-                save_write(&g->meta);
-                sfx_play(g, SFX_LEVELUP);
-            }
-        }
+    if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+        (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+        hub_perm_apply(g, g->hub_cursor);
     }
 
-    /* hot-zones bas d'ecran : R / H / O */
-    /* "DEBUTER" zone */
-    if (mouse_in_rect(g, INTERNAL_W/2 - 80, INTERNAL_H - 28, 160, 12) && mouse_clicked(g)) {
+    /* zones bas d'ecran : DEBUTER / OPTIONS / AIDE */
+    int by = INTERNAL_H - 30;
+    int bw = 120, bh = 16;
+    /* trois boutons centres */
+    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
+    if (mouse_in_rect(g, gx, by, bw, bh) && mouse_clicked(g))
         g->state = GS_CHOOSE_HERO;
-    }
-    if (mouse_in_rect(g, INTERNAL_W/2 - 80, INTERNAL_H - 16, 160, 10) && mouse_clicked(g)) {
+    if (mouse_in_rect(g, gx + bw + 6, by, bw, bh) && mouse_clicked(g)) {
         g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
-        g->opt_waiting_rebind = false;
-        g->state = GS_OPTIONS;
+        g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
     }
-
-    if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R]) {
-        g->state = GS_CHOOSE_HERO;
-    }
-    if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) {
+    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g))
         g->state = GS_HELP;
-    }
+
+    if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R])
+        g->state = GS_CHOOSE_HERO;
+    if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H])
+        g->state = GS_HELP;
 }
 
 static void update_choose_hero(Game *g) {
@@ -366,13 +385,19 @@ static void update_choose_hero(Game *g) {
     if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
         g->hero_cursor = (g->hero_cursor + 1) % HERO_COUNT;
 
-    /* mouse hover sur les portraits (alignement render_choose_hero) */
-    int gap = INTERNAL_W / (HERO_COUNT + 1);
-    int sy_center = (INTERNAL_H * 5) / 12;
-    for (int i = 0; i < HERO_COUNT; i++) {
-        int sx = gap * (i + 1);
-        if (mouse_in_rect(g, sx - 26, sy_center - 34, 52, 80)) {
-            g->hero_cursor = i;
+    /* mouse hover sur les portraits (2 rangees, aligne sur render_choose_hero) */
+    {
+        int per_row = 5;
+        int gap_x = INTERNAL_W / (per_row + 1);
+        int row_y[2] = { (INTERNAL_H * 4) / 12, (INTERNAL_H * 8) / 12 };
+        for (int i = 0; i < HERO_COUNT; i++) {
+            int row = i / per_row;
+            int col = i % per_row;
+            int sx = gap_x * (col + 1);
+            int sy = row_y[row];
+            if (mouse_in_rect(g, sx - 26, sy - 34, 52, 80)) {
+                g->hero_cursor = i;
+            }
         }
     }
 
@@ -380,6 +405,10 @@ static void update_choose_hero(Game *g) {
                     (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])  ||
                     mouse_clicked(g);
     if (activate) {
+        if (!g->meta.hero_discovered[g->hero_cursor]) {
+            /* heros encore inconnu : pas selectionnable */
+            return;
+        }
         if (g->meta.hero_unlocked[g->hero_cursor]) {
             game_start_new_run(g);
         } else {
@@ -395,22 +424,30 @@ static void update_choose_hero(Game *g) {
 }
 
 static void apply_levelup_choice(Game *g, int c) {
-    int kind = g->levelup_choice_kind[c];
-    int val  = g->levelup_choices[c];
-    if (kind == 1) {
-        Weapon *w = &g->player.weapons[g->player.active_weapon];
-        weapon_attach_element(w, (Element)val);
-        int mask = weapon_combo_id(w);
-        bool found = false;
-        for (int s = 0; s < g->meta.combo_seen_count; s++)
-            if (g->meta.combo_seen[s] == mask) { found = true; break; }
-        if (!found && g->meta.combo_seen_count < 64) {
-            g->meta.combo_seen[g->meta.combo_seen_count++] = mask;
-        }
-    } else if (kind == 2) {
-        if      (val == 0) { g->player.maxhp += 20.f; g->player.hp += 20.f; }
-        else if (val == 1) { g->player.speed += 10.f; }
-        else if (val == 2) { g->player.dmg_mul *= 1.15f; }
+    int val = g->levelup_choices[c];
+    Player *p = &g->player;
+    /* val = stat id, sans option element (les elements se decouvrent via gameplay) */
+    switch (val) {
+        case 0: p->maxhp += 20.f; p->hp += 20.f; break;
+        case 1: p->speed += 12.f; break;
+        case 2: p->dmg_mul *= 1.15f; break;
+        case 3: p->armor += 1.f; break;
+        case 4: p->regen_per_sec += 0.6f; break;
+        case 5: p->lifesteal += 0.04f; break;
+        case 6:
+            /* +10% range : reduit cooldown de toutes armes */
+            for (int i = 0; i < WEAPON_SLOTS; i++)
+                if (p->weapons[i].owned) p->weapons[i].base_range *= 1.10f;
+            break;
+        case 7:
+            for (int i = 0; i < WEAPON_SLOTS; i++)
+                if (p->weapons[i].owned) p->weapons[i].base_cd *= 0.90f;
+            break;
+        case 8:
+            /* heal complet */
+            p->hp = p->maxhp;
+            break;
+        default: break;
     }
     sfx_play(g, SFX_LEVELUP);
     g->state = GS_RUN;
@@ -437,20 +474,20 @@ static void update_levelup(Game *g) {
 
 static void update_shop(Game *g) {
     if (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
-        g->shop_cursor = (g->shop_cursor + 4) % 5;
+        g->shop_cursor = (g->shop_cursor + SHOP_SLOTS - 1) % SHOP_SLOTS;
     if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
-        g->shop_cursor = (g->shop_cursor + 1) % 5;
+        g->shop_cursor = (g->shop_cursor + 1) % SHOP_SLOTS;
     if (g->keys[SDL_SCANCODE_A] && !g->keys_prev[SDL_SCANCODE_A])
-        g->shop_cursor = (g->shop_cursor + 4) % 5;
+        g->shop_cursor = (g->shop_cursor + SHOP_SLOTS - 1) % SHOP_SLOTS;
     if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
-        g->shop_cursor = (g->shop_cursor + 1) % 5;
+        g->shop_cursor = (g->shop_cursor + 1) % SHOP_SLOTS;
 
-    /* mouse on cards (aligne sur render_shop) */
-    int boxw = 100, boxh = 130, gap = 6;
-    int total_w = 5 * boxw + 4 * gap;
+    /* layout (aligne sur render_shop) */
+    int boxw = 130, boxh = 150, gap = 8;
+    int total_w = SHOP_SLOTS * boxw + (SHOP_SLOTS - 1) * gap;
     int sx0 = (INTERNAL_W - total_w) / 2;
-    int sy  = 64;
-    for (int i = 0; i < 5; i++) {
+    int sy  = 56;
+    for (int i = 0; i < SHOP_SLOTS; i++) {
         int sx = sx0 + i * (boxw + gap);
         if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
             g->shop_cursor = i;
@@ -461,6 +498,16 @@ static void update_shop(Game *g) {
     if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
         (g->keys[SDL_SCANCODE_E] && !g->keys_prev[SDL_SCANCODE_E])) {
         shop_buy(g, g->shop_cursor);
+    }
+    /* reroll : touche R ou bouton */
+    if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R]) {
+        shop_reroll(g);
+    }
+    int rrw = 110, rrh = 18;
+    int rrx = (INTERNAL_W - rrw) / 2;
+    int rry = sy + boxh + 8;
+    if (mouse_in_rect(g, rrx, rry, rrw, rrh) && mouse_clicked(g)) {
+        shop_reroll(g);
     }
     {
         SDL_Scancode kinv = g->settings.keys[BIND_INVENTORY];
@@ -567,28 +614,17 @@ void game_run(Game *g) {
                 g->player.xp -= g->player.xp_to_next;
                 g->player.xp_to_next = (int)(g->player.xp_to_next * 1.4f) + 1;
                 g->player.level++;
-                int statpool[3] = {0, 1, 2};
-                for (int i = 2; i > 0; i--) {
+                /* uniquement des stats : les elements se decouvrent via
+                   pickups dans le donjon, pas au level-up. */
+                int statpool[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+                int N = 9;
+                for (int i = N - 1; i > 0; i--) {
                     int j = rand() % (i + 1);
                     int t = statpool[i]; statpool[i] = statpool[j]; statpool[j] = t;
                 }
-                int elpool[8]; int elcount = 0;
-                for (int e = 1; e < EL_COUNT; e++)
-                    if (g->meta.element_unlocked[e]) elpool[elcount++] = e;
-                for (int i = elcount - 1; i > 0; i--) {
-                    int j = rand() % (i + 1);
-                    int t = elpool[i]; elpool[i] = elpool[j]; elpool[j] = t;
-                }
-                int el_used = 0;
                 for (int c = 0; c < 3; c++) {
-                    int rr = rand() % 100;
-                    if (rr < 60 && el_used < elcount) {
-                        g->levelup_choice_kind[c] = 1;
-                        g->levelup_choices[c] = elpool[el_used++];
-                    } else {
-                        g->levelup_choice_kind[c] = 2;
-                        g->levelup_choices[c] = statpool[c % 3];
-                    }
+                    g->levelup_choice_kind[c] = 2; /* tous stats */
+                    g->levelup_choices[c] = statpool[c];
                 }
                 g->state = GS_LEVELUP;
                 sfx_play(g, SFX_LEVELUP);

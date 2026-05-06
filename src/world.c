@@ -177,7 +177,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                 if (chance > 0.50f) chance = 0.50f;
                 if ((rand() / (float)RAND_MAX) < chance) {
                     e->is_elite = true;
-                    e->element = (Element)(EL_FIRE + (rand() % 7));
+                    e->element = (Element)(EL_FIRE + (rand() % (EL_COUNT - 1)));
                     e->maxhp *= 2.0f;
                     e->hp = e->maxhp;
                     e->r += 1.5f;
@@ -185,6 +185,8 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     e->xp_drop *= 2;
                 }
             }
+            /* nom procedural */
+            enemy_generate_name(e, g->floor_index);
             return i;
         }
     }
@@ -303,6 +305,17 @@ static bool aabb_solid(Game *g, float x, float y, float r) {
 void player_take_damage(Game *g, float dmg) {
     Player *p = &g->player;
     if (p->invuln_t > 0.f || p->dash_t > 0.f) return;
+    /* dodge */
+    if (p->dodge > 0.f && (rand() / (float)RAND_MAX) < p->dodge) {
+        dmgnum_spawn(g, p->x, p->y, 0, 0xC0FFFFFF, false);
+        /* mini effet d'esquive */
+        for (int i = 0; i < 8; i++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, p->x, p->y, cosf(a) * 80, sinf(a) * 80,
+                                0.3f, 0xFFFFFFFF, 1.5f, 0);
+        }
+        return;
+    }
     float real = dmg - p->armor;
     if (real < 1.f) real = 1.f;
     p->hp -= real;
@@ -398,7 +411,11 @@ void update_player(Game *g) {
                     Weapon *w = &p->weapons[p->active_weapon];
                     weapon_attach_element(w, e);
                     sfx_play(g, SFX_LEVELUP);
-                    /* register discovery */
+                    /* DECOUVERTE permanente : element entre dans le pool */
+                    if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
+                        g->meta.element_discovered[e] = true;
+                        save_write(&g->meta);
+                    }
                     int mask = weapon_combo_id(w);
                     bool found = false;
                     for (int s = 0; s < g->meta.combo_seen_count; s++)
@@ -419,6 +436,11 @@ void update_player(Game *g) {
                     p->weapons[slot].owned = true;
                     p->active_weapon = slot;
                     sfx_play(g, SFX_LEVELUP);
+                    /* DECOUVERTE permanente */
+                    if (kind > 0 && kind < W_COUNT && !g->meta.weapon_discovered[kind]) {
+                        g->meta.weapon_discovered[kind] = true;
+                        save_write(&g->meta);
+                    }
                     break;
                 }
                 case PU_CHEST:
@@ -431,7 +453,7 @@ void update_player(Game *g) {
                         if (has_fists) {
                             int weapons[8]; int wn = 0;
                             for (int wk = W_SWORD; wk < W_COUNT; wk++)
-                                if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
+                                if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
                             if (wn > 0) {
                                 int wpick = weapons[rand() % wn];
                                 pickup_spawn(g, PU_WEAPON, wpick, pk->x, pk->y - 6);
@@ -449,7 +471,7 @@ void update_player(Game *g) {
                         else {
                             int unlocked[8]; int n = 0;
                             for (int e = 1; e < EL_COUNT; e++)
-                                if (g->meta.element_unlocked[e]) unlocked[n++] = e;
+                                if (g->meta.element_discovered[e]) unlocked[n++] = e;
                             if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], fx, fy);
                             else pickup_spawn(g, PU_COIN, 2, fx, fy);
                         }
@@ -491,7 +513,7 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
     if ((rand() % 100) < (e->is_boss ? 60 : 5)) {
         int unlocked[8]; int n = 0;
         for (int el = 1; el < EL_COUNT; el++)
-            if (g->meta.element_unlocked[el]) unlocked[n++] = el;
+            if (g->meta.element_discovered[el]) unlocked[n++] = el;
         if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
     }
     /* equipement : elite garanti, boss garanti, normaux 4% */
@@ -508,7 +530,7 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
         if (has_fists) {
             int weapons[8]; int wn = 0;
             for (int wk = W_SWORD; wk < W_COUNT; wk++)
-                if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
+                if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
             if (wn > 0)
                 pickup_spawn(g, PU_WEAPON, weapons[rand() % wn], e->x - 12, e->y - 12);
         }
@@ -573,7 +595,7 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el, float kx
                 }
             }
         }
-        /* boss kill: portal */
+        /* boss kill: portal + decouverte du heros suivant */
         if (e->is_boss) {
             g->dungeon.boss_dead = true;
             g->shake_t = 0.6f; g->shake_mag = 8.f;
@@ -587,6 +609,14 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el, float kx
             pickup_spawn(g, PU_PORTAL, 0, e->x, e->y);
             sfx_play(g, SFX_BOSS);
             g->portal_spawned = true;
+            /* revele le prochain heros non-decouvert */
+            for (int h = 0; h < HERO_COUNT; h++) {
+                if (!g->meta.hero_discovered[h]) {
+                    g->meta.hero_discovered[h] = true;
+                    save_write(&g->meta);
+                    break;
+                }
+            }
         } else {
             for (int i = 0; i < 14; i++) {
                 float a = (rand() % 360) * 0.01745f;

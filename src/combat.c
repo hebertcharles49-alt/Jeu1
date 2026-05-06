@@ -12,15 +12,18 @@
 float elem_effectiveness(Element atk, Element def) {
     if (def == EL_NONE || atk == EL_NONE) return 1.0f;
     static const float T[EL_COUNT][EL_COUNT] = {
-        /*atk \\ def : NONE FIRE WATER EARTH LGT  AIR  VOID FAE */
-        /*NONE*/ { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
-        /*FIRE*/ { 1.0f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f },
-        /*WATER*/{ 1.0f, 2.0f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f },
-        /*EARTH*/{ 1.0f, 1.0f, 2.0f, 0.5f, 2.0f, 0.5f, 1.0f, 1.0f },
-        /*LGT*/  { 1.0f, 1.0f, 2.0f, 0.5f, 0.5f, 2.0f, 1.0f, 1.0f },
-        /*AIR*/  { 1.0f, 1.0f, 1.0f, 2.0f, 0.5f, 0.5f, 1.0f, 1.0f },
-        /*VOID*/ { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 2.0f },
-        /*FAE*/  { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f, 0.5f }
+        /*atk \\ def    NONE FIRE WATER EARTH LGT   AIR  VOID FAE  STEEL DARK HOLY */
+        /*NONE */ { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+        /*FIRE */ { 1.0f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f, 2.0f, 1.5f, 0.5f },
+        /*WATER*/ { 1.0f, 2.0f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 1.0f, 1.0f },
+        /*EARTH*/ { 1.0f, 1.0f, 2.0f, 0.5f, 2.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+        /*LGT  */ { 1.0f, 1.0f, 2.0f, 0.5f, 0.5f, 2.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.0f },
+        /*AIR  */ { 1.0f, 1.0f, 1.0f, 2.0f, 0.5f, 0.5f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f },
+        /*VOID */ { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 2.0f, 1.0f, 0.5f, 0.5f },
+        /*FAE  */ { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f, 0.5f, 0.5f, 0.5f, 1.5f },
+        /*STEEL*/ { 1.0f, 0.5f, 1.0f, 2.0f, 0.5f, 1.5f, 1.0f, 1.5f, 0.5f, 1.0f, 1.0f },
+        /*DARK */ { 1.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 1.5f, 1.0f, 0.5f, 2.0f },
+        /*HOLY */ { 1.0f, 1.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 0.5f, 1.0f, 2.0f, 0.5f },
     };
     return T[atk][def];
 }
@@ -35,6 +38,9 @@ const char *element_name(Element e) {
         case EL_AIR:       return "Air";
         case EL_VOID:      return "Vide";
         case EL_FAE:       return "Fee";
+        case EL_STEEL:     return "Acier";
+        case EL_DARK:      return "Tenebres";
+        case EL_HOLY:      return "Sacre";
         default:           return "?";
     }
 }
@@ -48,6 +54,9 @@ uint32_t element_color(Element e) {
         case EL_AIR:       return 0xC8E0F0FF;
         case EL_VOID:      return 0x8030B0FF;
         case EL_FAE:       return 0xF080F0FF;
+        case EL_STEEL:     return 0xC0C8D0FF;
+        case EL_DARK:      return 0x202028FF;
+        case EL_HOLY:      return 0xFFE890FF;
         default:           return 0xCCCCCCFF;
     }
 }
@@ -71,6 +80,11 @@ const char *hero_name(HeroClass h) {
         case HERO_MAGE:      return "Mage";
         case HERO_BERSERKER: return "Berserker";
         case HERO_PALADIN:   return "Paladin";
+        case HERO_DRUIDE:    return "Druide";
+        case HERO_ASSASSIN:  return "Assassin";
+        case HERO_RANGER:    return "Ranger";
+        case HERO_TEMPLIER:  return "Templier";
+        case HERO_NECROMANT: return "Necromant";
         default:             return "?";
     }
 }
@@ -78,10 +92,15 @@ const char *hero_name(HeroClass h) {
 const char *hero_desc(HeroClass h) {
     switch (h) {
         case HERO_GUERRIER:  return "+25 PV   +15% degats melee";
-        case HERO_VOLEUR:    return "+20 vitesse   dash plus court";
+        case HERO_VOLEUR:    return "+20 vitesse   dash plus long";
         case HERO_MAGE:      return "+30% degats elementaires   PV bas";
-        case HERO_BERSERKER: return "Vol de vie 8%   +20% degats   fragile";
+        case HERO_BERSERKER: return "+8% vol de vie   +20% degats   fragile";
         case HERO_PALADIN:   return "+2 armure   regen 1 PV/s";
+        case HERO_DRUIDE:    return "+50% degats elem   -30% degats melee";
+        case HERO_ASSASSIN:  return "+25% crit   x2 crit dmg   -25 PV max";
+        case HERO_RANGER:    return "+40% degats distance   -25% degats melee";
+        case HERO_TEMPLIER:  return "+3 armure   +15 PV   -15% atk speed";
+        case HERO_NECROMANT: return "+15% vol de vie   -1 regen/s   +20% dmg vide";
         default: return "";
     }
 }
@@ -373,7 +392,7 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
     float al = sqrtf(ax * ax + ay * ay) + 0.001f;
     ax /= al; ay /= al;
     float reach = w->base_range * fx.range_mul;
-    float dmg  = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    float dmg  = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     int hits = 0;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
@@ -402,7 +421,7 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
     float al = sqrtf(ax * ax + ay * ay) + 0.001f;
     ax /= al; ay /= al;
     float reach = w->base_range * fx.range_mul;
-    float dmg  = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    float dmg  = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     int hits = 0;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
@@ -439,7 +458,7 @@ static void fire_shield(Game *g, Weapon *w, ComboFx fx) {
     Player *p = &g->player;
     p->invuln_t = 0.5f;
     float radius = w->base_range * fx.range_mul + 8.f;
-    float dmg = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     do_aoe_at(g, p->x, p->y, radius, dmg, fx.status, fx.color);
     /* reflect projectiles */
     int reflected = 0;
@@ -473,7 +492,7 @@ static void fire_bow(Game *g, Weapon *w, ComboFx fx) {
     float ax = p->aim_x - p->x, ay = p->aim_y - p->y;
     float al = sqrtf(ax * ax + ay * ay) + 0.001f;
     ax /= al; ay /= al;
-    float dmg = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     float speed = 320.f * fx.range_mul;
     for (int s = 0; s < nshots; s++) {
         float spread = (nshots > 1) ? ((s - (nshots - 1) / 2.f) * 0.16f) : 0.f;
@@ -508,7 +527,7 @@ static void fire_wand(Game *g, Weapon *w, ComboFx fx) {
     pr.vx = ax * speed; pr.vy = ay * speed;
     pr.life = (w->base_range / speed) * fx.range_mul;
     pr.r = 5.f;
-    pr.dmg = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    pr.dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     pr.owner = 0;
     pr.aoe = 40.f * fx.range_mul;
     pr.primary = fx.status;
@@ -524,7 +543,7 @@ static void fire_wand(Game *g, Weapon *w, ComboFx fx) {
 static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
     Player *p = &g->player;
     float radius = w->base_range * fx.range_mul + 12.f;
-    float dmg = w->base_dmg * fx.dmg_mul * p->dmg_mul;
+    float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     do_aoe_at(g, p->x, p->y, radius, dmg, fx.status, fx.color);
     if (fx.chain) {
         int best = nearest_enemy(g, p->x, p->y, radius, NULL);
@@ -557,6 +576,22 @@ void update_weapons(Game *g) {
         if (w->cooldown > 0.f) continue;
         ComboFx fx = compute_combo(weapon_combo_id(w));
 
+        /* applique les stats joueur dans le combo fx */
+        bool is_melee = (w->kind == W_FISTS || w->kind == W_SWORD ||
+                         w->kind == W_AXE   || w->kind == W_SHIELD);
+        bool is_range = (w->kind == W_BOW || w->kind == W_WAND);
+        float pmul = p->dmg_mul;
+        if (is_melee) pmul *= p->melee_dmg_mul;
+        if (is_range) pmul *= p->range_dmg_mul;
+        if (w->element_count > 0) pmul *= p->elem_dmg_mul;
+        if (fx.status > 0 && fx.status < EL_COUNT) {
+            pmul *= (1.f + p->elem_affinity[fx.status]);
+        }
+        bool crit = (rand() / (float)RAND_MAX) < p->crit_chance;
+        if (crit) pmul *= p->crit_dmg;
+        fx.dmg_mul *= pmul;
+        fx.range_mul *= p->range_mul;
+
         bool fire = true;
         if (w->kind == W_FISTS || w->kind == W_SWORD || w->kind == W_AXE) {
             float scan = (w->kind == W_AXE)
@@ -576,7 +611,8 @@ void update_weapons(Game *g) {
             case W_AXE:    fire_axe(g, w, fx);    break;
             default: break;
         }
-        w->cooldown = w->base_cd * fx.cd_mul;
+        /* atk_speed_mul < 1 = plus rapide */
+        w->cooldown = w->base_cd * fx.cd_mul * p->atk_speed_mul;
     }
 }
 

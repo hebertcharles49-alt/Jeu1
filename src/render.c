@@ -421,13 +421,23 @@ static void draw_enemy(Game *g, Enemy *e, int sx, int sy) {
 
     /* HP bar */
     if (e->hp < e->maxhp) {
-        int bw = (e->is_boss) ? 80 : (w + 2);
+        int bw = (e->is_boss) ? 100 : (w + 2);
         int bx = sx - bw / 2;
-        int by = (e->is_boss) ? (sy - w/2 - 8) : (sy - w/2 - 4);
+        int by = (e->is_boss) ? (sy - w/2 - 12) : (sy - w/2 - 4);
         fill_rect(g->renderer, bx, by, bw, e->is_boss ? 3 : 1, 0x402020FF);
         int hf = (int)(bw * (e->hp / e->maxhp));
         fill_rect(g->renderer, bx, by, hf, e->is_boss ? 3 : 1, 0xFF4040FF);
         if (e->is_boss) rect_outline(g->renderer, bx-1, by-1, bw+2, 5, 0xFFD040FF);
+    }
+    /* nom (elites + boss) */
+    if ((e->is_elite || e->is_boss) && e->name[0]) {
+        int nw = text_width(e->name);
+        int nx = sx - nw / 2;
+        int ny = (e->is_boss) ? (sy - w/2 - 22) : (sy - w/2 - 12);
+        /* halo */
+        text_draw(g->renderer, nx + 1, ny + 1, e->name, 0x000000FF);
+        uint32_t col = e->is_boss ? 0xFFD040FF : element_color(e->element);
+        text_draw(g->renderer, nx, ny, e->name, col);
     }
 }
 
@@ -747,58 +757,126 @@ void render_hud(Game *g) {
 }
 
 /* ---------- HUB ---------- */
+/* helpers extern (fournis par main.c -> shop_recipe etc) */
+extern int  hub_perm_cost(int kind);
+/* main.c uses static; redefine local labels for buttons */
+
+static const char *perm_btn_label(int k) {
+    switch (k) {
+        case 0: return "+10 PV MAX";
+        case 1: return "+1 ARMURE";
+        case 2: return "+5 VITESSE";
+        case 3: return "+5% DEGATS";
+        default: return "?";
+    }
+}
+static int perm_btn_cost(int k) {
+    switch (k) {
+        case 0: return 40;
+        case 1: return 60;
+        case 2: return 50;
+        case 3: return 70;
+        default: return 999;
+    }
+}
+
 void render_hub(Game *g) {
-    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x080612FF);
-    /* brazier */
-    for (int i = 0; i < 80; i++) {
-        int x = INTERNAL_W / 2 + (rand() % 30) - 15;
-        int y = 60 - (rand() % 30);
-        fill_rect(g->renderer, x, y, 1, 1, 0xFF8040FF);
+    /* fond degrade */
+    for (int yy = 0; yy < INTERNAL_H; yy++) {
+        int v = 6 + (INTERNAL_H - yy) / 36;
+        fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
+                  (uint32_t)((v << 24) | ((v / 2) << 16) | ((v) << 8) | 0xFF));
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE SANCTUAIRE")/2, 12,
+    /* embers */
+    for (int i = 0; i < 70; i++) {
+        int x = (i * 73 + (int)(g->time * 12)) % INTERNAL_W;
+        int y = ((i * 37) + (int)(g->time * (i % 5 + 2) * 5)) % INTERNAL_H;
+        fill_rect(g->renderer, x, y, 1, 1, (i & 3) ? 0x301820FF : 0xFFA060FF);
+    }
+
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE SANCTUAIRE")/2, 10,
               "LE SANCTUAIRE", 0xFFE080FF);
-    text_drawf(g->renderer, 8, 28, 0xC0E0FFFF,
-               "ECLATS %d  COURSES %d  MEILLEUR %d/%d  VICTOIRES %d",
-               g->meta.shards, g->meta.total_runs, g->meta.best_floor, MAX_FLOORS, g->meta.victories);
+    text_drawf(g->renderer, 8, 26, 0xC0E0FFFF,
+               "ECLATS %d   COURSES %d   MEILLEUR %d/%d   VICTOIRES %d",
+               g->meta.shards, g->meta.total_runs, g->meta.best_floor,
+               MAX_FLOORS, g->meta.victories);
+    text_draw(g->renderer, 8, 38,
+              "ACHATS PERMANENTS - Augmente tes stats pour les futures courses",
+              0x80FFC0FF);
 
-    text_draw(g->renderer, 8, 44, "ARMES", 0xFFFFFFFF);
-    int y = 56;
-    for (int i = 1; i < W_COUNT; i++) {     /* skip W_FISTS */
-        bool sel = (g->hub_cursor == (i - 1));
-        bool unl = g->meta.weapon_unlocked[i];
-        int cost = 30 + i * 18;
-        uint32_t col = unl ? 0x80FF80FF : 0xC0C0C0FF;
-        if (sel) col = 0xFFFF40FF;
-        text_drawf(g->renderer, sel ? 4 : 12, y, col, "%s %s   %s",
-                   sel ? ">" : " ", weapon_name((WeaponKind)i),
-                   unl ? "POSSEDE" : "");
-        if (!unl) text_drawf(g->renderer, 180, y, sel ? 0xFFFF40FF : 0xFFC080FF, "%d ECLATS", cost);
-        y += 10;
+    /* 4 boutons stats permanents */
+    int boxw = 118, boxh = 50, gap = 6;
+    int total_w = 4 * boxw + 3 * gap;
+    int sx0 = (INTERNAL_W - total_w) / 2;
+    int sy = 60;
+    for (int i = 0; i < 4; i++) {
+        int sx = sx0 + i * (boxw + gap);
+        bool sel = (g->hub_cursor == i);
+        bool ok = (g->meta.shards >= perm_btn_cost(i));
+        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x281828FF : 0x14101AFF);
+        rect_outline(g->renderer, sx, sy, boxw, boxh,
+                     sel ? 0xFFFF40FF : (ok ? 0x404048FF : 0x60303AFF));
+        text_draw(g->renderer, sx + 8, sy + 8, perm_btn_label(i),
+                  sel ? 0xFFFF40FF : 0xFFFFFFFF);
+        text_drawf(g->renderer, sx + 8, sy + 24, 0xFFD040FF, "%d", perm_btn_cost(i));
+        fill_rect(g->renderer, sx + 8 + 16, sy + 25, 5, 5, 0xFFD040FF);
+        /* etat actuel */
+        int cur = 0;
+        switch (i) {
+            case 0: cur = g->meta.perm_hp; break;
+            case 1: cur = g->meta.perm_armor; break;
+            case 2: cur = g->meta.perm_speed; break;
+            case 3: cur = g->meta.perm_dmg_pct; break;
+        }
+        text_drawf(g->renderer, sx + 8, sy + 36, 0x80FFC0FF, "actuel +%d", cur);
     }
 
-    text_draw(g->renderer, INTERNAL_W/2, 44, "ELEMENTS", 0xFFFFFFFF);
-    y = 56;
+    /* CODEX */
+    int cx = 24, cy = 124;
+    text_draw(g->renderer, cx, cy, "CODEX  -  ARMES", 0xFFFF80FF);
+    int discovered_w = 0;
+    for (int i = 1; i < W_COUNT; i++) if (g->meta.weapon_discovered[i]) discovered_w++;
+    text_drawf(g->renderer, cx + 130, cy, 0xCCCCCCFF, "%d / %d", discovered_w, W_COUNT - 1);
+    cy += 12;
+    for (int i = 1; i < W_COUNT; i++) {
+        bool d = g->meta.weapon_discovered[i];
+        const char *n = d ? weapon_name((WeaponKind)i) : "??????";
+        uint32_t c = d ? 0xFFFFFFFF : 0x404040FF;
+        text_drawf(g->renderer, cx, cy, c, "- %s", n);
+        cy += 10;
+    }
+
+    int cx2 = INTERNAL_W / 2 + 20, cy2 = 124;
+    text_draw(g->renderer, cx2, cy2, "CODEX  -  ELEMENTS", 0xFFFF80FF);
+    int discovered_e = 0;
+    for (int i = 1; i < EL_COUNT; i++) if (g->meta.element_discovered[i]) discovered_e++;
+    text_drawf(g->renderer, cx2 + 160, cy2, 0xCCCCCCFF, "%d / %d", discovered_e, EL_COUNT - 1);
+    cy2 += 12;
     for (int e = 1; e < EL_COUNT; e++) {
-        int cursor = (W_COUNT - 1) + (e - 1);
-        bool sel = (g->hub_cursor == cursor);
-        bool unl = g->meta.element_unlocked[e];
-        int cost = 25 + e * 12;
-        uint32_t col = unl ? 0x80FF80FF : 0xC0C0C0FF;
-        if (sel) col = 0xFFFF40FF;
-        text_drawf(g->renderer, INTERNAL_W/2 + (sel ? -4 : 4), y, col, "%s %s   %s",
-                   sel ? ">" : " ", element_name((Element)e),
-                   unl ? "DEBLOQUE" : "");
-        if (!unl) text_drawf(g->renderer, INTERNAL_W - 76, y,
-                             sel ? 0xFFFF40FF : 0xFFC080FF, "%d ECLATS", cost);
-        y += 10;
+        bool d = g->meta.element_discovered[e];
+        const char *n = d ? element_name((Element)e) : "??????";
+        uint32_t c = d ? element_color((Element)e) : 0x404040FF;
+        text_drawf(g->renderer, cx2, cy2, c, "- %s", n);
+        cy2 += 10;
     }
 
-    text_draw(g->renderer, INTERNAL_W/2 - 110, INTERNAL_H - 32,
-              "W/S NAVIGUER   ENTREE ACHETER", 0xCCCCCCFF);
-    text_draw(g->renderer, INTERNAL_W/2 - 110, INTERNAL_H - 22,
-              "R DEBUTER COURSE   H AIDE", 0xFFFF80FF);
-    text_draw(g->renderer, INTERNAL_W/2 - 110, INTERNAL_H - 12,
-              "O OPTIONS   ECHAP QUITTER", 0xCCCCCCFF);
+    /* 3 boutons bas */
+    int by = INTERNAL_H - 30;
+    int bw = 120, bh = 16;
+    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
+    const char *labels[3] = { "[R] DEBUTER", "[O] OPTIONS", "[H] AIDE" };
+    uint32_t col_active[3] = { 0x80FF80FF, 0xCCCCCCFF, 0xCCCCCCFF };
+    for (int i = 0; i < 3; i++) {
+        int x = gx + i * (bw + 6);
+        bool hov = mouse_in_rect(g, x, by, bw, bh);
+        fill_rect(g->renderer, x, by, bw, bh, hov ? 0x303060FF : 0x18181EFF);
+        rect_outline(g->renderer, x, by, bw, bh, hov ? 0xFFFF80FF : 0x404048FF);
+        const char *l = labels[i];
+        text_draw(g->renderer, x + (bw - text_width(l)) / 2, by + 5, l,
+                  hov ? 0xFFFF80FF : col_active[i]);
+    }
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP : QUITTER")/2,
+              INTERNAL_H - 10, "ECHAP : QUITTER", 0x808080FF);
 }
 
 /* ---------- OPTIONS ---------- */
@@ -891,58 +969,106 @@ void render_options(Game *g) {
 }
 
 /* ---------- HERO SELECT ---------- */
-static void draw_hero_portrait(Game *g, int sx, int sy, HeroClass h, bool selected) {
-    uint32_t cape = 0x303040FF, tunic = 0x6A4A2AFF;
+static void hero_palette(HeroClass h, uint32_t *cape, uint32_t *tunic) {
+    *cape = 0x303040FF; *tunic = 0x6A4A2AFF;
     switch (h) {
-        case HERO_GUERRIER:  cape = 0x802020FF; tunic = 0x707080FF; break;
-        case HERO_VOLEUR:    cape = 0x305030FF; tunic = 0x202028FF; break;
-        case HERO_MAGE:      cape = 0x402070FF; tunic = 0x6040A0FF; break;
-        case HERO_BERSERKER: cape = 0x202020FF; tunic = 0x803020FF; break;
-        case HERO_PALADIN:   cape = 0xFFD040FF; tunic = 0xC0C0D0FF; break;
+        case HERO_GUERRIER:  *cape = 0x802020FF; *tunic = 0x707080FF; break;
+        case HERO_VOLEUR:    *cape = 0x305030FF; *tunic = 0x202028FF; break;
+        case HERO_MAGE:      *cape = 0x402070FF; *tunic = 0x6040A0FF; break;
+        case HERO_BERSERKER: *cape = 0x202020FF; *tunic = 0x803020FF; break;
+        case HERO_PALADIN:   *cape = 0xFFD040FF; *tunic = 0xC0C0D0FF; break;
+        case HERO_DRUIDE:    *cape = 0x305020FF; *tunic = 0x60804030; break;
+        case HERO_ASSASSIN:  *cape = 0x101018FF; *tunic = 0x301030FF; break;
+        case HERO_RANGER:    *cape = 0x405028FF; *tunic = 0x806030FF; break;
+        case HERO_TEMPLIER:  *cape = 0xC0C0C8FF; *tunic = 0x808088FF; break;
+        case HERO_NECROMANT: *cape = 0x202840FF; *tunic = 0x303060FF; break;
         default: break;
     }
+}
+
+static void draw_hero_portrait(Game *g, int sx, int sy, HeroClass h,
+                               bool selected, bool discovered) {
+    uint32_t cape, tunic;
+    hero_palette(h, &cape, &tunic);
+    if (!discovered) { cape = 0x101010FF; tunic = 0x202020FF; }
     if (selected) rect_outline(g->renderer, sx - 22, sy - 30, 44, 60, 0xFFFF40FF);
     fill_rect(g->renderer, sx - 14, sy - 16, 28, 32, cape);
     fill_rect(g->renderer, sx - 12, sy - 8, 24, 22, tunic);
-    fill_rect(g->renderer, sx - 8, sy - 22, 16, 12, 0xE8C089FF);
-    fill_rect(g->renderer, sx - 8, sy - 24, 16, 4, 0x402010FF);
-    fill_rect(g->renderer, sx - 5, sy - 18, 3, 3, 0x000000FF);
-    fill_rect(g->renderer, sx + 2, sy - 18, 3, 3, 0x000000FF);
+    fill_rect(g->renderer, sx - 8, sy - 22, 16, 12,
+              discovered ? 0xE8C089FF : 0x303030FF);
+    fill_rect(g->renderer, sx - 8, sy - 24, 16, 4,
+              discovered ? 0x402010FF : 0x101010FF);
+    if (discovered) {
+        fill_rect(g->renderer, sx - 5, sy - 18, 3, 3, 0x000000FF);
+        fill_rect(g->renderer, sx + 2, sy - 18, 3, 3, 0x000000FF);
+    } else {
+        /* point d'interrogation gigantesque */
+        text_draw(g->renderer, sx - 3, sy - 22, "?", 0x808080FF);
+    }
 }
 
 void render_choose_hero(Game *g) {
-    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x080612FF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("CHOISIS TON HEROS")/2, 12,
+    /* fond degrade */
+    for (int yy = 0; yy < INTERNAL_H; yy++) {
+        int v = 6 + (INTERNAL_H - yy) / 32;
+        fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
+                  (uint32_t)((v << 24) | (v << 16) | ((v + 4) << 8) | 0xFF));
+    }
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("CHOISIS TON HEROS")/2, 10,
               "CHOISIS TON HEROS", 0xFFE080FF);
     text_drawf(g->renderer, 8, 24, 0xC0E0FFFF, "ECLATS %d", g->meta.shards);
 
-    int gap = INTERNAL_W / (HERO_COUNT + 1);
-    int sy_center = (INTERNAL_H * 5) / 12;
+    int discovered_n = 0;
+    for (int i = 0; i < HERO_COUNT; i++) if (g->meta.hero_discovered[i]) discovered_n++;
+    text_drawf(g->renderer, INTERNAL_W - 110, 24, 0xCCCCCCFF,
+               "DECOUVERTS %d/%d", discovered_n, HERO_COUNT);
+
+    /* 2 rangees de 5 portraits */
+    int per_row = 5;
+    int gap_x = INTERNAL_W / (per_row + 1);
+    int row_y[2] = { (INTERNAL_H * 4) / 12, (INTERNAL_H * 8) / 12 };
     for (int i = 0; i < HERO_COUNT; i++) {
-        int sx = gap * (i + 1);
-        int sy = sy_center;
+        int row = i / per_row;
+        int col = i % per_row;
+        int sx = gap_x * (col + 1);
+        int sy = row_y[row];
         bool sel = (g->hero_cursor == i);
-        draw_hero_portrait(g, sx, sy, (HeroClass)i, sel);
-        text_draw(g->renderer, sx - text_width(hero_name((HeroClass)i)) / 2, sy + 26,
-                  hero_name((HeroClass)i), sel ? 0xFFFF40FF : 0xFFFFFFFF);
-        if (!g->meta.hero_unlocked[i]) {
+        bool disc = g->meta.hero_discovered[i];
+        draw_hero_portrait(g, sx, sy, (HeroClass)i, sel, disc);
+        const char *n = disc ? hero_name((HeroClass)i) : "??????";
+        uint32_t c = disc ? (sel ? 0xFFFF40FF : 0xFFFFFFFF) : 0x606060FF;
+        text_draw(g->renderer, sx - text_width(n) / 2, sy + 22, n, c);
+        if (disc && !g->meta.hero_unlocked[i]) {
             int cost = 60 + i * 25;
             char b[24]; snprintf(b, sizeof(b), "%d ECLATS", cost);
-            text_draw(g->renderer, sx - text_width(b) / 2, sy + 36, b, 0xFFC080FF);
+            text_draw(g->renderer, sx - text_width(b) / 2, sy + 32, b, 0xFFC080FF);
         }
     }
+
     /* description */
-    text_draw(g->renderer, INTERNAL_W/2 - text_width(hero_desc((HeroClass)g->hero_cursor))/2,
-              INTERNAL_H - 60, hero_desc((HeroClass)g->hero_cursor), 0xCCCCFFFF);
-    if (!g->meta.hero_unlocked[g->hero_cursor]) {
-        text_draw(g->renderer, INTERNAL_W/2 - text_width("VERROUILLE - ENTREE POUR ACHETER") / 2,
-                  INTERNAL_H - 44, "VERROUILLE - ENTREE POUR ACHETER", 0xFFC080FF);
+    HeroClass cur = (HeroClass)g->hero_cursor;
+    if (g->meta.hero_discovered[cur]) {
+        text_draw(g->renderer, INTERNAL_W/2 - text_width(hero_desc(cur))/2,
+                  INTERNAL_H - 56, hero_desc(cur), 0xCCCCFFFF);
+        if (!g->meta.hero_unlocked[cur]) {
+            text_draw(g->renderer,
+                      INTERNAL_W/2 - text_width("VERROUILLE - CLIC POUR ACHETER")/2,
+                      INTERNAL_H - 42, "VERROUILLE - CLIC POUR ACHETER", 0xFFC080FF);
+        } else {
+            text_draw(g->renderer,
+                      INTERNAL_W/2 - text_width("CLIC OU ENTREE POUR PARTIR EN COURSE")/2,
+                      INTERNAL_H - 42, "CLIC OU ENTREE POUR PARTIR EN COURSE", 0x80FF80FF);
+        }
     } else {
-        text_draw(g->renderer, INTERNAL_W/2 - text_width("ENTREE POUR PARTIR EN COURSE")/2,
-                  INTERNAL_H - 44, "ENTREE POUR PARTIR EN COURSE", 0x80FF80FF);
+        text_draw(g->renderer,
+                  INTERNAL_W/2 - text_width("HEROS INCONNU - terrasse un boss pour le reveler")/2,
+                  INTERNAL_H - 42,
+                  "HEROS INCONNU - terrasse un boss pour le reveler",
+                  0x808080FF);
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("A/D NAVIGUER   ECHAP RETOUR")/2,
-              INTERNAL_H - 24, "A/D NAVIGUER   ECHAP RETOUR", 0xCCCCCCFF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("A/D NAVIGUER   SOURIS HOVER/CLIC   ECHAP RETOUR")/2,
+              INTERNAL_H - 18, "A/D NAVIGUER   SOURIS HOVER/CLIC   ECHAP RETOUR",
+              0xCCCCCCFF);
 }
 
 /* ---------- LEVELUP ---------- */
@@ -1172,66 +1298,111 @@ void render_help(Game *g) {
     text_draw(g->renderer, 8, INTERNAL_H - 12, "ECHAP POUR REVENIR", 0xFFFF80FF);
 }
 
-/* ---------- SHOP ---------- */
-static const char *shop_kind_name(int k) {
-    switch (k) {
-        case 0: return "Coeur (+30 PV)";
-        case 1: return "Armure +1 (perm)";
-        case 2: return "+8% Degats (perm)";
-        case 4: return "+15 PV Max (perm)";
-        case 5: return "Equipement";
-        default: return "?";
-    }
-}
-
+/* ---------- SHOP (Brotato-like) ---------- */
 void render_shop(Game *g) {
-    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x100818FF);
-    /* candle decor */
-    for (int i = 0; i < 30; i++) {
-        int x = 60 + i * 12;
-        int yy = 24 + (((int)(g->time * 6) + i) & 3);
-        fill_rect(g->renderer, x, yy, 1, 2, 0xFF8030FF);
+    /* fond degrade ambiance taverne */
+    for (int y = 0; y < INTERNAL_H; y++) {
+        int v = 12 + (INTERNAL_H - y) / 28;
+        fill_rect(g->renderer, 0, y, INTERNAL_W, 1,
+                  (uint32_t)((v << 24) | ((v / 2) << 16) | ((v / 3) << 8) | 0xFF));
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("BOUTIQUE DE PALIER")/2, 12,
-              "BOUTIQUE DE PALIER", 0xFFE080FF);
-    text_drawf(g->renderer, 8, 26, 0xFFD040FF, "PIECES %d", g->player.coins);
-    text_drawf(g->renderer, 8, 36, 0xC0E0FFFF, "ETAGE %d -> %d", g->floor_index, g->floor_index + 1);
+    /* particules braise */
+    for (int i = 0; i < 60; i++) {
+        int x = (i * 73 + (int)(g->time * 16)) % INTERNAL_W;
+        int y = ((i * 91) + (int)(g->time * (i % 5 + 2) * 4)) % INTERNAL_H;
+        uint32_t col = (i & 3) ? 0x402030FF : 0xFFB060FF;
+        fill_rect(g->renderer, x, y, 1, 1, col);
+    }
 
-    int boxw = 100, boxh = 130, gap = 6;
-    int total_w = 5 * boxw + 4 * gap;
-    int sx = (INTERNAL_W - total_w) / 2;
-    int sy = 64;
-    for (int i = 0; i < 5; i++) {
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("MARCHE DE PALIER")/2, 14,
+              "MARCHE DE PALIER", 0xFFE080FF);
+    text_drawf(g->renderer, 8, 30, 0xFFD040FF, "PIECES %d", g->player.coins);
+    text_drawf(g->renderer, 8, 40, 0xC0E0FFFF, "ETAGE %d -> %d",
+               g->floor_index, g->floor_index + 1);
+    text_drawf(g->renderer, INTERNAL_W - 110, 30, 0x80FFC0FF,
+               "ACHATS  %d", g->player.shop_purchased_count);
+
+    int boxw = 130, boxh = 150, gap = 8;
+    int total_w = SHOP_SLOTS * boxw + (SHOP_SLOTS - 1) * gap;
+    int sx0 = (INTERNAL_W - total_w) / 2;
+    int sy = 56;
+    for (int i = 0; i < SHOP_SLOTS; i++) {
         ShopItem *si = &g->shop_items[i];
+        int sx = sx0 + i * (boxw + gap);
         bool sel = (g->shop_cursor == i);
-        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x281828FF : 0x14101AFF);
-        rect_outline(g->renderer, sx, sy, boxw, boxh, sel ? 0xFFFF40FF : 0x404048FF);
-        text_drawf(g->renderer, sx + 4, sy + 4, sel ? 0xFFFF40FF : 0xFFFFFFFF, "[%d]", i + 1);
-        if (si->kind == 5) {
-            text_draw(g->renderer, sx + 4, sy + 16, rarity_name(si->item.rarity),
-                      rarity_color(si->item.rarity));
-            text_draw(g->renderer, sx + 4, sy + 26, slot_name(si->item.slot), 0xFFFFFFFF);
-            text_drawf(g->renderer, sx + 4, sy + 36, 0xCCCCCCFF, "+%.1f", si->item.stat_value);
-        } else {
-            text_draw(g->renderer, sx + 4, sy + 18, shop_kind_name(si->kind), 0xFFFFFFFF);
+        bool affordable = (g->player.coins >= si->cost);
+        uint32_t border = sel ? 0xFFFF40FF : (affordable ? 0x404048FF : 0x60303AFF);
+        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x1A1422FF : 0x10080FFF);
+        rect_outline(g->renderer, sx, sy, boxw, boxh, border);
+
+        /* badge rarete couleur */
+        uint32_t rcol = shop_recipe_color(si->recipe_id);
+        fill_rect(g->renderer, sx + 4, sy + 4, boxw - 8, 2, rcol);
+        fill_rect(g->renderer, sx, sy, 6, boxh, rcol);
+
+        /* nom */
+        text_draw(g->renderer, sx + 10, sy + 12, shop_recipe_name(si->recipe_id), rcol);
+        /* desc en multi-ligne grossier (decoupe a l'espace si trop long) */
+        const char *desc = shop_recipe_desc(si->recipe_id);
+        int max_chars = (boxw - 16) / 6;
+        char line[64];
+        int desc_y = sy + 26;
+        const char *p = desc;
+        while (*p && desc_y < sy + boxh - 28) {
+            int n = 0;
+            while (p[n] && n < max_chars && p[n] != '\n') n++;
+            /* coupe a un espace si possible */
+            if (p[n] && n == max_chars) {
+                int back = n;
+                while (back > 0 && p[back] != ' ') back--;
+                if (back > 0) n = back;
+            }
+            int len = n; if (len > 60) len = 60;
+            memcpy(line, p, len); line[len] = 0;
+            text_draw(g->renderer, sx + 10, desc_y, line, 0xCCCCDDFF);
+            desc_y += 9;
+            p += n;
+            while (*p == ' ') p++;
         }
+
+        /* prix / status */
+        int by = sy + boxh - 18;
         if (si->bought) {
-            text_draw(g->renderer, sx + 4, sy + boxh - 24, "ACHETE", 0x80FF80FF);
+            text_draw(g->renderer, sx + 10, by, "ACHETE", 0x80FF80FF);
         } else {
-            text_drawf(g->renderer, sx + 4, sy + boxh - 24, 0xFFD040FF, "%d", si->cost);
-            fill_rect(g->renderer, sx + 4 + 12, sy + boxh - 23, 5, 5, 0xFFD040FF);
+            uint32_t pcol = affordable ? 0xFFD040FF : 0x806020FF;
+            text_drawf(g->renderer, sx + 10, by, pcol, "%d", si->cost);
+            fill_rect(g->renderer, sx + 10 + 22, by + 1, 5, 5, pcol);
+            if (sel) text_draw(g->renderer, sx + boxw - 56, by, "[ACHETER]",
+                              affordable ? 0x80FF80FF : 0x808080FF);
         }
-        sx += boxw + gap;
     }
+
+    /* bouton REROLL */
+    int rrw = 110, rrh = 18;
+    int rrx = (INTERNAL_W - rrw) / 2;
+    int rry = sy + boxh + 8;
+    bool rrhov = mouse_in_rect(g, rrx, rry, rrw, rrh);
+    bool rrok  = (g->player.coins >= g->shop_reroll_cost);
+    fill_rect(g->renderer, rrx, rry, rrw, rrh, rrhov ? 0x303060FF : 0x18181EFF);
+    rect_outline(g->renderer, rrx, rry, rrw, rrh, rrhov ? 0xFFFF80FF : 0x404048FF);
+    text_drawf(g->renderer, rrx + 8, rry + 6,
+               rrok ? (rrhov ? 0xFFFF80FF : 0xCCCCCCFF) : 0x808080FF,
+               "REROLL  %d", g->shop_reroll_cost);
+    fill_rect(g->renderer, rrx + 8 + text_width("REROLL  ") + 6, rry + 7, 5, 5,
+              rrok ? 0xFFD040FF : 0x806020FF);
 
     if (g->inv_msg_t > 0.f)
         text_draw(g->renderer, INTERNAL_W/2 - text_width(g->inv_msg)/2,
-                  INTERNAL_H - 40, g->inv_msg, 0xFFFF40FF);
+                  INTERNAL_H - 38, g->inv_msg, 0xFFFF40FF);
 
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("A/D CHOISIR   ENTREE ACHETER   I INVENTAIRE")/2,
-              INTERNAL_H - 28, "A/D CHOISIR   ENTREE ACHETER   I INVENTAIRE", 0xCCCCCCFF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("C OU ECHAP : ETAGE SUIVANT")/2,
-              INTERNAL_H - 16, "C OU ECHAP : ETAGE SUIVANT", 0x80FF80FF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("CLIC ACHETER  R REROLL  I INVENTAIRE")/2,
+              INTERNAL_H - 26, "CLIC ACHETER  R REROLL  I INVENTAIRE", 0xCCCCCCFF);
+    int fbx = INTERNAL_W/2 - 100, fby = INTERNAL_H - 14;
+    bool fbhov = mouse_in_rect(g, fbx, fby, 200, 12);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("[ESPACE / CLIC] ETAGE SUIVANT")/2,
+              fby + 1, "[ESPACE / CLIC] ETAGE SUIVANT",
+              fbhov ? 0xFFFF80FF : 0x80FF80FF);
 }
 
 /* ---------- INVENTORY ---------- */

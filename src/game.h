@@ -43,6 +43,9 @@ typedef enum {
     EL_AIR,
     EL_VOID,
     EL_FAE,
+    EL_STEEL,        /* Acier */
+    EL_DARK,         /* Tenebres */
+    EL_HOLY,         /* Sacre */
     EL_COUNT
 } Element;
 
@@ -75,6 +78,12 @@ typedef enum {
     HERO_MAGE,
     HERO_BERSERKER,
     HERO_PALADIN,
+    /* archetypes balance + / - */
+    HERO_DRUIDE,        /* +elem dmg, -melee dmg */
+    HERO_ASSASSIN,      /* +crit, -hp */
+    HERO_RANGER,        /* +range dmg, -melee dmg */
+    HERO_TEMPLIER,      /* +armor, -atk speed */
+    HERO_NECROMANT,     /* +lifesteal, -regen */
     HERO_COUNT
 } HeroClass;
 
@@ -140,6 +149,12 @@ typedef struct {
     int   split_left;
     bool  is_boss;
     float telegraph_t;
+    /* ---- procedural ---- */
+    char  name[40];           /* "Vorgar le Brulant" */
+    /* stats (peuvent etre modifiees par mods/affixes) */
+    float dmg_flat;
+    float speed;
+    float atk_cd;
 } Enemy;
 
 typedef struct {
@@ -225,9 +240,22 @@ typedef struct {
     float hp, maxhp;
     float speed;
     float armor;
-    float dmg_mul;
+    float dmg_mul;            /* multiplicateur global */
     float lifesteal;
     float regen_per_sec;
+    /* ---- stats avancees (style Brotato) ---- */
+    float flat_dmg;           /* +flat ajoute aux dmg arme */
+    float melee_dmg_mul;      /* multiplicateur arme melee */
+    float range_dmg_mul;      /* multiplicateur arme distance */
+    float elem_dmg_mul;       /* multiplicateur si arme a elements */
+    float atk_speed_mul;      /* < 1.0 = plus rapide, divise le cd */
+    float crit_chance;        /* 0..1 */
+    float crit_dmg;           /* multiplicateur sur coup critique (default 1.5) */
+    float range_mul;          /* portee armes */
+    float dodge;              /* 0..1 chance d'esquiver */
+    /* affinites elementaires : multiplicateur de dmg par element (+/-) */
+    float elem_affinity[EL_COUNT];
+
     int   level;
     int   xp;
     int   xp_to_next;
@@ -248,6 +276,10 @@ typedef struct {
     /* inventaire */
     Item  inventory[INVENTORY_SLOTS];
     Item  equipped[EQUIP_SLOTS];
+
+    /* shop items achetes durant la course (effets cumulatifs) */
+    int   shop_purchased[64];   /* tableau d'index d'item achete */
+    int   shop_purchased_count;
 } Player;
 
 /* ---------- Map / Dungeon ---------- */
@@ -288,9 +320,12 @@ typedef struct {
 /* ---------- Meta ---------- */
 typedef struct {
     int  shards;
+    /* progression de decouverte (revelee via gameplay) */
+    bool weapon_discovered[W_COUNT];
+    bool element_discovered[EL_COUNT];
+    bool hero_discovered[HERO_COUNT];
+    /* deblocage paye avec eclats (pour heros uniquement) */
     bool hero_unlocked[HERO_COUNT];
-    bool weapon_unlocked[W_COUNT];
-    bool element_unlocked[EL_COUNT];
     int  best_floor;
     int  total_runs;
     int  perm_dmg_pct;
@@ -302,14 +337,13 @@ typedef struct {
     int  combo_seen_count;
 } MetaSave;
 
-/* ---------- SHOP ---------- */
+/* ---------- SHOP (Brotato-like) ---------- */
 typedef struct {
-    int  kind;
-    int  value;
-    int  cost;
-    bool bought;
-    Item item;
+    int   recipe_id;        /* index dans la table de recettes shop */
+    int   cost;
+    bool  bought;
 } ShopItem;
+#define SHOP_SLOTS 4
 
 /* ---------- Settings (rebind / son / DLSS) ---------- */
 typedef enum {
@@ -391,8 +425,10 @@ typedef struct {
     bool          portal_spawned;
 
     /* shop */
-    ShopItem      shop_items[5];
+    ShopItem      shop_items[SHOP_SLOTS];
     int           shop_cursor;
+    int           shop_reroll_cost;
+    int           shop_visits;
 
     /* inventory cursor: 0..11 inv, 12..17 equip */
     int           inv_cursor;
@@ -521,9 +557,26 @@ void  render_lore(Game *g);
 bool  mouse_in_rect(Game *g, int x, int y, int w, int h);
 bool  mouse_clicked(Game *g);
 
-/* shop */
+/* shop (Brotato-like) */
 void  shop_generate(Game *g);
 void  shop_buy(Game *g, int idx);
+void  shop_reroll(Game *g);
+const char *shop_recipe_name(int recipe_id);
+const char *shop_recipe_desc(int recipe_id);
+int   shop_recipe_count(void);
+int   shop_recipe_cost(int recipe_id);
+uint32_t shop_recipe_color(int recipe_id);   /* couleur d'aperçu */
+void  shop_apply_recipe(Game *g, int recipe_id);
+
+/* procedural names */
+void  enemy_generate_name(Enemy *e, int floor_index);
+
+/* mod support */
+void  mods_load(Game *g);
+
+/* drop tables */
+Rarity rarity_for_floor_elite(int floor_index);
+Rarity rarity_for_floor_boss(int floor_index);
 
 /* inventory */
 Item  item_make(EquipSlot slot, Rarity rarity, int sub_kind);

@@ -92,21 +92,74 @@ Item item_make(EquipSlot slot, Rarity rarity, int sub_kind) {
     return it;
 }
 
+/* ---------- TABLES DE RARETE PAR ETAGE ---------- */
+
+/* table elite : %commun / magique / rare / epique / legendaire */
+static const int ELITE_TABLE[10][R_COUNT] = {
+    /* etage 1 */ { 100,  0,  0,  0,  0 },
+    /* etage 2 */ { 100,  0,  0,  0,  0 },
+    /* etage 3 */ {  75, 25,  0,  0,  0 },
+    /* etage 4 */ {  55, 30, 15,  0,  0 },
+    /* etage 5 */ {  45, 33, 20,  2,  0 },
+    /* etage 6 */ {  30, 40, 25,  5,  0 },
+    /* etage 7 */ {  19, 30, 40, 10,  1 },
+    /* etage 8 */ {  17, 24, 32, 24,  3 },
+    /* etage 9 */ {  15, 18, 25, 30, 12 },
+    /* etage 10*/ {   5, 10, 20, 40, 25 }
+};
+
+/* table boss : plus genereux que les elites */
+static const int BOSS_TABLE[10][R_COUNT] = {
+    /* etage 1 */ {  30, 50, 20,  0,  0 },
+    /* etage 2 */ {  20, 50, 25,  5,  0 },
+    /* etage 3 */ {  10, 45, 35, 10,  0 },
+    /* etage 4 */ {   5, 35, 40, 18,  2 },
+    /* etage 5 */ {   0, 30, 40, 25,  5 },
+    /* etage 6 */ {   0, 25, 35, 30, 10 },
+    /* etage 7 */ {   0, 15, 30, 40, 15 },
+    /* etage 8 */ {   0, 10, 25, 40, 25 },
+    /* etage 9 */ {   0,  5, 20, 40, 35 },
+    /* etage 10*/ {   0,  0, 15, 40, 45 }
+};
+
+static Rarity roll_table(const int *row) {
+    int total = 0;
+    for (int i = 0; i < R_COUNT; i++) total += row[i];
+    if (total <= 0) return R_COMMON;
+    int r = rand() % total;
+    int acc = 0;
+    for (int i = 0; i < R_COUNT; i++) {
+        acc += row[i];
+        if (r < acc) return (Rarity)i;
+    }
+    return R_COMMON;
+}
+
+Rarity rarity_for_floor_elite(int floor_index) {
+    int idx = floor_index - 1;
+    if (idx < 0) idx = 0;
+    if (idx >= 10) idx = 9;
+    return roll_table(ELITE_TABLE[idx]);
+}
+
+Rarity rarity_for_floor_boss(int floor_index) {
+    int idx = floor_index - 1;
+    if (idx < 0) idx = 0;
+    if (idx >= 10) idx = 9;
+    return roll_table(BOSS_TABLE[idx]);
+}
+
 Item item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss) {
-    /* rarete pondere par etage + bonus elite/boss */
-    int roll = rand() % 1000;
-    Rarity rarity = R_COMMON;
-    int floor_bonus = floor_index * 20;
-    int elite_bonus = elite ? 250 : 0;
-    int boss_bonus  = boss  ? 500 : 0;
-    int score = roll + floor_bonus + elite_bonus + boss_bonus;
-    if      (score < 500)  rarity = R_COMMON;
-    else if (score < 800)  rarity = R_MAGIC;
-    else if (score < 1050) rarity = R_RARE;
-    else if (score < 1250) rarity = R_EPIC;
-    else                   rarity = R_LEGENDARY;
-    /* boss minimum rare */
-    if (boss && rarity < R_RARE) rarity = R_RARE;
+    Rarity rarity;
+    if (boss)        rarity = rarity_for_floor_boss(floor_index);
+    else if (elite)  rarity = rarity_for_floor_elite(floor_index);
+    else {
+        /* drop normal : commun majoritaire avec quelques magiques */
+        int r = rand() % 100;
+        if (r < 70 - floor_index * 2)  rarity = R_COMMON;
+        else if (r < 92 - floor_index) rarity = R_MAGIC;
+        else                            rarity = R_RARE;
+    }
     EquipSlot slot = (EquipSlot)(rand() % 6);
     int sub_kind = rand() % 5;
     (void)g;

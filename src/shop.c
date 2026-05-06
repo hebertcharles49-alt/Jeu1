@@ -1,0 +1,242 @@
+/*
+ * shop.c - boutique style Brotato : recettes data-driven, double-edged
+ */
+#include "game.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    const char *name;
+    const char *desc;
+    int    cost;
+    Rarity rarity;
+    /* effets additifs (stat += d_*) */
+    float d_maxhp, d_speed, d_armor;
+    float d_dmg_mul, d_lifesteal, d_regen;
+    float d_flat, d_melee, d_range;
+    float d_elem, d_atk_speed;
+    float d_crit_chance, d_crit_dmg;
+    float d_range_mul, d_dodge;
+    int   d_aff_el;
+    float d_aff_val;
+    int   d_aff_el2;
+    float d_aff_val2;
+} Recipe;
+
+static const Recipe RECIPES[] = {
+    /* ---- COMMUN (8-15g) ---- */
+    { "Bandage",            "+0.6 regen / s",                    8,  R_COMMON,
+      0,0,0, 0,0,0.6f,  0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Pierre tranchante",  "+3 degats plats",                   10, R_COMMON,
+      0,0,0, 0,0,0,    3.f,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Cuir tanne",         "+1 armure",                         10, R_COMMON,
+      0,0,1.f, 0,0,0,  0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Cape ample",         "+8% esquive",                        8, R_COMMON,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0,0,  0,0.08f, 0,0, 0,0 },
+    { "Coeur frais",        "+15 PV max",                        12, R_COMMON,
+      15.f,0,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Champignon noir",    "+15 PV, -8% degats",                12, R_COMMON,
+      15.f,0,0, -0.08f,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Sangsue tonique",    "+5% vol de vie",                    12, R_COMMON,
+      0,0,0, 0,0.05f,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+
+    /* ---- MAGIQUE (15-22g) ---- */
+    { "Lame lourde",        "+6 dmg plats, -10% atk speed",      15, R_MAGIC,
+      0,0,0, 0,0,0,    6.f,0,0, 0,0.10f, 0,0, 0,0, 0,0, 0,0 },
+    { "Chausses du loup",   "+12 vitesse",                       12, R_MAGIC,
+      0,12.f,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Bottes du fugitif",  "+15 vitesse, +5% esquive",          18, R_MAGIC,
+      0,15.f,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0.05f, 0,0, 0,0 },
+    { "Loupe ardente",      "+25% degats elem",                  18, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0, 0.25f,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Carquois",           "+20% degats distance",              14, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0.20f,0, 0,  0,0,  0,0, 0,0, 0,0 },
+    { "Gantelet de fer",    "+25% melee, -10% distance",         20, R_MAGIC,
+      0,0,0, 0,0,0,    0,0.25f,-0.10f, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Coeur de pierre",    "+1 armure, -5 vitesse",             14, R_MAGIC,
+      0,-5.f,1.f, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0 },
+    { "Lame ensorcelee",    "+10% degats, +3% vol vie",          22, R_MAGIC,
+      0,0,0, 0.10f,0.03f,0, 0,0,0, 0,0, 0,0,  0,0, 0,0, 0,0 },
+    { "Talisman de feu",    "+30% Feu, -30% Eau",                10, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0,0,  0,0, EL_FIRE,0.30f, EL_WATER,-0.30f },
+    { "Talisman d'eau",     "+30% Eau, -30% Feu",                10, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0,0,  0,0, EL_WATER,0.30f, EL_FIRE,-0.30f },
+    { "Pendule du chasseur","+8% crit",                          16, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0.08f,0, 0,0, 0,0, 0,0 },
+    { "Mains rapides",      "+12% atk speed",                    16, R_MAGIC,
+      0,0,0, 0,0,0,    0,0,0, 0,-0.12f, 0,0, 0,0, 0,0, 0,0 },
+    { "Long bras",          "+15% portee, +1 dmg",               14, R_MAGIC,
+      0,0,0, 0,0,0,    1.f,0,0, 0,0,  0,0,  0.15f,0, 0,0, 0,0 },
+    { "Anneau de verre",    "+50% crit dmg, -5 PV",              10, R_MAGIC,
+      -5.f,0,0, 0,0,0, 0,0,0, 0,0,  0,0.50f, 0,0, 0,0, 0,0 },
+
+    /* ---- RARE (20-30g) ---- */
+    { "Couronne de fer",    "+2 armure, +10 PV, -10 vitesse",    25, R_RARE,
+      10.f,-10.f,2.f, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Sang de dragon",     "+20% dmg, -1 regen",                30, R_RARE,
+      0,0,0, 0.20f,0,-1.f, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Pacte sombre",       "+30% dmg, -25 PV max",              22, R_RARE,
+      -25.f,0,0, 0.30f,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Beni",               "+0.8 regen, +10% dmg",              22, R_RARE,
+      0,0,0, 0.10f,0,0.8f, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Tonneau de poudre",  "+6 dmg plats, +20% crit dmg",       22, R_RARE,
+      0,0,0, 0,0,0,    6.f,0,0, 0,0,  0,0.20f, 0,0, 0,0, 0,0 },
+    { "Bague de vampire",   "+10% vol vie, -10 PV max",          28, R_RARE,
+      -10.f,0,0, 0,0.10f,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Pomme empoisonnee",  "+25% dmg, -1.5 regen",              22, R_RARE,
+      0,0,0, 0.25f,0,-1.5f, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Sceau foudroyant",   "+20% Foudre, +8% atk speed",        20, R_RARE,
+      0,0,0, 0,0,0,    0,0,0, 0,-0.08f, 0,0, 0,0, EL_LIGHTNING,0.20f, 0,0 },
+    { "Chaine d'acier",     "+30% Acier, +1 armure",             22, R_RARE,
+      0,0,1.f, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, EL_STEEL,0.30f, 0,0 },
+    { "Talisman du Vide",   "+25% Vide, +25% Tenebres",          24, R_RARE,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0,0,  0,0, EL_VOID,0.25f, EL_DARK,0.25f },
+    { "Eau benie",          "+25% Sacre, +5% esquive",           20, R_RARE,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0,0,  0,0.05f, EL_HOLY,0.25f, 0,0 },
+    { "Bracelet de la fee", "+20% Fee, +0.4 regen",              18, R_RARE,
+      0,0,0, 0,0,0.4f, 0,0,0, 0,0,  0,0,  0,0, EL_FAE,0.20f, 0,0 },
+    { "Lentille folle",     "+5% crit, +25% crit dmg",           20, R_RARE,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0.05f,0.25f, 0,0, 0,0, 0,0 },
+
+    /* ---- EPIQUE / LEGENDAIRE (30+g) ---- */
+    { "Coeur de geant",     "+40 PV max, -10% atk speed",        35, R_EPIC,
+      40.f,0,0, 0,0,0, 0,0,0, 0,0.10f, 0,0, 0,0, 0,0, 0,0 },
+    { "Pacte du Necromancien","+15% vol vie, +20% Tenebres",     38, R_EPIC,
+      0,0,0, 0,0.15f,0, 0,0,0, 0,0,  0,0,  0,0, EL_DARK,0.20f, 0,0 },
+    { "Auriculaire du roi", "+20% dmg, +1 armure, +0.5 regen",   45, R_EPIC,
+      0,0,1.f, 0.20f,0,0.5f, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0 },
+    { "Pierre du dragon",   "+50% Feu, +20 PV, -20% Eau",        45, R_EPIC,
+      20.f,0,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, EL_FIRE,0.50f, EL_WATER,-0.20f },
+    { "Cle des dieux",      "+15% crit, +50% crit dmg",          50, R_LEGENDARY,
+      0,0,0, 0,0,0,    0,0,0, 0,0,  0.15f,0.50f, 0,0, 0,0, 0,0 },
+    { "Larme du Cristal",   "+30% degats elem, +15% portee",     55, R_LEGENDARY,
+      0,0,0, 0,0,0,    0,0,0, 0.30f,0, 0,0,  0.15f,0, 0,0, 0,0 },
+};
+#define NUM_RECIPES ((int)(sizeof(RECIPES) / sizeof(RECIPES[0])))
+
+int shop_recipe_count(void) { return NUM_RECIPES; }
+
+const char *shop_recipe_name(int rid) {
+    if (rid < 0 || rid >= NUM_RECIPES) return "?";
+    return RECIPES[rid].name;
+}
+
+const char *shop_recipe_desc(int rid) {
+    if (rid < 0 || rid >= NUM_RECIPES) return "?";
+    return RECIPES[rid].desc;
+}
+
+int shop_recipe_cost(int rid) {
+    if (rid < 0 || rid >= NUM_RECIPES) return 999;
+    return RECIPES[rid].cost;
+}
+
+uint32_t shop_recipe_color(int rid) {
+    if (rid < 0 || rid >= NUM_RECIPES) return 0xCCCCCCFF;
+    return rarity_color(RECIPES[rid].rarity);
+}
+
+void shop_recipe_apply_effect(Game *g, int rid,
+        float *maxhp, float *speed, float *armor,
+        float *dmg_mul, float *lifesteal, float *regen,
+        float *flat_dmg, float *melee, float *range,
+        float *elem, float *atk_speed, float *crit_c,
+        float *crit_d, float *rangem, float *dodge,
+        float *aff) {
+    (void)g;
+    if (rid < 0 || rid >= NUM_RECIPES) return;
+    const Recipe *r = &RECIPES[rid];
+    *maxhp     += r->d_maxhp;
+    *speed     += r->d_speed;
+    *armor     += r->d_armor;
+    *dmg_mul   += r->d_dmg_mul;
+    *lifesteal += r->d_lifesteal;
+    *regen     += r->d_regen;
+    *flat_dmg  += r->d_flat;
+    *melee     += r->d_melee;
+    *range     += r->d_range;
+    *elem      += r->d_elem;
+    *atk_speed += r->d_atk_speed;
+    *crit_c    += r->d_crit_chance;
+    *crit_d    += r->d_crit_dmg;
+    *rangem    += r->d_range_mul;
+    *dodge     += r->d_dodge;
+    if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) aff[r->d_aff_el]  += r->d_aff_val;
+    if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) aff[r->d_aff_el2] += r->d_aff_val2;
+}
+
+/* generation aleatoire selon l'etage : raretes plus elevees plus tard */
+static int pick_recipe_for_floor(int floor_idx) {
+    int weight_total = 0;
+    int weights[NUM_RECIPES];
+    for (int i = 0; i < NUM_RECIPES; i++) {
+        Rarity r = RECIPES[i].rarity;
+        int w = 0;
+        switch (r) {
+            case R_COMMON:    w = (floor_idx <= 3) ? 60 : (floor_idx <= 6) ? 30 : 15; break;
+            case R_MAGIC:     w = (floor_idx <= 3) ? 30 : (floor_idx <= 6) ? 40 : 25; break;
+            case R_RARE:      w = (floor_idx <= 3) ? 8  : (floor_idx <= 6) ? 25 : 35; break;
+            case R_EPIC:      w = (floor_idx <= 3) ? 2  : (floor_idx <= 6) ? 5  : 18; break;
+            case R_LEGENDARY: w = (floor_idx <= 6) ? 0  : 7; break;
+            default: w = 0;
+        }
+        weights[i] = w;
+        weight_total += w;
+    }
+    if (weight_total == 0) return 0;
+    int roll = rand() % weight_total;
+    int acc = 0;
+    for (int i = 0; i < NUM_RECIPES; i++) {
+        acc += weights[i];
+        if (roll < acc) return i;
+    }
+    return 0;
+}
+
+void shop_generate(Game *g) {
+    g->shop_visits++;
+    for (int i = 0; i < SHOP_SLOTS; i++) {
+        ShopItem *si = &g->shop_items[i];
+        memset(si, 0, sizeof(*si));
+        si->recipe_id = pick_recipe_for_floor(g->floor_index);
+        /* cost ajuste selon etage */
+        int base_cost = shop_recipe_cost(si->recipe_id);
+        si->cost = base_cost + g->floor_index * 2;
+    }
+    g->shop_cursor = 0;
+    g->shop_reroll_cost = 5 + g->shop_visits;
+}
+
+void shop_reroll(Game *g) {
+    if (g->player.coins < g->shop_reroll_cost) return;
+    g->player.coins -= g->shop_reroll_cost;
+    sfx_play(g, SFX_COIN);
+    /* ne pas reset shop_visits pour faire monter le cout du reroll */
+    int prev_visits = g->shop_visits;
+    shop_generate(g);
+    g->shop_visits = prev_visits + 1;
+    g->shop_reroll_cost = 5 + g->shop_visits;
+}
+
+void shop_buy(Game *g, int idx) {
+    if (idx < 0 || idx >= SHOP_SLOTS) return;
+    ShopItem *si = &g->shop_items[idx];
+    if (si->bought) return;
+    if (g->player.coins < si->cost) return;
+    g->player.coins -= si->cost;
+    si->bought = true;
+    sfx_play(g, SFX_COIN);
+    /* enregistre l'achat sur le joueur (effet cumulatif) */
+    if (g->player.shop_purchased_count < 64) {
+        g->player.shop_purchased[g->player.shop_purchased_count++] = si->recipe_id;
+    }
+    game_recompute_player_stats(g);
+}
+
+void shop_apply_recipe(Game *g, int recipe_id) {
+    if (g->player.shop_purchased_count < 64) {
+        g->player.shop_purchased[g->player.shop_purchased_count++] = recipe_id;
+    }
+    game_recompute_player_stats(g);
+}
