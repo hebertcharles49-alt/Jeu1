@@ -316,6 +316,7 @@ typedef struct {
     int  spawn_x, spawn_y;
     int  exit_x, exit_y;
     int  level_index;
+    int  gen_id;          /* incremente a chaque generation : pour la cache mesh */
     bool boss_dead;
     int  boss_room_idx;
 } Dungeon;

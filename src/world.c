@@ -41,7 +41,9 @@ static int rand_range(int lo, int hi) {
 
 void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     srand(seed);
+    int prev_gen = d->gen_id;
     memset(d, 0, sizeof(*d));
+    d->gen_id = prev_gen + 1;          /* invalide la cache mesh render */
     d->level_index = floor_index;
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++)
@@ -377,10 +379,13 @@ void update_player(Game *g) {
     }
 
     float speed = p->speed * (dashing ? 3.6f : 1.f);
-    float dx = ix * speed * dt;
-    float dy = iy * speed * dt;
-    if (!aabb_solid(g, p->x + dx, p->y, p->r - 1)) p->x += dx;
-    if (!aabb_solid(g, p->x, p->y + dy, p->r - 1)) p->y += dy;
+    /* vx/vy en pixels/s, utilise par le rendu (bobbing/swing/orientation) */
+    p->vx = ix * speed;
+    p->vy = iy * speed;
+    float dx = p->vx * dt;
+    float dy = p->vy * dt;
+    if (!aabb_solid(g, p->x + dx, p->y, p->r - 1)) p->x += dx; else p->vx = 0;
+    if (!aabb_solid(g, p->x, p->y + dy, p->r - 1)) p->y += dy; else p->vy = 0;
 
     /* weapon select (bindings) */
     {

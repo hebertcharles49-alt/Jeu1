@@ -345,113 +345,298 @@ static void draw_player_3d(Game *g) {
     Player *p = &g->player;
     bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
     if (blink) return;
-    v3 pos = player_world_pos(p);
-    float bob = (p->vx*p->vx + p->vy*p->vy > 0.1f)
-              ? sinf(g->time * 12.f) * 0.04f : 0.f;
+    v3 pos = player_world_pos(p);             /* monde continu, pas tile-aligne */
+
+    /* bobbing visible quand on bouge ; respiration legere a l'arret */
+    float speed_sq = p->vx*p->vx + p->vy*p->vy;
+    bool moving = speed_sq > 5.f;
+    float bob   = moving ? sinf(g->time * 14.f) * 0.05f
+                         : sinf(g->time * 2.5f) * 0.015f;
+    float swing = moving ? sinf(g->time * 14.f) * 0.10f : 0.f;
+
+    /* orientation : on tourne legerement le perso vers le mouvement */
+    float face_x = 0.f, face_z = 0.f;
+    if (speed_sq > 1.f) {
+        float l = sqrtf(speed_sq);
+        face_x = (p->vx / l);
+        face_z = (p->vy / l);
+    }
+    /* perpendiculaire pour positionner les bras/jambes "sur le cote" */
+    float side_x = -face_z, side_z = face_x;
+    if (face_x == 0.f && face_z == 0.f) { side_x = 1.f; side_z = 0.f; }
+
     float br, bg, bb, hr, hg, hb;
     hero_color(p->hero, &br, &bg, &bb, &hr, &hg, &hb);
 
-    /* corps */
+    /* ombre projetee */
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.5f, 0.55f + bob, pos.z + 0.5f),
-                 v3_make(0.55f, 0.55f, 0.55f),
-                 br, bg, bb);
-    /* tete */
-    gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.5f, 0.95f + bob, pos.z + 0.5f),
-                 v3_make(0.40f, 0.40f, 0.40f),
-                 0.91f, 0.75f, 0.54f);
-    /* casque (cape couleur) */
-    gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.5f, 1.18f + bob, pos.z + 0.5f),
-                 v3_make(0.46f, 0.18f, 0.46f),
-                 hr, hg, hb);
-    /* jambes : 2 petits cubes */
-    gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.32f, 0.18f + bob*0.5f, pos.z + 0.5f),
-                 v3_make(0.18f, 0.36f, 0.20f),
-                 hr*0.7f, hg*0.7f, hb*0.7f);
-    gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.68f, 0.18f + bob*0.5f, pos.z + 0.5f),
-                 v3_make(0.18f, 0.36f, 0.20f),
-                 hr*0.7f, hg*0.7f, hb*0.7f);
+                 v3_make(pos.x, 0.005f, pos.z),
+                 v3_make(0.55f, 0.01f, 0.55f),
+                 0.02f, 0.01f, 0.04f);
 
-    /* equipement equipe : casque rarete */
+    /* jambes : 2 cubes lateraux qui swingent */
+    float leg_off = 0.13f;
+    float leg_lift_l = (swing > 0 ? swing * 0.5f : 0.f);
+    float leg_lift_r = (swing < 0 ? -swing * 0.5f : 0.f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + side_x * leg_off, 0.20f + leg_lift_l, pos.z + side_z * leg_off),
+                 v3_make(0.18f, 0.40f, 0.20f),
+                 hr*0.55f, hg*0.55f, hb*0.55f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x - side_x * leg_off, 0.20f + leg_lift_r, pos.z - side_z * leg_off),
+                 v3_make(0.18f, 0.40f, 0.20f),
+                 hr*0.55f, hg*0.55f, hb*0.55f);
+
+    /* corps (tunique) */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x, 0.62f + bob, pos.z),
+                 v3_make(0.50f, 0.46f, 0.40f),
+                 br, bg, bb);
+
+    /* bras : 2 cubes lateraux */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + side_x * 0.32f, 0.62f + bob - swing * 0.5f,
+                         pos.z + side_z * 0.32f),
+                 v3_make(0.14f, 0.34f, 0.14f),
+                 br * 1.05f, bg * 1.05f, bb * 1.05f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x - side_x * 0.32f, 0.62f + bob + swing * 0.5f,
+                         pos.z - side_z * 0.32f),
+                 v3_make(0.14f, 0.34f, 0.14f),
+                 br * 1.05f, bg * 1.05f, bb * 1.05f);
+
+    /* tete (peau) */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + face_x * 0.02f, 1.05f + bob, pos.z + face_z * 0.02f),
+                 v3_make(0.36f, 0.36f, 0.36f),
+                 0.91f, 0.75f, 0.54f);
+    /* yeux : 2 minuscules cubes noirs devant la tete */
+    {
+        float ex = pos.x + face_x * 0.18f + side_x * 0.07f;
+        float ez = pos.z + face_z * 0.18f + side_z * 0.07f;
+        gfx_box_draw(g->renderer, v3_make(ex, 1.10f + bob, ez),
+                     v3_make(0.04f, 0.04f, 0.04f), 0.02f, 0.02f, 0.02f);
+        ex = pos.x + face_x * 0.18f - side_x * 0.07f;
+        ez = pos.z + face_z * 0.18f - side_z * 0.07f;
+        gfx_box_draw(g->renderer, v3_make(ex, 1.10f + bob, ez),
+                     v3_make(0.04f, 0.04f, 0.04f), 0.02f, 0.02f, 0.02f);
+    }
+
+    /* casque / capuche : couvre la tete sauf si rien d'equipe */
     if (p->equipped[SLOT_HELM].occupied) {
         uint32_t c = rarity_color(p->equipped[SLOT_HELM].rarity);
         gfx_box_draw(g->renderer,
-            v3_make(pos.x + 0.5f, 1.30f + bob, pos.z + 0.5f),
-            v3_make(0.50f, 0.20f, 0.50f),
+            v3_make(pos.x, 1.20f + bob, pos.z),
+            v3_make(0.42f, 0.20f, 0.42f),
             ((c>>24)&0xFF)/255.f, ((c>>16)&0xFF)/255.f, ((c>>8)&0xFF)/255.f);
+    } else {
+        /* cheveux / bandeau couleur classe */
+        gfx_box_draw(g->renderer,
+            v3_make(pos.x, 1.22f + bob, pos.z),
+            v3_make(0.40f, 0.10f, 0.40f),
+            hr * 0.4f, hg * 0.4f, hb * 0.4f);
     }
+
+    /* armure de torse */
     if (p->equipped[SLOT_CHEST].occupied) {
         uint32_t c = rarity_color(p->equipped[SLOT_CHEST].rarity);
         gfx_box_draw(g->renderer,
-            v3_make(pos.x + 0.5f, 0.70f + bob, pos.z + 0.5f),
-            v3_make(0.62f, 0.30f, 0.62f),
+            v3_make(pos.x, 0.70f + bob, pos.z),
+            v3_make(0.55f, 0.30f, 0.45f),
             ((c>>24)&0xFF)/255.f, ((c>>16)&0xFF)/255.f, ((c>>8)&0xFF)/255.f);
     }
-    /* arme tenue : petit cube blanc cote droit */
+
+    /* arme tenue dans la main droite (cote +side) */
     {
         Weapon *w = &p->weapons[p->active_weapon];
         if (w->kind != W_FISTS) {
             float wr = 0.9f, wg = 0.9f, wb = 0.95f;
+            float wlen = 0.50f, wsize = 0.10f;
             switch (w->kind) {
-                case W_SWORD:  wr=0.9f; wg=0.9f; wb=0.95f; break;
-                case W_AXE:    wr=0.6f; wg=0.6f; wb=0.65f; break;
-                case W_BOW:    wr=0.5f; wg=0.3f; wb=0.15f; break;
-                case W_WAND:   wr=0.6f; wg=0.3f; wb=0.95f; break;
-                case W_SHIELD: wr=0.7f; wg=0.6f; wb=0.3f; break;
+                case W_SWORD:  wr=0.92f; wg=0.92f; wb=0.96f; wlen=0.55f; break;
+                case W_AXE:    wr=0.65f; wg=0.65f; wb=0.70f; wlen=0.50f; wsize=0.14f; break;
+                case W_BOW:    wr=0.55f; wg=0.35f; wb=0.18f; wlen=0.55f; break;
+                case W_WAND:   wr=0.62f; wg=0.32f; wb=0.95f; wlen=0.45f; break;
+                case W_SHIELD: wr=0.72f; wg=0.62f; wb=0.32f; wlen=0.45f; wsize=0.20f; break;
                 default: break;
             }
+            float hx = pos.x + side_x * 0.42f + face_x * 0.10f;
+            float hz = pos.z + side_z * 0.42f + face_z * 0.10f;
             gfx_box_draw(g->renderer,
-                v3_make(pos.x + 0.85f, 0.55f + bob, pos.z + 0.5f),
-                v3_make(0.10f, 0.50f, 0.10f),
+                v3_make(hx, 0.62f + bob - swing * 0.5f, hz),
+                v3_make(wsize, wlen, wsize),
                 wr, wg, wb);
+            /* eclat magique au bout du baton */
+            if (w->kind == W_WAND) {
+                gfx_box_draw(g->renderer,
+                    v3_make(hx, 0.92f + bob, hz),
+                    v3_make(0.16f, 0.16f, 0.16f),
+                    0.95f, 0.65f, 1.0f);
+            }
         }
+    }
+
+    /* dash glow */
+    if (p->dash_t > 0.f) {
+        gfx_box_draw(g->renderer,
+            v3_make(pos.x, 0.5f, pos.z),
+            v3_make(0.85f, 0.05f, 0.85f),
+            0.6f, 1.0f, 1.0f);
     }
 }
 
 static void draw_enemy_3d(Game *g, Enemy *e) {
     float r, gg, b; enemy_color(e, &r, &gg, &b);
     v3 pos = v3_make(e->x / TILE, 0.f, e->y / TILE);
-    float h = 1.0f, w = 0.7f;
-    if (e->is_boss) { h = 1.6f; w = 1.1f; }
-    if (e->kind == EK_SLIME) { h = 0.5f; w = 0.65f; }
+    float h = 1.0f, w = 0.65f;
+    if (e->is_boss) { h = 1.7f; w = 1.15f; }
+    if (e->kind == EK_SLIME) { h = 0.45f; w = 0.7f; }
 
-    /* corps */
+    /* swing/bobbing en mouvement */
+    float swing = sinf(g->time * 8.f + e->x * 0.13f + e->y * 0.07f) * 0.06f;
+    float wobble = (e->kind == EK_SLIME) ? sinf(g->time * 6.f + e->x) * 0.08f : 0.f;
+
+    /* ombre */
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x, h * 0.5f, pos.z),
-                 v3_make(w, h, w), r, gg, b);
-    /* tete (sauf slime / boss) */
-    if (e->kind != EK_SLIME && !e->is_boss) {
+                 v3_make(pos.x, 0.005f, pos.z),
+                 v3_make(w + 0.05f, 0.01f, w + 0.05f),
+                 0.02f, 0.01f, 0.04f);
+
+    /* SLIME : grosse bulle + reflet */
+    if (e->kind == EK_SLIME) {
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x, h + 0.2f, pos.z),
-                     v3_make(w * 0.7f, 0.4f, w * 0.7f), r * 1.2f, gg * 1.2f, b * 1.2f);
+                     v3_make(pos.x, h * 0.5f + wobble, pos.z),
+                     v3_make(w + wobble*0.5f, h + wobble, w + wobble*0.5f),
+                     r, gg, b);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.08f, h * 0.85f + wobble, pos.z - 0.08f),
+                     v3_make(0.10f, 0.10f, 0.10f),
+                     1.f, 1.f, 1.f);
+        return;
     }
-    if (e->kind == EK_DEMON) {
-        /* cornes */
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x - 0.18f, h + 0.5f, pos.z),
-                     v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x + 0.18f, h + 0.5f, pos.z),
-                     v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
-    }
+
+    /* BOSS : grand corps + couronne + chaque element marque */
     if (e->is_boss) {
-        /* couronne */
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x, h + 0.25f, pos.z),
-                     v3_make(w * 1.1f, 0.25f, w * 1.1f), 1.0f, 0.85f, 0.25f);
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.5f, pos.z),
+                     v3_make(w, h, w), r, gg, b);
+        /* tete carre */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.25f, pos.z),
+                     v3_make(w * 0.7f, 0.45f, w * 0.7f),
+                     r * 1.2f, gg * 1.2f, b * 1.2f);
+        /* yeux rouges */
+        gfx_box_draw(g->renderer, v3_make(pos.x - 0.18f, h + 0.30f, pos.z + 0.32f),
+                     v3_make(0.08f, 0.08f, 0.06f), 1.f, 0.1f, 0.1f);
+        gfx_box_draw(g->renderer, v3_make(pos.x + 0.18f, h + 0.30f, pos.z + 0.32f),
+                     v3_make(0.08f, 0.08f, 0.06f), 1.f, 0.1f, 0.1f);
+        /* couronne doree */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.55f, pos.z),
+                     v3_make(w * 1.0f, 0.10f, w * 1.0f), 1.0f, 0.85f, 0.25f);
+        /* 3 pointes */
+        for (int i = -1; i <= 1; i++) {
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x + i * 0.30f, h + 0.70f, pos.z),
+                v3_make(0.10f, 0.18f, 0.10f),
+                1.0f, 0.85f, 0.25f);
+        }
+        /* halo elementaire */
+        if (e->element != EL_NONE) {
+            uint32_t c = element_color(e->element);
+            float er=((c>>24)&0xFF)/255.f,eg=((c>>16)&0xFF)/255.f,eb=((c>>8)&0xFF)/255.f;
+            float pulse = 0.10f + 0.06f * sinf(g->time * 3.f);
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(w + pulse * 2.f, 0.02f, w + pulse * 2.f), er, eg, eb);
+        }
+        return;
     }
-    /* aura elite */
+
+    /* ENNEMIS NORMAUX : corps + tete + 2 jambes + 2 bras */
+    float leg_h = 0.32f;
+    float body_y = leg_h + (h - leg_h) * 0.5f;
+    /* jambes */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x - 0.12f, leg_h * 0.5f + swing * 0.5f, pos.z),
+                 v3_make(0.16f, leg_h, 0.18f),
+                 r * 0.6f, gg * 0.6f, b * 0.6f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.12f, leg_h * 0.5f - swing * 0.5f, pos.z),
+                 v3_make(0.16f, leg_h, 0.18f),
+                 r * 0.6f, gg * 0.6f, b * 0.6f);
+    /* corps */
+    gfx_box_draw(g->renderer, v3_make(pos.x, body_y, pos.z),
+                 v3_make(w, h - leg_h, w * 0.85f), r, gg, b);
+    /* bras */
+    float arm_swing = swing * 1.5f;
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x - (w/2 + 0.08f), body_y - arm_swing, pos.z),
+                 v3_make(0.13f, (h - leg_h) * 0.85f, 0.13f),
+                 r * 0.9f, gg * 0.9f, b * 0.9f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + (w/2 + 0.08f), body_y + arm_swing, pos.z),
+                 v3_make(0.13f, (h - leg_h) * 0.85f, 0.13f),
+                 r * 0.9f, gg * 0.9f, b * 0.9f);
+    /* tete */
+    float head_y = h + 0.18f;
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x, head_y, pos.z),
+                 v3_make(w * 0.7f, 0.36f, w * 0.7f),
+                 r * 1.15f, gg * 1.15f, b * 1.15f);
+    /* yeux */
+    {
+        float ey = head_y + 0.05f;
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.10f, ey, pos.z + w * 0.36f),
+                     v3_make(0.06f, 0.06f, 0.04f),
+                     1.f, 0.95f, 0.25f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.10f, ey, pos.z + w * 0.36f),
+                     v3_make(0.06f, 0.06f, 0.04f),
+                     1.f, 0.95f, 0.25f);
+    }
+    /* details par kind */
+    switch (e->kind) {
+        case EK_DEMON: {
+            /* cornes */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x - 0.18f, head_y + 0.30f, pos.z),
+                         v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x + 0.18f, head_y + 0.30f, pos.z),
+                         v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
+            /* dents */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, head_y - 0.10f, pos.z + w * 0.37f),
+                         v3_make(0.18f, 0.06f, 0.04f),
+                         1.f, 1.f, 1.f);
+            break;
+        }
+        case EK_BANDIT: {
+            /* masque noir au visage */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, head_y + 0.04f, pos.z + w * 0.36f),
+                         v3_make(w * 0.65f, 0.13f, 0.04f),
+                         0.05f, 0.05f, 0.07f);
+            break;
+        }
+        case EK_ZOMBIE: {
+            /* "blessure" verdatre sur le torse */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, body_y + 0.05f, pos.z + w * 0.43f),
+                         v3_make(0.20f, 0.10f, 0.04f),
+                         0.45f, 0.65f, 0.2f);
+            break;
+        }
+        default: break;
+    }
+
+    /* aura elite (disque pulsant au sol couleur element) */
     if (e->is_elite && e->element != EL_NONE) {
         uint32_t c = element_color(e->element);
-        float er = ((c>>24)&0xFF)/255.f, eg = ((c>>16)&0xFF)/255.f, eb = ((c>>8)&0xFF)/255.f;
-        float pulse = 0.05f + 0.04f * sinf(g->time * 5.f);
+        float er=((c>>24)&0xFF)/255.f,eg=((c>>16)&0xFF)/255.f,eb=((c>>8)&0xFF)/255.f;
+        float pulse = 0.10f + 0.06f * sinf(g->time * 5.f);
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x, h * 0.5f, pos.z),
-                     v3_make(w + pulse * 4.f, h * 0.05f, w + pulse * 4.f), er, eg, eb);
+                     v3_make(pos.x, 0.04f, pos.z),
+                     v3_make(w + pulse * 2.f, 0.02f, w + pulse * 2.f), er, eg, eb);
     }
 }
 
@@ -980,20 +1165,33 @@ void render_world(Game *g) {
     Player *p = &g->player;
     GfxCtx *gc = g->renderer;
 
-    /* (re)build mesh quand l'etage change */
-    static int built_floor = 0;
-    if (built_floor != g->dungeon.level_index || s_mesh_count == 0) {
+    /* (re)build mesh quand le donjon change. On utilise gen_id, qui est
+       incremente a chaque dungeon_generate, pour detecter une regeneration
+       meme au meme niveau (relance d'une course par exemple). */
+    static int built_gen = -1;
+    bool dungeon_changed = (built_gen != g->dungeon.gen_id);
+    if (dungeon_changed || s_mesh_count == 0) {
         build_dungeon_mesh(g);
-        built_floor = g->dungeon.level_index;
+        built_gen = g->dungeon.gen_id;
     }
 
-    /* camera : 3eme personne, angle isometrique-ish */
+    /* camera : 3eme personne, isometrique-ish, lerp doux vers le joueur */
     v3 player_w = player_world_pos(p);
-    v3 cam_target = v3_make(player_w.x + 0.5f, 0.6f, player_w.z + 0.5f);
-    /* offset arriere + haut */
-    float shake_x = (g->camera_x) * 0.02f;
-    float shake_y = (g->camera_y) * 0.02f;
-    v3 cam_eye = v3_add(cam_target, v3_make(shake_x, 9.0f, 8.0f + shake_y));
+    static float scam_x = 0.f, scam_z = 0.f;
+    static int   scam_init = 0;
+    if (!scam_init || dungeon_changed) {
+        scam_x = player_w.x; scam_z = player_w.z; scam_init = 1;
+    }
+    /* approche : 12% du delta par frame -> environ 0.4 sec pour rattraper */
+    float lerp_k = 0.12f;
+    scam_x += (player_w.x - scam_x) * lerp_k;
+    scam_z += (player_w.z - scam_z) * lerp_k;
+
+    /* shake : on utilise camera_x/y (offsets shake depuis main) en world */
+    float shake_x = g->camera_x * 0.015f;
+    float shake_z = g->camera_y * 0.015f;
+    v3 cam_target = v3_make(scam_x + shake_x, 0.6f, scam_z + shake_z);
+    v3 cam_eye = v3_add(cam_target, v3_make(0.0f, 9.0f, 8.0f));
     m4 view = m4_lookat(cam_eye, cam_target, v3_make(0, 1, 0));
     float aspect = (float)INTERNAL_W / (float)INTERNAL_H;
     m4 proj = m4_perspective(0.85f, aspect, 0.1f, 90.0f);
