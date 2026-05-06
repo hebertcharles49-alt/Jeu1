@@ -547,22 +547,26 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
 void update_weapons(Game *g) {
     Player *p = &g->player;
     float dt = g->dt;
+    /* aim TOUJOURS souris (deja calcule dans update_player). On gate
+       les armes melee/AOE sur la presence d'un ennemi en portee pour
+       eviter le bruit visuel/sonore d'attaques dans le vide. */
     for (int i = 0; i < WEAPON_SLOTS; i++) {
         Weapon *w = &p->weapons[i];
         if (!w->owned) continue;
         w->cooldown -= dt;
         if (w->cooldown > 0.f) continue;
         ComboFx fx = compute_combo(weapon_combo_id(w));
-        bool need_target = (w->kind == W_SWORD || w->kind == W_BOW || w->kind == W_FISTS);
-        if (need_target) {
-            float d;
-            float scan = (w->kind == W_BOW) ? 320.f * fx.range_mul
-                                            : w->base_range * fx.range_mul + 10.f;
-            int t = nearest_enemy(g, p->x, p->y, scan, &d);
-            if (t < 0) continue;
-            p->aim_x = g->enemies[t].x;
-            p->aim_y = g->enemies[t].y;
+
+        bool fire = true;
+        if (w->kind == W_FISTS || w->kind == W_SWORD || w->kind == W_AXE) {
+            float scan = (w->kind == W_AXE)
+                       ? w->base_range * fx.range_mul + 18.f
+                       : w->base_range * fx.range_mul + 10.f;
+            int t = nearest_enemy(g, p->x, p->y, scan, NULL);
+            if (t < 0) fire = false;
         }
+        if (!fire) continue;
+
         switch (w->kind) {
             case W_FISTS:  fire_fists(g, w, fx);  break;
             case W_SWORD:  fire_sword(g, w, fx);  break;

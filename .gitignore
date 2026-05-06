@@ -4,7 +4,10 @@ build/
 *.exe
 crucible
 crucible.exe
+element_dungeon
+element_dungeon.exe
 crucible_save.dat
+crucible_settings.dat
 SDL2.dll
 *.pdb
 *.ilk

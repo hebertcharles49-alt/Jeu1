@@ -8,9 +8,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define INTERNAL_W 480
-#define INTERNAL_H 270
-#define WINDOW_SCALE 3
+#define INTERNAL_W 640
+#define INTERNAL_H 360
+#define WINDOW_SCALE 2
 #define WINDOW_W (INTERNAL_W * WINDOW_SCALE)
 #define WINDOW_H (INTERNAL_H * WINDOW_SCALE)
 
@@ -333,6 +333,7 @@ typedef struct {
 /* ---------- Game state ---------- */
 typedef enum {
     GS_TITLE = 0,
+    GS_LORE,
     GS_HUB,
     GS_HELP,
     GS_OPTIONS,
@@ -513,6 +514,12 @@ const char *scancode_label(SDL_Scancode sc);
 void  render_options(Game *g);
 void  update_options(Game *g);
 void  apply_render_filter(Game *g);    /* recree g->target avec le filtre courant */
+
+void  render_lore(Game *g);
+
+/* helpers souris */
+bool  mouse_in_rect(Game *g, int x, int y, int w, int h);
+bool  mouse_clicked(Game *g);
 
 /* shop */
 void  shop_generate(Game *g);

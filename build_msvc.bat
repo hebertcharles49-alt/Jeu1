@@ -21,7 +21,7 @@ set INCS=/I "%SDL2_DIR%\include"
 set LIBS=/LIBPATH:"%SDL2_DIR%\lib\x64" SDL2.lib SDL2main.lib shell32.lib
 
 cl /O2 /W3 /nologo %INCS% src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c ^
-   /Fobuild\ /Fecrucible.exe /link %LIBS% /SUBSYSTEM:WINDOWS
+   /Fobuild\ /Feelement_dungeon.exe /link %LIBS% /SUBSYSTEM:WINDOWS
 
 if errorlevel 1 (
     echo Echec de compilation.
@@ -29,5 +29,5 @@ if errorlevel 1 (
 )
 
 if exist "%SDL2_DIR%\lib\x64\SDL2.dll" copy "%SDL2_DIR%\lib\x64\SDL2.dll" SDL2.dll >nul
-echo OK -- crucible.exe
+echo OK -- element_dungeon.exe
 endlocal

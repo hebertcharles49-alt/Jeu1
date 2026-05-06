@@ -100,6 +100,28 @@ static int section_row_count(int section) {
 void update_options(Game *g) {
     Settings *s = &g->settings;
 
+    /* mouse: tabs en haut + lignes */
+    {
+        int tabw = 100, tabh = 14, gap = 4;
+        int tx = (INTERNAL_W - tabw * 3 - gap * 2) / 2;
+        for (int i = 0; i < 3; i++) {
+            int x = tx + i * (tabw + gap);
+            if (mouse_in_rect(g, x, 22, tabw, tabh)) {
+                if (mouse_clicked(g)) {
+                    g->opt_section = i;
+                    g->opt_cursor = 0;
+                }
+            }
+        }
+        int rc = section_row_count(g->opt_section);
+        for (int i = 0; i < rc; i++) {
+            int y = 50 + (g->opt_section == 0 ? 12 : 0) + i * 11;
+            if (mouse_in_rect(g, 22, y - 1, INTERNAL_W - 60, 11)) {
+                g->opt_cursor = i;
+            }
+        }
+    }
+
     /* attente d'une touche pour rebind */
     if (g->opt_waiting_rebind) {
         if (g->opt_last_keydown != SDL_SCANCODE_UNKNOWN) {
@@ -153,6 +175,13 @@ void update_options(Game *g) {
                        (g->keys[SDL_SCANCODE_D]     && !g->keys_prev[SDL_SCANCODE_D]);
     bool press_enter = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
                        (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]);
+    /* click on focused row = press_enter equivalent, dans la zone de la ligne */
+    {
+        int y = 50 + (g->opt_section == 0 ? 12 : 0) + g->opt_cursor * 11;
+        if (mouse_in_rect(g, 22, y - 1, INTERNAL_W - 60, 11) && mouse_clicked(g)) {
+            press_enter = true;
+        }
+    }
 
     if (g->opt_section == 0) {
         if (press_enter) {

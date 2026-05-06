@@ -11,6 +11,14 @@
 static Game g_game;
 Game *game_get(void) { return &g_game; }
 
+bool mouse_in_rect(Game *g, int x, int y, int w, int h) {
+    return g->mouse_x >= x && g->mouse_x < x + w &&
+           g->mouse_y >= y && g->mouse_y < y + h;
+}
+bool mouse_clicked(Game *g) {
+    return g->mouse_btn && !g->mouse_btn_prev;
+}
+
 static void poll_input(Game *g, bool *quit) {
     SDL_Event ev;
     g->mouse_btn_prev = g->mouse_btn;
@@ -30,6 +38,7 @@ static void poll_input(Game *g, bool *quit) {
                     case GS_HUB:        *quit = true; break;
                     case GS_TITLE:      *quit = true; break;
                     case GS_HELP:       g->state = GS_TITLE; break;
+                    case GS_LORE:       g->state = GS_TITLE; break;
                     case GS_OPTIONS:
                         settings_write(&g->settings);
                         g->state = g->opt_return ? g->opt_return : GS_TITLE;
@@ -114,7 +123,7 @@ void game_init(Game *g) {
     /* charger les reglages avant la creation des textures (filtre) */
     settings_load(&g->settings);
 
-    g->window = SDL_CreateWindow("Crucible — Doomlike Hybride",
+    g->window = SDL_CreateWindow("Element Dungeon",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, SDL_WINDOW_SHOWN);
     if (!g->window) { fprintf(stderr, "Win: %s\n", SDL_GetError()); exit(1); }
@@ -278,7 +287,7 @@ void game_next_floor(Game *g) {
 
 /* hub navigation */
 static void update_hub(Game *g) {
-    int total = W_COUNT - 1 + (EL_COUNT - 1);   /* exclude W_FISTS and EL_NONE */
+    int total = W_COUNT - 1 + (EL_COUNT - 1);
     if (g->keys[SDL_SCANCODE_W] && !g->keys_prev[SDL_SCANCODE_W])
         g->hub_cursor = (g->hub_cursor + total - 1) % total;
     if (g->keys[SDL_SCANCODE_S] && !g->keys_prev[SDL_SCANCODE_S])
@@ -287,26 +296,58 @@ static void update_hub(Game *g) {
         g->hub_cursor = (g->hub_cursor + total - 1) % total;
     if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
         g->hub_cursor = (g->hub_cursor + 1) % total;
-    if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-        (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+
+    /* mouse hover : aligne curseur sur la ligne sous le pointeur */
+    int rowh = 11;
+    /* armes : x in [8, 260], y in [56 + i*rowh] */
+    for (int i = 0; i < W_COUNT - 1; i++) {
+        if (mouse_in_rect(g, 8, 54 + i * rowh, 260, rowh)) {
+            g->hub_cursor = i;
+        }
+    }
+    int colx = INTERNAL_W / 2;
+    for (int e = 0; e < EL_COUNT - 1; e++) {
+        if (mouse_in_rect(g, colx - 4, 54 + e * rowh, 260, rowh)) {
+            g->hub_cursor = (W_COUNT - 1) + e;
+        }
+    }
+
+    bool activate = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                    (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])      ||
+                    mouse_clicked(g);
+    if (activate) {
         if (g->hub_cursor < W_COUNT - 1) {
-            int wi = g->hub_cursor + 1; /* skip fists */
+            int wi = g->hub_cursor + 1;
             int cost = 30 + wi * 18;
             if (!g->meta.weapon_unlocked[wi] && g->meta.shards >= cost) {
                 g->meta.shards -= cost;
                 g->meta.weapon_unlocked[wi] = true;
                 save_write(&g->meta);
+                sfx_play(g, SFX_LEVELUP);
             }
         } else {
-            int e = g->hub_cursor - (W_COUNT - 1) + 1; /* skip EL_NONE */
+            int e = g->hub_cursor - (W_COUNT - 1) + 1;
             int cost = 25 + e * 12;
             if (!g->meta.element_unlocked[e] && g->meta.shards >= cost) {
                 g->meta.shards -= cost;
                 g->meta.element_unlocked[e] = true;
                 save_write(&g->meta);
+                sfx_play(g, SFX_LEVELUP);
             }
         }
     }
+
+    /* hot-zones bas d'ecran : R / H / O */
+    /* "DEBUTER" zone */
+    if (mouse_in_rect(g, INTERNAL_W/2 - 80, INTERNAL_H - 28, 160, 12) && mouse_clicked(g)) {
+        g->state = GS_CHOOSE_HERO;
+    }
+    if (mouse_in_rect(g, INTERNAL_W/2 - 80, INTERNAL_H - 16, 160, 10) && mouse_clicked(g)) {
+        g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
+        g->opt_waiting_rebind = false;
+        g->state = GS_OPTIONS;
+    }
+
     if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R]) {
         g->state = GS_CHOOSE_HERO;
     }
@@ -324,8 +365,21 @@ static void update_choose_hero(Game *g) {
         g->hero_cursor = (g->hero_cursor + HERO_COUNT - 1) % HERO_COUNT;
     if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
         g->hero_cursor = (g->hero_cursor + 1) % HERO_COUNT;
-    if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-        (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])) {
+
+    /* mouse hover sur les portraits (alignement render_choose_hero) */
+    int gap = INTERNAL_W / (HERO_COUNT + 1);
+    int sy_center = (INTERNAL_H * 5) / 12;
+    for (int i = 0; i < HERO_COUNT; i++) {
+        int sx = gap * (i + 1);
+        if (mouse_in_rect(g, sx - 26, sy_center - 34, 52, 80)) {
+            g->hero_cursor = i;
+        }
+    }
+
+    bool activate = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                    (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])  ||
+                    mouse_clicked(g);
+    if (activate) {
         if (g->meta.hero_unlocked[g->hero_cursor]) {
             game_start_new_run(g);
         } else {
@@ -334,34 +388,49 @@ static void update_choose_hero(Game *g) {
                 g->meta.shards -= cost;
                 g->meta.hero_unlocked[g->hero_cursor] = true;
                 save_write(&g->meta);
+                sfx_play(g, SFX_LEVELUP);
             }
         }
     }
 }
 
+static void apply_levelup_choice(Game *g, int c) {
+    int kind = g->levelup_choice_kind[c];
+    int val  = g->levelup_choices[c];
+    if (kind == 1) {
+        Weapon *w = &g->player.weapons[g->player.active_weapon];
+        weapon_attach_element(w, (Element)val);
+        int mask = weapon_combo_id(w);
+        bool found = false;
+        for (int s = 0; s < g->meta.combo_seen_count; s++)
+            if (g->meta.combo_seen[s] == mask) { found = true; break; }
+        if (!found && g->meta.combo_seen_count < 64) {
+            g->meta.combo_seen[g->meta.combo_seen_count++] = mask;
+        }
+    } else if (kind == 2) {
+        if      (val == 0) { g->player.maxhp += 20.f; g->player.hp += 20.f; }
+        else if (val == 1) { g->player.speed += 10.f; }
+        else if (val == 2) { g->player.dmg_mul *= 1.15f; }
+    }
+    sfx_play(g, SFX_LEVELUP);
+    g->state = GS_RUN;
+}
+
 static void update_levelup(Game *g) {
     for (int c = 0; c < 3; c++) {
         if (g->keys[SDL_SCANCODE_1 + c] && !g->keys_prev[SDL_SCANCODE_1 + c]) {
-            int kind = g->levelup_choice_kind[c];
-            int val  = g->levelup_choices[c];
-            if (kind == 1) { /* element */
-                Weapon *w = &g->player.weapons[g->player.active_weapon];
-                weapon_attach_element(w, (Element)val);
-                int mask = weapon_combo_id(w);
-                bool found = false;
-                for (int s = 0; s < g->meta.combo_seen_count; s++)
-                    if (g->meta.combo_seen[s] == mask) { found = true; break; }
-                if (!found && g->meta.combo_seen_count < 64) {
-                    g->meta.combo_seen[g->meta.combo_seen_count++] = mask;
-                }
-            } else if (kind == 2) { /* stat */
-                if      (val == 0) { g->player.maxhp += 20.f; g->player.hp += 20.f; }
-                else if (val == 1) { g->player.speed += 10.f; }
-                else if (val == 2) { g->player.dmg_mul *= 1.15f; }
-            }
-            sfx_play(g, SFX_LEVELUP);
-            g->state = GS_RUN;
-            return;
+            apply_levelup_choice(g, c); return;
+        }
+    }
+    /* mouse : align with render_levelup boxes */
+    int boxw = 130, boxh = 56;
+    int total_w = boxw * 3 + 12;
+    int sx0 = (INTERNAL_W - total_w) / 2;
+    int sy = 70;
+    for (int c = 0; c < 3; c++) {
+        int sx = sx0 + c * (boxw + 6);
+        if (mouse_in_rect(g, sx, sy, boxw, boxh) && mouse_clicked(g)) {
+            apply_levelup_choice(g, c); return;
         }
     }
 }
@@ -375,13 +444,33 @@ static void update_shop(Game *g) {
         g->shop_cursor = (g->shop_cursor + 4) % 5;
     if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
         g->shop_cursor = (g->shop_cursor + 1) % 5;
+
+    /* mouse on cards (aligne sur render_shop) */
+    int boxw = 100, boxh = 130, gap = 6;
+    int total_w = 5 * boxw + 4 * gap;
+    int sx0 = (INTERNAL_W - total_w) / 2;
+    int sy  = 64;
+    for (int i = 0; i < 5; i++) {
+        int sx = sx0 + i * (boxw + gap);
+        if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
+            g->shop_cursor = i;
+            if (mouse_clicked(g)) shop_buy(g, i);
+        }
+    }
+
     if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
         (g->keys[SDL_SCANCODE_E] && !g->keys_prev[SDL_SCANCODE_E])) {
         shop_buy(g, g->shop_cursor);
     }
-    if (g->keys[SDL_SCANCODE_I] && !g->keys_prev[SDL_SCANCODE_I]) {
-        g->state_prev = GS_SHOP;
-        g->state = GS_INVENTORY;
+    {
+        SDL_Scancode kinv = g->settings.keys[BIND_INVENTORY];
+        if (kinv && g->keys[kinv] && !g->keys_prev[kinv]) {
+            g->state_prev = GS_SHOP; g->state = GS_INVENTORY;
+        }
+    }
+    /* "ETAGE SUIVANT" zone bas */
+    if (mouse_in_rect(g, INTERNAL_W/2 - 100, INTERNAL_H - 22, 200, 14) && mouse_clicked(g)) {
+        game_next_floor(g);
     }
     if ((g->keys[SDL_SCANCODE_C] && !g->keys_prev[SDL_SCANCODE_C]) ||
         (g->keys[SDL_SCANCODE_SPACE] && !g->keys_prev[SDL_SCANCODE_SPACE])) {
@@ -409,17 +498,40 @@ void game_run(Game *g) {
         poll_input(g, &quit);
 
         if (g->state == GS_TITLE) {
-            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                (g->keys[SDL_SCANCODE_SPACE] && !g->keys_prev[SDL_SCANCODE_SPACE])) {
-                g->state = GS_HUB;
+            bool start = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                         (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]);
+            /* mouse zones (alignees sur render_title) */
+            int yA = INTERNAL_H/2 + 20;
+            int yB = INTERNAL_H/2 + 36;
+            int yC = INTERNAL_H/2 + 52;
+            int yD = INTERNAL_H/2 + 68;
+            int yE = INTERNAL_H/2 + 84;
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yA, 200, 12) && mouse_clicked(g)) start = true;
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yB, 200, 12) && mouse_clicked(g))
+                g->state = GS_LORE;
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yC, 200, 12) && mouse_clicked(g)) {
+                g->opt_return = GS_TITLE; g->opt_section = 0; g->opt_cursor = 0;
+                g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
             }
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yD, 200, 12) && mouse_clicked(g))
+                g->state = GS_HELP;
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yE, 200, 12) && mouse_clicked(g))
+                quit = true;
+            if (start) g->state = GS_HUB;
             if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) g->state = GS_HELP;
+            if (g->keys[SDL_SCANCODE_L] && !g->keys_prev[SDL_SCANCODE_L]) g->state = GS_LORE;
             if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
                 g->opt_return = GS_TITLE;
                 g->opt_section = 0;
                 g->opt_cursor = 0;
                 g->opt_waiting_rebind = false;
                 g->state = GS_OPTIONS;
+            }
+        } else if (g->state == GS_LORE) {
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])  ||
+                mouse_clicked(g)) {
+                g->state = GS_TITLE;
             }
         } else if (g->state == GS_HELP) {
             /* esc handled */
@@ -519,6 +631,7 @@ void game_run(Game *g) {
         SDL_RenderClear(g->renderer);
 
         if (g->state == GS_TITLE)            render_title(g);
+        else if (g->state == GS_LORE)        render_lore(g);
         else if (g->state == GS_HELP)        render_help(g);
         else if (g->state == GS_OPTIONS)     render_options(g);
         else if (g->state == GS_HUB)         render_hub(g);

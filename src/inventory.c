@@ -210,8 +210,32 @@ bool inventory_fuse(Game *g) {
     return true;
 }
 
-/* keyboard navigation in inventory screen */
+/* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
+    /* mouse hover/click sur slots */
+    int cell = 28;
+    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+        int row = i / 4, col = i % 4;
+        int sx = 30 + col * cell;
+        int sy = 24 + row * cell;
+        if (mouse_in_rect(g, sx, sy, 26, 26)) {
+            g->inv_cursor = i;
+            if (mouse_clicked(g)) {
+                inventory_equip(g, i);
+            }
+        }
+    }
+    int eqx = INTERNAL_W - 60;
+    for (int i = 0; i < EQUIP_SLOTS; i++) {
+        int sx = eqx;
+        int sy = 24 + i * cell;
+        if (mouse_in_rect(g, sx, sy, 26, 26)) {
+            g->inv_cursor = 12 + i;
+            if (mouse_clicked(g)) {
+                inventory_unequip(g, i);
+            }
+        }
+    }
     /* 12 inventory slots laid out 4x3, then 6 equipment slots */
     /* cursor < 12 = inv, 12..17 = equip */
     if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT]) {

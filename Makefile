@@ -9,12 +9,12 @@ OBJDIR  := build
 OBJS    := $(SRCS:src/%.c=$(OBJDIR)/%.o)
 
 ifdef WIN
-  TARGET  := crucible.exe
+  TARGET  := element_dungeon.exe
   SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null)
   SDL_LIBS   := $(shell sdl2-config --libs   2>/dev/null)
   LDFLAGS := $(SDL_LIBS) -lm -mwindows
 else
-  TARGET  := crucible
+  TARGET  := element_dungeon
   SDL_CFLAGS := $(shell sdl2-config --cflags)
   SDL_LIBS   := $(shell sdl2-config --libs)
   LDFLAGS := $(SDL_LIBS) -lm
@@ -37,6 +37,6 @@ run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe
+	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe
 
 .PHONY: all run clean

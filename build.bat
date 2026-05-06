@@ -35,7 +35,7 @@ if %errorlevel%==0 (
 )
 
 echo Compilation...
-gcc %CFLAGS% %SDL_CFLAGS% %SOURCES% %SDL_LIBS% -lm -mwindows -o crucible.exe
+gcc %CFLAGS% %SDL_CFLAGS% %SOURCES% %SDL_LIBS% -lm -mwindows -o element_dungeon.exe
 if errorlevel 1 (
     echo Echec de compilation.
     exit /b 1
@@ -45,5 +45,5 @@ if defined SDL2_DIR (
     if exist "%SDL2_DIR%\bin\SDL2.dll" copy "%SDL2_DIR%\bin\SDL2.dll" SDL2.dll >nul
 )
 
-echo OK -- lance crucible.exe ou tape: crucible.exe
+echo OK -- lance element_dungeon.exe ou tape: element_dungeon.exe
 endlocal

@@ -106,6 +106,8 @@ void text_drawf(SDL_Renderer *r, int x, int y, uint32_t col, const char *fmt, ..
 
 int text_width(const char *s) { return (int)strlen(s) * 6; }
 
+static void draw_vignette(Game *g);   /* defini plus bas */
+
 /* ---------- HELPERS ---------- */
 static void set_color_u32(SDL_Renderer *r, uint32_t c) {
     SDL_SetRenderDrawColor(r, (c>>24)&0xFF, (c>>16)&0xFF, (c>>8)&0xFF, c&0xFF);
@@ -151,9 +153,10 @@ static void draw_player(Game *g, int sx, int sy) {
     bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
     if (blink) return;
 
-    /* shadow */
+    /* ombre douce ovale */
     SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
-    fill_rect(g->renderer, sx - 6, sy + 5, 12, 3, 0x00000080);
+    fill_rect(g->renderer, sx - 7, sy + 6, 14, 2, 0x00000080);
+    fill_rect(g->renderer, sx - 5, sy + 8, 10, 1, 0x00000060);
     SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
 
     uint32_t cape = 0x303040FF, tunic = 0x6A4A2AFF, hair = 0x402010FF;
@@ -166,15 +169,105 @@ static void draw_player(Game *g, int sx, int sy) {
         default: break;
     }
 
-    fill_rect(g->renderer, sx - 5, sy - 8, 10, 12, cape);
-    fill_rect(g->renderer, sx - 4, sy - 4, 8, 8,   tunic);
-    fill_rect(g->renderer, sx - 3, sy - 10, 6, 5,  0xE8C089FF);
-    fill_rect(g->renderer, sx - 3, sy - 11, 6, 2,  hair);
-    fill_rect(g->renderer, sx - 2, sy - 8, 1, 1,   0x000000FF);
-    fill_rect(g->renderer, sx + 1, sy - 8, 1, 1,   0x000000FF);
-    fill_rect(g->renderer, sx - 4, sy + 1, 8, 1,   0x202020FF);
-    fill_rect(g->renderer, sx - 4, sy + 4, 3, 3,   0x402010FF);
-    fill_rect(g->renderer, sx + 1, sy + 4, 3, 3,   0x402010FF);
+    /* leger bobbing en mouvement (Hades-like) */
+    int bob = 0;
+    if (p->vx * p->vx + p->vy * p->vy > 0.001f) {
+        bob = ((int)(g->time * 12.f) & 1);
+    } else {
+        bob = (((int)(g->time * 4.f)) & 1) ? 0 : -1;
+    }
+
+    /* CAPE qui flotte avec direction de mouvement */
+    int cape_off = (p->facing_dir == 0) ? -1 : (p->facing_dir == 2) ? 1 : 0;
+    fill_rect(g->renderer, sx - 5 + cape_off, sy - 7 + bob, 10, 11, cape);
+    fill_rect(g->renderer, sx - 5 + cape_off, sy - 7 + bob, 10, 2, 0x000000FF);
+
+    /* TORSE / TUNIQUE */
+    fill_rect(g->renderer, sx - 4, sy - 4 + bob, 8, 8, tunic);
+
+    /* TETE */
+    fill_rect(g->renderer, sx - 3, sy - 10 + bob, 6, 5, 0xE8C089FF);
+    fill_rect(g->renderer, sx - 3, sy - 10 + bob, 6, 1, 0xC09060FF);  /* shadow rim */
+
+    /* CHEVEUX (sera couvert par casque equipe) */
+    if (!p->equipped[SLOT_HELM].occupied) {
+        fill_rect(g->renderer, sx - 3, sy - 11 + bob, 6, 2, hair);
+        fill_rect(g->renderer, sx - 3, sy - 12 + bob, 6, 1, hair);
+    }
+
+    /* YEUX */
+    fill_rect(g->renderer, sx - 2, sy - 8 + bob, 1, 1, 0x000000FF);
+    fill_rect(g->renderer, sx + 1, sy - 8 + bob, 1, 1, 0x000000FF);
+
+    /* CEINTURE */
+    if (p->equipped[SLOT_BELT].occupied)
+        fill_rect(g->renderer, sx - 4, sy + 1 + bob, 8, 1, rarity_color(p->equipped[SLOT_BELT].rarity));
+    else
+        fill_rect(g->renderer, sx - 4, sy + 1 + bob, 8, 1, 0x202020FF);
+
+    /* JAMBES */
+    {
+        uint32_t legcol = 0x402010FF;
+        if (p->equipped[SLOT_LEGS].occupied) legcol = rarity_color(p->equipped[SLOT_LEGS].rarity);
+        fill_rect(g->renderer, sx - 3, sy + 2 + bob, 2, 3, legcol);
+        fill_rect(g->renderer, sx + 1, sy + 2 + bob, 2, 3, legcol);
+    }
+
+    /* BOTTES */
+    {
+        uint32_t bootcol = 0x180A04FF;
+        if (p->equipped[SLOT_BOOTS].occupied) bootcol = rarity_color(p->equipped[SLOT_BOOTS].rarity);
+        fill_rect(g->renderer, sx - 4, sy + 4 + bob, 3, 3, bootcol);
+        fill_rect(g->renderer, sx + 1, sy + 4 + bob, 3, 3, bootcol);
+        fill_rect(g->renderer, sx - 4, sy + 6 + bob, 3, 1, 0x000000FF);
+        fill_rect(g->renderer, sx + 1, sy + 6 + bob, 3, 1, 0x000000FF);
+    }
+
+    /* CASQUE par dessus tete si equipe */
+    if (p->equipped[SLOT_HELM].occupied) {
+        uint32_t hc = rarity_color(p->equipped[SLOT_HELM].rarity);
+        fill_rect(g->renderer, sx - 3, sy - 12 + bob, 6, 4, hc);
+        fill_rect(g->renderer, sx - 3, sy - 12 + bob, 6, 1, 0x000000FF);
+        /* visiere */
+        fill_rect(g->renderer, sx - 3, sy - 9 + bob, 6, 1, 0x000000FF);
+    }
+
+    /* TORSE armor par dessus tunique */
+    if (p->equipped[SLOT_CHEST].occupied) {
+        uint32_t cc = rarity_color(p->equipped[SLOT_CHEST].rarity);
+        fill_rect(g->renderer, sx - 4, sy - 4 + bob, 8, 6, cc);
+        fill_rect(g->renderer, sx - 4, sy - 4 + bob, 8, 1, 0x000000FF);
+        /* harnais V */
+        fill_rect(g->renderer, sx - 1, sy - 3 + bob, 2, 4, 0x000000FF);
+    }
+
+    /* GANTS */
+    {
+        uint32_t gc = (p->equipped[SLOT_GLOVES].occupied) ?
+                      rarity_color(p->equipped[SLOT_GLOVES].rarity) : 0xE8C089FF;
+        fill_rect(g->renderer, sx - 6, sy + 0 + bob, 2, 2, gc);
+        fill_rect(g->renderer, sx + 4, sy + 0 + bob, 2, 2, gc);
+    }
+
+    /* arme tenue : petit pictogramme dans la main droite */
+    {
+        Weapon *w = &p->weapons[p->active_weapon];
+        int hx = sx + 5, hy = sy + 0 + bob;
+        switch (w->kind) {
+            case W_SWORD:  fill_rect(g->renderer, hx, hy - 5, 1, 5, 0xE8E8FFFF);
+                           fill_rect(g->renderer, hx - 1, hy - 6, 3, 1, 0xC0C0FFFF); break;
+            case W_AXE:    fill_rect(g->renderer, hx, hy - 4, 1, 4, 0x806040FF);
+                           fill_rect(g->renderer, hx - 1, hy - 5, 3, 2, 0xC0C0C0FF); break;
+            case W_BOW:    fill_rect(g->renderer, hx, hy - 5, 1, 5, 0x804020FF);
+                           fill_rect(g->renderer, hx - 1, hy - 5, 3, 1, 0x804020FF);
+                           fill_rect(g->renderer, hx - 1, hy - 1, 3, 1, 0x804020FF); break;
+            case W_WAND:   fill_rect(g->renderer, hx, hy - 4, 1, 4, 0x402080FF);
+                           fill_rect(g->renderer, hx - 1, hy - 5, 3, 1, 0xC080FFFF); break;
+            case W_SHIELD: fill_rect(g->renderer, hx, hy - 3, 2, 5, 0xC0A060FF);
+                           fill_rect(g->renderer, hx, hy - 3, 2, 1, 0x806030FF); break;
+            default: break;
+        }
+    }
 
     /* attack swing */
     if (p->anim_t > 0.f) {
@@ -415,22 +508,31 @@ static void draw_tile(Game *g, int sx, int sy, TileKind t, int tx, int ty) {
     SDL_Renderer *r = g->renderer;
     switch (t) {
         case T_VOID:
-            fill_rect(r, sx, sy, TILE, TILE, 0x040308FF);
+            fill_rect(r, sx, sy, TILE, TILE, 0x020106FF);
             break;
         case T_FLOOR: {
-            uint32_t c = ((tx + ty) & 1) ? 0x2A1F30FF : 0x231828FF;
+            /* dalle tres sombre style donjon Diablo 2 */
+            uint32_t c = ((tx + ty) & 1) ? 0x140B1AFF : 0x0E0712FF;
             fill_rect(r, sx, sy, TILE, TILE, c);
-            int hash = (tx * 7 + ty * 13) & 7;
-            if (hash == 0) fill_rect(r, sx + 3, sy + 4, 1, 1, 0x3A2A40FF);
-            if (hash == 3) fill_rect(r, sx + 11, sy + 9, 1, 1, 0x3A2A40FF);
+            /* joint de dalle */
+            fill_rect(r, sx, sy, TILE, 1, 0x07050AFF);
+            fill_rect(r, sx, sy, 1, TILE, 0x07050AFF);
+            /* grain */
+            int hash = (tx * 7 + ty * 13) & 15;
+            if (hash == 0) fill_rect(r, sx + 3, sy + 4, 1, 1, 0x281A30FF);
+            if (hash == 3) fill_rect(r, sx + 11, sy + 9, 1, 1, 0x281A30FF);
+            if (hash == 7) fill_rect(r, sx + 7, sy + 12, 2, 1, 0x1A1024FF);
             break;
         }
         case T_WALL:
-            fill_rect(r, sx, sy, TILE, TILE, 0x40384DFF);
-            fill_rect(r, sx, sy, TILE, 2, 0x564867FF);
-            fill_rect(r, sx, sy + TILE - 2, TILE, 2, 0x2A2333FF);
-            fill_rect(r, sx + 4, sy + 5, 2, 2, 0x322840FF);
-            fill_rect(r, sx + 10, sy + 9, 2, 2, 0x322840FF);
+            /* mur en pierre sombre, luminance haut > bas */
+            fill_rect(r, sx, sy, TILE, TILE, 0x1F1828FF);
+            fill_rect(r, sx, sy, TILE, 3, 0x342A40FF);
+            fill_rect(r, sx, sy + TILE - 3, TILE, 3, 0x100918FF);
+            /* cracks */
+            fill_rect(r, sx + 4, sy + 5, 2, 2, 0x180F22FF);
+            fill_rect(r, sx + 10, sy + 9, 2, 2, 0x180F22FF);
+            fill_rect(r, sx + 7, sy + 11, 1, 2, 0x261A35FF);
             break;
         case T_DOOR:
             fill_rect(r, sx, sy, TILE, TILE, 0x603020FF);
@@ -560,13 +662,17 @@ void render_world(Game *g) {
         }
     }
 
+    /* vignette ambiance dungeon */
+    draw_vignette(g);
+
     /* aim cursor */
     int mx = g->mouse_x;
     int my = g->mouse_y;
-    fill_rect(g->renderer, mx - 4, my, 3, 1, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx + 2, my, 3, 1, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx, my - 4, 1, 3, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx, my + 2, 1, 3, 0xFFFFFFFF);
+    fill_rect(g->renderer, mx - 5, my, 4, 1, 0xFFFFFFFF);
+    fill_rect(g->renderer, mx + 2, my, 4, 1, 0xFFFFFFFF);
+    fill_rect(g->renderer, mx, my - 5, 1, 4, 0xFFFFFFFF);
+    fill_rect(g->renderer, mx, my + 2, 1, 4, 0xFFFFFFFF);
+    fill_rect(g->renderer, mx, my, 1, 1, 0xFFFFFFFF);
 
     /* boss intro overlay */
     if (g->boss_intro_t > 0.f) {
@@ -811,9 +917,10 @@ void render_choose_hero(Game *g) {
     text_drawf(g->renderer, 8, 24, 0xC0E0FFFF, "ECLATS %d", g->meta.shards);
 
     int gap = INTERNAL_W / (HERO_COUNT + 1);
+    int sy_center = (INTERNAL_H * 5) / 12;
     for (int i = 0; i < HERO_COUNT; i++) {
         int sx = gap * (i + 1);
-        int sy = 90;
+        int sy = sy_center;
         bool sel = (g->hero_cursor == i);
         draw_hero_portrait(g, sx, sy, (HeroClass)i, sel);
         text_draw(g->renderer, sx - text_width(hero_name((HeroClass)i)) / 2, sy + 26,
@@ -925,19 +1032,116 @@ void render_victory(Game *g) {
 
 /* ---------- TITLE ---------- */
 void render_title(Game *g) {
-    for (int i = 0; i < 60; i++) {
-        int x = (i * 73 + (int)(g->time * 8)) % INTERNAL_W;
-        int y = (i * 37) % INTERNAL_H;
-        fill_rect(g->renderer, x, y, 1, 1, 0x404060FF);
+    /* fond degrade vertical sombre */
+    for (int y = 0; y < INTERNAL_H; y++) {
+        int v = 8 + (INTERNAL_H - y) / 24;
+        fill_rect(g->renderer, 0, y, INTERNAL_W, 1, (uint32_t)((v << 24) | (v / 2 << 16) | (v << 8) | 0xFF));
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("CRUCIBLE")*2/2, 60,
-              "CRUCIBLE", 0xFFE080FF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("DOOM x VAMPIRE x ISAAC x DIABLO")/2, 80,
-              "DOOM x VAMPIRE x ISAAC x DIABLO", 0xFFFFFFFF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("ENTREE POUR COMMENCER")/2, 130,
-              "ENTREE POUR COMMENCER", 0x80FF80FF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("O OPTIONS   H AIDE")/2, 150,
-              "O OPTIONS   H AIDE", 0xCCCCCCFF);
+    /* particules embers / cendres animees */
+    for (int i = 0; i < 100; i++) {
+        int x = (i * 73 + (int)(g->time * 14)) % INTERNAL_W;
+        int y = ((i * 37) + (int)(g->time * (i % 7 + 2) * 6)) % INTERNAL_H;
+        uint32_t col = (i & 3) ? 0x402030FF : 0xFFB060FF;
+        fill_rect(g->renderer, x, y, 1, 1, col);
+    }
+
+    /* titre chevele : ombre + coeur + glow */
+    const char *t = "ELEMENT DUNGEON";
+    int tw = text_width(t);
+    int tx = INTERNAL_W/2 - tw/2;
+    int ty = INTERNAL_H/2 - 60;
+    /* glow */
+    for (int dx = -2; dx <= 2; dx++) for (int dy = -2; dy <= 2; dy++) {
+        if (!dx && !dy) continue;
+        text_draw(g->renderer, tx + dx, ty + dy, t, 0x402010FF);
+    }
+    text_draw(g->renderer, tx, ty + 1, t, 0x000000FF);
+    text_draw(g->renderer, tx, ty, t, 0xFFD060FF);
+
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("DOOM x HADES x ISAAC x DIABLO")/2,
+              INTERNAL_H/2 - 38, "DOOM x HADES x ISAAC x DIABLO", 0xC0A080FF);
+
+    /* menu vertical */
+    const char *items[5] = { "JOUER", "LORE", "OPTIONS", "AIDE", "QUITTER" };
+    int yA = INTERNAL_H/2 + 20;
+    int rowh = 16;
+    for (int i = 0; i < 5; i++) {
+        int yi = yA + i * rowh;
+        bool hov = mouse_in_rect(g, INTERNAL_W/2 - 100, yi, 200, 12);
+        uint32_t col = hov ? 0xFFFF80FF : (i == 0 ? 0x80FFA0FF : 0xCCCCCCFF);
+        int w = text_width(items[i]);
+        text_draw(g->renderer, INTERNAL_W/2 - w/2, yi + 2, items[i], col);
+        if (hov) {
+            /* fleches */
+            text_draw(g->renderer, INTERNAL_W/2 - w/2 - 16, yi + 2, ">", col);
+            text_draw(g->renderer, INTERNAL_W/2 + w/2 + 10, yi + 2, "<", col);
+        }
+    }
+
+    text_draw(g->renderer, 8, INTERNAL_H - 14, "v1 -- C + SDL2", 0x606080FF);
+}
+
+/* ---------- LORE ---------- */
+void render_lore(Game *g) {
+    /* fond noir avec etoiles bleutees */
+    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x040208FF);
+    for (int i = 0; i < 80; i++) {
+        int x = (i * 53 + (int)(g->time * 6)) % INTERNAL_W;
+        int y = ((i * 91) ) % INTERNAL_H;
+        fill_rect(g->renderer, x, y, 1, 1, ((i % 3) ? 0x404068FF : 0x80A0E0FF));
+    }
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE PROLOGUE")/2, 18,
+              "LE PROLOGUE", 0xFFD060FF);
+
+    const char *paragraphs[] = {
+        "Il y a sept mille ans, le Cristal Originel se brisa dans le ciel.",
+        "Sept eclats tomberent dans l'abime. Chacun devint un element :",
+        "FEU, EAU, TERRE, FOUDRE, AIR, VIDE et FEE.",
+        "",
+        "Les rois batirent un Donjon pour les contenir. Sous terre, dix",
+        "etages, dix cles, dix Gardiens. Le temps fit son oeuvre :",
+        "les murs furent oublies, les eclats endormis sous la mousse.",
+        "",
+        "La porte vient de s'ouvrir. Quelque chose remonte. Les Gardiens",
+        "se reveillent. Les ennemis qui te traquent portent les couleurs",
+        "des elements -- frappe-les avec leur faiblesse.",
+        "",
+        "Toi, Heros sans nom : descend. Combine les eclats. Forge ton",
+        "arme, ta classe, ta legende. Ou meurs comme tous les autres.",
+        "",
+        "                            *      *      *",
+    };
+    int n = (int)(sizeof(paragraphs) / sizeof(paragraphs[0]));
+    int y = 50;
+    for (int i = 0; i < n; i++) {
+        int w = text_width(paragraphs[i]);
+        uint32_t col = 0xCCCCDDFF;
+        if (i == 2 || i == 9 || i == 10) col = 0xFFD0A0FF;
+        text_draw(g->renderer, INTERNAL_W/2 - w/2, y, paragraphs[i], col);
+        y += 11;
+    }
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("ENTREE / CLIC / ECHAP POUR REVENIR")/2,
+              INTERNAL_H - 18, "ENTREE / CLIC / ECHAP POUR REVENIR", 0xFFFF80FF);
+}
+
+/* ---------- VIGNETTE ---------- */
+static void draw_vignette(Game *g) {
+    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    int n = 24;
+    for (int i = 0; i < n; i++) {
+        int alpha = 110 - i * 4;
+        if (alpha < 0) alpha = 0;
+        SDL_SetRenderDrawColor(g->renderer, 0, 0, 6, (Uint8)alpha);
+        SDL_Rect t = { i, i, INTERNAL_W - i*2, 1 };
+        SDL_Rect b = { i, INTERNAL_H - 1 - i, INTERNAL_W - i*2, 1 };
+        SDL_Rect l = { i, i, 1, INTERNAL_H - i*2 };
+        SDL_Rect r = { INTERNAL_W - 1 - i, i, 1, INTERNAL_H - i*2 };
+        SDL_RenderFillRect(g->renderer, &t);
+        SDL_RenderFillRect(g->renderer, &b);
+        SDL_RenderFillRect(g->renderer, &l);
+        SDL_RenderFillRect(g->renderer, &r);
+    }
+    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
 }
 
 /* ---------- HELP ---------- */
@@ -946,7 +1150,7 @@ void render_help(Game *g) {
     text_draw(g->renderer, 8, 6, "AIDE", 0xFFE080FF);
     int y = 18;
     text_draw(g->renderer, 8, y, "WASD / FLECHES   DEPLACEMENT", 0xFFFFFFFF); y += 9;
-    text_draw(g->renderer, 8, y, "SOURIS           VISER", 0xFFFFFFFF); y += 9;
+    text_draw(g->renderer, 8, y, "SOURIS           VISER + naviguer/cliquer dans les menus", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "ESPACE           DASH", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "1 / 2 / TAB      ARME ACTIVE", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "I                INVENTAIRE", 0xFFFFFFFF); y += 9;
@@ -993,10 +1197,10 @@ void render_shop(Game *g) {
     text_drawf(g->renderer, 8, 26, 0xFFD040FF, "PIECES %d", g->player.coins);
     text_drawf(g->renderer, 8, 36, 0xC0E0FFFF, "ETAGE %d -> %d", g->floor_index, g->floor_index + 1);
 
-    int boxw = 88, boxh = 110, gap = 4;
+    int boxw = 100, boxh = 130, gap = 6;
     int total_w = 5 * boxw + 4 * gap;
     int sx = (INTERNAL_W - total_w) / 2;
-    int sy = 50;
+    int sy = 64;
     for (int i = 0; i < 5; i++) {
         ShopItem *si = &g->shop_items[i];
         bool sel = (g->shop_cursor == i);
