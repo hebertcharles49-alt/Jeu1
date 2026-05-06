@@ -79,7 +79,7 @@ void mods_load(Game *g) {
     HANDLE h = FindFirstFileA("mods\\*.cfg", &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do {
-            char path[260];
+            char path[MAX_PATH + 16];
             snprintf(path, sizeof(path), "mods\\%s", fd.cFileName);
             load_cfg_file(path);
         } while (FindNextFileA(h, &fd));
@@ -93,7 +93,7 @@ void mods_load(Game *g) {
             const char *n = de->d_name;
             size_t len = strlen(n);
             if (len > 4 && strcmp(n + len - 4, ".cfg") == 0) {
-                char path[260];
+                char path[512];
                 snprintf(path, sizeof(path), "mods/%s", n);
                 load_cfg_file(path);
             }

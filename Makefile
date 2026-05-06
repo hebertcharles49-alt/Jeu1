@@ -1,12 +1,17 @@
 # Makefile pour Crucible
-# Linux/Mac: make
-# MinGW Win: make WIN=1   (ou ./build.bat)
+# Linux/Mac : make
+# MinGW Win : make  (autodetection via OS=Windows_NT) ou make WIN=1
 
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -Wextra -std=c99
 SRCS    := src/main.c src/world.c src/combat.c src/render.c src/meta.c src/audio.c src/inventory.c src/options.c src/shop.c src/names.c src/mods.c src/gfx.c
 OBJDIR  := build
 OBJS    := $(SRCS:src/%.c=$(OBJDIR)/%.o)
+
+# Detection automatique : MSYS2/MinGW expose OS=Windows_NT.
+ifeq ($(OS),Windows_NT)
+  WIN := 1
+endif
 
 ifdef WIN
   TARGET  := element_dungeon.exe
