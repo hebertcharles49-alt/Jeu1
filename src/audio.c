@@ -278,8 +278,22 @@ void sfx_play(Game *g, SfxId id) {
     if (!g->audio_dev) return;
     if (id < 0 || id >= SFX_COUNT) return;
     if (!g_sfx_data[id]) return;
+    if (g->settings.sfx_mute) return;
+    int vol = g->settings.sfx_volume;
+    if (vol <= 0) return;
     /* limit queue to avoid runaway */
     Uint32 queued = SDL_GetQueuedAudioSize(g->audio_dev);
     if (queued > (Uint32)(SR * 4)) return;
-    SDL_QueueAudio(g->audio_dev, g_sfx_data[id], g_sfx_len[id] * sizeof(int16_t));
+    if (vol >= 4) {
+        SDL_QueueAudio(g->audio_dev, g_sfx_data[id], g_sfx_len[id] * sizeof(int16_t));
+    } else {
+        /* volume scaling : 1=25% 2=50% 3=75% */
+        int n = g_sfx_len[id];
+        int16_t *tmp = (int16_t *)malloc((size_t)n * sizeof(int16_t));
+        if (!tmp) return;
+        int num = vol, den = 4;
+        for (int i = 0; i < n; i++) tmp[i] = (int16_t)((int)g_sfx_data[id][i] * num / den);
+        SDL_QueueAudio(g->audio_dev, tmp, (Uint32)(n * sizeof(int16_t)));
+        free(tmp);
+    }
 }

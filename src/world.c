@@ -339,10 +339,14 @@ void update_player(Game *g) {
     if (p->dash_t > 0.f)  p->dash_t  -= dt;
     if (p->anim_t > 0.f)  p->anim_t  -= dt;
     bool dashing = p->dash_t > 0.f;
-    if (g->keys[SDL_SCANCODE_SPACE] && !g->keys_prev[SDL_SCANCODE_SPACE] &&
-        p->dash_cd <= 0.f && len > 0.01f) {
-        p->dash_cd = 0.7f;
-        p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
+    {
+        SDL_Scancode kdash = g->settings.keys[BIND_DASH];
+        if (kdash == SDL_SCANCODE_UNKNOWN) kdash = SDL_SCANCODE_SPACE;
+        if (g->keys[kdash] && !g->keys_prev[kdash] &&
+            p->dash_cd <= 0.f && len > 0.01f) {
+            p->dash_cd = 0.7f;
+            p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
+        }
     }
 
     float speed = p->speed * (dashing ? 3.6f : 1.f);
@@ -351,12 +355,16 @@ void update_player(Game *g) {
     if (!aabb_solid(g, p->x + dx, p->y, p->r - 1)) p->x += dx;
     if (!aabb_solid(g, p->x, p->y + dy, p->r - 1)) p->y += dy;
 
-    /* weapon select */
-    if (g->keys[SDL_SCANCODE_TAB] && !g->keys_prev[SDL_SCANCODE_TAB]) {
-        p->active_weapon = (p->active_weapon + 1) % WEAPON_SLOTS;
+    /* weapon select (bindings) */
+    {
+        SDL_Scancode kswap = g->settings.keys[BIND_WEAPON_SWAP];
+        SDL_Scancode k1    = g->settings.keys[BIND_WEAPON_1];
+        SDL_Scancode k2    = g->settings.keys[BIND_WEAPON_2];
+        if (kswap && g->keys[kswap] && !g->keys_prev[kswap])
+            p->active_weapon = (p->active_weapon + 1) % WEAPON_SLOTS;
+        if (k1 && g->keys[k1] && !g->keys_prev[k1]) p->active_weapon = 0;
+        if (k2 && g->keys[k2] && !g->keys_prev[k2]) p->active_weapon = 1;
     }
-    if (g->keys[SDL_SCANCODE_1] && !g->keys_prev[SDL_SCANCODE_1]) p->active_weapon = 0;
-    if (g->keys[SDL_SCANCODE_2] && !g->keys_prev[SDL_SCANCODE_2]) p->active_weapon = 1;
 
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
 

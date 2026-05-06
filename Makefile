@@ -4,7 +4,7 @@
 
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -Wextra -std=c99
-SRCS    := src/main.c src/world.c src/combat.c src/render.c src/meta.c src/audio.c src/inventory.c
+SRCS    := src/main.c src/world.c src/combat.c src/render.c src/meta.c src/audio.c src/inventory.c src/options.c
 OBJDIR  := build
 OBJS    := $(SRCS:src/%.c=$(OBJDIR)/%.o)
 

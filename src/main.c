@@ -14,22 +14,34 @@ Game *game_get(void) { return &g_game; }
 static void poll_input(Game *g, bool *quit) {
     SDL_Event ev;
     g->mouse_btn_prev = g->mouse_btn;
-    memcpy(g->keys_prev, g->keys, SDL_NUM_SCANCODES);
+    if (g->keys) memcpy(g->keys_prev, g->keys, SDL_NUM_SCANCODES);
     while (SDL_PollEvent(&ev)) {
         if (ev.type == SDL_QUIT) *quit = true;
-        if (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
-            switch (g->state) {
-                case GS_RUN:        g->state = GS_HUB; break;
-                case GS_HUB:        *quit = true; break;
-                case GS_TITLE:      *quit = true; break;
-                case GS_HELP:       g->state = GS_TITLE; break;
-                case GS_CHOOSE_HERO:g->state = GS_HUB; break;
-                case GS_INVENTORY:  g->state = g->state_prev; break;
-                case GS_LEVELUP:    /* pas d'echap */ break;
-                case GS_SHOP:       /* sortir = continuer */ game_next_floor(g); break;
-                case GS_DEAD:       game_to_hub(g); break;
-                case GS_VICTORY:    game_to_hub(g); break;
-                default: break;
+        if (ev.type == SDL_KEYDOWN) {
+            SDL_Scancode sc = ev.key.keysym.scancode;
+            /* capture pour rebind */
+            if (g->state == GS_OPTIONS && g->opt_waiting_rebind) {
+                g->opt_last_keydown = sc;
+                continue;     /* avale la touche */
+            }
+            if (sc == SDL_SCANCODE_ESCAPE) {
+                switch (g->state) {
+                    case GS_RUN:        g->state = GS_HUB; break;
+                    case GS_HUB:        *quit = true; break;
+                    case GS_TITLE:      *quit = true; break;
+                    case GS_HELP:       g->state = GS_TITLE; break;
+                    case GS_OPTIONS:
+                        settings_write(&g->settings);
+                        g->state = g->opt_return ? g->opt_return : GS_TITLE;
+                        break;
+                    case GS_CHOOSE_HERO:g->state = GS_HUB; break;
+                    case GS_INVENTORY:  g->state = g->state_prev; break;
+                    case GS_LEVELUP:    /* pas d'echap */ break;
+                    case GS_SHOP:       game_next_floor(g); break;
+                    case GS_DEAD:       game_to_hub(g); break;
+                    case GS_VICTORY:    game_to_hub(g); break;
+                    default: break;
+                }
             }
         }
     }
@@ -98,16 +110,26 @@ void game_init(Game *g) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         exit(1);
     }
+
+    /* charger les reglages avant la creation des textures (filtre) */
+    settings_load(&g->settings);
+
     g->window = SDL_CreateWindow("Crucible — Doomlike Hybride",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, SDL_WINDOW_SHOWN);
     if (!g->window) { fprintf(stderr, "Win: %s\n", SDL_GetError()); exit(1); }
+
+    /* essai materiel, puis vsync seul, puis software */
     g->renderer = SDL_CreateRenderer(g->window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!g->renderer)
+        g->renderer = SDL_CreateRenderer(g->window, -1, SDL_RENDERER_ACCELERATED);
+    if (!g->renderer)
+        g->renderer = SDL_CreateRenderer(g->window, -1, SDL_RENDERER_SOFTWARE);
     if (!g->renderer) { fprintf(stderr, "Ren: %s\n", SDL_GetError()); exit(1); }
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    g->target = SDL_CreateTexture(g->renderer, SDL_PIXELFORMAT_RGBA8888,
-        SDL_TEXTUREACCESS_TARGET, INTERNAL_W, INTERNAL_H);
+
+    apply_render_filter(g);
+    if (!g->target) { fprintf(stderr, "Tex: %s\n", SDL_GetError()); exit(1); }
 
     save_load(&g->meta);
     /* premiers debloques par defaut */
@@ -117,6 +139,10 @@ void game_init(Game *g) {
     g->meta.element_unlocked[EL_FIRE] = true;
 
     audio_init(g);
+
+    /* initialise la table des touches : evite memcpy depuis NULL au 1er frame */
+    g->keys = SDL_GetKeyboardState(NULL);
+    memset(g->keys_prev, 0, sizeof(g->keys_prev));
 
     g->state = GS_TITLE;
     srand((unsigned)time(NULL));
@@ -388,10 +414,26 @@ void game_run(Game *g) {
                 g->state = GS_HUB;
             }
             if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) g->state = GS_HELP;
+            if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
+                g->opt_return = GS_TITLE;
+                g->opt_section = 0;
+                g->opt_cursor = 0;
+                g->opt_waiting_rebind = false;
+                g->state = GS_OPTIONS;
+            }
         } else if (g->state == GS_HELP) {
             /* esc handled */
+        } else if (g->state == GS_OPTIONS) {
+            update_options(g);
         } else if (g->state == GS_HUB) {
             update_hub(g);
+            if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
+                g->opt_return = GS_HUB;
+                g->opt_section = 0;
+                g->opt_cursor = 0;
+                g->opt_waiting_rebind = false;
+                g->state = GS_OPTIONS;
+            }
         } else if (g->state == GS_CHOOSE_HERO) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
@@ -439,16 +481,24 @@ void game_run(Game *g) {
                 g->state = GS_LEVELUP;
                 sfx_play(g, SFX_LEVELUP);
             }
-            /* I = inventaire */
-            if (g->keys[SDL_SCANCODE_I] && !g->keys_prev[SDL_SCANCODE_I]) {
-                g->state_prev = GS_RUN;
-                g->state = GS_INVENTORY;
+            /* inventaire (binding) */
+            {
+                SDL_Scancode kinv = g->settings.keys[BIND_INVENTORY];
+                if (kinv != SDL_SCANCODE_UNKNOWN &&
+                    g->keys[kinv] && !g->keys_prev[kinv]) {
+                    g->state_prev = GS_RUN;
+                    g->state = GS_INVENTORY;
+                }
             }
         } else if (g->state == GS_LEVELUP) {
             update_levelup(g);
-            if (g->keys[SDL_SCANCODE_I] && !g->keys_prev[SDL_SCANCODE_I]) {
-                g->state_prev = GS_LEVELUP;
-                g->state = GS_INVENTORY;
+            {
+                SDL_Scancode kinv = g->settings.keys[BIND_INVENTORY];
+                if (kinv != SDL_SCANCODE_UNKNOWN &&
+                    g->keys[kinv] && !g->keys_prev[kinv]) {
+                    g->state_prev = GS_LEVELUP;
+                    g->state = GS_INVENTORY;
+                }
             }
         } else if (g->state == GS_SHOP) {
             update_shop(g);
@@ -470,6 +520,7 @@ void game_run(Game *g) {
 
         if (g->state == GS_TITLE)            render_title(g);
         else if (g->state == GS_HELP)        render_help(g);
+        else if (g->state == GS_OPTIONS)     render_options(g);
         else if (g->state == GS_HUB)         render_hub(g);
         else if (g->state == GS_CHOOSE_HERO) render_choose_hero(g);
         else if (g->state == GS_SHOP) {

@@ -311,11 +311,31 @@ typedef struct {
     Item item;
 } ShopItem;
 
+/* ---------- Settings (rebind / son / DLSS) ---------- */
+typedef enum {
+    BIND_DASH = 0,
+    BIND_INVENTORY,
+    BIND_WEAPON_SWAP,
+    BIND_WEAPON_1,
+    BIND_WEAPON_2,
+    BIND_INTERACT,
+    BIND_COUNT
+} BindAction;
+
+typedef struct {
+    int          version;
+    SDL_Scancode keys[BIND_COUNT];
+    int          sfx_volume;        /* 0..4 */
+    int          sfx_mute;
+    int          dlss_on;           /* 0 = nearest, 1 = linear upscale */
+} Settings;
+
 /* ---------- Game state ---------- */
 typedef enum {
     GS_TITLE = 0,
     GS_HUB,
     GS_HELP,
+    GS_OPTIONS,
     GS_CHOOSE_HERO,
     GS_RUN,
     GS_LEVELUP,
@@ -386,6 +406,16 @@ typedef struct {
 
     float         boss_intro_t;
     char          boss_name[32];
+
+    /* options / settings */
+    Settings      settings;
+    int           opt_cursor;            /* row in options menu */
+    int           opt_section;           /* 0 = controls, 1 = audio, 2 = video */
+    bool          opt_waiting_rebind;
+    SDL_Scancode  opt_last_keydown;      /* captured by poll_input */
+    GameStateKind opt_return;            /* state to return to (title/hub) */
+    char          opt_msg[64];
+    float         opt_msg_t;
 } Game;
 
 /* ---------- API ---------- */
@@ -473,6 +503,16 @@ typedef enum {
 void  audio_init(Game *g);
 void  audio_shutdown(Game *g);
 void  sfx_play(Game *g, SfxId id);
+
+/* settings */
+void  settings_defaults(Settings *s);
+void  settings_load(Settings *s);
+void  settings_write(const Settings *s);
+const char *bind_action_name(BindAction a);
+const char *scancode_label(SDL_Scancode sc);
+void  render_options(Game *g);
+void  update_options(Game *g);
+void  apply_render_filter(Game *g);    /* recree g->target avec le filtre courant */
 
 /* shop */
 void  shop_generate(Game *g);

@@ -692,7 +692,96 @@ void render_hub(Game *g) {
     text_draw(g->renderer, INTERNAL_W/2 - 110, INTERNAL_H - 22,
               "R DEBUTER COURSE   H AIDE", 0xFFFF80FF);
     text_draw(g->renderer, INTERNAL_W/2 - 110, INTERNAL_H - 12,
-              "ECHAP QUITTER", 0xCCCCCCFF);
+              "O OPTIONS   ECHAP QUITTER", 0xCCCCCCFF);
+}
+
+/* ---------- OPTIONS ---------- */
+void render_options(Game *g) {
+    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x080612FF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("OPTIONS")/2, 8,
+              "OPTIONS", 0xFFE080FF);
+
+    /* tabs */
+    const char *tabs[3] = { "CONTROLES", "AUDIO", "VIDEO" };
+    int tabw = 100, tabh = 14;
+    int tx = (INTERNAL_W - tabw * 3 - 8) / 2;
+    for (int i = 0; i < 3; i++) {
+        bool sel = (g->opt_section == i);
+        fill_rect(g->renderer, tx, 22, tabw, tabh, sel ? 0x303060FF : 0x18181EFF);
+        rect_outline(g->renderer, tx, 22, tabw, tabh, sel ? 0xFFFF80FF : 0x404048FF);
+        text_draw(g->renderer, tx + (tabw - text_width(tabs[i])) / 2, 26,
+                  tabs[i], sel ? 0xFFFF80FF : 0xCCCCCCFF);
+        tx += tabw + 4;
+    }
+
+    int y = 50;
+    if (g->opt_section == 0) {
+        text_draw(g->renderer, 30, y, "ACTION", 0xCCCCCCFF);
+        text_draw(g->renderer, 280, y, "TOUCHE", 0xCCCCCCFF);
+        y += 12;
+        for (int i = 0; i < BIND_COUNT; i++) {
+            bool sel = (g->opt_cursor == i);
+            uint32_t col = sel ? 0xFFFF40FF : 0xFFFFFFFF;
+            text_drawf(g->renderer, sel ? 22 : 30, y, col, "%s%s",
+                       sel ? "> " : "  ", bind_action_name((BindAction)i));
+            const char *kn = scancode_label(g->settings.keys[i]);
+            text_draw(g->renderer, 280, y, kn, col);
+            y += 11;
+        }
+        y += 6;
+        text_draw(g->renderer, 30, y, "WASD / FLECHES sont reserves au deplacement.", 0x808080FF); y += 9;
+        text_draw(g->renderer, 30, y, "ENTREE = remapper   GAUCHE/DROITE = restaurer defaut", 0x808080FF);
+    } else if (g->opt_section == 1) {
+        const char *labels[2] = { "Couper le son (mute)", "Volume" };
+        for (int i = 0; i < 2; i++) {
+            bool sel = (g->opt_cursor == i);
+            uint32_t col = sel ? 0xFFFF40FF : 0xFFFFFFFF;
+            text_drawf(g->renderer, sel ? 22 : 30, y, col, "%s%s",
+                       sel ? "> " : "  ", labels[i]);
+            if (i == 0) {
+                text_draw(g->renderer, 280, y,
+                          g->settings.sfx_mute ? "ON" : "OFF", col);
+            } else {
+                /* volume bar */
+                int bx = 280, bw = 80;
+                fill_rect(g->renderer, bx, y, bw, 6, 0x202028FF);
+                int filled = (g->settings.sfx_volume * bw) / 4;
+                fill_rect(g->renderer, bx, y, filled, 6, sel ? 0xFFFF80FF : 0x80C0FFFF);
+                rect_outline(g->renderer, bx, y, bw, 6, 0x404048FF);
+                text_drawf(g->renderer, bx + bw + 6, y, col, "%d/4", g->settings.sfx_volume);
+            }
+            y += 11;
+        }
+        y += 6;
+        text_draw(g->renderer, 30, y, "ENTREE bascule mute.   GAUCHE/DROITE ajuste le volume.", 0x808080FF);
+    } else if (g->opt_section == 2) {
+        bool sel = (g->opt_cursor == 0);
+        uint32_t col = sel ? 0xFFFF40FF : 0xFFFFFFFF;
+        text_drawf(g->renderer, sel ? 22 : 30, y, col, "%sDLSS Generatif",
+                   sel ? "> " : "  ");
+        text_draw(g->renderer, 280, y,
+                  g->settings.dlss_on ? "ON  (lisse)" : "OFF (pixel art net)", col);
+        y += 14;
+        text_draw(g->renderer, 30, y, "Filtrage lineaire AI-like sur la sortie finale.", 0x808080FF); y += 9;
+        text_draw(g->renderer, 30, y, "Recommande OFF pour garder le pixel art bien net.", 0x808080FF); y += 9;
+        text_draw(g->renderer, 30, y, "ENTREE bascule.", 0x808080FF);
+    }
+
+    if (g->opt_waiting_rebind) {
+        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+        fill_rect(g->renderer, 0, INTERNAL_H/2 - 16, INTERNAL_W, 32, 0x000000C0);
+        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+        const char *msg = "APPUIE SUR UNE TOUCHE...   (ECHAP POUR ANNULER)";
+        text_draw(g->renderer, INTERNAL_W/2 - text_width(msg)/2,
+                  INTERNAL_H/2 - 4, msg, 0xFFFF40FF);
+    }
+
+    if (g->opt_msg_t > 0.f) {
+        text_draw(g->renderer, INTERNAL_W/2 - text_width(g->opt_msg)/2,
+                  INTERNAL_H - 32, g->opt_msg, 0xFFFF40FF);
+    }
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("Q/TAB SECTION   FLECHES NAVIGUER   ECHAP RETOUR")/2,
+              INTERNAL_H - 18, "Q/TAB SECTION   FLECHES NAVIGUER   ECHAP RETOUR", 0xCCCCCCFF);
 }
 
 /* ---------- HERO SELECT ---------- */
@@ -847,8 +936,8 @@ void render_title(Game *g) {
               "DOOM x VAMPIRE x ISAAC x DIABLO", 0xFFFFFFFF);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ENTREE POUR COMMENCER")/2, 130,
               "ENTREE POUR COMMENCER", 0x80FF80FF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("H POUR LAIDE")/2, 150,
-              "H POUR LAIDE", 0xCCCCCCFF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("O OPTIONS   H AIDE")/2, 150,
+              "O OPTIONS   H AIDE", 0xCCCCCCFF);
 }
 
 /* ---------- HELP ---------- */

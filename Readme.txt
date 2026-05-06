@@ -3,7 +3,37 @@
   Mode d'emploi pas-a-pas pour Windows
 ================================================================
 
-Tu es dev novice ? Suis ce guide a la lettre. 5 minutes, on est parti.
+Tu es dev novice ? Suis ce guide a la lettre. 5-10 minutes, on
+est parti.
+
+
+----------------------------------------------------------------
+0) RECUPERER LE CODE  (si tu n'as pas deja le dossier)
+----------------------------------------------------------------
+   Si tu as juste un lien Github, il faut "cloner" le depot.
+   Tu peux le faire de 2 facons.
+
+   --- OPTION RAPIDE : zip ---
+   Sur la page Github du projet, clique le bouton vert "Code"
+   puis "Download ZIP". Decompresse-le ou tu veux, par exemple :
+       C:\Users\Toi\Bureau\Jeu1
+   Saute a l'etape 1.
+
+   --- OPTION GIT (recommandee si tu vas re-recuperer des MAJ) ---
+   a) Installe Git :  https://git-scm.com/download/win
+      Lance l'installeur, "Next" partout, defaut OK.
+   b) Ouvre la nouvelle appli "Git Bash" depuis le menu Demarrer.
+   c) Place-toi ou tu veux poser le projet, par ex. :
+         cd /c/Users/Toi/Bureau
+   d) Clone (remplace L'URL par celle de ton depot, qui finit
+      en .git) :
+         git clone https://github.com/UTILISATEUR/REPO.git Jeu1
+      Ca cree un dossier Jeu1 avec tout le code dedans.
+   e) Pour recuperer les mises a jour plus tard :
+         cd /c/Users/Toi/Bureau/Jeu1
+         git pull
+
+   Une fois le dossier en place, passe a l'etape 1.
 
 
 ----------------------------------------------------------------
@@ -112,9 +142,13 @@ PROBLEMES COURANTS
            depuis l'explorateur.
 
    Aucune fenetre, ecran noir
-       --> ton GPU est tres ancien. Edite  src/main.c  ligne
-           "SDL_RENDERER_ACCELERATED"  --> remplace par
-           "SDL_RENDERER_SOFTWARE"  puis refais  make.
+       --> ton GPU est tres ancien. Le jeu retombe automatiquement
+           sur le rendu logiciel ; sinon coupe DLSS dans Options
+           ou re-essaie apres redemarrage.
+
+   "git: command not found" en suivant l'etape 0 (option git)
+       --> Git n'est pas installe. Soit installe-le, soit prends
+           l'option ZIP (etape 0 plus haut).
 
 
 ================================================================
@@ -126,12 +160,14 @@ CONCEPT
    etage, puis portail-boutique. ARPG diablolike avec inventaire,
    raretes, fusion, sensibilites elementaires.
 
-CONTROLES
-   ZQSD / WASD / FLECHES   deplacement
+CONTROLES (defauts, modifiables dans Options)
+   ZQSD / WASD / FLECHES   deplacement (toujours actif, non-rebind)
    SOURIS                  visee
    ESPACE                  dash (i-frames)
    1 / 2 / TAB             arme active (recoit les elements)
    I                       inventaire (pause)
+   O                       ouvrir Options (depuis menu titre / hub)
+   H                       aide en jeu
    ECHAP                   abandonner / fermer / quitter
 
 INVENTAIRE
@@ -140,6 +176,21 @@ INVENTAIRE
    M                       marquer 1 item (pour fusion)
    F                       FUSIONNER 3 items identiques (-> rarete +1, +20% stats)
    X                       effacer marques
+
+OPTIONS  ( touche O au menu titre ou au sanctuaire )
+   Section CONTROLES : remappe les touches non-deplacement
+       (Dash, Inventaire, Changer arme, Arme 1, Arme 2, Interagir)
+       --> ENTREE pour choisir une touche, GAUCHE/DROITE pour
+           restaurer le defaut. WASD/fleches sont reserves au
+           deplacement et NON remappables.
+   Section AUDIO : mute on/off, volume 0..4 (les sons sont
+       generes par code via SDL_QueueAudio, pas de fichier audio).
+   Section VIDEO : DLSS GENERATIF on/off.
+       --> OFF : pixel art en nearest-neighbor, ultra-net.
+       --> ON  : filtrage lineaire SDL sur la texture finale,
+                 plus lisse (style upscale AI). A tester selon
+                 ton ecran et ton gout.
+   Reglages persistants dans crucible_settings.dat.
 
 LES 5 HEROS
    Guerrier   +25 PV, +15% degats melee
@@ -208,12 +259,16 @@ PROGRESSION META
    src/world.c      donjon, ennemis, joueur, salles
    src/combat.c     armes, elements, combos, projectiles, fees
    src/inventory.c  inventaire, equipement, raretes, fusion
+   src/options.c    menu Options + persistance settings
    src/render.c     rendu pixel art, font, UI
    src/audio.c      sons procedural via SDL_QueueAudio
    src/meta.c       sauvegarde permanente (crucible_save.dat)
    Makefile         build Linux/MinGW
    build.bat        build Windows (MinGW)
    build_msvc.bat   build Windows (MSVC)
+
+   crucible_save.dat       progression permanente
+   crucible_settings.dat   reglages (touches, son, DLSS)
 
 Aucun asset externe. Sprites, font 5x7, sons : tout est genere
 par code.

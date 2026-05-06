@@ -13,7 +13,7 @@ setlocal
 if not exist build mkdir build
 
 set CFLAGS=-O2 -Wall -Wextra -std=c99
-set SOURCES=src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c
+set SOURCES=src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c
 
 set SDL_CFLAGS=
 set SDL_LIBS=
