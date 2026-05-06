@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* type opaque du contexte graphique GL3.3 (defini dans gfx.h) */
+typedef struct GfxCtx GfxCtx;
+
 #define INTERNAL_W 640
 #define INTERNAL_H 360
 #define WINDOW_SCALE 2
@@ -395,8 +398,7 @@ typedef struct {
     MetaSave      meta;
 
     SDL_Window   *window;
-    SDL_Renderer *renderer;
-    SDL_Texture  *target;
+    GfxCtx       *renderer;     /* contexte OpenGL (gardons le nom pour compat) */
     const Uint8  *keys;
     int           mouse_x, mouse_y;
     int           mouse_btn;
@@ -491,6 +493,7 @@ void  update_dmgnums(Game *g);
 void  update_room_logic(Game *g);
 
 void  render_world(Game *g);
+void  render_world_overlay_ui(Game *g);   /* HP bars/noms/dmgnums en UI 2D */
 void  render_hud(Game *g);
 void  render_hub(Game *g);
 void  render_levelup(Game *g);
@@ -523,8 +526,8 @@ int         weapon_combo_id(const Weapon *w);
 void        save_load(MetaSave *m);
 void        save_write(const MetaSave *m);
 
-void        text_draw(SDL_Renderer *r, int x, int y, const char *s, uint32_t col);
-void        text_drawf(SDL_Renderer *r, int x, int y, uint32_t col, const char *fmt, ...);
+void        text_draw(GfxCtx *r, int x, int y, const char *s, uint32_t col);
+void        text_drawf(GfxCtx *r, int x, int y, uint32_t col, const char *fmt, ...);
 int         text_width(const char *s);
 
 void        world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float ky);

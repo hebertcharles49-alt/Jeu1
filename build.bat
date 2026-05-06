@@ -13,7 +13,7 @@ setlocal
 if not exist build mkdir build
 
 set CFLAGS=-O2 -Wall -Wextra -std=c99
-set SOURCES=src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c src\shop.c src\names.c src\mods.c
+set SOURCES=src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c src\shop.c src\names.c src\mods.c src\gfx.c
 
 set SDL_CFLAGS=
 set SDL_LIBS=
@@ -35,7 +35,7 @@ if %errorlevel%==0 (
 )
 
 echo Compilation...
-gcc %CFLAGS% %SDL_CFLAGS% %SOURCES% %SDL_LIBS% -lm -mwindows -o element_dungeon.exe
+gcc %CFLAGS% %SDL_CFLAGS% %SOURCES% %SDL_LIBS% -lopengl32 -lm -mwindows -o element_dungeon.exe
 if errorlevel 1 (
     echo Echec de compilation.
     exit /b 1

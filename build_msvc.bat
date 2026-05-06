@@ -18,9 +18,9 @@ if not defined SDL2_DIR (
 if not exist build mkdir build
 
 set INCS=/I "%SDL2_DIR%\include"
-set LIBS=/LIBPATH:"%SDL2_DIR%\lib\x64" SDL2.lib SDL2main.lib shell32.lib
+set LIBS=/LIBPATH:"%SDL2_DIR%\lib\x64" SDL2.lib SDL2main.lib shell32.lib opengl32.lib
 
-cl /O2 /W3 /nologo %INCS% src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c src\shop.c src\names.c src\mods.c ^
+cl /O2 /W3 /nologo %INCS% src\main.c src\world.c src\combat.c src\render.c src\meta.c src\audio.c src\inventory.c src\options.c src\shop.c src\names.c src\mods.c src\gfx.c ^
    /Fobuild\ /Feelement_dungeon.exe /link %LIBS% /SUBSYSTEM:WINDOWS
 
 if errorlevel 1 (

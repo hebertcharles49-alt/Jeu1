@@ -71,15 +71,9 @@ const char *scancode_label(SDL_Scancode sc) {
 }
 
 void apply_render_filter(Game *g) {
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, g->settings.dlss_on ? "1" : "0");
-    if (g->target) SDL_DestroyTexture(g->target);
-    g->target = SDL_CreateTexture(g->renderer, SDL_PIXELFORMAT_RGBA8888,
-        SDL_TEXTUREACCESS_TARGET, INTERNAL_W, INTERNAL_H);
-    if (g->target) {
-        /* permet a la SDL de filtrer lors du blit final */
-        SDL_SetTextureScaleMode(g->target, g->settings.dlss_on ?
-            SDL_ScaleModeLinear : SDL_ScaleModeNearest);
-    }
+    /* DLSS toggle : la config est lue par gfx_frame_end pour piloter le
+       filtrage du blit FBO -> backbuffer. Rien a creer ici (FBO unique). */
+    (void)g;
 }
 
 /* ---------- update ---------- */

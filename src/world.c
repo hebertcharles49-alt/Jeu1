@@ -2,6 +2,7 @@
  * world.c - donjon, joueur, ennemis, pickups, boss, room logic
  */
 #include "game.h"
+#include "gfx.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -345,8 +346,21 @@ void update_player(Game *g) {
     else if (ix < -0.5f) p->facing_dir = 2;
     else if (iy < -0.5f) p->facing_dir = 3;
 
-    p->aim_x = g->mouse_x + g->camera_x;
-    p->aim_y = g->mouse_y + g->camera_y;
+    /* aim souris : ray-cast vers plan y=0 via la matrice camera precedente.
+       Premier frame : matrice nulle -> aim reste a 0,0 ; OK */
+    if (g->renderer) {
+        v3 ro, rd;
+        gfx_unproject(g->mouse_x, g->mouse_y, INTERNAL_W, INTERNAL_H,
+                      g->renderer->view, g->renderer->proj, &ro, &rd);
+        if (fabsf(rd.y) > 1e-4f) {
+            float t = -ro.y / rd.y;
+            if (t > 0.f && t < 200.f) {
+                v3 hit = v3_add(ro, v3_scl(rd, t));
+                p->aim_x = hit.x * (float)TILE;
+                p->aim_y = hit.z * (float)TILE;
+            }
+        }
+    }
 
     if (p->dash_cd > 0.f) p->dash_cd -= dt;
     if (p->dash_t > 0.f)  p->dash_t  -= dt;

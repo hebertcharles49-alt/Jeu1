@@ -164,10 +164,15 @@ LORE
    Gardiens, dix eclats. Descend.
 
 CONCEPT
-   Top-down pixel art sombre, ambiance Hades / Isaac / Diablo 2.
-   Donjon procedural en 10 etages, un BOSS par etage, puis
-   portail-boutique. ARPG diablolike : inventaire, raretes,
-   fusion, sensibilites elementaires.
+   Donjon 3D voxel a la Minecraft (rendu OpenGL 3.3 + shaders),
+   ambiance Hades / Isaac / Diablo 2. Donjon procedural en 10
+   etages, un BOSS par etage, puis portail-boutique. ARPG
+   diablolike : inventaire, raretes, fusion, sensibilites
+   elementaires.
+
+PRE-REQUIS GRAPHIQUES
+   Le jeu utilise OpenGL 3.3 core. Quasi tous les GPUs depuis
+   2010 sont compatibles. Pilotes a jour conseilles.
 
 CONTROLES (defauts, modifiables dans Options)
    ZQSD / WASD / FLECHES   deplacement (toujours actif)

@@ -1,7 +1,16 @@
 /*
- * render.c - rendu pixel art procedural + UI + bitmap font
+ * render.c - UI 2D + rendu 3D voxel
+ *
+ * UI : reutilise les helpers (fill_rect, text_draw, ...) qui dispatchent
+ * vers le batcher GL (gfx.c). Tous les ecrans (titre, hub, options, shop,
+ * inventaire) sont en passe ortho.
+ *
+ * Monde : render_world genere un mesh voxel a partir du donjon (heightmap
+ * murs / sol) et dessine joueur, ennemis, projectiles, particules en
+ * cubes 3D ou billboards via gfx_box_draw / gfx_billboard_draw.
  */
 #include "game.h"
+#include "gfx.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -77,8 +86,8 @@ static const Glyph *find_glyph(char c) {
     return &FONT[0];
 }
 
-void text_draw(SDL_Renderer *r, int x, int y, const char *s, uint32_t col) {
-    SDL_SetRenderDrawColor(r, (col>>24)&0xFF, (col>>16)&0xFF, (col>>8)&0xFF, col&0xFF);
+void text_draw(GfxCtx *r, int x, int y, const char *s, uint32_t col) {
+    gfx_set_color(r, col);
     int cx = x;
     for (const char *p = s; *p; p++) {
         if (*p == '\n') { cx = x; y += 8; continue; }
@@ -87,8 +96,7 @@ void text_draw(SDL_Renderer *r, int x, int y, const char *s, uint32_t col) {
             uint8_t bits = gph->row[row];
             for (int b = 0; b < 5; b++) {
                 if (bits & (1 << b)) {
-                    SDL_Rect rr = { cx + b, y + row, 1, 1 };
-                    SDL_RenderFillRect(r, &rr);
+                    gfx_fill_rect(r, cx + b, y + row, 1, 1);
                 }
             }
         }
@@ -96,7 +104,7 @@ void text_draw(SDL_Renderer *r, int x, int y, const char *s, uint32_t col) {
     }
 }
 
-void text_drawf(SDL_Renderer *r, int x, int y, uint32_t col, const char *fmt, ...) {
+void text_drawf(GfxCtx *r, int x, int y, uint32_t col, const char *fmt, ...) {
     char buf[256];
     va_list ap; va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -108,56 +116,423 @@ int text_width(const char *s) { return (int)strlen(s) * 6; }
 
 static void draw_vignette(Game *g);   /* defini plus bas */
 
-/* ---------- HELPERS ---------- */
-static void set_color_u32(SDL_Renderer *r, uint32_t c) {
-    SDL_SetRenderDrawColor(r, (c>>24)&0xFF, (c>>16)&0xFF, (c>>8)&0xFF, c&0xFF);
+/* ---------- HELPERS UI 2D ----------
+ * Dispatch vers le batcher GL. La signature reste GfxCtx* pour que
+ * tous les sites d'appel (g->renderer) continuent a compiler. */
+#if defined(__GNUC__) || defined(__clang__)
+#define MAYBE_UNUSED __attribute__((unused))
+#else
+#define MAYBE_UNUSED
+#endif
+
+MAYBE_UNUSED static void set_color_u32(GfxCtx *r, uint32_t c) {
+    gfx_set_color(r, c);
 }
 
-static void fill_rect(SDL_Renderer *r, int x, int y, int w, int h, uint32_t c) {
-    set_color_u32(r, c);
-    SDL_Rect rr = { x, y, w, h };
-    SDL_RenderFillRect(r, &rr);
+static void fill_rect(GfxCtx *r, int x, int y, int w, int h, uint32_t c) {
+    gfx_set_color(r, c);
+    gfx_fill_rect(r, x, y, w, h);
 }
 
-static void draw_disk(SDL_Renderer *r, int cx, int cy, int radius, uint32_t c) {
-    set_color_u32(r, c);
+MAYBE_UNUSED static void draw_disk(GfxCtx *r, int cx, int cy, int radius, uint32_t c) {
+    gfx_set_color(r, c);
     for (int dy = -radius; dy <= radius; dy++) {
         int dx = (int)sqrtf((float)(radius*radius - dy*dy));
-        SDL_Rect rr = { cx - dx, cy + dy, dx*2 + 1, 1 };
-        SDL_RenderFillRect(r, &rr);
+        gfx_fill_rect(r, cx - dx, cy + dy, dx*2 + 1, 1);
     }
 }
 
-static void draw_ring(SDL_Renderer *r, int cx, int cy, int radius, uint32_t c) {
-    set_color_u32(r, c);
+MAYBE_UNUSED static void draw_ring(GfxCtx *r, int cx, int cy, int radius, uint32_t c) {
+    gfx_set_color(r, c);
     int n = 48;
     for (int i = 0; i < n; i++) {
         float a = (i / (float)n) * 6.2831f;
         int x = cx + (int)(cosf(a) * radius);
         int y = cy + (int)(sinf(a) * radius);
-        SDL_Rect rr = { x, y, 1, 1 };
-        SDL_RenderFillRect(r, &rr);
+        gfx_fill_rect(r, x, y, 1, 1);
     }
 }
 
-static void rect_outline(SDL_Renderer *r, int x, int y, int w, int h, uint32_t c) {
+static void rect_outline(GfxCtx *r, int x, int y, int w, int h, uint32_t c) {
     fill_rect(r, x, y, w, 1, c);
     fill_rect(r, x, y+h-1, w, 1, c);
     fill_rect(r, x, y, 1, h, c);
     fill_rect(r, x+w-1, y, 1, h, c);
 }
 
-/* ---------- SPRITES ---------- */
+/* ============================================================
+ *  RENDU 3D VOXEL
+ * ============================================================ */
+
+/* projette un point monde vers ecran (FBO interne) */
+static bool world_to_screen(GfxCtx *gc, v3 world, int *out_sx, int *out_sy) {
+    /* multiplie par view puis proj */
+    float v[4] = { world.x, world.y, world.z, 1.f };
+    float vv[4];
+    for (int i = 0; i < 4; i++) {
+        vv[i] = gc->view.m[i + 0] * v[0] + gc->view.m[i + 4] * v[1] +
+                gc->view.m[i + 8] * v[2] + gc->view.m[i + 12]* v[3];
+    }
+    float p[4];
+    for (int i = 0; i < 4; i++) {
+        p[i] = gc->proj.m[i + 0] * vv[0] + gc->proj.m[i + 4] * vv[1] +
+               gc->proj.m[i + 8] * vv[2] + gc->proj.m[i + 12]* vv[3];
+    }
+    if (p[3] <= 0.001f) return false;
+    float nx = p[0] / p[3];
+    float ny = p[1] / p[3];
+    *out_sx = (int)((nx * 0.5f + 0.5f) * INTERNAL_W);
+    *out_sy = (int)((1.f - (ny * 0.5f + 0.5f)) * INTERNAL_H);
+    return true;
+}
+
+/* ----------------------------------------------------------------
+ *  generation du mesh voxel a partir du donjon (heightmap)
+ * ---------------------------------------------------------------- */
+
+#define WALL_H 2.0f          /* hauteur des murs en blocks */
+#define MAX_VERTS_PER_FRAME (1024 * 1024)   /* 1M verts max */
+
+static float *s_mesh_buf = NULL;
+static int    s_mesh_cap = 0;
+static int    s_mesh_count = 0;
+
+static void mesh_reserve(int n_verts_min) {
+    if (n_verts_min <= s_mesh_cap) return;
+    int new_cap = s_mesh_cap ? s_mesh_cap * 2 : 16384;
+    while (new_cap < n_verts_min) new_cap *= 2;
+    s_mesh_buf = (float *)realloc(s_mesh_buf, (size_t)new_cap * 9 * sizeof(float));
+    s_mesh_cap = new_cap;
+}
+
+static void mesh_push_vert(float x, float y, float z,
+                           float nx, float ny, float nz,
+                           float r, float g, float b) {
+    mesh_reserve(s_mesh_count + 1);
+    float *p = &s_mesh_buf[s_mesh_count * 9];
+    p[0]=x; p[1]=y; p[2]=z;
+    p[3]=nx; p[4]=ny; p[5]=nz;
+    p[6]=r; p[7]=g; p[8]=b;
+    s_mesh_count++;
+}
+
+/* emet un quad face avec 2 triangles, normale et couleur uniforme */
+static void mesh_push_quad(v3 a, v3 b, v3 c, v3 d, v3 n, float r, float g, float bl) {
+    mesh_push_vert(a.x,a.y,a.z, n.x,n.y,n.z, r,g,bl);
+    mesh_push_vert(b.x,b.y,b.z, n.x,n.y,n.z, r,g,bl);
+    mesh_push_vert(c.x,c.y,c.z, n.x,n.y,n.z, r,g,bl);
+    mesh_push_vert(a.x,a.y,a.z, n.x,n.y,n.z, r,g,bl);
+    mesh_push_vert(c.x,c.y,c.z, n.x,n.y,n.z, r,g,bl);
+    mesh_push_vert(d.x,d.y,d.z, n.x,n.y,n.z, r,g,bl);
+}
+
+/* couleurs par tile pour la face top */
+static void tile_color_top(TileKind t, float *r, float *g, float *b) {
+    switch (t) {
+        case T_FLOOR:       *r=0.10f; *g=0.07f; *b=0.13f; break;
+        case T_BLOOD:       *r=0.30f; *g=0.07f; *b=0.10f; break;
+        case T_BONES:       *r=0.65f; *g=0.62f; *b=0.55f; break;
+        case T_RUNE:        *r=0.55f; *g=0.30f; *b=0.85f; break;
+        case T_TORCH:       *r=0.20f; *g=0.13f; *b=0.16f; break;
+        case T_EXIT:        *r=0.30f; *g=0.50f; *b=0.95f; break;
+        case T_HAZARD_LAVA: *r=0.95f; *g=0.40f; *b=0.10f; break;
+        case T_HAZARD_WATER:*r=0.20f; *g=0.40f; *b=0.85f; break;
+        case T_DOOR:        *r=0.40f; *g=0.20f; *b=0.10f; break;
+        default:            *r=0.10f; *g=0.07f; *b=0.13f; break;
+    }
+}
+/* couleurs murs (faces verticales) */
+static void wall_color_side(float *r, float *g, float *b) {
+    *r = 0.13f; *g = 0.10f; *b = 0.18f;
+}
+static void wall_color_top(float *r, float *g, float *b) {
+    *r = 0.18f; *g = 0.14f; *b = 0.24f;
+}
+
+MAYBE_UNUSED static bool tile_is_floor(TileKind t) {
+    return t != T_VOID && t != T_WALL;
+}
+
+static void emit_wall_column(float x, float z) {
+    float x0 = x, x1 = x + 1.f;
+    float z0 = z, z1 = z + 1.f;
+    float y0 = 0.f, y1 = WALL_H;
+    float r, g, b; wall_color_side(&r, &g, &b);
+    /* +X face */
+    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
+                   v3_make(1,0,0), r,g,b);
+    /* -X face */
+    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x0,y1,z1), v3_make(x0,y1,z0), v3_make(x0,y0,z0),
+                   v3_make(-1,0,0), r,g,b);
+    /* +Z face */
+    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x1,y0,z1), v3_make(x1,y1,z1), v3_make(x0,y1,z1),
+                   v3_make(0,0,1), r*0.9f,g*0.9f,b*0.9f);
+    /* -Z face */
+    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x0,y0,z0), v3_make(x0,y1,z0), v3_make(x1,y1,z0),
+                   v3_make(0,0,-1), r*1.1f,g*1.1f,b*1.1f);
+    /* top (lit) */
+    float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
+    mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
+                   v3_make(0,1,0), tr,tg,tb);
+}
+
+static void emit_floor_top(float x, float z, TileKind t) {
+    float x0 = x, x1 = x + 1.f;
+    float z0 = z, z1 = z + 1.f;
+    float y = 0.f;
+    float r, g, b; tile_color_top(t, &r, &g, &b);
+    mesh_push_quad(v3_make(x0,y,z0), v3_make(x0,y,z1), v3_make(x1,y,z1), v3_make(x1,y,z0),
+                   v3_make(0,1,0), r,g,b);
+}
+
+static void build_dungeon_mesh(Game *g) {
+    s_mesh_count = 0;
+    Dungeon *d = &g->dungeon;
+    for (int y = 0; y < MAP_H; y++) {
+        for (int x = 0; x < MAP_W; x++) {
+            TileKind t = d->tiles[y][x];
+            if (t == T_VOID) continue;
+            if (t == T_WALL) {
+                emit_wall_column((float)x, (float)y);
+            } else {
+                emit_floor_top((float)x, (float)y, t);
+            }
+        }
+    }
+    gfx_terrain_upload(g->renderer, s_mesh_buf, s_mesh_count);
+}
+
+/* ----------------------------------------------------------------
+ *  rendu d'entites (cubes-stack a la Minecraft)
+ * ---------------------------------------------------------------- */
+
+static void hero_color(HeroClass h, float *r, float *g, float *b,
+                       float *r2, float *g2, float *b2) {
+    /* corps + casque/cape */
+    *r=0.42f; *g=0.29f; *b=0.16f; *r2=0.19f; *g2=0.19f; *b2=0.25f;
+    switch (h) {
+        case HERO_GUERRIER:  *r=0.44f;*g=0.44f;*b=0.50f; *r2=0.50f;*g2=0.13f;*b2=0.13f; break;
+        case HERO_VOLEUR:    *r=0.13f;*g=0.13f;*b=0.16f; *r2=0.19f;*g2=0.31f;*b2=0.19f; break;
+        case HERO_MAGE:      *r=0.38f;*g=0.25f;*b=0.63f; *r2=0.25f;*g2=0.13f;*b2=0.44f; break;
+        case HERO_BERSERKER: *r=0.50f;*g=0.19f;*b=0.13f; *r2=0.13f;*g2=0.13f;*b2=0.13f; break;
+        case HERO_PALADIN:   *r=0.75f;*g=0.75f;*b=0.81f; *r2=1.00f;*g2=0.81f;*b2=0.25f; break;
+        case HERO_DRUIDE:    *r=0.31f;*g=0.50f;*b=0.13f; *r2=0.50f;*g2=0.32f;*b2=0.13f; break;
+        case HERO_ASSASSIN:  *r=0.13f;*g=0.07f;*b=0.16f; *r2=0.07f;*g2=0.07f;*b2=0.13f; break;
+        case HERO_RANGER:    *r=0.50f;*g=0.38f;*b=0.19f; *r2=0.31f;*g2=0.38f;*b2=0.13f; break;
+        case HERO_TEMPLIER:  *r=0.50f;*g=0.50f;*b=0.55f; *r2=0.75f;*g2=0.75f;*b2=0.81f; break;
+        case HERO_NECROMANT: *r=0.19f;*g=0.19f;*b=0.38f; *r2=0.13f;*g2=0.13f;*b2=0.25f; break;
+        default: break;
+    }
+}
+
+static void enemy_color(Enemy *e, float *r, float *g, float *b) {
+    switch (e->kind) {
+        case EK_ZOMBIE: *r=0.31f;*g=0.50f;*b=0.25f; break;
+        case EK_BANDIT: *r=0.50f;*g=0.38f;*b=0.25f; break;
+        case EK_DEMON:  *r=0.63f;*g=0.13f;*b=0.25f; break;
+        case EK_SLIME:  *r=0.25f;*g=0.63f;*b=0.63f; break;
+        case EK_BOSS:   *r=1.00f;*g=0.13f;*b=0.50f; break;
+        default:        *r=0.5f;*g=0.5f;*b=0.5f; break;
+    }
+    if (e->hit_flash > 0.f) { *r = 1.f; *g = 1.f; *b = 1.f; }
+}
+
+static v3 player_world_pos(Player *p) {
+    return v3_make(p->x / TILE, 0.f, p->y / TILE);
+}
+
+static void draw_player_3d(Game *g) {
+    Player *p = &g->player;
+    bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
+    if (blink) return;
+    v3 pos = player_world_pos(p);
+    float bob = (p->vx*p->vx + p->vy*p->vy > 0.1f)
+              ? sinf(g->time * 12.f) * 0.04f : 0.f;
+    float br, bg, bb, hr, hg, hb;
+    hero_color(p->hero, &br, &bg, &bb, &hr, &hg, &hb);
+
+    /* corps */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.5f, 0.55f + bob, pos.z + 0.5f),
+                 v3_make(0.55f, 0.55f, 0.55f),
+                 br, bg, bb);
+    /* tete */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.5f, 0.95f + bob, pos.z + 0.5f),
+                 v3_make(0.40f, 0.40f, 0.40f),
+                 0.91f, 0.75f, 0.54f);
+    /* casque (cape couleur) */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.5f, 1.18f + bob, pos.z + 0.5f),
+                 v3_make(0.46f, 0.18f, 0.46f),
+                 hr, hg, hb);
+    /* jambes : 2 petits cubes */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.32f, 0.18f + bob*0.5f, pos.z + 0.5f),
+                 v3_make(0.18f, 0.36f, 0.20f),
+                 hr*0.7f, hg*0.7f, hb*0.7f);
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + 0.68f, 0.18f + bob*0.5f, pos.z + 0.5f),
+                 v3_make(0.18f, 0.36f, 0.20f),
+                 hr*0.7f, hg*0.7f, hb*0.7f);
+
+    /* equipement equipe : casque rarete */
+    if (p->equipped[SLOT_HELM].occupied) {
+        uint32_t c = rarity_color(p->equipped[SLOT_HELM].rarity);
+        gfx_box_draw(g->renderer,
+            v3_make(pos.x + 0.5f, 1.30f + bob, pos.z + 0.5f),
+            v3_make(0.50f, 0.20f, 0.50f),
+            ((c>>24)&0xFF)/255.f, ((c>>16)&0xFF)/255.f, ((c>>8)&0xFF)/255.f);
+    }
+    if (p->equipped[SLOT_CHEST].occupied) {
+        uint32_t c = rarity_color(p->equipped[SLOT_CHEST].rarity);
+        gfx_box_draw(g->renderer,
+            v3_make(pos.x + 0.5f, 0.70f + bob, pos.z + 0.5f),
+            v3_make(0.62f, 0.30f, 0.62f),
+            ((c>>24)&0xFF)/255.f, ((c>>16)&0xFF)/255.f, ((c>>8)&0xFF)/255.f);
+    }
+    /* arme tenue : petit cube blanc cote droit */
+    {
+        Weapon *w = &p->weapons[p->active_weapon];
+        if (w->kind != W_FISTS) {
+            float wr = 0.9f, wg = 0.9f, wb = 0.95f;
+            switch (w->kind) {
+                case W_SWORD:  wr=0.9f; wg=0.9f; wb=0.95f; break;
+                case W_AXE:    wr=0.6f; wg=0.6f; wb=0.65f; break;
+                case W_BOW:    wr=0.5f; wg=0.3f; wb=0.15f; break;
+                case W_WAND:   wr=0.6f; wg=0.3f; wb=0.95f; break;
+                case W_SHIELD: wr=0.7f; wg=0.6f; wb=0.3f; break;
+                default: break;
+            }
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x + 0.85f, 0.55f + bob, pos.z + 0.5f),
+                v3_make(0.10f, 0.50f, 0.10f),
+                wr, wg, wb);
+        }
+    }
+}
+
+static void draw_enemy_3d(Game *g, Enemy *e) {
+    float r, gg, b; enemy_color(e, &r, &gg, &b);
+    v3 pos = v3_make(e->x / TILE, 0.f, e->y / TILE);
+    float h = 1.0f, w = 0.7f;
+    if (e->is_boss) { h = 1.6f; w = 1.1f; }
+    if (e->kind == EK_SLIME) { h = 0.5f; w = 0.65f; }
+
+    /* corps */
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x, h * 0.5f, pos.z),
+                 v3_make(w, h, w), r, gg, b);
+    /* tete (sauf slime / boss) */
+    if (e->kind != EK_SLIME && !e->is_boss) {
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, h + 0.2f, pos.z),
+                     v3_make(w * 0.7f, 0.4f, w * 0.7f), r * 1.2f, gg * 1.2f, b * 1.2f);
+    }
+    if (e->kind == EK_DEMON) {
+        /* cornes */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.18f, h + 0.5f, pos.z),
+                     v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.18f, h + 0.5f, pos.z),
+                     v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
+    }
+    if (e->is_boss) {
+        /* couronne */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, h + 0.25f, pos.z),
+                     v3_make(w * 1.1f, 0.25f, w * 1.1f), 1.0f, 0.85f, 0.25f);
+    }
+    /* aura elite */
+    if (e->is_elite && e->element != EL_NONE) {
+        uint32_t c = element_color(e->element);
+        float er = ((c>>24)&0xFF)/255.f, eg = ((c>>16)&0xFF)/255.f, eb = ((c>>8)&0xFF)/255.f;
+        float pulse = 0.05f + 0.04f * sinf(g->time * 5.f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, h * 0.5f, pos.z),
+                     v3_make(w + pulse * 4.f, h * 0.05f, w + pulse * 4.f), er, eg, eb);
+    }
+}
+
+static void draw_pickup_3d(Game *g, Pickup *pk) {
+    v3 pos = v3_make(pk->x / TILE, 0.4f + sinf(pk->hover_t) * 0.05f, pk->y / TILE);
+    float r=0.7f, gg=0.7f, b=0.7f, sz=0.25f;
+    switch (pk->kind) {
+        case PU_XP:      r=0.25f; gg=0.75f; b=1.0f;   sz=0.20f; break;
+        case PU_HEART:   r=1.0f;  gg=0.25f; b=0.38f;  sz=0.25f; break;
+        case PU_SOUL:    r=0.50f; gg=0.88f; b=0.50f;  sz=0.25f; break;
+        case PU_COIN:    r=1.0f;  gg=0.82f; b=0.25f;  sz=0.22f; break;
+        case PU_ELEMENT: {
+            uint32_t c = element_color((Element)pk->value);
+            r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
+            sz=0.30f; break;
+        }
+        case PU_WEAPON:  r=0.88f; gg=0.88f; b=1.0f;   sz=0.30f; break;
+        case PU_CHEST:   r=0.50f; gg=0.31f; b=0.19f;  sz=0.45f; break;
+        case PU_PORTAL: {
+            float a = g->time * 4.f;
+            for (int i = 0; i < 6; i++) {
+                float ang = a + i * 1.05f;
+                gfx_box_draw(g->renderer,
+                    v3_make(pos.x + cosf(ang)*0.4f, pos.y + sinf(ang*0.5f)*0.2f + 0.4f,
+                            pos.z + sinf(ang)*0.4f),
+                    v3_make(0.10f, 0.10f, 0.10f), 0.5f, 0.88f, 1.0f);
+            }
+            gfx_box_draw(g->renderer, pos, v3_make(0.5f, 0.05f, 0.5f), 0.25f, 0.44f, 0.75f);
+            return;
+        }
+        case PU_ITEM: {
+            uint32_t c = rarity_color(pk->item.rarity);
+            r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
+            sz=0.30f; break;
+        }
+    }
+    gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
+}
+
+static void draw_projectile_3d(Game *g, Projectile *pr) {
+    v3 pos = v3_make(pr->x / TILE, 0.5f, pr->y / TILE);
+    uint32_t c = element_color(pr->primary);
+    if (pr->owner == 1 && pr->primary == EL_NONE) c = 0xFF80C0FF;
+    float r = ((c>>24)&0xFF)/255.f, gg = ((c>>16)&0xFF)/255.f, b = ((c>>8)&0xFF)/255.f;
+    float sz = (pr->aoe > 0.f) ? 0.30f : 0.18f;
+    gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
+}
+
+static void draw_fairy_3d(Game *g, Fairy *f) {
+    v3 pos = v3_make(f->x / TILE, 0.7f, f->y / TILE);
+    uint32_t c = element_color(f->element);
+    float r = ((c>>24)&0xFF)/255.f, gg = ((c>>16)&0xFF)/255.f, b = ((c>>8)&0xFF)/255.f;
+    gfx_box_draw(g->renderer, pos, v3_make(0.16f, 0.16f, 0.16f), r, gg, b);
+}
+
+static void draw_particles_3d(Game *g) {
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        Particle *p = &g->particles[i];
+        if (!p->alive) continue;
+        uint32_t c = p->color;
+        float r = ((c>>24)&0xFF)/255.f, gg = ((c>>16)&0xFF)/255.f, b = ((c>>8)&0xFF)/255.f;
+        v3 pos = v3_make(p->x / TILE, 0.5f, p->y / TILE);
+        float s = (p->size + 1.f) / TILE * 1.5f;
+        if (s < 0.05f) s = 0.05f;
+        gfx_box_draw(g->renderer, pos, v3_make(s, s, s), r, gg, b);
+    }
+}
+
+
+#if 0
+/* ---------- SPRITES (ANCIEN 2D - desactive en 3D) ---------- */
 static void draw_player(Game *g, int sx, int sy) {
     Player *p = &g->player;
     bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
     if (blink) return;
 
     /* ombre douce ovale */
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, sx - 7, sy + 6, 14, 2, 0x00000080);
     fill_rect(g->renderer, sx - 5, sy + 8, 10, 1, 0x00000060);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
 
     uint32_t cape = 0x303040FF, tunic = 0x6A4A2AFF, hair = 0x402010FF;
     switch (p->hero) {
@@ -333,9 +708,9 @@ static void draw_enemy(Game *g, Enemy *e, int sx, int sy) {
     if (flash) base = 0xFFFFFFFF;
 
     /* shadow */
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, sx - w/2, sy + w/2 - 1, w, 3, 0x00000080);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
 
     /* elite aura */
     if (e->is_elite && e->element != EL_NONE) {
@@ -599,102 +974,134 @@ static void draw_tile(Game *g, int sx, int sy, TileKind t, int tx, int ty) {
     }
 }
 
+#endif
 /* ---------- WORLD ---------- */
 void render_world(Game *g) {
-    int cx = (int)g->camera_x;
-    int cy = (int)g->camera_y;
-    int x0 = cx / TILE - 1; if (x0 < 0) x0 = 0;
-    int y0 = cy / TILE - 1; if (y0 < 0) y0 = 0;
-    int x1 = (cx + INTERNAL_W) / TILE + 1; if (x1 > MAP_W) x1 = MAP_W;
-    int y1 = (cy + INTERNAL_H) / TILE + 1; if (y1 > MAP_H) y1 = MAP_H;
-    for (int y = y0; y < y1; y++) {
-        for (int x = x0; x < x1; x++) {
-            int sx = x * TILE - cx;
-            int sy = y * TILE - cy;
-            draw_tile(g, sx, sy, g->dungeon.tiles[y][x], x, y);
+    Player *p = &g->player;
+    GfxCtx *gc = g->renderer;
+
+    /* (re)build mesh quand l'etage change */
+    static int built_floor = 0;
+    if (built_floor != g->dungeon.level_index || s_mesh_count == 0) {
+        build_dungeon_mesh(g);
+        built_floor = g->dungeon.level_index;
+    }
+
+    /* camera : 3eme personne, angle isometrique-ish */
+    v3 player_w = player_world_pos(p);
+    v3 cam_target = v3_make(player_w.x + 0.5f, 0.6f, player_w.z + 0.5f);
+    /* offset arriere + haut */
+    float shake_x = (g->camera_x) * 0.02f;
+    float shake_y = (g->camera_y) * 0.02f;
+    v3 cam_eye = v3_add(cam_target, v3_make(shake_x, 9.0f, 8.0f + shake_y));
+    m4 view = m4_lookat(cam_eye, cam_target, v3_make(0, 1, 0));
+    float aspect = (float)INTERNAL_W / (float)INTERNAL_H;
+    m4 proj = m4_perspective(0.85f, aspect, 0.1f, 90.0f);
+    gfx_set_camera(gc, view, proj);
+
+    /* mouse aim : ray-cast vers plan y=0 et stocke en pixel-coords */
+    {
+        v3 ro, rd;
+        gfx_unproject(g->mouse_x, g->mouse_y, INTERNAL_W, INTERNAL_H, view, proj, &ro, &rd);
+        if (fabsf(rd.y) > 1e-4f) {
+            float t = -ro.y / rd.y;
+            if (t > 0.f && t < 200.f) {
+                v3 hit = v3_add(ro, v3_scl(rd, t));
+                p->aim_x = hit.x * (float)TILE;
+                p->aim_y = hit.z * (float)TILE;
+            }
         }
     }
 
+    /* ---- 3D world ---- */
+    gfx_terrain_draw(gc, player_w);
+
     for (int i = 0; i < MAX_PICKUPS; i++) {
-        Pickup *pk = &g->pickups[i];
-        if (!pk->alive) continue;
-        draw_pickup(g, pk, (int)pk->x - cx, (int)pk->y - cy);
+        Pickup *pk = &g->pickups[i]; if (!pk->alive) continue;
+        draw_pickup_3d(g, pk);
     }
     for (int i = 0; i < MAX_FAIRIES; i++) {
-        Fairy *f = &g->fairies[i];
-        if (!f->alive) continue;
-        draw_fairy(g, f, (int)f->x - cx, (int)f->y - cy);
+        Fairy *f = &g->fairies[i]; if (!f->alive) continue;
+        draw_fairy_3d(g, f);
     }
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *e = &g->enemies[i]; if (!e->alive) continue;
+        draw_enemy_3d(g, e);
+    }
+    draw_player_3d(g);
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile *pr = &g->projectiles[i]; if (!pr->alive) continue;
+        draw_projectile_3d(g, pr);
+    }
+    draw_particles_3d(g);
+}
+
+/* HP bars + names + dmg numbers : passe UI (apres gfx_ui_begin).
+   Expose en non-static car appelee par main.c. */
+void render_world_overlay_ui(Game *g) {
+    GfxCtx *gc = g->renderer;
+    /* HP bars + noms au-dessus des ennemis */
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;
-        draw_enemy(g, e, (int)e->x - cx, (int)e->y - cy);
-    }
-    draw_player(g, (int)g->player.x - cx, (int)g->player.y - cy);
-
-    for (int i = 0; i < MAX_PROJECTILES; i++) {
-        Projectile *pr = &g->projectiles[i];
-        if (!pr->alive) continue;
-        draw_projectile(g, pr, (int)pr->x - cx, (int)pr->y - cy);
-    }
-
-    for (int i = 0; i < MAX_PARTICLES; i++) {
-        Particle *p = &g->particles[i];
-        if (!p->alive) continue;
-        uint32_t c = p->color;
-        if (p->life < 0.2f) {
-            uint8_t a = (uint8_t)(255 * (p->life / 0.2f));
-            c = (c & 0xFFFFFF00) | a;
+        v3 head = v3_make(e->x / TILE, (e->is_boss ? 2.0f : 1.4f),
+                          e->y / TILE);
+        int sx, sy;
+        if (!world_to_screen(gc, head, &sx, &sy)) continue;
+        if (e->hp < e->maxhp) {
+            int bw = e->is_boss ? 80 : 24;
+            int bx = sx - bw / 2, by = sy;
+            fill_rect(gc, bx, by, bw, e->is_boss ? 4 : 2, 0x402020FF);
+            int hf = (int)(bw * (e->hp / e->maxhp));
+            fill_rect(gc, bx, by, hf, e->is_boss ? 4 : 2, 0xFF4040FF);
         }
-        int sz = (int)p->size;
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
-        fill_rect(g->renderer, (int)p->x - cx - sz/2, (int)p->y - cy - sz/2, sz, sz, c);
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+        if ((e->is_elite || e->is_boss) && e->name[0]) {
+            int nw = text_width(e->name);
+            uint32_t col = e->is_boss ? 0xFFD040FF : element_color(e->element);
+            text_draw(gc, sx - nw/2 + 1, sy - 9, e->name, 0x000000FF);
+            text_draw(gc, sx - nw/2,     sy - 10, e->name, col);
+        }
     }
-
     /* damage numbers */
     for (int i = 0; i < MAX_DMGNUM; i++) {
         DamageNumber *d = &g->dmgnums[i];
         if (!d->alive) continue;
-        int x = (int)d->x - cx;
-        int y = (int)d->y - cy;
+        v3 wp = v3_make(d->x / TILE, 1.0f, d->y / TILE);
+        int sx, sy;
+        if (!world_to_screen(gc, wp, &sx, &sy)) continue;
         uint32_t col = d->color;
         if (d->life < 0.25f) {
             uint8_t a = (uint8_t)(255 * (d->life / 0.25f));
             col = (col & 0xFFFFFF00) | a;
         }
         if (d->big) {
-            text_draw(g->renderer, x - 5, y - 7, d->text, 0x000000FF);
-            text_draw(g->renderer, x - 4, y - 6, d->text, col);
-            text_draw(g->renderer, x - 4, y - 7, d->text, col);
+            text_draw(gc, sx - 5, sy - 7, d->text, 0x000000FF);
+            text_draw(gc, sx - 4, sy - 6, d->text, col);
         } else {
-            text_draw(g->renderer, x - 4, y - 6, d->text, col);
+            text_draw(gc, sx - 4, sy - 6, d->text, col);
         }
     }
-
-    /* vignette ambiance dungeon */
+    /* curseur de visee */
+    int mx = g->mouse_x, my = g->mouse_y;
+    fill_rect(gc, mx - 5, my, 4, 1, 0xFFFFFFFF);
+    fill_rect(gc, mx + 2, my, 4, 1, 0xFFFFFFFF);
+    fill_rect(gc, mx, my - 5, 1, 4, 0xFFFFFFFF);
+    fill_rect(gc, mx, my + 2, 1, 4, 0xFFFFFFFF);
+    fill_rect(gc, mx, my, 1, 1, 0xFFFFFFFF);
+    /* vignette */
     draw_vignette(g);
-
-    /* aim cursor */
-    int mx = g->mouse_x;
-    int my = g->mouse_y;
-    fill_rect(g->renderer, mx - 5, my, 4, 1, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx + 2, my, 4, 1, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx, my - 5, 1, 4, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx, my + 2, 1, 4, 0xFFFFFFFF);
-    fill_rect(g->renderer, mx, my, 1, 1, 0xFFFFFFFF);
-
-    /* boss intro overlay */
+    /* boss intro */
     if (g->boss_intro_t > 0.f) {
         int alpha = (int)(180 * (g->boss_intro_t / 2.5f));
         if (alpha > 180) alpha = 180;
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
-        fill_rect(g->renderer, 0, INTERNAL_H/2 - 18, INTERNAL_W, 36,
-                  (uint32_t)((0xFF206080 & 0xFFFFFF00) | (alpha & 0xFF)));
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
-        text_draw(g->renderer, INTERNAL_W/2 - text_width(g->boss_name)/2,
+        gfx_set_blend(gc, true);
+        uint32_t col = (uint32_t)(0x20608000u | (alpha & 0xFF));
+        gfx_set_color(gc, col);
+        gfx_fill_rect(gc, 0, INTERNAL_H/2 - 18, INTERNAL_W, 36);
+        gfx_set_blend(gc, false);
+        text_draw(gc, INTERNAL_W/2 - text_width(g->boss_name)/2,
                   INTERNAL_H/2 - 6, g->boss_name, 0xFFFFFFFF);
-        text_draw(g->renderer, INTERNAL_W/2 - text_width("CONFRONTATION") / 2,
+        text_draw(gc, INTERNAL_W/2 - text_width("CONFRONTATION")/2,
                   INTERNAL_H/2 + 4, "CONFRONTATION", 0xFFD040FF);
     }
 }
@@ -952,9 +1359,9 @@ void render_options(Game *g) {
     }
 
     if (g->opt_waiting_rebind) {
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+        gfx_set_blend(g->renderer, true);
         fill_rect(g->renderer, 0, INTERNAL_H/2 - 16, INTERNAL_W, 32, 0x000000C0);
-        SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+        gfx_set_blend(g->renderer, false);
         const char *msg = "APPUIE SUR UNE TOUCHE...   (ECHAP POUR ANNULER)";
         text_draw(g->renderer, INTERNAL_W/2 - text_width(msg)/2,
                   INTERNAL_H/2 - 4, msg, 0xFFFF40FF);
@@ -1073,9 +1480,9 @@ void render_choose_hero(Game *g) {
 
 /* ---------- LEVELUP ---------- */
 void render_levelup(Game *g) {
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x000000C0);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("MONTEE DE NIVEAU")/2, 30,
               "MONTEE DE NIVEAU", 0xFFFF80FF);
     Weapon *w = &g->player.weapons[g->player.active_weapon];
@@ -1118,9 +1525,9 @@ void render_levelup(Game *g) {
 
 /* ---------- DEAD ---------- */
 void render_dead(Game *g) {
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x300010C0);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("VAINCU")/2, 80,
               "VAINCU", 0xFF4060FF);
     text_drawf(g->renderer, INTERNAL_W/2 - 70, 100, 0xFFFFFFFF,
@@ -1135,9 +1542,9 @@ void render_dead(Game *g) {
 
 /* ---------- VICTORY ---------- */
 void render_victory(Game *g) {
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x102030E0);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
     /* fireworks */
     for (int i = 0; i < 80; i++) {
         int x = (int)((sinf(g->time + i) * 0.5f + 0.5f) * INTERNAL_W);
@@ -1252,22 +1659,19 @@ void render_lore(Game *g) {
 
 /* ---------- VIGNETTE ---------- */
 static void draw_vignette(Game *g) {
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     int n = 24;
     for (int i = 0; i < n; i++) {
         int alpha = 110 - i * 4;
         if (alpha < 0) alpha = 0;
-        SDL_SetRenderDrawColor(g->renderer, 0, 0, 6, (Uint8)alpha);
-        SDL_Rect t = { i, i, INTERNAL_W - i*2, 1 };
-        SDL_Rect b = { i, INTERNAL_H - 1 - i, INTERNAL_W - i*2, 1 };
-        SDL_Rect l = { i, i, 1, INTERNAL_H - i*2 };
-        SDL_Rect r = { INTERNAL_W - 1 - i, i, 1, INTERNAL_H - i*2 };
-        SDL_RenderFillRect(g->renderer, &t);
-        SDL_RenderFillRect(g->renderer, &b);
-        SDL_RenderFillRect(g->renderer, &l);
-        SDL_RenderFillRect(g->renderer, &r);
+        uint32_t col = (uint32_t)(alpha & 0xFF) | 0x00000600u;
+        gfx_set_color(g->renderer, col);
+        gfx_fill_rect(g->renderer, i, i, INTERNAL_W - i*2, 1);
+        gfx_fill_rect(g->renderer, i, INTERNAL_H - 1 - i, INTERNAL_W - i*2, 1);
+        gfx_fill_rect(g->renderer, i, i, 1, INTERNAL_H - i*2);
+        gfx_fill_rect(g->renderer, INTERNAL_W - 1 - i, i, 1, INTERNAL_H - i*2);
     }
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
 }
 
 /* ---------- HELP ---------- */
@@ -1431,9 +1835,9 @@ static void render_item_slot(Game *g, int sx, int sy, Item *it, bool sel, bool m
 }
 
 void render_inventory(Game *g) {
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
+    gfx_set_blend(g->renderer, true);
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x000000D0);
-    SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+    gfx_set_blend(g->renderer, false);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("INVENTAIRE")/2, 6,
               "INVENTAIRE", 0xFFE080FF);
 

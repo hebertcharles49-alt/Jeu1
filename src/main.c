@@ -2,6 +2,7 @@
  * main.c - boucle principale et machine d'etats
  */
 #include "game.h"
+#include "gfx.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,25 +178,27 @@ void game_init(Game *g) {
         exit(1);
     }
 
-    /* charger les reglages avant la creation des textures (filtre) */
+    /* charger les reglages avant la creation du contexte */
     settings_load(&g->settings);
 
+    /* fenetre OpenGL */
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     g->window = SDL_CreateWindow("Element Dungeon",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WINDOW_W, WINDOW_H, SDL_WINDOW_SHOWN);
+        WINDOW_W, WINDOW_H, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
     if (!g->window) { fprintf(stderr, "Win: %s\n", SDL_GetError()); exit(1); }
 
-    /* essai materiel, puis vsync seul, puis software */
-    g->renderer = SDL_CreateRenderer(g->window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!g->renderer)
-        g->renderer = SDL_CreateRenderer(g->window, -1, SDL_RENDERER_ACCELERATED);
-    if (!g->renderer)
-        g->renderer = SDL_CreateRenderer(g->window, -1, SDL_RENDERER_SOFTWARE);
-    if (!g->renderer) { fprintf(stderr, "Ren: %s\n", SDL_GetError()); exit(1); }
-
+    /* contexte GL3.3 + FBO offscreen pour pixel-art chunky */
+    g->renderer = (GfxCtx *)calloc(1, sizeof(GfxCtx));
+    if (!g->renderer) { fprintf(stderr, "alloc gfx\n"); exit(1); }
+    if (!gfx_init(g->renderer, g->window, INTERNAL_W, INTERNAL_H, WINDOW_W, WINDOW_H)) {
+        fprintf(stderr, "echec init OpenGL\n"); exit(1);
+    }
     apply_render_filter(g);
-    if (!g->target) { fprintf(stderr, "Tex: %s\n", SDL_GetError()); exit(1); }
 
     save_load(&g->meta);
     /* decouvertes de depart : un heros, deux armes, un element */
@@ -219,8 +222,7 @@ void game_init(Game *g) {
 void game_shutdown(Game *g) {
     save_write(&g->meta);
     audio_shutdown(g);
-    if (g->target)   SDL_DestroyTexture(g->target);
-    if (g->renderer) SDL_DestroyRenderer(g->renderer);
+    if (g->renderer) { gfx_shutdown(g->renderer); free(g->renderer); g->renderer = NULL; }
     if (g->window)   SDL_DestroyWindow(g->window);
     SDL_Quit();
 }
@@ -662,10 +664,23 @@ void game_run(Game *g) {
             }
         }
 
-        SDL_SetRenderTarget(g->renderer, g->target);
-        SDL_SetRenderDrawColor(g->renderer, 12, 10, 18, 255);
-        SDL_RenderClear(g->renderer);
+        gfx_frame_begin(g->renderer);
 
+        /* le monde 3D est dessine d'abord (avec depth test), puis l'UI 2D
+           est dessinee en passe ortho par-dessus. */
+        bool show_world = (g->state == GS_RUN || g->state == GS_LEVELUP ||
+                           g->state == GS_DEAD || g->state == GS_VICTORY ||
+                           (g->state == GS_INVENTORY &&
+                              (g->state_prev == GS_RUN || g->state_prev == GS_LEVELUP)));
+        if (show_world) {
+            int sx, sy; apply_shake(g, &sx, &sy);
+            g->camera_x = (float)sx;
+            g->camera_y = (float)sy;
+            render_world(g);     /* 3D */
+        }
+
+        /* UI 2D : tout passe par le batcher GL. */
+        gfx_ui_begin(g->renderer);
         if (g->state == GS_TITLE)            render_title(g);
         else if (g->state == GS_LORE)        render_lore(g);
         else if (g->state == GS_HELP)        render_help(g);
@@ -675,42 +690,37 @@ void game_run(Game *g) {
         else if (g->state == GS_SHOP) {
             render_shop(g);
         } else if (g->state == GS_INVENTORY) {
-            /* render previous state behind */
             if (g->state_prev == GS_RUN || g->state_prev == GS_LEVELUP) {
-                int sx, sy; apply_shake(g, &sx, &sy);
-                g->camera_x = g->player.x - INTERNAL_W / 2 + sx;
-                g->camera_y = g->player.y - INTERNAL_H / 2 + sy;
-                render_world(g);
+                render_world_overlay_ui(g);
                 render_hud(g);
             } else if (g->state_prev == GS_SHOP) {
                 render_shop(g);
             }
             render_inventory(g);
         } else {
-            int sx, sy; apply_shake(g, &sx, &sy);
-            g->camera_x = g->player.x - INTERNAL_W / 2 + sx;
-            g->camera_y = g->player.y - INTERNAL_H / 2 + sy;
-            render_world(g);
+            if (g->state == GS_RUN || g->state == GS_LEVELUP ||
+                g->state == GS_DEAD || g->state == GS_VICTORY) {
+                render_world_overlay_ui(g);
+            }
             render_hud(g);
             if (g->state == GS_LEVELUP) render_levelup(g);
             if (g->state == GS_DEAD)    render_dead(g);
             if (g->state == GS_VICTORY) render_victory(g);
-            /* white flash on hurt */
             if (g->flash_t > 0.f) {
-                Uint8 alpha = (Uint8)(180.f * (g->flash_t / 0.20f));
-                SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_BLEND);
-                SDL_SetRenderDrawColor(g->renderer, 255, 60, 60, alpha);
-                SDL_Rect full = {0, 0, INTERNAL_W, INTERNAL_H};
-                SDL_RenderFillRect(g->renderer, &full);
-                SDL_SetRenderDrawBlendMode(g->renderer, SDL_BLENDMODE_NONE);
+                int alpha = (int)(180.f * (g->flash_t / 0.20f));
+                if (alpha < 0) alpha = 0;
+                if (alpha > 255) alpha = 255;
+                gfx_set_blend(g->renderer, true);
+                uint32_t col = ((uint32_t)0xFF3C3CU << 8) | (uint32_t)(alpha & 0xFF);
+                gfx_set_color(g->renderer, col);
+                gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
+                gfx_set_blend(g->renderer, false);
             }
         }
+        gfx_ui_end(g->renderer);
 
-        SDL_SetRenderTarget(g->renderer, NULL);
-        SDL_SetRenderDrawColor(g->renderer, 0, 0, 0, 255);
-        SDL_RenderClear(g->renderer);
-        SDL_RenderCopy(g->renderer, g->target, NULL, NULL);
-        SDL_RenderPresent(g->renderer);
+        gfx_frame_end(g->renderer);
+        SDL_GL_SwapWindow(g->window);
     }
 }
 
