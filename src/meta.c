@@ -1,5 +1,5 @@
 /*
- * meta.c - sauvegarde / chargement progression permanente
+ * meta.c - sauvegarde / chargement
  */
 #include "game.h"
 #include <stdio.h>
@@ -7,7 +7,7 @@
 
 #define SAVE_PATH "crucible_save.dat"
 #define SAVE_MAGIC 0x43525542u   /* 'CRUB' */
-#define SAVE_VERSION 1u
+#define SAVE_VERSION 2u
 
 void save_load(MetaSave *m) {
     memset(m, 0, sizeof(*m));

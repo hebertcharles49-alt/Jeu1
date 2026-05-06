@@ -1,5 +1,5 @@
 /*
- * world.c - dungeon, player movement, enemies, pickups, room logic
+ * world.c - donjon, joueur, ennemis, pickups, boss, room logic
  */
 #include "game.h"
 #include <math.h>
@@ -42,18 +42,17 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     srand(seed);
     memset(d, 0, sizeof(*d));
     d->level_index = floor_index;
-    /* fill with walls */
     for (int y = 0; y < MAP_H; y++)
         for (int x = 0; x < MAP_W; x++)
             d->tiles[y][x] = T_WALL;
 
-    int target_rooms = 6 + floor_index;
-    if (target_rooms > 14) target_rooms = 14;
+    int target_rooms = 6 + floor_index / 2;
+    if (target_rooms > 12) target_rooms = 12;
     int placed = 0, attempts = 0;
-    while (placed < target_rooms && attempts < 200) {
+    while (placed < target_rooms && attempts < 250) {
         attempts++;
-        int rw = rand_range(6, 12);
-        int rh = rand_range(6, 10);
+        int rw = rand_range(7, 13);
+        int rh = rand_range(7, 11);
         int rx = rand_range(2, MAP_W - rw - 2);
         int ry = rand_range(2, MAP_H - rh - 2);
         bool overlap = false;
@@ -70,8 +69,10 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         d->rooms[placed].w = rw;
         d->rooms[placed].h = rh;
         d->rooms[placed].cleared = false;
-        d->rooms[placed].enemies_to_spawn = 3 + floor_index + rand() % 4;
+        d->rooms[placed].enemies_to_spawn = 3 + floor_index + rand() % 3;
         d->rooms[placed].spawn_timer_ms = 0;
+        d->rooms[placed].is_boss_room = false;
+        d->rooms[placed].boss_spawned = false;
         carve_room(d, rx, ry, rw, rh);
         placed++;
     }
@@ -86,26 +87,45 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         int by = b->y + b->h / 2;
         carve_corridor(d, ax, ay, bx, by);
     }
-    /* spawn point in first room, exit in last */
     if (placed >= 1) {
         d->spawn_x = d->rooms[0].x + d->rooms[0].w / 2;
         d->spawn_y = d->rooms[0].y + d->rooms[0].h / 2;
-        d->rooms[0].cleared = true; /* no enemies in spawn */
+        d->rooms[0].cleared = true;
         d->rooms[0].enemies_to_spawn = 0;
     }
-    if (placed >= 1) {
+    /* boss room = last */
+    d->boss_room_idx = placed - 1;
+    if (placed >= 2) {
         Room *r = &d->rooms[placed - 1];
+        r->is_boss_room = true;
+        r->enemies_to_spawn = 0;   /* no normal enemies; boss handles it */
+        r->cleared = false;
         d->exit_x = r->x + r->w / 2;
         d->exit_y = r->y + r->h / 2;
-        d->tiles[d->exit_y][d->exit_x] = T_EXIT;
+        /* runes around boss spawn */
+        int cx = r->x + r->w / 2, cy = r->y + r->h / 2;
+        for (int yy = -2; yy <= 2; yy++) for (int xx = -2; xx <= 2; xx++) {
+            if (abs(xx) + abs(yy) == 3 && cx+xx>0 && cy+yy>0 && cx+xx<MAP_W-1 && cy+yy<MAP_H-1) {
+                d->tiles[cy + yy][cx + xx] = T_RUNE;
+            }
+        }
     }
-    /* sprinkle hazard tiles based on floor */
-    for (int i = 0; i < floor_index * 4; i++) {
-        int x = rand_range(2, MAP_W - 2);
-        int y = rand_range(2, MAP_H - 2);
-        if (d->tiles[y][x] == T_FLOOR) {
-            int r = rand() % 3;
-            if (r == 0) d->tiles[y][x] = T_BLOOD;
+    /* decorate other rooms */
+    for (int ri = 0; ri < placed; ri++) {
+        Room *r = &d->rooms[ri];
+        /* torches at 4 corners */
+        int xs[2] = { r->x + 1, r->x + r->w - 2 };
+        int ys[2] = { r->y + 1, r->y + r->h - 2 };
+        for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) {
+            int tx = xs[a], ty = ys[b];
+            if (d->tiles[ty][tx] == T_FLOOR) d->tiles[ty][tx] = T_TORCH;
+        }
+        if (!r->is_boss_room && ri > 0) {
+            for (int k = 0; k < 2 + rand() % 3; k++) {
+                int tx = r->x + 1 + rand() % (r->w - 2);
+                int ty = r->y + 1 + rand() % (r->h - 2);
+                if (d->tiles[ty][tx] == T_FLOOR) d->tiles[ty][tx] = (rand() % 2) ? T_BLOOD : T_BONES;
+            }
         }
     }
 }
@@ -120,34 +140,50 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
             e->x = x; e->y = y;
             e->kind = kind;
             e->r = 6.f;
-            e->xp_drop = 1;
+            e->xp_drop = 1; e->coin_drop = 1;
+            float diff = powf(1.15f, (float)(g->floor_index - 1));
             switch (kind) {
-                case 0: /* grunt - melee chaser */
-                    e->hp = e->maxhp = 14.f + g->floor_index * 3.f;
-                    e->r = 6.f;
-                    e->xp_drop = 1;
+                case EK_ZOMBIE:
+                    e->hp = e->maxhp = 18.f * diff;
+                    e->r = 6.f; e->xp_drop = 1; e->coin_drop = 1;
                     break;
-                case 1: /* shooter */
-                    e->hp = e->maxhp = 10.f + g->floor_index * 2.f;
-                    e->r = 6.f;
-                    e->xp_drop = 2;
+                case EK_BANDIT:
+                    e->hp = e->maxhp = 14.f * diff;
+                    e->r = 6.f; e->xp_drop = 2; e->coin_drop = 2;
                     break;
-                case 2: /* bullet hell brute */
-                    e->hp = e->maxhp = 30.f + g->floor_index * 5.f;
-                    e->r = 9.f;
-                    e->xp_drop = 3;
+                case EK_DEMON:
+                    e->hp = e->maxhp = 38.f * diff;
+                    e->r = 9.f; e->xp_drop = 4; e->coin_drop = 4;
                     break;
-                case 3: /* fast skitter */
-                    e->hp = e->maxhp = 8.f + g->floor_index * 2.f;
-                    e->r = 5.f;
-                    e->xp_drop = 1;
+                case EK_SLIME:
+                    e->hp = e->maxhp = 12.f * diff;
+                    e->r = 5.f; e->xp_drop = 1; e->coin_drop = 1;
+                    e->split_left = 1;
                     break;
-                case 4: /* mini-boss */
-                    e->hp = e->maxhp = 120.f + g->floor_index * 20.f;
-                    e->r = 12.f;
-                    e->xp_drop = 8;
+                case EK_BOSS:
+                    e->hp = e->maxhp = 220.f * diff;
+                    e->r = 14.f; e->xp_drop = 12; e->coin_drop = 30;
+                    e->is_boss = true;
+                    e->variant = (g->floor_index - 1) % 5;
+                    e->telegraph_t = 1.5f;
+                    /* boss = element du palier */
+                    e->element = (Element)(EL_FIRE + ((g->floor_index - 1) % 7));
                     break;
                 default: break;
+            }
+            /* elite roll : 5% par etage atteint, plafond 50%, sauf boss */
+            if (kind != EK_BOSS) {
+                float chance = 0.05f * (float)g->floor_index;
+                if (chance > 0.50f) chance = 0.50f;
+                if ((rand() / (float)RAND_MAX) < chance) {
+                    e->is_elite = true;
+                    e->element = (Element)(EL_FIRE + (rand() % 7));
+                    e->maxhp *= 2.0f;
+                    e->hp = e->maxhp;
+                    e->r += 1.5f;
+                    e->coin_drop *= 3;
+                    e->xp_drop *= 2;
+                }
             }
             return i;
         }
@@ -166,17 +202,23 @@ int projectile_spawn(Game *g, Projectile p) {
     return -1;
 }
 
-int particle_spawn(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size) {
+int particle_spawn_kind(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size, int kind) {
     for (int i = 0; i < MAX_PARTICLES; i++) {
         if (!g->particles[i].alive) {
             Particle *p = &g->particles[i];
             p->alive = true;
             p->x = x; p->y = y; p->vx = vx; p->vy = vy;
-            p->life = life; p->color = color; p->size = size;
+            p->life = life; p->life_max = life;
+            p->color = color; p->size = size;
+            p->kind = kind;
             return i;
         }
     }
     return -1;
+}
+
+int particle_spawn(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size) {
+    return particle_spawn_kind(g, x, y, vx, vy, life, color, size, 0);
 }
 
 int pickup_spawn(Game *g, PickupKind k, int v, float x, float y) {
@@ -193,6 +235,22 @@ int pickup_spawn(Game *g, PickupKind k, int v, float x, float y) {
     return -1;
 }
 
+int pickup_spawn_item(Game *g, Item it, float x, float y) {
+    for (int i = 0; i < MAX_PICKUPS; i++) {
+        if (!g->pickups[i].alive) {
+            Pickup *p = &g->pickups[i];
+            p->alive = true;
+            p->kind = PU_ITEM;
+            p->value = 0;
+            p->item = it;
+            p->x = x; p->y = y;
+            p->hover_t = (float)(rand() % 100) / 50.f;
+            return i;
+        }
+    }
+    return -1;
+}
+
 int fairy_spawn(Game *g, float x, float y, Element el) {
     for (int i = 0; i < MAX_FAIRIES; i++) {
         if (!g->fairies[i].alive) {
@@ -200,8 +258,27 @@ int fairy_spawn(Game *g, float x, float y, Element el) {
             memset(f, 0, sizeof(*f));
             f->alive = true;
             f->x = x; f->y = y;
-            f->life = 12.f;
+            f->life = 14.f;
             f->element = el;
+            f->target = -1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+int dmgnum_spawn(Game *g, float x, float y, int amount, uint32_t color, bool big) {
+    for (int i = 0; i < MAX_DMGNUM; i++) {
+        if (!g->dmgnums[i].alive) {
+            DamageNumber *d = &g->dmgnums[i];
+            d->alive = true;
+            d->x = x + (rand() % 8) - 4;
+            d->y = y - 6;
+            d->vy = -28.f;
+            d->life = d->life_max = 0.7f;
+            d->color = color;
+            d->big = big;
+            snprintf(d->text, sizeof(d->text), "%d", amount);
             return i;
         }
     }
@@ -210,7 +287,6 @@ int fairy_spawn(Game *g, float x, float y, Element el) {
 
 /* ---------- COLLISION ---------- */
 static bool aabb_solid(Game *g, float x, float y, float r) {
-    /* sample 4 corners */
     int xs[2] = { (int)((x - r) / TILE), (int)((x + r) / TILE) };
     int ys[2] = { (int)((y - r) / TILE), (int)((y + r) / TILE) };
     for (int i = 0; i < 2; i++) {
@@ -224,6 +300,21 @@ static bool aabb_solid(Game *g, float x, float y, float r) {
 }
 
 /* ---------- PLAYER ---------- */
+void player_take_damage(Game *g, float dmg) {
+    Player *p = &g->player;
+    if (p->invuln_t > 0.f || p->dash_t > 0.f) return;
+    float real = dmg - p->armor;
+    if (real < 1.f) real = 1.f;
+    p->hp -= real;
+    p->invuln_t = 0.6f;
+    g->shake_t = 0.30f; g->shake_mag = 5.f;
+    g->hitstop_t = 0.06f;
+    g->flash_t = 0.20f;
+    sfx_play(g, SFX_PLAYER_HURT);
+    dmgnum_spawn(g, p->x, p->y, (int)real, 0xFFFF80FF, true);
+    if (p->hp <= 0.f) sfx_play(g, SFX_DEATH);
+}
+
 void update_player(Game *g) {
     Player *p = &g->player;
     float dt = g->dt;
@@ -236,106 +327,139 @@ void update_player(Game *g) {
     float len = sqrtf(ix * ix + iy * iy);
     if (len > 0.001f) { ix /= len; iy /= len; }
 
-    /* facing direction */
     if      (ix > 0.5f)  p->facing_dir = 0;
     else if (iy > 0.5f)  p->facing_dir = 1;
     else if (ix < -0.5f) p->facing_dir = 2;
     else if (iy < -0.5f) p->facing_dir = 3;
 
-    /* aim toward mouse (in world coords) */
     p->aim_x = g->mouse_x + g->camera_x;
     p->aim_y = g->mouse_y + g->camera_y;
 
-    /* dash */
     if (p->dash_cd > 0.f) p->dash_cd -= dt;
     if (p->dash_t > 0.f)  p->dash_t  -= dt;
+    if (p->anim_t > 0.f)  p->anim_t  -= dt;
     bool dashing = p->dash_t > 0.f;
     if (g->keys[SDL_SCANCODE_SPACE] && !g->keys_prev[SDL_SCANCODE_SPACE] &&
         p->dash_cd <= 0.f && len > 0.01f) {
-        p->dash_cd = 0.8f;
-        p->dash_t = 0.18f;
+        p->dash_cd = 0.7f;
+        p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
     }
 
-    float speed = p->speed * (dashing ? 3.5f : 1.f);
+    float speed = p->speed * (dashing ? 3.6f : 1.f);
     float dx = ix * speed * dt;
     float dy = iy * speed * dt;
-
-    /* move with collision */
     if (!aabb_solid(g, p->x + dx, p->y, p->r - 1)) p->x += dx;
     if (!aabb_solid(g, p->x, p->y + dy, p->r - 1)) p->y += dy;
 
-    /* weapon switch (Q/E for prev/next active) */
-    if (g->keys[SDL_SCANCODE_Q] && !g->keys_prev[SDL_SCANCODE_Q]) {
-        for (int k = 0; k < WEAPON_SLOTS; k++) {
-            int idx = (p->active_weapon - 1 - k + WEAPON_SLOTS) % WEAPON_SLOTS;
-            if (p->weapons[idx].owned) { p->active_weapon = idx; break; }
-        }
-    }
+    /* weapon select */
     if (g->keys[SDL_SCANCODE_TAB] && !g->keys_prev[SDL_SCANCODE_TAB]) {
-        for (int k = 0; k < WEAPON_SLOTS; k++) {
-            int idx = (p->active_weapon + 1 + k) % WEAPON_SLOTS;
-            if (p->weapons[idx].owned) { p->active_weapon = idx; break; }
-        }
+        p->active_weapon = (p->active_weapon + 1) % WEAPON_SLOTS;
     }
-    /* number keys 1..5 to set active */
-    for (int i = 0; i < 5; i++) {
-        if (g->keys[SDL_SCANCODE_1 + i] && !g->keys_prev[SDL_SCANCODE_1 + i]) {
-            if (p->weapons[i].owned) p->active_weapon = i;
-        }
-    }
+    if (g->keys[SDL_SCANCODE_1] && !g->keys_prev[SDL_SCANCODE_1]) p->active_weapon = 0;
+    if (g->keys[SDL_SCANCODE_2] && !g->keys_prev[SDL_SCANCODE_2]) p->active_weapon = 1;
 
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
 
-    /* pickup pull */
+    /* regen */
+    if (p->regen_per_sec > 0.f && p->hp < p->maxhp) {
+        p->regen_acc += p->regen_per_sec * dt;
+        while (p->regen_acc >= 1.f) { p->hp += 1.f; p->regen_acc -= 1.f; }
+        if (p->hp > p->maxhp) p->hp = p->maxhp;
+    }
+
+    /* pickup pull / collect */
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i];
         if (!pk->alive) continue;
         float ddx = p->x - pk->x, ddy = p->y - pk->y;
         float d2 = ddx * ddx + ddy * ddy;
-        if (d2 < 60.f * 60.f) {
+        float pull = 70.f;
+        if (d2 < pull * pull) {
             float d = sqrtf(d2) + 0.01f;
-            pk->x += ddx / d * 120.f * dt;
-            pk->y += ddy / d * 120.f * dt;
+            pk->x += ddx / d * 140.f * dt;
+            pk->y += ddy / d * 140.f * dt;
         }
         if (d2 < 12.f * 12.f) {
-            /* collect */
             switch (pk->kind) {
-                case PU_XP:    p->xp += 1; break;
-                case PU_HEART: p->hp += 15.f; if (p->hp > p->maxhp) p->hp = p->maxhp; break;
-                case PU_SOUL:  p->souls += 1; break;
+                case PU_XP:    p->xp += 1; sfx_play(g, SFX_PICKUP); break;
+                case PU_HEART: p->hp += 18.f; if (p->hp > p->maxhp) p->hp = p->maxhp; sfx_play(g, SFX_PICKUP); break;
+                case PU_SOUL:  p->souls += 1; sfx_play(g, SFX_PICKUP); break;
+                case PU_COIN:  p->coins += pk->value > 0 ? pk->value : 1; sfx_play(g, SFX_COIN); break;
                 case PU_ELEMENT: {
                     Element e = (Element)pk->value;
                     Weapon *w = &p->weapons[p->active_weapon];
                     weapon_attach_element(w, e);
+                    sfx_play(g, SFX_LEVELUP);
+                    /* register discovery */
+                    int mask = weapon_combo_id(w);
+                    bool found = false;
+                    for (int s = 0; s < g->meta.combo_seen_count; s++)
+                        if (g->meta.combo_seen[s] == mask) { found = true; break; }
+                    if (!found && g->meta.combo_seen_count < 64) {
+                        g->meta.combo_seen[g->meta.combo_seen_count++] = mask;
+                    }
                     break;
                 }
                 case PU_WEAPON: {
                     int kind = pk->value;
-                    if (!p->weapons[kind].owned) {
-                        weapon_init_defaults(&p->weapons[kind], (WeaponKind)kind);
-                        p->weapons[kind].owned = true;
-                    } else {
-                        p->weapons[kind].base_dmg *= 1.10f;
-                    }
+                    /* place into a slot: prefer a fists slot */
+                    int slot = -1;
+                    for (int s = 0; s < WEAPON_SLOTS; s++)
+                        if (p->weapons[s].kind == W_FISTS) { slot = s; break; }
+                    if (slot < 0) slot = p->active_weapon;
+                    weapon_init_defaults(&p->weapons[slot], (WeaponKind)kind);
+                    p->weapons[slot].owned = true;
+                    p->active_weapon = slot;
+                    sfx_play(g, SFX_LEVELUP);
                     break;
                 }
                 case PU_CHEST:
-                    /* chest spawns multiple goodies */
-                    for (int k = 0; k < 4; k++) {
+                    sfx_play(g, SFX_LEVELUP);
+                    /* si le joueur a encore des poings, ajoute une arme dans le coffre */
+                    {
+                        bool has_fists = false;
+                        for (int s = 0; s < WEAPON_SLOTS; s++)
+                            if (p->weapons[s].kind == W_FISTS) { has_fists = true; break; }
+                        if (has_fists) {
+                            int weapons[8]; int wn = 0;
+                            for (int wk = W_SWORD; wk < W_COUNT; wk++)
+                                if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
+                            if (wn > 0) {
+                                int wpick = weapons[rand() % wn];
+                                pickup_spawn(g, PU_WEAPON, wpick, pk->x, pk->y - 6);
+                            }
+                        }
+                    }
+                    for (int k = 0; k < 5; k++) {
                         float ang = (rand() % 360) * 0.01745f;
-                        float fx = pk->x + cosf(ang) * 16.f;
-                        float fy = pk->y + sinf(ang) * 16.f;
-                        int r = rand() % 100;
-                        if (r < 30) pickup_spawn(g, PU_HEART, 0, fx, fy);
-                        else if (r < 60) pickup_spawn(g, PU_SOUL, 0, fx, fy);
+                        float fx = pk->x + cosf(ang) * 18.f;
+                        float fy = pk->y + sinf(ang) * 18.f;
+                        int rr = rand() % 100;
+                        if (rr < 40) pickup_spawn(g, PU_COIN, 1 + rand()%3, fx, fy);
+                        else if (rr < 60) pickup_spawn(g, PU_HEART, 0, fx, fy);
+                        else if (rr < 75) pickup_spawn(g, PU_SOUL, 0, fx, fy);
                         else {
                             int unlocked[8]; int n = 0;
                             for (int e = 1; e < EL_COUNT; e++)
                                 if (g->meta.element_unlocked[e]) unlocked[n++] = e;
                             if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], fx, fy);
-                            else pickup_spawn(g, PU_XP, 0, fx, fy);
+                            else pickup_spawn(g, PU_COIN, 2, fx, fy);
                         }
                     }
+                    /* burst FX */
+                    for (int k = 0; k < 30; k++) {
+                        float ang = (rand() % 360) * 0.01745f;
+                        particle_spawn_kind(g, pk->x, pk->y, cosf(ang) * 80, sinf(ang) * 80,
+                                            0.5f, 0xFFD060FF, 2.f, 2);
+                    }
+                    break;
+                case PU_PORTAL:
+                    sfx_play(g, SFX_PORTAL);
+                    pk->alive = false;
+                    game_open_shop(g);
+                    return;
+                case PU_ITEM:
+                    inventory_pickup(g, pk->item);
                     break;
             }
             pk->alive = false;
@@ -344,59 +468,229 @@ void update_player(Game *g) {
 }
 
 /* ---------- ENEMIES ---------- */
+static void enemy_drop_loot(Game *g, Enemy *e) {
+    int xpcount = 1 + e->xp_drop;
+    for (int i = 0; i < xpcount; i++) {
+        float a = (rand() % 360) * 0.01745f;
+        pickup_spawn(g, PU_XP, 0, e->x + cosf(a) * 4, e->y + sinf(a) * 4);
+    }
+    for (int i = 0; i < e->coin_drop; i++) {
+        float a = (rand() % 360) * 0.01745f;
+        pickup_spawn(g, PU_COIN, 1, e->x + cosf(a) * 6, e->y + sinf(a) * 6);
+    }
+    if ((rand() % 100) < (e->is_boss ? 100 : 7)) pickup_spawn(g, PU_HEART, 0, e->x, e->y);
+    if ((rand() % 100) < (e->is_boss ? 100 : 6)) pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
+    if ((rand() % 100) < (e->is_boss ? 60 : 5)) {
+        int unlocked[8]; int n = 0;
+        for (int el = 1; el < EL_COUNT; el++)
+            if (g->meta.element_unlocked[el]) unlocked[n++] = el;
+        if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
+    }
+    /* equipement : elite garanti, boss garanti, normaux 4% */
+    if (e->is_boss) {
+        Item it = item_drop_for_floor(g, g->floor_index, false, true);
+        pickup_spawn_item(g, it, e->x, e->y);
+        /* boss en debloque un second */
+        Item it2 = item_drop_for_floor(g, g->floor_index, false, true);
+        pickup_spawn_item(g, it2, e->x + 12, e->y + 12);
+        /* arme bonus si le joueur a encore des poings */
+        bool has_fists = false;
+        for (int s = 0; s < WEAPON_SLOTS; s++)
+            if (g->player.weapons[s].kind == W_FISTS) { has_fists = true; break; }
+        if (has_fists) {
+            int weapons[8]; int wn = 0;
+            for (int wk = W_SWORD; wk < W_COUNT; wk++)
+                if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
+            if (wn > 0)
+                pickup_spawn(g, PU_WEAPON, weapons[rand() % wn], e->x - 12, e->y - 12);
+        }
+    } else if (e->is_elite) {
+        Item it = item_drop_for_floor(g, g->floor_index, true, false);
+        pickup_spawn_item(g, it, e->x, e->y);
+    } else if ((rand() % 100) < 4) {
+        Item it = item_drop_for_floor(g, g->floor_index, false, false);
+        pickup_spawn_item(g, it, e->x, e->y);
+    }
+}
+
 static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el, float kx, float ky) {
+    /* applique la sensibilite/resistance elementaire */
+    float eff = elem_effectiveness(el, e->element);
+    dmg *= eff;
     e->hp -= dmg;
-    /* status */
-    if (el == EL_FIRE) {
-        e->fire_dot = 2.f;
-        e->fire_dps = 4.f + dmg * 0.2f;
-    }
-    if (el == EL_WATER) {
-        e->slow_t = 1.5f;
-    }
-    if (el == EL_LIGHTNING) {
-        e->stun_t = 0.4f;
-    }
+    e->hit_flash = (eff >= 2.f) ? 0.18f : 0.10f;
+    if (el == EL_FIRE)      { e->fire_dot = 2.f; e->fire_dps = 4.f + dmg * 0.2f; }
+    if (el == EL_WATER)     { e->slow_t = 1.5f; }
+    if (el == EL_LIGHTNING) { e->stun_t = 0.4f; }
     e->knockback_x += kx;
     e->knockback_y += ky;
-    /* hit particles */
+    /* damage number */
+    if (dmg > 0.f) {
+        bool big = (dmg > 30.f) || e->is_boss;
+        uint32_t col = big ? 0xFFD060FF : 0xFFFFFFFF;
+        if (el == EL_FIRE)      col = 0xFF8040FF;
+        if (el == EL_LIGHTNING) col = 0xFFEC60FF;
+        if (el == EL_WATER)     col = 0x80B0FFFF;
+        if (el == EL_VOID)      col = 0xC080FFFF;
+        dmgnum_spawn(g, e->x, e->y - e->r, (int)(dmg + 0.5f), col, big);
+    }
+    /* lifesteal hook */
+    if (g->player.lifesteal > 0.f && dmg > 0.f) {
+        g->player.hp += dmg * g->player.lifesteal;
+        if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
+    }
+    /* particles */
     for (int i = 0; i < 6; i++) {
         float a = (rand() % 360) * 0.01745f;
-        float s = 30.f + rand() % 60;
-        particle_spawn(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 0.4f, element_color(el), 2.f);
+        float s = 30.f + rand() % 80;
+        particle_spawn_kind(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 0.4f,
+                            element_color(el), 2.f, 2);
     }
+    if (dmg > 25.f) sfx_play(g, SFX_HEAVY_HIT);
+    else if (dmg > 0.f) sfx_play(g, SFX_HIT);
     if (e->hp <= 0.f) {
         e->alive = false;
         g->run_kills++;
-        /* drops */
-        int xpcount = 1 + e->xp_drop;
-        for (int i = 0; i < xpcount; i++) {
-            float a = (rand() % 360) * 0.01745f;
-            pickup_spawn(g, PU_XP, 0, e->x + cosf(a) * 4, e->y + sinf(a) * 4);
+        enemy_drop_loot(g, e);
+        /* split slime */
+        if (e->kind == EK_SLIME && e->split_left > 0) {
+            for (int s = 0; s < 2; s++) {
+                int idx = enemy_spawn(g, EK_SLIME, e->x + (rand()%16) - 8, e->y + (rand()%16) - 8);
+                if (idx >= 0) {
+                    g->enemies[idx].split_left = 0;
+                    g->enemies[idx].r = 4.f;
+                    g->enemies[idx].hp = g->enemies[idx].maxhp = e->maxhp * 0.4f;
+                    g->enemies[idx].coin_drop = 0;
+                    g->enemies[idx].xp_drop = 0;
+                }
+            }
         }
-        if ((rand() % 100) < 8) pickup_spawn(g, PU_HEART, 0, e->x, e->y);
-        if ((rand() % 100) < 6) pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
-        if ((rand() % 100) < 5) {
-            int unlocked[8]; int n = 0;
-            for (int el = 1; el < EL_COUNT; el++)
-                if (g->meta.element_unlocked[el]) unlocked[n++] = el;
-            if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
-        }
-        /* death poof */
-        for (int i = 0; i < 14; i++) {
-            float a = (rand() % 360) * 0.01745f;
-            float s = 40.f + rand() % 80;
-            particle_spawn(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 0.6f, 0xAA3333FF, 2.f);
+        /* boss kill: portal */
+        if (e->is_boss) {
+            g->dungeon.boss_dead = true;
+            g->shake_t = 0.6f; g->shake_mag = 8.f;
+            g->hitstop_t = 0.20f;
+            for (int k = 0; k < 80; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                float s = 100.f + rand() % 200;
+                particle_spawn_kind(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 1.0f,
+                                    0xFFE060FF, 3.f, 2);
+            }
+            pickup_spawn(g, PU_PORTAL, 0, e->x, e->y);
+            sfx_play(g, SFX_BOSS);
+            g->portal_spawned = true;
+        } else {
+            for (int i = 0; i < 14; i++) {
+                float a = (rand() % 360) * 0.01745f;
+                float s = 40.f + rand() % 80;
+                particle_spawn_kind(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 0.6f,
+                                    0xAA3333FF, 2.f, 2);
+            }
         }
     }
 }
 
-/* exposed for combat.c via header? we'll keep it static and let combat.c call a helper */
 void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float ky) {
     if (idx < 0 || idx >= MAX_ENEMIES) return;
     Enemy *e = &g->enemies[idx];
     if (!e->alive) return;
     enemy_take_damage(g, e, dmg, el, kx, ky);
+}
+
+static void boss_update(Game *g, Enemy *e, float dt) {
+    Player *p = &g->player;
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    if (e->telegraph_t > 0.f) {
+        e->telegraph_t -= dt;
+        return;
+    }
+    e->ai_t += dt;
+    e->ai_t2 += dt;
+    /* slow chase */
+    float dx = p->x - e->x, dy = p->y - e->y;
+    float d = sqrtf(dx * dx + dy * dy) + 0.01f;
+    float speed = 35.f + e->variant * 6.f;
+    if (e->slow_t > 0.f) speed *= 0.5f;
+    if (d > 30.f) {
+        float vx = dx / d * speed;
+        float vy = dy / d * speed;
+        float nx = e->x + vx * dt, ny = e->y + vy * dt;
+        if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx;
+        if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny;
+    }
+    /* attacks */
+    float pat_cd = 1.6f - e->variant * 0.1f;
+    if (e->ai_t > pat_cd) {
+        e->ai_t = 0;
+        switch (e->variant) {
+            case 0: { /* radial 16 */
+                for (int k = 0; k < 16; k++) {
+                    float a = (k / 16.f) * 6.2831f + g->time;
+                    Projectile pr = {0};
+                    pr.x = e->x; pr.y = e->y;
+                    pr.vx = cosf(a) * 90.f; pr.vy = sinf(a) * 90.f;
+                    pr.life = 4.f; pr.r = 3.5f; pr.dmg = 12.f * diff; pr.owner = 1;
+                    pr.reflectable = true; pr.primary = EL_FIRE;
+                    projectile_spawn(g, pr);
+                }
+                sfx_play(g, SFX_SHOOT);
+                break;
+            }
+            case 1: { /* spiral */
+                for (int k = 0; k < 6; k++) {
+                    float a = (k / 6.f) * 6.2831f + e->ai_t2 * 2.f;
+                    Projectile pr = {0};
+                    pr.x = e->x; pr.y = e->y;
+                    pr.vx = cosf(a) * 110.f; pr.vy = sinf(a) * 110.f;
+                    pr.life = 3.f; pr.r = 3.f; pr.dmg = 10.f * diff; pr.owner = 1;
+                    pr.primary = EL_VOID;
+                    projectile_spawn(g, pr);
+                }
+                sfx_play(g, SFX_SHOOT);
+                break;
+            }
+            case 2: { /* aim cone */
+                float a0 = atan2f(dy, dx);
+                for (int k = -3; k <= 3; k++) {
+                    float a = a0 + k * 0.18f;
+                    Projectile pr = {0};
+                    pr.x = e->x; pr.y = e->y;
+                    pr.vx = cosf(a) * 130.f; pr.vy = sinf(a) * 130.f;
+                    pr.life = 3.f; pr.r = 3.f; pr.dmg = 14.f * diff; pr.owner = 1;
+                    pr.primary = EL_LIGHTNING;
+                    projectile_spawn(g, pr);
+                }
+                sfx_play(g, SFX_SHOOT);
+                break;
+            }
+            case 3: { /* mines */
+                for (int k = 0; k < 5; k++) {
+                    Projectile pr = {0};
+                    pr.x = e->x + (rand()%80)-40;
+                    pr.y = e->y + (rand()%80)-40;
+                    pr.vx = 0; pr.vy = 0;
+                    pr.life = 2.f; pr.r = 4.f; pr.dmg = 16.f * diff; pr.owner = 1;
+                    pr.primary = EL_EARTH;
+                    projectile_spawn(g, pr);
+                }
+                sfx_play(g, SFX_EXPLODE);
+                break;
+            }
+            case 4: { /* summon zombies */
+                for (int k = 0; k < 3; k++) {
+                    enemy_spawn(g, EK_ZOMBIE, e->x + (rand()%60)-30, e->y + (rand()%60)-30);
+                }
+                sfx_play(g, SFX_BOSS);
+                break;
+            }
+        }
+    }
+    /* contact dmg */
+    if (d < e->r + p->r) {
+        player_take_damage(g, 16.f * diff);
+        float ux = dx / d, uy = dy / d;
+        p->x += ux * 8.f; p->y += uy * 8.f;
+    }
 }
 
 void update_enemies(Game *g) {
@@ -406,12 +700,13 @@ void update_enemies(Game *g) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;
 
-        /* status timers */
+        if (e->hit_flash > 0.f) e->hit_flash -= dt;
+
         if (e->fire_dot > 0.f) {
             e->fire_dot -= dt;
             e->hp -= e->fire_dps * dt;
-            if ((rand() % 100) < 10)
-                particle_spawn(g, e->x + (rand()%8)-4, e->y - 4, 0, -20, 0.4f, 0xFF8030FF, 2.f);
+            if ((rand() % 100) < 12)
+                particle_spawn_kind(g, e->x + (rand()%8)-4, e->y - 4, 0, -22, 0.4f, 0xFF8030FF, 2.f, 0);
             if (e->hp <= 0.f) {
                 enemy_take_damage(g, e, 0, EL_FIRE, 0, 0);
                 continue;
@@ -420,11 +715,12 @@ void update_enemies(Game *g) {
         if (e->slow_t > 0.f) e->slow_t -= dt;
         if (e->stun_t > 0.f) { e->stun_t -= dt; continue; }
 
-        /* knockback decay */
         e->knockback_x *= 0.85f;
         e->knockback_y *= 0.85f;
         e->x += e->knockback_x * dt;
         e->y += e->knockback_y * dt;
+
+        if (e->is_boss) { boss_update(g, e, dt); continue; }
 
         float dx = p->x - e->x;
         float dy = p->y - e->y;
@@ -433,76 +729,59 @@ void update_enemies(Game *g) {
 
         float speed = 0.f;
         switch (e->kind) {
-            case 0: speed = 50.f; break;
-            case 1: speed = 35.f; break;
-            case 2: speed = 30.f; break;
-            case 3: speed = 80.f; break;
-            case 4: speed = 40.f; break;
+            case EK_ZOMBIE: speed = 50.f; break;
+            case EK_BANDIT: speed = 35.f; break;
+            case EK_DEMON:  speed = 30.f; break;
+            case EK_SLIME:  speed = 95.f; break;
         }
         if (e->slow_t > 0.f) speed *= 0.4f;
 
-        /* approach but stop at firing range for shooters */
         bool approach = true;
-        if ((e->kind == 1 || e->kind == 2) && dist < 90.f) approach = false;
+        if ((e->kind == EK_BANDIT || e->kind == EK_DEMON) && dist < 100.f) approach = false;
 
         if (approach) {
             float vx = dx / dist * speed;
             float vy = dy / dist * speed;
+            /* slime hops */
+            if (e->kind == EK_SLIME) {
+                float hop = 0.6f + 0.4f * sinf(g->time * 6.f + i);
+                vx *= hop; vy *= hop;
+            }
             float nx = e->x + vx * dt;
             float ny = e->y + vy * dt;
             if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx;
             if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny;
         }
 
-        /* shoot */
         e->ai_t += dt;
-        if (e->kind == 1 && e->ai_t > 1.4f && dist < 200.f) {
+        float diff = powf(1.15f, (float)(g->floor_index - 1));
+
+        if (e->kind == EK_BANDIT && e->ai_t > 1.4f && dist < 220.f) {
             e->ai_t = 0;
             Projectile pr = {0};
             pr.x = e->x; pr.y = e->y;
-            pr.vx = dx / dist * 90.f;
-            pr.vy = dy / dist * 90.f;
-            pr.life = 4.f;
-            pr.r = 3.f;
-            pr.dmg = 8.f + g->floor_index;
-            pr.owner = 1;
-            pr.reflectable = true;
+            pr.vx = dx / dist * 110.f;
+            pr.vy = dy / dist * 110.f;
+            pr.life = 4.f; pr.r = 3.f;
+            pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
             pr.primary = EL_VOID;
             projectile_spawn(g, pr);
+            sfx_play(g, SFX_SHOOT);
         }
-        if (e->kind == 2 && e->ai_t > 1.8f && dist < 220.f) {
+        if (e->kind == EK_DEMON && e->ai_t > 1.6f && dist < 240.f) {
             e->ai_t = 0;
             for (int k = 0; k < 8; k++) {
                 float a = (k / 8.f) * 6.2831f + g->time * 0.3f;
                 Projectile pr = {0};
                 pr.x = e->x; pr.y = e->y;
-                pr.vx = cosf(a) * 80.f;
-                pr.vy = sinf(a) * 80.f;
-                pr.life = 4.f;
-                pr.r = 3.f;
-                pr.dmg = 6.f + g->floor_index;
-                pr.owner = 1;
-                pr.reflectable = true;
+                pr.vx = cosf(a) * 90.f;
+                pr.vy = sinf(a) * 90.f;
+                pr.life = 4.f; pr.r = 3.f;
+                pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = true;
                 pr.primary = EL_FIRE;
                 projectile_spawn(g, pr);
             }
-        }
-        if (e->kind == 4 && e->ai_t > 1.0f) {
-            e->ai_t = 0;
-            for (int k = 0; k < 12; k++) {
-                float a = (k / 12.f) * 6.2831f + g->time;
-                Projectile pr = {0};
-                pr.x = e->x; pr.y = e->y;
-                pr.vx = cosf(a) * 70.f;
-                pr.vy = sinf(a) * 70.f;
-                pr.life = 5.f;
-                pr.r = 4.f;
-                pr.dmg = 10.f + g->floor_index;
-                pr.owner = 1;
-                pr.reflectable = true;
-                pr.primary = (k % 2) ? EL_FIRE : EL_VOID;
-                projectile_spawn(g, pr);
-            }
+            sfx_play(g, SFX_SHOOT);
         }
 
         /* contact damage */
@@ -510,12 +789,10 @@ void update_enemies(Game *g) {
         float pdy = p->y - e->y;
         float pd = sqrtf(pdx * pdx + pdy * pdy);
         if (pd < e->r + p->r && p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-            float dmg = 6.f + g->floor_index * 1.5f;
-            if (e->kind == 4) dmg = 14.f + g->floor_index * 2.f;
-            p->hp -= dmg;
-            p->invuln_t = 0.6f;
-            g->shake_t = 0.25f; g->shake_mag = 4.f;
-            /* knockback player */
+            float dmg = 7.f * diff;
+            if (e->kind == EK_DEMON) dmg = 11.f * diff;
+            if (e->kind == EK_SLIME) dmg = 5.f * diff;
+            player_take_damage(g, dmg);
             float dxn = pdx / (pd + 0.01f);
             float dyn = pdy / (pd + 0.01f);
             p->x += dxn * 6.f;
@@ -558,50 +835,56 @@ static bool point_in_room(Room *r, float x, float y) {
 
 void update_room_logic(Game *g) {
     Player *p = &g->player;
-    /* find current room */
     for (int i = 0; i < g->dungeon.room_count; i++) {
         Room *r = &g->dungeon.rooms[i];
-        if (point_in_room(r, p->x, p->y)) {
-            if (r->cleared) continue;
-            /* spawn enemies progressively until budget exhausted */
-            if (r->enemies_to_spawn > 0) {
-                r->spawn_timer_ms += (int)(g->dt * 1000.f);
-                int spawn_interval = 600 - g->floor_index * 30;
-                if (spawn_interval < 120) spawn_interval = 120;
-                while (r->spawn_timer_ms >= spawn_interval && r->enemies_to_spawn > 0) {
-                    r->spawn_timer_ms -= spawn_interval;
-                    int kind;
-                    int roll = rand() % 100;
-                    if (g->floor_index >= 3 && r->enemies_to_spawn == 1 && (rand() % 100) < 18) kind = 4;
-                    else if (roll < 50) kind = 0;
-                    else if (roll < 75) kind = 3;
-                    else if (roll < 92) kind = 1;
-                    else kind = 2;
-                    /* spawn near room edge */
-                    int sx = r->x + 1 + rand() % (r->w - 2);
-                    int sy = r->y + 1 + rand() % (r->h - 2);
-                    enemy_spawn(g, kind, sx * TILE + TILE / 2, sy * TILE + TILE / 2);
-                    r->enemies_to_spawn--;
-                }
-            } else {
-                /* check if all enemies in room are dead */
-                bool any = false;
-                for (int e = 0; e < MAX_ENEMIES; e++) {
-                    if (!g->enemies[e].alive) continue;
-                    if (point_in_room(r, g->enemies[e].x, g->enemies[e].y)) { any = true; break; }
-                }
-                if (!any) {
-                    r->cleared = true;
-                    /* reward: chest in room */
-                    if ((rand() % 100) < 70) {
-                        pickup_spawn(g, PU_CHEST, 0,
-                                     (r->x + r->w / 2) * TILE,
-                                     (r->y + r->h / 2) * TILE);
-                    }
-                    /* if last room, ensure exit visible already (it is) */
-                }
+        if (!point_in_room(r, p->x, p->y)) continue;
+
+        if (r->is_boss_room) {
+            if (!r->boss_spawned) {
+                r->boss_spawned = true;
+                int sx = r->x + r->w / 2;
+                int sy = r->y + r->h / 2;
+                enemy_spawn(g, EK_BOSS, sx * TILE + TILE / 2, sy * TILE + TILE / 2);
+                snprintf(g->boss_name, sizeof(g->boss_name), "BOSS %d / 10", g->floor_index);
+                g->boss_intro_t = 2.5f;
+                sfx_play(g, SFX_BOSS);
             }
             return;
         }
+
+        if (r->cleared) continue;
+        if (r->enemies_to_spawn > 0) {
+            r->spawn_timer_ms += (int)(g->dt * 1000.f);
+            int spawn_interval = 600 - g->floor_index * 25;
+            if (spawn_interval < 120) spawn_interval = 120;
+            while (r->spawn_timer_ms >= spawn_interval && r->enemies_to_spawn > 0) {
+                r->spawn_timer_ms -= spawn_interval;
+                int kind;
+                int roll = rand() % 100;
+                if (roll < 45) kind = EK_ZOMBIE;
+                else if (roll < 70) kind = EK_SLIME;
+                else if (roll < 88) kind = EK_BANDIT;
+                else kind = EK_DEMON;
+                int sx = r->x + 1 + rand() % (r->w - 2);
+                int sy = r->y + 1 + rand() % (r->h - 2);
+                enemy_spawn(g, kind, sx * TILE + TILE / 2, sy * TILE + TILE / 2);
+                r->enemies_to_spawn--;
+            }
+        } else {
+            bool any = false;
+            for (int e = 0; e < MAX_ENEMIES; e++) {
+                if (!g->enemies[e].alive) continue;
+                if (point_in_room(r, g->enemies[e].x, g->enemies[e].y)) { any = true; break; }
+            }
+            if (!any) {
+                r->cleared = true;
+                if ((rand() % 100) < 80) {
+                    pickup_spawn(g, PU_CHEST, 0,
+                                 (r->x + r->w / 2) * TILE,
+                                 (r->y + r->h / 2) * TILE);
+                }
+            }
+        }
+        return;
     }
 }
