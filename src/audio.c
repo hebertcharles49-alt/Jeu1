@@ -1,7 +1,7 @@
 /*
- * audio.c - sons procéduraux générés au runtime, joués via SDL_QueueAudio
- * Pass de polish : bcp plus de sinus/triangles, moins de carre/bruit,
- * envelopes adoucies pour limiter la fatigue auditive.
+ * audio.c - sons procéduraux générés au runtime.
+ * Refait : amplitudes plus basses, sinus + harmoniques propres,
+ * envelopes longues exponentielles. Beaucoup moins agressif.
  */
 #include "game.h"
 #include <math.h>
@@ -13,29 +13,17 @@
 static int16_t *g_sfx_data[SFX_COUNT];
 static int      g_sfx_len[SFX_COUNT];
 
-static int16_t *alloc_buf(int samples) {
-    return (int16_t *)calloc(samples, sizeof(int16_t));
-}
-
+static int16_t *alloc_buf(int n) { return (int16_t *)calloc(n, sizeof(int16_t)); }
 static float frand(void) { return (rand() / (float)RAND_MAX) * 2.f - 1.f; }
 
-/* envelope ADSR-light, attack et release smooth */
-static void env_apply(int16_t *buf, int n, float attack, float release) {
+/* envelope douce : attack lineaire courte, release exponentielle */
+static void envelope(int16_t *buf, int n, float attack, float release_decay) {
     int a = (int)(attack * SR);
-    int r = (int)(release * SR);
     if (a < 1) a = 1;
-    if (r < 1) r = 1;
     for (int i = 0; i < n; i++) {
-        float e = 1.f;
-        if (i < a) {
-            float t = i / (float)a;
-            e = t * t * (3.f - 2.f * t);   /* smoothstep attack */
-        }
-        if (i > n - r) {
-            float t = (n - i) / (float)r;
-            e *= t * t;                     /* quadratic release */
-        }
-        if (e < 0) e = 0;
+        float e;
+        if (i < a)        e = (float)i / (float)a;
+        else              e = expf(-release_decay * (i - a) / (float)SR);
         int v = (int)(buf[i] * e);
         if (v >  32767) v =  32767;
         if (v < -32768) v = -32768;
@@ -43,38 +31,22 @@ static void env_apply(int16_t *buf, int n, float attack, float release) {
     }
 }
 
-static void mix_sine(int16_t *buf, int n, float freq, float amp, float pitch_decay) {
+static void add_sine(int16_t *buf, int n, float freq, float amp, float pitch_decay) {
     for (int i = 0; i < n; i++) {
         float t = i / (float)SR;
-        float f = freq * (1.f - pitch_decay * t);
+        float f = freq * expf(-pitch_decay * t);
         if (f < 20.f) f = 20.f;
         float s = sinf(t * f * 6.2831f);
-        int v = buf[i] + (int)(s * amp * 30000);
+        int v = buf[i] + (int)(s * amp * 22000);
         if (v >  32767) v =  32767;
         if (v < -32768) v = -32768;
         buf[i] = (int16_t)v;
     }
 }
 
-static void mix_tri(int16_t *buf, int n, float freq, float amp, float pitch_decay) {
-    float phase = 0.f;
+static void add_noise(int16_t *buf, int n, float amp) {
     for (int i = 0; i < n; i++) {
-        float t = i / (float)SR;
-        float f = freq * (1.f - pitch_decay * t);
-        if (f < 20.f) f = 20.f;
-        phase += f / (float)SR;
-        if (phase >= 1.f) phase -= 1.f;
-        float s = phase < 0.5f ? (phase * 4.f - 1.f) : (3.f - phase * 4.f);
-        int v = buf[i] + (int)(s * amp * 28000);
-        if (v >  32767) v =  32767;
-        if (v < -32768) v = -32768;
-        buf[i] = (int16_t)v;
-    }
-}
-
-static void mix_noise(int16_t *buf, int n, float amp) {
-    for (int i = 0; i < n; i++) {
-        int v = buf[i] + (int)(frand() * amp * 20000);
+        int v = buf[i] + (int)(frand() * amp * 14000);
         if (v >  32767) v =  32767;
         if (v < -32768) v = -32768;
         buf[i] = (int16_t)v;
@@ -89,199 +61,185 @@ static void low_pass(int16_t *buf, int n, float k) {
     }
 }
 
-static void make_punch(int idx) {
+/* === SONS === */
+
+/* hit standard : un coup mat, pas un cri */
+static void make_hit(int idx) {
     int n = (int)(0.13f * SR);
     int16_t *b = alloc_buf(n);
-    mix_tri(b, n, 110.f, 0.55f, 1.5f);
-    mix_noise(b, n, 0.18f);
-    low_pass(b, n, 0.20f);
-    env_apply(b, n, 0.005f, 0.10f);
+    add_sine(b, n, 320.f, 0.45f, 6.f);   /* corps thump */
+    add_sine(b, n, 640.f, 0.18f, 8.f);   /* harmonique */
+    low_pass(b, n, 0.30f);
+    envelope(b, n, 0.002f, 18.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
-static void make_hit(int idx) {
+/* heavy : un grand boum sourd */
+static void make_heavy(int idx) {
+    int n = (int)(0.30f * SR);
+    int16_t *b = alloc_buf(n);
+    add_sine(b, n,  90.f, 0.55f, 3.f);
+    add_sine(b, n, 180.f, 0.25f, 5.f);
+    low_pass(b, n, 0.18f);
+    envelope(b, n, 0.003f, 9.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* punch : coup de poing mou */
+static void make_punch(int idx) {
     int n = (int)(0.10f * SR);
     int16_t *b = alloc_buf(n);
-    /* corps : sinus de mid-low decroissant en pitch */
-    mix_sine(b, n, 480.f, 0.55f, 2.5f);
-    mix_tri (b, n, 240.f, 0.30f, 2.0f);
-    mix_noise(b, n, 0.06f);
-    low_pass(b, n, 0.40f);
-    env_apply(b, n, 0.003f, 0.08f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_heavy(int idx) {
-    int n = (int)(0.22f * SR);
-    int16_t *b = alloc_buf(n);
-    mix_tri (b, n,  80.f, 0.65f, 0.8f);
-    mix_sine(b, n, 160.f, 0.30f, 1.0f);
-    mix_noise(b, n, 0.10f);
+    add_sine(b, n, 140.f, 0.40f, 8.f);
+    add_noise(b, n, 0.10f);
     low_pass(b, n, 0.18f);
-    env_apply(b, n, 0.004f, 0.16f);
+    envelope(b, n, 0.005f, 24.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
+/* swing : whoosh discret */
 static void make_swing(int idx) {
-    /* whoosh : bruit lowpass tres bref */
     int n = (int)(0.08f * SR);
     int16_t *b = alloc_buf(n);
-    mix_noise(b, n, 0.30f);
-    /* sweep filter manually */
-    float k = 0.05f;
-    float prev = 0;
-    for (int i = 0; i < n; i++) {
-        k = 0.05f + (i / (float)n) * 0.20f;
-        prev += k * (b[i] - prev);
-        b[i] = (int16_t)prev;
-    }
-    env_apply(b, n, 0.010f, 0.05f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_explode(int idx) {
-    int n = (int)(0.32f * SR);
-    int16_t *b = alloc_buf(n);
-    /* basse profonde + bruit filtré */
-    mix_tri (b, n,  60.f, 0.60f, 0.5f);
-    mix_sine(b, n, 100.f, 0.25f, 0.8f);
-    mix_noise(b, n, 0.30f);
+    add_noise(b, n, 0.20f);
     low_pass(b, n, 0.10f);
-    env_apply(b, n, 0.004f, 0.22f);
+    envelope(b, n, 0.010f, 30.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
+/* explose : pas de cymbale, juste un boum bas filtree */
+static void make_explode(int idx) {
+    int n = (int)(0.30f * SR);
+    int16_t *b = alloc_buf(n);
+    add_sine(b, n,  60.f, 0.50f, 2.f);
+    add_sine(b, n, 110.f, 0.20f, 4.f);
+    add_noise(b, n, 0.15f);
+    low_pass(b, n, 0.10f);
+    envelope(b, n, 0.005f, 8.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* pickup : "ding" doux a deux notes */
 static void make_pickup(int idx) {
-    int n = (int)(0.12f * SR);
+    int n = (int)(0.13f * SR);
     int16_t *b = alloc_buf(n);
-    /* sinus monte doucement */
-    for (int i = 0; i < n; i++) {
-        float t = i / (float)SR;
-        float f = 700.f + t * 900.f;
-        float s = sinf(t * f * 6.2831f);
-        int v = (int)(s * 14000);
-        b[i] = (int16_t)v;
-    }
-    env_apply(b, n, 0.005f, 0.08f);
+    add_sine(b, n / 2,             880.f, 0.30f, 0.f);
+    add_sine(b + n / 2, n - n / 2, 1320.f, 0.30f, 0.f);
+    envelope(b, n, 0.005f, 20.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
+/* coin : sinus haut clair */
 static void make_coin(int idx) {
-    int n = (int)(0.18f * SR);
+    int n = (int)(0.16f * SR);
     int16_t *b = alloc_buf(n);
-    /* deux notes sinus, harmoniques cristallines */
-    mix_sine(b, n / 3, 1320.f, 0.30f, 0.f);
-    mix_sine(b + n / 3, 2 * n / 3, 1980.f, 0.30f, 0.f);
-    /* leger overtone */
-    mix_sine(b, n / 3, 2640.f, 0.10f, 0.f);
-    env_apply(b, n, 0.004f, 0.14f);
+    add_sine(b, n / 3,             1318.f, 0.28f, 0.f);  /* mi 6 */
+    add_sine(b + n / 3, 2 * n / 3, 1976.f, 0.28f, 0.f);  /* si 6 */
+    add_sine(b, n,                 3951.f, 0.06f, 0.f);  /* harmonique */
+    envelope(b, n, 0.004f, 18.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
+/* level-up : arpege ascendant majeur */
 static void make_levelup(int idx) {
     int n = (int)(0.55f * SR);
     int16_t *b = alloc_buf(n);
     int seg = n / 4;
-    float notes[4] = { 523.f, 659.f, 784.f, 1046.f };
+    float notes[4] = { 523.f, 659.f, 784.f, 1046.f }; /* C-E-G-C */
     for (int i = 0; i < 4; i++) {
-        mix_sine(b + i * seg, seg, notes[i], 0.32f, 0.f);
-        mix_sine(b + i * seg, seg, notes[i] * 2.f, 0.10f, 0.f);
+        add_sine(b + i * seg, seg, notes[i], 0.30f, 0.f);
+        add_sine(b + i * seg, seg, notes[i] * 2.f, 0.07f, 0.f);
     }
-    env_apply(b, n, 0.010f, 0.18f);
+    envelope(b, n, 0.005f, 5.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
-static void make_player_hurt(int idx) {
-    int n = (int)(0.22f * SR);
-    int16_t *b = alloc_buf(n);
-    /* triangle descendant, plus chaud que saw */
-    mix_tri (b, n, 230.f, 0.45f, 0.6f);
-    mix_sine(b, n, 460.f, 0.18f, 0.7f);
-    mix_noise(b, n, 0.07f);
-    low_pass(b, n, 0.30f);
-    env_apply(b, n, 0.005f, 0.16f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_death(int idx) {
-    int n = (int)(0.70f * SR);
-    int16_t *b = alloc_buf(n);
-    mix_tri (b, n, 280.f, 0.55f, 0.7f);
-    mix_sine(b, n, 140.f, 0.40f, 0.5f);
-    mix_noise(b, n, 0.10f);
-    low_pass(b, n, 0.18f);
-    env_apply(b, n, 0.010f, 0.40f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_boss(int idx) {
-    int n = (int)(0.95f * SR);
-    int16_t *b = alloc_buf(n);
-    /* drone bas montant, rappelle Hades */
-    mix_sine(b, n,  70.f, 0.55f, -0.4f);
-    mix_tri (b, n,  55.f, 0.30f, -0.2f);
-    mix_sine(b, n, 110.f, 0.20f, -0.4f);
-    low_pass(b, n, 0.10f);
-    env_apply(b, n, 0.06f, 0.40f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_portal(int idx) {
-    int n = (int)(0.50f * SR);
-    int16_t *b = alloc_buf(n);
-    /* sinus modulé par sinus lent (glissando ethere) */
-    for (int i = 0; i < n; i++) {
-        float t = i / (float)SR;
-        float f = 540.f + sinf(t * 8.f) * 180.f;
-        float s = sinf(t * f * 6.2831f);
-        s += 0.3f * sinf(t * f * 2.f * 6.2831f);
-        int v = (int)(s * 9000);
-        b[i] = (int16_t)v;
-    }
-    env_apply(b, n, 0.05f, 0.25f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_shoot(int idx) {
-    int n = (int)(0.10f * SR);
-    int16_t *b = alloc_buf(n);
-    /* ton clair chute pitch, sinus pas square */
-    mix_sine(b, n, 980.f, 0.40f, 5.f);
-    mix_tri (b, n, 490.f, 0.20f, 4.f);
-    mix_noise(b, n, 0.06f);
-    env_apply(b, n, 0.003f, 0.08f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
-static void make_zap(int idx) {
-    int n = (int)(0.14f * SR);
-    int16_t *b = alloc_buf(n);
-    /* eclair : sinus haut + harmonique, modulation fast */
-    for (int i = 0; i < n; i++) {
-        float t = i / (float)SR;
-        float f = 1300.f * (1.f - t * 5.f);
-        if (f < 200.f) f = 200.f;
-        float s = sinf(t * f * 6.2831f);
-        s += 0.4f * sinf(t * f * 2.f * 6.2831f);
-        int v = (int)(s * 12000);
-        b[i] = (int16_t)v;
-    }
-    mix_noise(b, n, 0.04f);
-    env_apply(b, n, 0.002f, 0.10f);
-    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
-}
-
+/* fuse : long arpege harmonique pour la fusion */
 static void make_fuse(int idx) {
-    /* fusion : long arpege harmonique */
     int n = (int)(0.85f * SR);
     int16_t *b = alloc_buf(n);
     int seg = n / 5;
     float notes[5] = { 392.f, 523.f, 659.f, 880.f, 1175.f };
     for (int i = 0; i < 5; i++) {
-        mix_sine(b + i * seg, seg, notes[i], 0.28f, 0.f);
-        mix_sine(b + i * seg, seg, notes[i] * 1.5f, 0.10f, 0.f);
+        add_sine(b + i * seg, seg, notes[i], 0.28f, 0.f);
+        add_sine(b + i * seg, seg, notes[i] * 1.5f, 0.08f, 0.f);
     }
-    env_apply(b, n, 0.008f, 0.25f);
+    envelope(b, n, 0.005f, 4.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* hurt joueur : grognement court sourd */
+static void make_player_hurt(int idx) {
+    int n = (int)(0.18f * SR);
+    int16_t *b = alloc_buf(n);
+    add_sine(b, n, 220.f, 0.40f, 5.f);
+    add_noise(b, n, 0.06f);
+    low_pass(b, n, 0.20f);
+    envelope(b, n, 0.005f, 14.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* death joueur : descente longue */
+static void make_death(int idx) {
+    int n = (int)(0.65f * SR);
+    int16_t *b = alloc_buf(n);
+    add_sine(b, n, 280.f, 0.45f, 3.5f);
+    add_sine(b, n, 140.f, 0.30f, 2.5f);
+    low_pass(b, n, 0.15f);
+    envelope(b, n, 0.010f, 4.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* boss : drone bas montant en pression */
+static void make_boss(int idx) {
+    int n = (int)(0.90f * SR);
+    int16_t *b = alloc_buf(n);
+    /* glissando montant : pitch_decay negatif = montee */
+    add_sine(b, n,  80.f, 0.50f, -0.6f);
+    add_sine(b, n,  60.f, 0.30f, -0.4f);
+    add_sine(b, n, 160.f, 0.18f, -0.6f);
+    low_pass(b, n, 0.10f);
+    envelope(b, n, 0.080f, 2.5f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* portal : sinus modulee douce */
+static void make_portal(int idx) {
+    int n = (int)(0.45f * SR);
+    int16_t *b = alloc_buf(n);
+    for (int i = 0; i < n; i++) {
+        float t = i / (float)SR;
+        float f = 540.f + sinf(t * 7.f) * 120.f;
+        float s = sinf(t * f * 6.2831f);
+        s += 0.30f * sinf(t * f * 2.f * 6.2831f);
+        b[i] = (int16_t)(s * 8000);
+    }
+    envelope(b, n, 0.05f, 4.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* shoot : ton sec */
+static void make_shoot(int idx) {
+    int n = (int)(0.08f * SR);
+    int16_t *b = alloc_buf(n);
+    add_sine(b, n,  900.f, 0.32f, 8.f);
+    add_sine(b, n, 1800.f, 0.10f, 12.f);
+    envelope(b, n, 0.002f, 28.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* zap : eclair haut, harmonique courte */
+static void make_zap(int idx) {
+    int n = (int)(0.10f * SR);
+    int16_t *b = alloc_buf(n);
+    for (int i = 0; i < n; i++) {
+        float t = i / (float)SR;
+        float f = 1200.f * expf(-7.f * t);
+        if (f < 200.f) f = 200.f;
+        float s = sinf(t * f * 6.2831f);
+        s += 0.30f * sinf(t * f * 2.f * 6.2831f);
+        b[i] = (int16_t)(s * 9000);
+    }
+    envelope(b, n, 0.002f, 24.f);
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
@@ -329,15 +287,14 @@ void sfx_play(Game *g, SfxId id) {
     int vol = g->settings.sfx_volume;
     if (vol <= 0) return;
     Uint32 queued = SDL_GetQueuedAudioSize(g->audio_dev);
-    if (queued > (Uint32)(SR * 4)) return;
+    if (queued > (Uint32)(SR * 4)) return;   /* anti-runaway */
     if (vol >= 4) {
         SDL_QueueAudio(g->audio_dev, g_sfx_data[id], g_sfx_len[id] * sizeof(int16_t));
     } else {
         int n = g_sfx_len[id];
         int16_t *tmp = (int16_t *)malloc((size_t)n * sizeof(int16_t));
         if (!tmp) return;
-        int num = vol, den = 4;
-        for (int i = 0; i < n; i++) tmp[i] = (int16_t)((int)g_sfx_data[id][i] * num / den);
+        for (int i = 0; i < n; i++) tmp[i] = (int16_t)((int)g_sfx_data[id][i] * vol / 4);
         SDL_QueueAudio(g->audio_dev, tmp, (Uint32)(n * sizeof(int16_t)));
         free(tmp);
     }

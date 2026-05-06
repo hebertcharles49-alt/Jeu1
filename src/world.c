@@ -208,18 +208,26 @@ int projectile_spawn(Game *g, Projectile p) {
 }
 
 int particle_spawn_kind(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size, int kind) {
+    /* 1) on cherche un slot libre */
+    int free_slot = -1;
+    /* 2) fallback : si pool plein, on remplace la particule LA PLUS PROCHE
+     *    de mourir (life restante minimum). Comportement defini > drop
+     *    silencieux. Cf. critique : "particules sans plafond global". */
+    int oldest = 0;
+    float oldest_life = g->particles[0].life;
     for (int i = 0; i < MAX_PARTICLES; i++) {
-        if (!g->particles[i].alive) {
-            Particle *p = &g->particles[i];
-            p->alive = true;
-            p->x = x; p->y = y; p->vx = vx; p->vy = vy;
-            p->life = life; p->life_max = life;
-            p->color = color; p->size = size;
-            p->kind = kind;
-            return i;
-        }
+        Particle *q = &g->particles[i];
+        if (!q->alive) { free_slot = i; break; }
+        if (q->life < oldest_life) { oldest = i; oldest_life = q->life; }
     }
-    return -1;
+    int idx = (free_slot >= 0) ? free_slot : oldest;
+    Particle *p = &g->particles[idx];
+    p->alive = true;
+    p->x = x; p->y = y; p->vx = vx; p->vy = vy;
+    p->life = life; p->life_max = life;
+    p->color = color; p->size = size;
+    p->kind = kind;
+    return idx;
 }
 
 int particle_spawn(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size) {
@@ -484,9 +492,14 @@ void update_player(Game *g) {
                         float fx = pk->x + cosf(ang) * 18.f;
                         float fy = pk->y + sinf(ang) * 18.f;
                         int rr = rand() % 100;
-                        if (rr < 40) pickup_spawn(g, PU_COIN, 1 + rand()%3, fx, fy);
-                        else if (rr < 60) pickup_spawn(g, PU_HEART, 0, fx, fy);
-                        else if (rr < 75) pickup_spawn(g, PU_SOUL, 0, fx, fy);
+                        if (rr < 35) pickup_spawn(g, PU_COIN, 1 + rand()%3, fx, fy);
+                        else if (rr < 55) {
+                            int t = rand() % 3;
+                            int heal = (t == 0) ? 8 : (t == 1) ? 16 : 12;
+                            pickup_spawn(g, PU_FOOD, heal, fx, fy);
+                        }
+                        else if (rr < 70) pickup_spawn(g, PU_SOUL, 0, fx, fy);
+                        else if (rr < 73) pickup_spawn(g, PU_SCROLL, 0, fx, fy);
                         else {
                             int unlocked[8]; int n = 0;
                             for (int e = 1; e < EL_COUNT; e++)
@@ -510,6 +523,38 @@ void update_player(Game *g) {
                 case PU_ITEM:
                     inventory_pickup(g, pk->item);
                     break;
+                case PU_FOOD: {
+                    /* nourriture variee : value = quantite de PV (defaut 12) */
+                    int heal = pk->value > 0 ? pk->value : 12;
+                    p->hp += (float)heal;
+                    if (p->hp > p->maxhp) p->hp = p->maxhp;
+                    sfx_play(g, SFX_PICKUP);
+                    break;
+                }
+                case PU_SCROLL: {
+                    /* parchemin de lore : affiche un extrait pendant 6s.
+                     * Lore distillee plutot qu'un menu dedie (Darkest-D-like). */
+                    static const char *SNIPPETS[] = {
+                        "Sept eclats sont tombes du Cristal. Sept couleurs.",
+                        "Le Donjon respire. Il sait que tu es la.",
+                        "Au troisieme etage, les murs ont commence a saigner.",
+                        "Le Forgeron-Roi fond les ames pour son ACIER.",
+                        "La Fee hait le Vide. Le Vide la nourrit.",
+                        "Le SACRE et les TENEBRES sont nes du meme silence.",
+                        "Aucun heros n'est revenu de l'etage 10.",
+                        "L'EAU eteint le FEU. Mais la FOUDRE bout l'EAU.",
+                        "Les Gardiens portent les couleurs des elements -- frappe leur faiblesse.",
+                        "Trois eclats greffes : la lame change de chant.",
+                        "Une lame seule te tuera. Deux te garderont en vie.",
+                        "Les ennemis nommes sont nes des reves d'autres heros.",
+                    };
+                    int n = (int)(sizeof(SNIPPETS) / sizeof(SNIPPETS[0]));
+                    const char *s = SNIPPETS[rand() % n];
+                    snprintf(g->scroll_text, sizeof(g->scroll_text), "%s", s);
+                    g->scroll_t = 6.f;
+                    sfx_play(g, SFX_LEVELUP);
+                    break;
+                }
             }
             pk->alive = false;
         }
@@ -527,10 +572,19 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
         float a = (rand() % 360) * 0.01745f;
         pickup_spawn(g, PU_COIN, 1, e->x + cosf(a) * 6, e->y + sinf(a) * 6);
     }
-    if ((rand() % 100) < (e->is_boss ? 100 : 7)) pickup_spawn(g, PU_HEART, 0, e->x, e->y);
+    /* Nourriture variee : petit poulet (8 PV), grosse cuisse (16), pain (12).
+     * Chaque drop pioche au hasard un type. La chance reste la meme. */
+    if ((rand() % 100) < (e->is_boss ? 100 : 7)) {
+        int t = rand() % 3;
+        int heal = (t == 0) ? 8 : (t == 1) ? 16 : 12;
+        pickup_spawn(g, PU_FOOD, heal, e->x, e->y);
+    }
     if ((rand() % 100) < (e->is_boss ? 100 : 6)) pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
+    /* parchemins de lore : rare. Garanti chez le boss, 1.5% chez les autres. */
+    if ((rand() % 1000) < (e->is_boss ? 600 : 15))
+        pickup_spawn(g, PU_SCROLL, 0, e->x, e->y);
     if ((rand() % 100) < (e->is_boss ? 60 : 5)) {
-        int unlocked[8]; int n = 0;
+        int unlocked[16]; int n = 0;
         for (int el = 1; el < EL_COUNT; el++)
             if (g->meta.element_discovered[el]) unlocked[n++] = el;
         if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
@@ -597,8 +651,12 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el, float kx
     }
     if (dmg > 25.f) sfx_play(g, SFX_HEAVY_HIT);
     else if (dmg > 0.f) sfx_play(g, SFX_HIT);
-    if (e->hp <= 0.f) {
-        e->alive = false;
+    if (e->hp <= 0.f && e->dying_t <= 0.f) {
+        /* declenche l'animation de mort : le corps reste rendu sans IA
+           pendant dying_max secondes, puis disparait. */
+        e->dying_max = e->is_boss ? 1.20f : 0.45f;
+        e->dying_t   = e->dying_max;
+        e->hp = 0.f;
         g->run_kills++;
         enemy_drop_loot(g, e);
         /* split slime */
@@ -651,6 +709,7 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     if (idx < 0 || idx >= MAX_ENEMIES) return;
     Enemy *e = &g->enemies[idx];
     if (!e->alive) return;
+    if (e->dying_t > 0.f) return;   /* ne re-tue pas un cadavre en train de tomber */
     enemy_take_damage(g, e, dmg, el, kx, ky);
 }
 
@@ -758,6 +817,13 @@ void update_enemies(Game *g) {
         if (!e->alive) continue;
 
         if (e->hit_flash > 0.f) e->hit_flash -= dt;
+
+        /* etat de mort : on rend le corps mais on coupe IA + collisions */
+        if (e->dying_t > 0.f) {
+            e->dying_t -= dt;
+            if (e->dying_t <= 0.f) e->alive = false;
+            continue;
+        }
 
         if (e->fire_dot > 0.f) {
             e->fire_dot -= dt;

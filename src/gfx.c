@@ -273,12 +273,17 @@ static const char *FS_TERR =
 "uniform vec3 u_light_dir;\n"
 "uniform vec3 u_player_pos;\n"
 "void main() {\n"
-"    float diff = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.25);\n"
+"    /* lambert global doux */\n"
+"    float diff = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.45);\n"
 "    vec3 col = v_color * diff;\n"
-"    /* fog distance depuis joueur */\n"
-"    float d = length(v_pos.xz - u_player_pos.xz);\n"
-"    float fog = clamp(1.0 - (d - 8.0) / 18.0, 0.0, 1.0);\n"
-"    col = mix(vec3(0.020, 0.012, 0.040), col, fog);\n"
+"    /* lampe-torche radiale autour du joueur (eclaire les couloirs) */\n"
+"    float pd = length(v_pos.xz - u_player_pos.xz);\n"
+"    float plight = clamp(1.0 - pd / 6.5, 0.0, 1.0);\n"
+"    plight = plight * plight;\n"
+"    col += vec3(0.40, 0.30, 0.18) * plight;\n"
+"    /* fog plus lointain : 16+ tiles avant attenuation */\n"
+"    float fog = clamp(1.0 - (pd - 16.0) / 22.0, 0.0, 1.0);\n"
+"    col = mix(vec3(0.030, 0.020, 0.060), col, fog);\n"
 "    frag = vec4(col, 1.0);\n"
 "}\n";
 
@@ -306,7 +311,8 @@ static const char *FS_BB =
 "out vec4 frag;\n"
 "uniform vec3 u_light_dir;\n"
 "void main() {\n"
-"    float diff = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.4);\n"
+"    /* ambiance plus lumineuse pour que les entites soient visibles */\n"
+"    float diff = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.55);\n"
 "    frag = vec4(v_color * diff, 1.0);\n"
 "}\n";
 

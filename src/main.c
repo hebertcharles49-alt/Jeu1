@@ -70,103 +70,115 @@ static void apply_shake(Game *g, int *ox, int *oy) {
     *oy = (int)((rand() / (float)RAND_MAX - 0.5f) * 2.f * m);
 }
 
+/* clamp helper : cap simple low/high */
+static inline float clampf(float v, float lo, float hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
 void game_recompute_player_stats(Game *g) {
     Player *p = &g->player;
-    /* defaults */
-    float base_maxhp = 100.f, base_speed = 110.f, base_armor = 0.f;
-    float base_dmg_mul = 1.0f, base_lifesteal = 0.f, base_regen = 0.f;
-    float base_flat_dmg = 0.f;
-    float base_melee = 1.f, base_range = 1.f, base_elem = 1.f;
-    float base_atkspeed = 1.f;
-    float base_crit_chance = 0.05f, base_crit_dmg = 1.5f;
-    float base_rangem = 1.f;
-    float base_dodge = 0.f;
-    float base_aff[EL_COUNT];
-    for (int i = 0; i < EL_COUNT; i++) base_aff[i] = 0.f;
+    /* StatBlock unique : tous les modificateurs s'accumulent ici, puis
+     * un seul passage de clamp avant d'ecrire dans Player. */
+    StatBlock sb = {
+        .maxhp = 100.f, .speed = 110.f, .armor = 0.f,
+        .dmg_mul = 1.f, .lifesteal = 0.f, .regen = 0.f,
+        .flat_dmg = 0.f,
+        .melee = 1.f, .range = 1.f, .elem = 1.f,
+        .atk_speed = 1.f,
+        .crit_chance = 0.05f, .crit_dmg = 1.5f,
+        .range_mul = 1.f, .dodge = 0.f,
+    };
+    for (int i = 0; i < EL_COUNT; i++) sb.aff[i] = 0.f;
 
     /* hero archetype */
     switch (p->hero) {
-        case HERO_GUERRIER:  base_maxhp += 25.f; base_melee *= 1.15f; break;
-        case HERO_VOLEUR:    base_speed += 20.f; break;
-        case HERO_MAGE:      base_maxhp -= 20.f; base_elem  *= 1.30f; break;
-        case HERO_BERSERKER: base_maxhp -= 10.f; base_dmg_mul *= 1.20f; base_lifesteal = 0.08f; break;
-        case HERO_PALADIN:   base_armor += 2.f;  base_regen += 1.f; base_maxhp += 15.f; break;
-        case HERO_DRUIDE:    base_elem  *= 1.50f; base_melee *= 0.70f; break;
-        case HERO_ASSASSIN:  base_crit_chance += 0.25f; base_crit_dmg += 0.5f; base_maxhp -= 25.f; break;
-        case HERO_RANGER:    base_range *= 1.40f; base_melee *= 0.75f; break;
-        case HERO_TEMPLIER:  base_armor += 3.f; base_maxhp += 15.f; base_atkspeed *= 1.15f; break;
-        case HERO_NECROMANT: base_lifesteal = 0.15f; base_regen -= 1.f;
-                             base_aff[EL_VOID] += 0.20f; base_aff[EL_DARK] += 0.20f; break;
+        case HERO_GUERRIER:  sb.maxhp += 25.f; sb.melee *= 1.15f; break;
+        case HERO_VOLEUR:    sb.speed += 20.f; break;
+        case HERO_MAGE:      sb.maxhp -= 20.f; sb.elem  *= 1.30f; break;
+        case HERO_BERSERKER: sb.maxhp -= 10.f; sb.dmg_mul *= 1.20f; sb.lifesteal = 0.08f; break;
+        case HERO_PALADIN:   sb.armor += 2.f;  sb.regen += 1.f; sb.maxhp += 15.f; break;
+        case HERO_DRUIDE:    sb.elem  *= 1.50f; sb.melee *= 0.70f; break;
+        case HERO_ASSASSIN:  sb.crit_chance += 0.25f; sb.crit_dmg += 0.5f; sb.maxhp -= 25.f; break;
+        case HERO_RANGER:    sb.range *= 1.40f; sb.melee *= 0.75f; break;
+        case HERO_TEMPLIER:  sb.armor += 3.f; sb.maxhp += 15.f; sb.atk_speed *= 1.15f; break;
+        case HERO_NECROMANT: sb.lifesteal = 0.15f; sb.regen -= 1.f;
+                             sb.aff[EL_VOID] += 0.20f; sb.aff[EL_DARK] += 0.20f; break;
         default: break;
     }
 
     /* meta perm bonuses (sanctuaire) */
-    base_maxhp += g->meta.perm_hp;
-    base_armor += g->meta.perm_armor;
-    base_speed += g->meta.perm_speed;
-    base_dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
+    sb.maxhp += g->meta.perm_hp;
+    sb.armor += g->meta.perm_armor;
+    sb.speed += g->meta.perm_speed;
+    sb.dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
 
     /* equipement */
     for (int s = 0; s < EQUIP_SLOTS; s++) {
         if (!p->equipped[s].occupied) continue;
         float v = p->equipped[s].stat_value;
         switch ((EquipSlot)s) {
-            case SLOT_HELM:   base_maxhp   += v;          break;
-            case SLOT_CHEST:  base_armor   += v;          break;
-            case SLOT_LEGS:   base_speed   += v;          break;
-            case SLOT_BOOTS:  base_dodge   += v * 0.5f;   break;
-            case SLOT_BELT:   base_regen   += v;          break;
-            case SLOT_GLOVES: base_dmg_mul *= (1.f + v);  break;
+            case SLOT_HELM:   sb.maxhp   += v;          break;
+            case SLOT_CHEST:  sb.armor   += v;          break;
+            case SLOT_LEGS:   sb.speed   += v;          break;
+            case SLOT_BOOTS:  sb.dodge   += v * 0.5f;   break;
+            case SLOT_BELT:   sb.regen   += v;          break;
+            case SLOT_GLOVES: sb.dmg_mul *= (1.f + v);  break;
             default: break;
         }
     }
 
-    /* shop items (effets cumulatifs) */
+    /* shop : on accumule via la nouvelle API qui prend un StatBlock */
     for (int i = 0; i < p->shop_purchased_count; i++) {
-        int rid = p->shop_purchased[i];
-        /* applique l'effet du recipe -- callback exterieur */
-        extern void shop_recipe_apply_effect(Game *g, int rid,
-                                             float *maxhp, float *speed, float *armor,
-                                             float *dmg_mul, float *lifesteal, float *regen,
-                                             float *flat_dmg, float *melee, float *range,
-                                             float *elem, float *atkspeed, float *crit_c,
-                                             float *crit_d, float *rangem, float *dodge,
-                                             float *aff);
-        shop_recipe_apply_effect(g, rid,
-            &base_maxhp, &base_speed, &base_armor,
-            &base_dmg_mul, &base_lifesteal, &base_regen,
-            &base_flat_dmg, &base_melee, &base_range,
-            &base_elem, &base_atkspeed, &base_crit_chance,
-            &base_crit_dmg, &base_rangem, &base_dodge,
-            base_aff);
+        shop_recipe_apply_to_block(p->shop_purchased[i], &sb);
     }
 
-    /* clamp et applique */
-    if (base_maxhp < 1.f) base_maxhp = 1.f;
-    if (base_speed < 30.f) base_speed = 30.f;
-    if (base_atkspeed < 0.3f) base_atkspeed = 0.3f;
-    if (base_crit_chance < 0.f) base_crit_chance = 0.f;
-    if (base_crit_chance > 1.f) base_crit_chance = 1.f;
-    if (base_dodge < 0.f) base_dodge = 0.f;
-    if (base_dodge > 0.75f) base_dodge = 0.75f;
+    /* ===== CLAMPS EXPLICITES ====================================
+     * Garantit que toute valeur out-of-range (achats / heros / equip)
+     * est ramenee dans une plage saine avant d'ecrire sur Player. */
+    sb.maxhp     = clampf(sb.maxhp,    1.f, 9999.f);
+    sb.speed     = clampf(sb.speed,   30.f,  400.f);
+    sb.armor     = clampf(sb.armor,    0.f,   50.f);
+    sb.dmg_mul   = clampf(sb.dmg_mul,  0.1f, 10.f);
+    sb.lifesteal = clampf(sb.lifesteal,0.f,   0.50f);  /* cap 50% */
+    sb.regen     = clampf(sb.regen,   -5.f,  10.f);
+    sb.flat_dmg  = clampf(sb.flat_dmg, 0.f, 200.f);
+    sb.melee     = clampf(sb.melee,    0.1f,  5.f);
+    sb.range     = clampf(sb.range,    0.1f,  5.f);
+    sb.elem      = clampf(sb.elem,     0.1f,  5.f);
+    /* atk_speed : multiplicateur du cooldown ; minimum 0.30 evite cadence absurde */
+    sb.atk_speed = clampf(sb.atk_speed, 0.30f, 3.f);
+    /* crit chance : diminishing returns au-dela de 75%, cap dur 95% */
+    if (sb.crit_chance > 0.75f) {
+        float over = sb.crit_chance - 0.75f;
+        sb.crit_chance = 0.75f + over * 0.25f;
+    }
+    sb.crit_chance = clampf(sb.crit_chance, 0.f, 0.95f);
+    sb.crit_dmg    = clampf(sb.crit_dmg,    1.f, 6.f);
+    sb.range_mul   = clampf(sb.range_mul,   0.5f, 3.f);
+    sb.dodge       = clampf(sb.dodge,       0.f, 0.75f);
+    /* affinites elementaires : -50%..+200% par element */
+    for (int i = 0; i < EL_COUNT; i++) sb.aff[i] = clampf(sb.aff[i], -0.50f, 2.00f);
 
+    /* applique sur Player */
     float ratio = (p->maxhp > 0.f) ? (p->hp / p->maxhp) : 1.f;
-    p->maxhp = base_maxhp;
-    p->speed = base_speed;
-    p->armor = base_armor;
-    p->dmg_mul = base_dmg_mul;
-    p->lifesteal = base_lifesteal;
-    p->regen_per_sec = base_regen;
-    p->flat_dmg = base_flat_dmg;
-    p->melee_dmg_mul = base_melee;
-    p->range_dmg_mul = base_range;
-    p->elem_dmg_mul = base_elem;
-    p->atk_speed_mul = base_atkspeed;
-    p->crit_chance = base_crit_chance;
-    p->crit_dmg = base_crit_dmg;
-    p->range_mul = base_rangem;
-    p->dodge = base_dodge;
-    for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = base_aff[i];
+    p->maxhp        = sb.maxhp;
+    p->speed        = sb.speed;
+    p->armor        = sb.armor;
+    p->dmg_mul      = sb.dmg_mul;
+    p->lifesteal    = sb.lifesteal;
+    p->regen_per_sec = sb.regen;
+    p->flat_dmg     = sb.flat_dmg;
+    p->melee_dmg_mul= sb.melee;
+    p->range_dmg_mul= sb.range;
+    p->elem_dmg_mul = sb.elem;
+    p->atk_speed_mul= sb.atk_speed;
+    p->crit_chance  = sb.crit_chance;
+    p->crit_dmg     = sb.crit_dmg;
+    p->range_mul    = sb.range_mul;
+    p->dodge        = sb.dodge;
+    for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
     if (p->hp <= 0.f || ratio > 1.f) p->hp = p->maxhp;
     else                              p->hp = ratio * p->maxhp;
 }
@@ -549,26 +561,22 @@ void game_run(Game *g) {
         if (g->state == GS_TITLE) {
             bool start = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
                          (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]);
-            /* mouse zones (alignees sur render_title) */
-            int yA = INTERNAL_H/2 + 20;
-            int yB = INTERNAL_H/2 + 36;
-            int yC = INTERNAL_H/2 + 52;
-            int yD = INTERNAL_H/2 + 68;
-            int yE = INTERNAL_H/2 + 84;
+            /* mouse zones (alignees sur render_title : 4 lignes desormais) */
+            int yA = INTERNAL_H/2 + 20;   /* JOUER */
+            int yB = INTERNAL_H/2 + 36;   /* OPTIONS */
+            int yC = INTERNAL_H/2 + 52;   /* AIDE */
+            int yD = INTERNAL_H/2 + 68;   /* QUITTER */
             if (mouse_in_rect(g, INTERNAL_W/2 - 100, yA, 200, 12) && mouse_clicked(g)) start = true;
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yB, 200, 12) && mouse_clicked(g))
-                g->state = GS_LORE;
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yC, 200, 12) && mouse_clicked(g)) {
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yB, 200, 12) && mouse_clicked(g)) {
                 g->opt_return = GS_TITLE; g->opt_section = 0; g->opt_cursor = 0;
                 g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
             }
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yD, 200, 12) && mouse_clicked(g))
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yC, 200, 12) && mouse_clicked(g))
                 g->state = GS_HELP;
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yE, 200, 12) && mouse_clicked(g))
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yD, 200, 12) && mouse_clicked(g))
                 quit = true;
             if (start) g->state = GS_HUB;
             if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) g->state = GS_HELP;
-            if (g->keys[SDL_SCANCODE_L] && !g->keys_prev[SDL_SCANCODE_L]) g->state = GS_LORE;
             if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
                 g->opt_return = GS_TITLE;
                 g->opt_section = 0;
@@ -599,6 +607,7 @@ void game_run(Game *g) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
             g->run_time += g->dt;
+            if (g->scroll_t > 0.f) g->scroll_t -= g->dt;
             if (g->boss_intro_t > 0.f) g->boss_intro_t -= dt;
             if (g->flash_t > 0.f)      g->flash_t -= dt;
             update_player(g);

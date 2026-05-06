@@ -152,6 +152,9 @@ typedef struct {
     int   split_left;
     bool  is_boss;
     float telegraph_t;
+    /* anim de mort : tant que >0, le corps est rendu et fond, sans IA */
+    float dying_t;
+    float dying_max;
     /* ---- procedural ---- */
     char  name[40];           /* "Vorgar le Brulant" */
     /* stats (peuvent etre modifiees par mods/affixes) */
@@ -202,6 +205,8 @@ typedef enum {
     PU_COIN,
     PU_PORTAL,
     PU_ITEM,        /* equipement */
+    PU_SCROLL,      /* parchemin de lore (Darkest-Dungeon-like) */
+    PU_FOOD,        /* nourriture (poulet/legume) - regen PV */
 } PickupKind;
 
 typedef struct {
@@ -427,6 +432,10 @@ typedef struct {
     int           floor_index;
     bool          portal_spawned;
 
+    /* parchemin de lore actuel (overlay UI temporaire) */
+    char          scroll_text[224];
+    float         scroll_t;
+
     /* shop */
     ShopItem      shop_items[SHOP_SLOTS];
     int           shop_cursor;
@@ -561,6 +570,19 @@ void  render_lore(Game *g);
 bool  mouse_in_rect(Game *g, int x, int y, int w, int h);
 bool  mouse_clicked(Game *g);
 
+/* StatBlock : centralise toutes les stats joueur en une seule struct,
+ * pour eviter les fonctions a 15+ pointeurs. game_recompute_player_stats
+ * accumule dans un StatBlock puis copie vers Player avec clamps. */
+typedef struct {
+    float maxhp, speed, armor;
+    float dmg_mul, lifesteal, regen;
+    float flat_dmg, melee, range, elem;
+    float atk_speed;
+    float crit_chance, crit_dmg;
+    float range_mul, dodge;
+    float aff[EL_COUNT];
+} StatBlock;
+
 /* shop (Brotato-like) */
 void  shop_generate(Game *g);
 void  shop_buy(Game *g, int idx);
@@ -571,6 +593,8 @@ int   shop_recipe_count(void);
 int   shop_recipe_cost(int recipe_id);
 uint32_t shop_recipe_color(int recipe_id);   /* couleur d'aperçu */
 void  shop_apply_recipe(Game *g, int recipe_id);
+/* applique l effet d une recette sur un StatBlock (additif). */
+void  shop_recipe_apply_to_block(int recipe_id, StatBlock *sb);
 
 /* procedural names */
 void  enemy_generate_name(Enemy *e, int floor_index);

@@ -137,33 +137,29 @@ uint32_t shop_recipe_color(int rid) {
     return rarity_color(RECIPES[rid].rarity);
 }
 
-void shop_recipe_apply_effect(Game *g, int rid,
-        float *maxhp, float *speed, float *armor,
-        float *dmg_mul, float *lifesteal, float *regen,
-        float *flat_dmg, float *melee, float *range,
-        float *elem, float *atk_speed, float *crit_c,
-        float *crit_d, float *rangem, float *dodge,
-        float *aff) {
-    (void)g;
+/* Nouvelle API : accumule dans un StatBlock unique au lieu de 15 pointeurs.
+ * Cette signature est stable (StatBlock peut grandir sans casser l API). */
+void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
+    if (!sb) return;
     if (rid < 0 || rid >= NUM_RECIPES) return;
     const Recipe *r = &RECIPES[rid];
-    *maxhp     += r->d_maxhp;
-    *speed     += r->d_speed;
-    *armor     += r->d_armor;
-    *dmg_mul   += r->d_dmg_mul;
-    *lifesteal += r->d_lifesteal;
-    *regen     += r->d_regen;
-    *flat_dmg  += r->d_flat;
-    *melee     += r->d_melee;
-    *range     += r->d_range;
-    *elem      += r->d_elem;
-    *atk_speed += r->d_atk_speed;
-    *crit_c    += r->d_crit_chance;
-    *crit_d    += r->d_crit_dmg;
-    *rangem    += r->d_range_mul;
-    *dodge     += r->d_dodge;
-    if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) aff[r->d_aff_el]  += r->d_aff_val;
-    if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) aff[r->d_aff_el2] += r->d_aff_val2;
+    sb->maxhp     += r->d_maxhp;
+    sb->speed     += r->d_speed;
+    sb->armor     += r->d_armor;
+    sb->dmg_mul   += r->d_dmg_mul;
+    sb->lifesteal += r->d_lifesteal;
+    sb->regen     += r->d_regen;
+    sb->flat_dmg  += r->d_flat;
+    sb->melee     += r->d_melee;
+    sb->range     += r->d_range;
+    sb->elem      += r->d_elem;
+    sb->atk_speed += r->d_atk_speed;
+    sb->crit_chance += r->d_crit_chance;
+    sb->crit_dmg    += r->d_crit_dmg;
+    sb->range_mul   += r->d_range_mul;
+    sb->dodge       += r->d_dodge;
+    if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) sb->aff[r->d_aff_el]  += r->d_aff_val;
+    if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) sb->aff[r->d_aff_el2] += r->d_aff_val2;
 }
 
 /* generation aleatoire selon l'etage : raretes plus elevees plus tard */

@@ -492,6 +492,27 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
     if (e->is_boss) { h = 1.7f; w = 1.15f; }
     if (e->kind == EK_SLIME) { h = 0.45f; w = 0.7f; }
 
+    /* anim de mort : le corps fond dans le sol, retreci, et tinte rouge.
+     * dying_ratio = 1 -> mort fraiche ; -> 0 = sur le point de disparaitre */
+    if (e->dying_t > 0.f) {
+        float ratio = e->dying_max > 0.f ? (e->dying_t / e->dying_max) : 0.f;
+        if (ratio < 0.f) ratio = 0.f;
+        float scale = 0.20f + 0.80f * ratio;             /* shrinks to 20% */
+        float sink  = (1.f - ratio) * (h * 0.5f);        /* coule */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, h * 0.5f * scale - sink, pos.z),
+                     v3_make(w * scale, h * scale, w * scale),
+                     r * (0.7f + 0.3f * ratio),
+                     gg * 0.4f * ratio,
+                     b  * 0.4f * ratio);
+        /* particules ascendantes */
+        if ((rand() % 100) < 25) {
+            particle_spawn_kind(g, e->x, e->y, (rand()%40)-20, -50,
+                                0.4f, (uint32_t)(0xC02828FF), 2.f, 0);
+        }
+        return;
+    }
+
     /* swing/bobbing en mouvement */
     float swing = sinf(g->time * 8.f + e->x * 0.13f + e->y * 0.07f) * 0.06f;
     float wobble = (e->kind == EK_SLIME) ? sinf(g->time * 6.f + e->x) * 0.08f : 0.f;
@@ -671,6 +692,26 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
             uint32_t c = rarity_color(pk->item.rarity);
             r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
             sz=0.30f; break;
+        }
+        case PU_FOOD: {
+            /* poulet : 2 cubes pour la cuisse */
+            gfx_box_draw(g->renderer, pos, v3_make(0.30f, 0.18f, 0.18f),
+                         0.78f, 0.55f, 0.30f);    /* corps brun */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, pos.y + 0.14f, pos.z),
+                         v3_make(0.10f, 0.12f, 0.10f),
+                         0.95f, 0.88f, 0.75f);    /* os blanc */
+            return;
+        }
+        case PU_SCROLL: {
+            /* parchemin : cube creme + bande rouge */
+            gfx_box_draw(g->renderer, pos, v3_make(0.32f, 0.10f, 0.22f),
+                         0.92f, 0.86f, 0.65f);
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, pos.y + 0.06f, pos.z),
+                         v3_make(0.10f, 0.04f, 0.24f),
+                         0.70f, 0.18f, 0.18f);
+            return;
         }
     }
     gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
@@ -1302,6 +1343,33 @@ void render_world_overlay_ui(Game *g) {
         text_draw(gc, INTERNAL_W/2 - text_width("CONFRONTATION")/2,
                   INTERNAL_H/2 + 4, "CONFRONTATION", 0xFFD040FF);
     }
+
+    /* parchemin de lore : overlay bas d'ecran. Fade in/out doux. */
+    if (g->scroll_t > 0.f && g->scroll_text[0]) {
+        float t = g->scroll_t;
+        float a = 1.f;
+        if (t > 5.f)      a = (6.f - t);          /* fade-in 1s */
+        else if (t < 1.f) a = t;                  /* fade-out 1s */
+        if (a < 0.f) a = 0.f;
+        if (a > 1.f) a = 1.f;
+        int alpha = (int)(220.f * a);
+        gfx_set_blend(gc, true);
+        uint32_t bg = (uint32_t)(0x18120800u | (alpha & 0xFF));
+        gfx_set_color(gc, bg);
+        gfx_fill_rect(gc, 30, INTERNAL_H - 70, INTERNAL_W - 60, 50);
+        /* bordure parchemin */
+        uint32_t bord = (uint32_t)(0xC0A86000u | (alpha & 0xFF));
+        gfx_set_color(gc, bord);
+        gfx_fill_rect(gc, 30, INTERNAL_H - 70, INTERNAL_W - 60, 1);
+        gfx_fill_rect(gc, 30, INTERNAL_H - 21, INTERNAL_W - 60, 1);
+        gfx_set_blend(gc, false);
+        uint32_t txt = (uint32_t)(0xE8D0A000u | (alpha & 0xFF));
+        text_draw(gc, INTERNAL_W/2 - text_width("PARCHEMIN")/2,
+                  INTERNAL_H - 64, "PARCHEMIN", txt);
+        int tw = text_width(g->scroll_text);
+        text_draw(gc, INTERNAL_W/2 - tw/2,
+                  INTERNAL_H - 48, g->scroll_text, txt);
+    }
 }
 
 /* ---------- HUD ---------- */
@@ -1792,11 +1860,11 @@ void render_title(Game *g) {
     text_draw(g->renderer, INTERNAL_W/2 - text_width("DOOM x HADES x ISAAC x DIABLO")/2,
               INTERNAL_H/2 - 38, "DOOM x HADES x ISAAC x DIABLO", 0xC0A080FF);
 
-    /* menu vertical */
-    const char *items[5] = { "JOUER", "LORE", "OPTIONS", "AIDE", "QUITTER" };
+    /* menu vertical (lore retire : distille en jeu via parchemins) */
+    const char *items[4] = { "JOUER", "OPTIONS", "AIDE", "QUITTER" };
     int yA = INTERNAL_H/2 + 20;
     int rowh = 16;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         int yi = yA + i * rowh;
         bool hov = mouse_in_rect(g, INTERNAL_W/2 - 100, yi, 200, 12);
         uint32_t col = hov ? 0xFFFF80FF : (i == 0 ? 0x80FFA0FF : 0xCCCCCCFF);

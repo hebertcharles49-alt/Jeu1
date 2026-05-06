@@ -8,7 +8,12 @@
 #include <stdio.h>
 
 /* table d'efficacite element atk vs element def (Pokemon-like)
- * 1.0 = neutre, 2.0 = super-efficace, 0.5 = resiste */
+ * 1.0 = neutre, 2.0 = super-efficace, 0.5 = resiste
+ *
+ * IMPORTANT : cette table doit avoir EXACTEMENT EL_COUNT lignes et colonnes,
+ * et les lignes doivent etre dans l'ordre de l'enum Element. Si tu reorganises
+ * Element, tu dois mettre a jour ce tableau dans le meme ordre.
+ * L'assert ci-dessous attrape une desyncronisation enum vs table. */
 float elem_effectiveness(Element atk, Element def) {
     if (def == EL_NONE || atk == EL_NONE) return 1.0f;
     static const float T[EL_COUNT][EL_COUNT] = {
@@ -25,6 +30,11 @@ float elem_effectiveness(Element atk, Element def) {
         /*DARK */ { 1.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 1.5f, 1.0f, 0.5f, 2.0f },
         /*HOLY */ { 1.0f, 1.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 0.5f, 1.0f, 2.0f, 0.5f },
     };
+    /* compile-time : explose si EL_COUNT bouge sans qu'on touche la table */
+    _Static_assert(sizeof(T) / sizeof(T[0]) == EL_COUNT,
+        "elem_effectiveness: table T desynchronisee avec EL_COUNT");
+    _Static_assert(sizeof(T[0]) / sizeof(float) == EL_COUNT,
+        "elem_effectiveness: largeur de T desynchronisee avec EL_COUNT");
     return T[atk][def];
 }
 
@@ -186,12 +196,21 @@ void weapon_attach_element(Weapon *w, Element e) {
 }
 
 int weapon_combo_id(const Weapon *w) {
-    int mask = 0;
+    /* bitmask des elements presents : 1 bit par enum (sauf EL_NONE).
+     * Stocke en uint64_t pour autoriser jusqu'a 63 elements (la limite
+     * pratique etant l'explosion combinatoire de compute_combo bien avant).
+     * Le retour reste int (toujours <=2^31 valeurs en pratique) pour
+     * compat avec le reste du code. */
+    uint64_t mask = 0;
     for (int i = 0; i < w->element_count; i++) {
         Element e = w->elements[i];
-        if (e > 0 && e < 32) mask |= (1 << e);
+        if (e > 0 && (int)e < 64) mask |= ((uint64_t)1 << e);
     }
-    return mask;
+    /* on tronque en int car aucun element au-dela de 31 n'est utilise pour
+     * l'instant ; si tu en ajoutes au-dela, change egalement la signature */
+    _Static_assert(EL_COUNT <= 31,
+        "weapon_combo_id: passe la signature en uint64_t si EL_COUNT > 31");
+    return (int)mask;
 }
 
 static bool combo_has(int mask, Element a) { return (mask & (1 << a)) != 0; }
@@ -315,6 +334,7 @@ static int nearest_enemy(Game *g, float x, float y, float range, float *out_d) {
     int best = -1; float bestd = range * range;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!g->enemies[i].alive) continue;
+        if (g->enemies[i].dying_t > 0.f) continue;   /* skip cadavres */
         float dx = g->enemies[i].x - x;
         float dy = g->enemies[i].y - y;
         float d2 = dx * dx + dy * dy;
@@ -403,7 +423,10 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
         float dot = (dx * ax + dy * ay) / (d + 0.001f);
         if (dot < 0.5f) continue;
         world_enemy_damage(g, i, dmg, fx.status, ax * 200.f, ay * 200.f);
-        if (fx.lifesteal) p->hp += dmg * 0.05f;
+        if (fx.lifesteal) {
+            p->hp += dmg * 0.05f;
+            if (p->hp > p->maxhp) p->hp = p->maxhp;   /* cap */
+        }
         hits++;
     }
     cue_swing(p, 5, ax, ay);
@@ -434,7 +457,10 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
         world_enemy_damage(g, i, dmg, fx.status, ax * 220.f, ay * 220.f);
         if (fx.chain) chain_hit(g, i, dmg * 0.6f, fx.status, 2, fx.color);
         if (fx.aoe_explode) do_aoe_at(g, e->x, e->y, 30.f, dmg * 0.5f, fx.status, fx.color);
-        if (fx.lifesteal) p->hp += dmg * 0.05f;
+        if (fx.lifesteal) {
+            p->hp += dmg * 0.05f;
+            if (p->hp > p->maxhp) p->hp = p->maxhp;   /* cap */
+        }
         hits++;
     }
     /* slash arc */
@@ -592,11 +618,19 @@ void update_weapons(Game *g) {
         fx.dmg_mul *= pmul;
         fx.range_mul *= p->range_mul;
 
+        /* Gating coherent : toutes les armes "actives" (qui produisent un
+         * impact visible / coute du calcul) sont gatees sur la presence
+         * d'un ennemi en portee, sauf le bouclier qui est defensif et
+         * doit pouvoir reflechir des projectiles meme sans cible. */
         bool fire = true;
-        if (w->kind == W_FISTS || w->kind == W_SWORD || w->kind == W_AXE) {
-            float scan = (w->kind == W_AXE)
-                       ? w->base_range * fx.range_mul + 18.f
-                       : w->base_range * fx.range_mul + 10.f;
+        if (w->kind != W_SHIELD) {
+            float scan;
+            switch (w->kind) {
+                case W_AXE:    scan = w->base_range * fx.range_mul + 18.f; break;
+                case W_BOW:    scan = 320.f * fx.range_mul; break;
+                case W_WAND:   scan = w->base_range * fx.range_mul + 30.f; break;
+                default:       scan = w->base_range * fx.range_mul + 10.f; break;
+            }
             int t = nearest_enemy(g, p->x, p->y, scan, NULL);
             if (t < 0) fire = false;
         }
