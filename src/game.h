@@ -74,6 +74,17 @@ typedef struct {
     int        element_count;
 } Weapon;
 
+/* ---------- Triple Feedback Loop ----------
+ * Etat persistant d'un triple combo : monte sur hit/kill, decroit en
+ * dehors du combat, declenche un mode "overload" au-dela d'un seuil. */
+typedef struct {
+    float intensity;    /* 0.0 -> 2.0 ; monte sur hit/kill */
+    float decay_rate;   /* copie depuis TripleLoopDef a l'activation */
+    int   proc_count;   /* hits+kills depuis debut de salle */
+    bool  overloaded;   /* intensity > overload_threshold */
+} LoopState;
+#define MAX_TRIPLE_LOOPS 8
+
 /* ---------- Heroes ---------- */
 typedef enum {
     HERO_GUERRIER = 0,
@@ -207,6 +218,7 @@ typedef enum {
     PU_ITEM,        /* equipement */
     PU_SCROLL,      /* parchemin de lore (Darkest-Dungeon-like) */
     PU_FOOD,        /* nourriture (poulet/legume) - regen PV */
+    PU_SHRINE,      /* pacte : bonus + malus permanent pour la run */
 } PickupKind;
 
 typedef struct {
@@ -288,6 +300,12 @@ typedef struct {
     /* shop items achetes durant la course (effets cumulatifs) */
     int   shop_purchased[64];   /* tableau d'index d'item achete */
     int   shop_purchased_count;
+
+    /* ---- Triple feedback loop ----
+     * Etat persistant pour chaque triple combo definissant un loop. */
+    LoopState loop_states[MAX_TRIPLE_LOOPS];
+    int       active_loop_idx;    /* -1 = aucun triple actif */
+    int       active_loop_mask;   /* mask du triple actif */
 } Player;
 
 /* ---------- Map / Dungeon ---------- */
@@ -477,6 +495,11 @@ typedef struct {
     GameStateKind opt_return;            /* state to return to (title/hub) */
     char          opt_msg[64];
     float         opt_msg_t;
+
+    /* nombre d'ennemis vivants (non en train de mourir) maintenu par
+     * update_enemies. Utilise par loop_decay : la jauge ne decroit que
+     * quand la salle est vide. */
+    int           enemy_alive_count;
 } Game;
 
 /* ---------- API ---------- */
@@ -490,6 +513,12 @@ void  game_to_hub(Game *g);
 void  game_open_shop(Game *g);
 void  game_next_floor(Game *g);
 void  game_recompute_player_stats(Game *g);
+
+/* triple feedback loop : voir TripleLoopDef dans combat.c */
+void     loop_on_hit(Game *g);
+void     loop_on_kill(Game *g);
+void     loop_decay(Game *g, float dt);
+uint32_t triple_loop_aura_color(int loop_idx);
 
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);

@@ -620,6 +620,8 @@ void update_player(Game *g) {
             pk->alive = false;
         }
     }
+    /* feedback loop : decroit en dehors du combat (gere par enemy_alive_count) */
+    loop_decay(g, g->dt);
 }
 
 /* ---------- ENEMIES ---------- */
@@ -855,7 +857,11 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     Enemy *e = &g->enemies[idx];
     if (!e->alive) return;
     if (e->dying_t > 0.f) return;   /* ne re-tue pas un cadavre en train de tomber */
+    bool already_dead = (e->hp <= 0.f);
     enemy_take_damage(g, e, dmg, el, kx, ky);
+    /* feedback loop : le triple combo actif gagne en intensite */
+    loop_on_hit(g);
+    if (e->hp <= 0.f && !already_dead) loop_on_kill(g);
 }
 
 static void boss_update(Game *g, Enemy *e, float dt) {
@@ -1067,6 +1073,13 @@ void update_enemies(Game *g) {
             p->y += dyn * 6.f;
         }
     }
+    /* compteur d'ennemis actifs (hors cadavres en train de tomber).
+     * Utilise par loop_decay : la jauge de feedback ne descend qu'en
+     * dehors du combat. */
+    g->enemy_alive_count = 0;
+    for (int i = 0; i < MAX_ENEMIES; i++)
+        if (g->enemies[i].alive && g->enemies[i].dying_t <= 0.f)
+            g->enemy_alive_count++;
 }
 
 /* ---------- PARTICLES ---------- */

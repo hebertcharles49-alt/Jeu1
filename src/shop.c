@@ -6,6 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* On utilise des designators partiels pour les ~38 recettes existantes :
+ * les nouveaux champs ajoutes a la struct (ex shrine_only) restent en zero.
+ * GCC le signale via -Wmissing-field-initializers, mais c'est garanti par
+ * la norme C99 ; on silence ce warning specifique pour ce fichier. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
 typedef struct {
     const char *name;
     const char *desc;
@@ -22,6 +30,7 @@ typedef struct {
     float d_aff_val;
     int   d_aff_el2;
     float d_aff_val2;
+    int   shrine_only;     /* 1 = ne peut etre obtenu que via PU_SHRINE */
 } Recipe;
 
 static const Recipe RECIPES[] = {
@@ -112,6 +121,22 @@ static const Recipe RECIPES[] = {
       0,0,0, 0,0,0,    0,0,0, 0,0,  0.15f,0.50f, 0,0, 0,0, 0,0 },
     { "Larme du Cristal",   "+30% degats elem, +15% portee",     55, R_LEGENDARY,
       0,0,0, 0,0,0,    0,0,0, 0.30f,0, 0,0,  0.15f,0, 0,0, 0,0 },
+
+    /* ---- PACTES (PU_SHRINE only) ----
+     * Bonus enormes + malus reels. Decision irreversible pour la run.
+     * Le dernier champ shrine_only=1 retire la recette du pool shop standard. */
+    { "Pacte du Sang",       "+30% degats / -25 PV max",         0, R_RARE,
+      -25.f,0,0, 0.30f,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0, 1 },
+    { "Pacte Glacial",       "+50% chance crit / -15% degats",    0, R_RARE,
+      0,0,0, -0.15f,0,0, 0,0,0, 0,0,  0.50f,0, 0,0, 0,0, 0,0, 1 },
+    { "Pacte du Vide",       "+15% vol vie / -1.5 regen",         0, R_RARE,
+      0,0,0, 0,0.15f,-1.5f, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 1 },
+    { "Pacte du Vent",       "+35 vitesse / -10 PV max",          0, R_RARE,
+      -10.f,35.f,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0, 1 },
+    { "Pacte Berserk",       "+25% atk speed / +20% dmg / -2 armure", 0, R_EPIC,
+      0,0,-2.f, 0.20f,0,0, 0,0,0, 0,-0.25f, 0,0, 0,0, 0,0, 0,0, 1 },
+    { "Pacte du Feu Noir",   "+40% degats elem / +15% degats pris",0, R_EPIC,
+      0,0,-3.f, 0,0,0, 0,0,0, 0.40f,0, 0,0, 0,0, 0,0, 0,0, 1 },
 };
 #define NUM_RECIPES ((int)(sizeof(RECIPES) / sizeof(RECIPES[0])))
 

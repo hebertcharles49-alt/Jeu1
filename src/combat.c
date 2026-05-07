@@ -213,9 +213,6 @@ int weapon_combo_id(const Weapon *w) {
     return (int)mask;
 }
 
-static bool combo_has(int mask, Element a) { return (mask & (1 << a)) != 0; }
-static bool combo_only(int mask, Element a) { return mask == (1 << a); }
-
 void weapon_describe(const Weapon *w, char *buf, int bufsz) {
     int n = snprintf(buf, bufsz, "[");
     for (int i = 0; i < w->element_count && n < bufsz - 8; i++) {
@@ -226,7 +223,30 @@ void weapon_describe(const Weapon *w, char *buf, int bufsz) {
     snprintf(buf + n, bufsz - n, "]");
 }
 
-/* ---------- COMBO FX ---------- */
+/* ==============================================================
+   BEHAVIOR TAGS
+   ============================================================== */
+typedef enum {
+    TAG_NONE        = 0,
+    TAG_HOT         = 1 << 0,
+    TAG_FLUID       = 1 << 1,
+    TAG_HEAVY       = 1 << 2,
+    TAG_LIGHT       = 1 << 3,
+    TAG_CONDUCTIVE  = 1 << 4,
+    TAG_PERSISTENT  = 1 << 5,
+    TAG_UNSTABLE    = 1 << 6,
+    TAG_CORROSIVE   = 1 << 7,
+    TAG_DIVINE      = 1 << 8,
+    TAG_SHADOW      = 1 << 9,
+    TAG_METALLIC    = 1 << 10,
+    TAG_HOMING_TAG  = 1 << 11,
+} BehaviorTag;
+
+#define HAS_TAGS(t, req) (((t) & (req)) == (req))
+
+/* ==============================================================
+   COMBOFX  (struct inchangee -- les fire_* en dependent)
+   ============================================================== */
 typedef struct {
     float dmg_mul;
     float cd_mul;
@@ -244,88 +264,296 @@ typedef struct {
     const char *tag;
 } ComboFx;
 
+/* ==============================================================
+   COUCHE 1 -- ElemBase : contribution de chaque element
+   dmg_add  : ADDITIF depuis 1.0  (FIRE = +0.15 -> dmg_mul = 1.15)
+   cd_mul   : MULTIPLICATIF       (AIR  =  0.80 -> -20% cooldown)
+   0.0f sur cd_mul / range_mul = "pas de modification"
+   ============================================================== */
+typedef struct {
+    uint32_t tags;
+    float    dmg_add;
+    float    cd_mul;
+    float    range_mul;
+    bool     pierces;
+    bool     homing;
+    bool     chain;
+    bool     aoe_explode;
+    bool     spawn_fairy;
+    bool     lifesteal;
+    int      extra_proj;
+    Element  status;
+    uint32_t color_tint;
+} ElemBase;
+
+static const ElemBase ELEM_BASE[EL_COUNT] = {
+    [EL_NONE]      = { 0 },
+    [EL_FIRE]      = { TAG_HOT|TAG_PERSISTENT,      .dmg_add= 0.15f,                                .status=EL_FIRE,      .color_tint=0xFF8040FF },
+    [EL_WATER]     = { TAG_FLUID|TAG_CONDUCTIVE,                     .cd_mul=0.90f,                  .status=EL_WATER,     .color_tint=0x80B0FFFF },
+    [EL_EARTH]     = { TAG_HEAVY,                   .dmg_add= 0.20f,               .pierces=true,                          .color_tint=0xA08060FF },
+    [EL_LIGHTNING] = { TAG_CONDUCTIVE|TAG_UNSTABLE, .dmg_add= 0.15f,               .chain=true,      .status=EL_LIGHTNING, .color_tint=0xFFEC60FF },
+    [EL_AIR]       = { TAG_LIGHT,                                    .cd_mul=0.80f, .range_mul=1.20f,                       .color_tint=0xC0E0FFFF },
+    [EL_VOID]      = { TAG_CORROSIVE|TAG_UNSTABLE,  .dmg_add= 0.25f,               .pierces=true,    .lifesteal=true,      .color_tint=0x8030B0FF },
+    [EL_FAE]       = { TAG_HOMING_TAG|TAG_LIGHT,                                    .homing=true,     .spawn_fairy=true,    .status=EL_FAE, .color_tint=0xF080F0FF },
+    [EL_STEEL]     = { TAG_METALLIC|TAG_HEAVY,      .dmg_add= 0.15f,               .pierces=true,                          .color_tint=0xC0C8D0FF },
+    [EL_DARK]      = { TAG_SHADOW|TAG_CORROSIVE,    .dmg_add= 0.10f,                                 .lifesteal=true,      .status=EL_DARK, .color_tint=0x505060FF },
+    [EL_HOLY]      = { TAG_DIVINE,                  .dmg_add= 0.10f,               .aoe_explode=true, .status=EL_HOLY,     .color_tint=0xFFE890FF },
+};
+_Static_assert(sizeof(ELEM_BASE)/sizeof(ELEM_BASE[0]) == EL_COUNT,
+    "ELEM_BASE desynchronise avec EL_COUNT");
+
+/* ==============================================================
+   COUCHE 2 -- EmergentRule : interactions tag-paires
+   required_tags : les DEUX bits doivent etre dans active_tags
+   0.0f / false = pas de modification
+   ============================================================== */
+typedef struct {
+    uint32_t required_tags;
+    float    dmg_add;
+    float    cd_mul;
+    float    range_mul;
+    bool     chain;
+    bool     aoe_explode;
+    bool     homing;
+    bool     pierces;
+    bool     spawn_fairy;
+    int      extra_proj;
+} EmergentRule;
+
+static const EmergentRule EMERGENT_RULES[] = {
+    { TAG_HOT|TAG_FLUID,             .dmg_add=-0.10f, .range_mul=1.20f, .aoe_explode=true  },
+    { TAG_CONDUCTIVE|TAG_UNSTABLE,   .dmg_add= 0.20f, .chain=true                          },
+    { TAG_HEAVY|TAG_HOT,             .dmg_add= 0.25f, .cd_mul=1.20f                        },
+    { TAG_LIGHT|TAG_HOT,             .extra_proj=2,   .range_mul=1.10f                     },
+    { TAG_CORROSIVE|TAG_HOMING_TAG,  .dmg_add=-0.10f, .extra_proj=2,   .homing=true        },
+    { TAG_DIVINE|TAG_HOT,            .dmg_add= 0.20f, .aoe_explode=true                    },
+    { TAG_METALLIC|TAG_CONDUCTIVE,   .pierces=true,   .range_mul=1.30f                     },
+    { TAG_SHADOW|TAG_UNSTABLE,       .dmg_add= 0.20f, .homing=true                         },
+    { TAG_DIVINE|TAG_FLUID,          .aoe_explode=true, .spawn_fairy=true                  },
+    { TAG_FLUID|TAG_HEAVY,           .dmg_add= 0.10f, .aoe_explode=true, .cd_mul=1.20f     },
+};
+static const int N_EMERGENT = (int)(sizeof(EMERGENT_RULES)/sizeof(EMERGENT_RULES[0]));
+
+/* ==============================================================
+   COUCHE 3 -- ComboName : cosmetique seul, aucune logique
+   Sentinel { 0, NULL, 0 } obligatoire en fin de tableau.
+   ============================================================== */
+typedef struct { int mask; const char *name; uint32_t color; } ComboName;
+
+static const ComboName COMBO_NAMES[] = {
+    { (1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING),  "Tempete",        0x80F0FFFF },
+    { (1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR),         "Volcan",         0xFF8040FF },
+    { (1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING),     "Dechirure",      0xC080FFFF },
+    { (1<<EL_WATER)|(1<<EL_EARTH)|(1<<EL_LIGHTNING),  "Tsunami",        0x60A0FFFF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),        "Marais",         0x80A8A0FF },
+    { (1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE),           "Phenix",         0xFFB0F0FF },
+    { (1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),         "Brume Mortelle", 0x9090C0FF },
+    { (1<<EL_EARTH)|(1<<EL_AIR)|(1<<EL_VOID),         "Effondrement",   0x806040FF },
+    { (1<<EL_FIRE)|(1<<EL_WATER),       "Vapeur",     0xC0E0F0FF },
+    { (1<<EL_FIRE)|(1<<EL_LIGHTNING),   "Plasma",     0xFFA0F0FF },
+    { (1<<EL_WATER)|(1<<EL_LIGHTNING),  "Choc",       0x80FFFFFF },
+    { (1<<EL_FIRE)|(1<<EL_EARTH),       "Lave",       0xFF6020FF },
+    { (1<<EL_WATER)|(1<<EL_EARTH),      "Boue",       0x806040FF },
+    { (1<<EL_EARTH)|(1<<EL_AIR),        "Sable",      0xD0B080FF },
+    { (1<<EL_AIR)|(1<<EL_LIGHTNING),    "Orage",      0xFFFF80FF },
+    { (1<<EL_AIR)|(1<<EL_FIRE),         "Brasier",    0xFFA040FF },
+    { (1<<EL_AIR)|(1<<EL_WATER),        "Brume",      0xC0D8E8FF },
+    { (1<<EL_VOID)|(1<<EL_FIRE),        "Feu noir",   0x802040FF },
+    { (1<<EL_VOID)|(1<<EL_WATER),       "Acide",      0x80B040FF },
+    { (1<<EL_VOID)|(1<<EL_EARTH),       "Tombeau",    0x402030FF },
+    { (1<<EL_VOID)|(1<<EL_LIGHTNING),   "Annihile",   0xC080FFFF },
+    { (1<<EL_VOID)|(1<<EL_AIR),         "Eclipse",    0x6040A0FF },
+    { (1<<EL_VOID)|(1<<EL_FAE),         "Esprit",     0xC080FFFF },
+    { (1<<EL_FAE)|(1<<EL_FIRE),         "Feu fee",    0xFFA0E0FF },
+    { (1<<EL_FAE)|(1<<EL_WATER),        "Source",     0xA0D0FFFF },
+    { (1<<EL_FAE)|(1<<EL_EARTH),        "Verger",     0xA0FFA0FF },
+    { (1<<EL_FAE)|(1<<EL_AIR),          "Sylphe",     0xE0E0FFFF },
+    { (1<<EL_FAE)|(1<<EL_LIGHTNING),    "Etincelle",  0xFFFFA0FF },
+    { (1<<EL_FIRE),       "Brule",    0xFF8040FF },
+    { (1<<EL_WATER),      "Glacial",  0x80B0FFFF },
+    { (1<<EL_EARTH),      "Pierre",   0xA08060FF },
+    { (1<<EL_LIGHTNING),  "Eclair",   0xFFEC60FF },
+    { (1<<EL_AIR),        "Vent",     0xC0E0FFFF },
+    { (1<<EL_VOID),       "Vide",     0x8030B0FF },
+    { (1<<EL_FAE),        "Feerie",   0xF080F0FF },
+    { (1<<EL_STEEL),      "Fer",      0xC0C8D0FF },
+    { (1<<EL_DARK),       "Ombre",    0x505060FF },
+    { (1<<EL_HOLY),       "Sacre",    0xFFE890FF },
+    { 0, NULL, 0 }  /* sentinel */
+};
+
+/* ==============================================================
+   COUCHE 4 -- TripleLoopDef : feedback loop des triples
+   Tous les effets overload sont dans la donnee.
+   Aucun if/else sur le mask dans les fonctions.
+   ============================================================== */
+typedef struct {
+    int      mask;
+    int      loop_idx;
+    float    gain_on_hit;
+    float    gain_on_kill;
+    float    decay_rate;
+    float    overload_threshold;
+    uint32_t aura_color;
+    /* effets overload -- 0 = inactif */
+    float    ov_dmg_mul;          /* dmg_mul += ov_dmg_mul * overload  */
+    float    ov_chain_add;        /* chain active si > 0               */
+    float    ov_proj_add;         /* extra_proj += (int)(ov * val)     */
+    float    ov_lifesteal_mul;    /* lifesteal amplifie                */
+    float    ov_self_dmg;         /* degat/s sur le joueur si overloaded */
+    bool     ov_explode_on_spawn;
+    bool     ov_spawn_fairy;
+} TripleLoopDef;
+
+static const TripleLoopDef TRIPLE_LOOPS[] = {
+    {
+        .mask=(1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING), .loop_idx=0,
+        .gain_on_hit=0.06f, .gain_on_kill=0.15f, .decay_rate=0.08f,
+        .overload_threshold=1.0f, .aura_color=0x80C0FFFF,
+        .ov_dmg_mul=0.40f, .ov_chain_add=3.0f, .ov_self_dmg=1.0f,
+    },
+    {
+        .mask=(1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR), .loop_idx=1,
+        .gain_on_hit=0.08f, .gain_on_kill=0.10f, .decay_rate=0.05f,
+        .overload_threshold=1.0f, .aura_color=0xFF6020FF,
+        .ov_proj_add=2.0f, .ov_dmg_mul=-0.35f, .ov_explode_on_spawn=true,
+    },
+    {
+        .mask=(1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING), .loop_idx=2,
+        .gain_on_hit=0.12f, .gain_on_kill=0.08f, .decay_rate=0.03f,
+        .overload_threshold=1.0f, .aura_color=0xA040C0FF,
+        .ov_lifesteal_mul=2.0f, .ov_self_dmg=0.5f,
+    },
+    {
+        .mask=(1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE), .loop_idx=3,
+        .gain_on_hit=0.05f, .gain_on_kill=0.20f, .decay_rate=0.10f,
+        .overload_threshold=1.0f, .aura_color=0xFF8040FF,
+        .ov_proj_add=1.5f, .ov_spawn_fairy=true,
+    },
+    { .mask=0 }  /* sentinel */
+};
+
+/* couleur d'aura par loop_idx (consomme par render.c). Sentinel ignoree. */
+uint32_t triple_loop_aura_color(int loop_idx) {
+    if (loop_idx < 0) return 0;
+    int n = (int)(sizeof(TRIPLE_LOOPS)/sizeof(TRIPLE_LOOPS[0])) - 1;  /* sentinel */
+    if (loop_idx >= n) return 0;
+    return TRIPLE_LOOPS[loop_idx].aura_color;
+}
+
+/* -------------------------------------------------------------- */
+static const TripleLoopDef *triple_find(int mask) {
+    for (int i = 0; TRIPLE_LOOPS[i].mask != 0; i++)
+        if (TRIPLE_LOOPS[i].mask == mask) return &TRIPLE_LOOPS[i];
+    return NULL;
+}
+
+/* -------------------------------------------------------------- */
+static void apply_loop_modifiers(ComboFx *fx,
+                                  const TripleLoopDef *def,
+                                  const LoopState *ls)
+{
+    if (!def || !ls || ls->intensity <= def->overload_threshold) return;
+    float ov = ls->intensity - def->overload_threshold;  /* 0..1 */
+    fx->dmg_mul    += def->ov_dmg_mul * ov;
+    fx->extra_proj += (int)(def->ov_proj_add * ov);
+    if (def->ov_chain_add > 0.f)  fx->chain       = true;
+    if (def->ov_spawn_fairy)       fx->spawn_fairy = true;
+}
+
+/* -------------------------------------------------------------- */
+void loop_on_hit(Game *g) {
+    int idx = g->player.active_loop_idx;
+    if (idx < 0) return;
+    LoopState *ls = &g->player.loop_states[idx];
+    ls->intensity += TRIPLE_LOOPS[idx].gain_on_hit;
+    if (ls->intensity > 2.0f) ls->intensity = 2.0f;
+    ls->proc_count++;
+    ls->overloaded = (ls->intensity > TRIPLE_LOOPS[idx].overload_threshold);
+}
+
+/* -------------------------------------------------------------- */
+void loop_on_kill(Game *g) {
+    int idx = g->player.active_loop_idx;
+    if (idx < 0) return;
+    LoopState *ls = &g->player.loop_states[idx];
+    ls->intensity += TRIPLE_LOOPS[idx].gain_on_kill;
+    if (ls->intensity > 2.0f) ls->intensity = 2.0f;
+    ls->proc_count++;
+    ls->overloaded = (ls->intensity > TRIPLE_LOOPS[idx].overload_threshold);
+}
+
+/* -------------------------------------------------------------- */
+void loop_decay(Game *g, float dt) {
+    int idx = g->player.active_loop_idx;
+    if (idx < 0 || g->enemy_alive_count > 0) return;
+    LoopState *ls = &g->player.loop_states[idx];
+    ls->intensity -= TRIPLE_LOOPS[idx].decay_rate * dt;
+    if (ls->intensity < 0.0f) ls->intensity = 0.0f;
+    ls->overloaded = (ls->intensity > TRIPLE_LOOPS[idx].overload_threshold);
+}
+
+/* -------------------------------------------------------------- */
+static void refresh_active_loop(Game *g, int mask) {
+    if (mask == g->player.active_loop_mask) return;
+    const TripleLoopDef *def = triple_find(mask);
+    if (!def) { g->player.active_loop_idx = -1; g->player.active_loop_mask = 0; return; }
+    g->player.active_loop_idx  = def->loop_idx;
+    g->player.active_loop_mask = mask;
+    /* intensity conservee si meme salle -- reset dans game_next_floor */
+}
+
+/* ==============================================================
+   compute_combo -- aucun if sur un mask, aucun return anticipe
+   ============================================================== */
 static ComboFx compute_combo(int mask) {
     ComboFx c = {0};
-    c.dmg_mul = 1.f; c.cd_mul = 1.f; c.range_mul = 1.f;
+    c.dmg_mul = 1.0f; c.cd_mul = 1.0f; c.range_mul = 1.0f;
     c.color = 0xFFFFFFFF; c.tag = "Brut";
     if (mask == 0) return c;
 
-    int fwl = (1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING);
-    int fea = (1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR);
-    int vfl = (1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING);
-    int wel = (1<<EL_WATER)|(1<<EL_EARTH)|(1<<EL_LIGHTNING);
-    int wae = (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH);
-    int faf = (1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE);
-    int vwa = (1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR);
-    int eav = (1<<EL_EARTH)|(1<<EL_AIR)|(1<<EL_VOID);
+    /* Couche 1 */
+    uint32_t active_tags = 0;
+    for (int e = 1; e < EL_COUNT; e++) {
+        if (!(mask & (1 << e))) continue;
+        const ElemBase *b = &ELEM_BASE[e];
+        active_tags    |= b->tags;
+        c.dmg_mul      += b->dmg_add;
+        if (b->cd_mul    != 0.0f) c.cd_mul    *= b->cd_mul;
+        if (b->range_mul != 0.0f) c.range_mul *= b->range_mul;
+        c.pierces      |= b->pierces;
+        c.homing       |= b->homing;
+        c.chain        |= b->chain;
+        c.aoe_explode  |= b->aoe_explode;
+        c.spawn_fairy  |= b->spawn_fairy;
+        c.lifesteal    |= b->lifesteal;
+        c.extra_proj   += b->extra_proj;
+        if (b->status != EL_NONE) c.status = b->status;
+        c.color         = b->color_tint;
+    }
 
-    if (mask == fwl) { c.tag="Tempete";      c.dmg_mul=2.0f; c.cd_mul=0.85f; c.aoe_explode=true; c.chain=true; c.status=EL_LIGHTNING; c.color=0x80F0FFFF; return c; }
-    if (mask == fea) { c.tag="Volcan";       c.dmg_mul=2.4f; c.aoe_explode=true; c.status=EL_FIRE; c.color=0xFF8040FF; c.extra_proj=2; return c; }
-    if (mask == vfl) { c.tag="Dechirure";    c.dmg_mul=2.6f; c.pierces=true; c.chain=true; c.lifesteal=true; c.status=EL_VOID; c.color=0xC080FFFF; return c; }
-    if (mask == wel) { c.tag="Tsunami";      c.dmg_mul=2.0f; c.aoe_explode=true; c.status=EL_WATER; c.color=0x60A0FFFF; c.range_mul=1.3f; return c; }
-    if (mask == wae) { c.tag="Marais";       c.dmg_mul=1.6f; c.aoe_explode=true; c.status=EL_WATER; c.cd_mul=0.7f; c.color=0x80A8A0FF; return c; }
-    if (mask == faf) { c.tag="Phenix";       c.dmg_mul=2.2f; c.spawn_fairy=true; c.status=EL_FIRE; c.color=0xFFB0F0FF; c.homing=true; return c; }
-    if (mask == vwa) { c.tag="Brume Mortelle"; c.dmg_mul=1.8f; c.pierces=true; c.aoe_explode=true; c.color=0x9090C0FF; return c; }
-    if (mask == eav) { c.tag="Effondrement"; c.dmg_mul=2.5f; c.aoe_explode=true; c.range_mul=1.2f; c.color=0x806040FF; return c; }
+    /* Couche 2 */
+    for (int i = 0; i < N_EMERGENT; i++) {
+        const EmergentRule *r = &EMERGENT_RULES[i];
+        if (!HAS_TAGS(active_tags, r->required_tags)) continue;
+        c.dmg_mul      += r->dmg_add;
+        if (r->cd_mul    != 0.0f) c.cd_mul    *= r->cd_mul;
+        if (r->range_mul != 0.0f) c.range_mul *= r->range_mul;
+        c.chain        |= r->chain;
+        c.aoe_explode  |= r->aoe_explode;
+        c.homing       |= r->homing;
+        c.pierces      |= r->pierces;
+        c.spawn_fairy  |= r->spawn_fairy;
+        c.extra_proj   += r->extra_proj;
+    }
 
-    int fw = (1<<EL_FIRE)|(1<<EL_WATER);
-    int fl = (1<<EL_FIRE)|(1<<EL_LIGHTNING);
-    int wl = (1<<EL_WATER)|(1<<EL_LIGHTNING);
-    int fe = (1<<EL_FIRE)|(1<<EL_EARTH);
-    int we = (1<<EL_WATER)|(1<<EL_EARTH);
-    int ea = (1<<EL_EARTH)|(1<<EL_AIR);
-    int al = (1<<EL_AIR)|(1<<EL_LIGHTNING);
-    int af = (1<<EL_AIR)|(1<<EL_FIRE);
-    int aw = (1<<EL_AIR)|(1<<EL_WATER);
-    int vf = (1<<EL_VOID)|(1<<EL_FIRE);
-    int vw = (1<<EL_VOID)|(1<<EL_WATER);
-    int vee= (1<<EL_VOID)|(1<<EL_EARTH);
-    int vl = (1<<EL_VOID)|(1<<EL_LIGHTNING);
-    int va = (1<<EL_VOID)|(1<<EL_AIR);
-    int vfae=(1<<EL_VOID)|(1<<EL_FAE);
-    int faef=(1<<EL_FAE)|(1<<EL_FIRE);
-    int faew=(1<<EL_FAE)|(1<<EL_WATER);
-    int faee=(1<<EL_FAE)|(1<<EL_EARTH);
-    int faea=(1<<EL_FAE)|(1<<EL_AIR);
-    int fael=(1<<EL_FAE)|(1<<EL_LIGHTNING);
+    /* Couche 3 */
+    bool named = false;
+    for (const ComboName *n = COMBO_NAMES; n->name != NULL; n++) {
+        if (n->mask == mask) { c.tag = n->name; c.color = n->color; named = true; break; }
+    }
+    if (!named) { c.tag = "Hybride"; c.color = 0xC0C0FFFF; }
 
-    if (mask == fw) { c.tag="Vapeur";   c.aoe_explode=true; c.dmg_mul=1.4f; c.range_mul=1.2f; c.color=0xC0E0F0FF; return c; }
-    if (mask == fl) { c.tag="Plasma";   c.dmg_mul=1.8f; c.chain=true; c.status=EL_LIGHTNING; c.color=0xFFA0F0FF; return c; }
-    if (mask == wl) { c.tag="Choc";     c.dmg_mul=1.5f; c.chain=true; c.status=EL_LIGHTNING; c.color=0x80FFFFFF; return c; }
-    if (mask == fe) { c.tag="Lave";     c.dmg_mul=1.6f; c.aoe_explode=true; c.status=EL_FIRE; c.color=0xFF6020FF; return c; }
-    if (mask == we) { c.tag="Boue";     c.dmg_mul=1.2f; c.status=EL_WATER; c.aoe_explode=true; c.color=0x806040FF; return c; }
-    if (mask == ea) { c.tag="Sable";    c.dmg_mul=1.4f; c.aoe_explode=true; c.color=0xD0B080FF; return c; }
-    if (mask == al) { c.tag="Orage";    c.dmg_mul=1.6f; c.chain=true; c.cd_mul=0.7f; c.color=0xFFFF80FF; return c; }
-    if (mask == af) { c.tag="Brasier";  c.dmg_mul=1.7f; c.status=EL_FIRE; c.range_mul=1.4f; c.color=0xFFA040FF; return c; }
-    if (mask == aw) { c.tag="Brume";    c.cd_mul=0.6f;  c.dmg_mul=0.9f; c.color=0xC0D8E8FF; return c; }
-    if (mask == vf) { c.tag="Feu noir"; c.dmg_mul=1.8f; c.lifesteal=true; c.status=EL_FIRE; c.color=0x802040FF; return c; }
-    if (mask == vw) { c.tag="Acide";    c.dmg_mul=1.5f; c.pierces=true; c.color=0x80B040FF; return c; }
-    if (mask == vee){ c.tag="Tombeau"; c.dmg_mul=1.7f; c.aoe_explode=true; c.color=0x402030FF; return c; }
-    if (mask == vl) { c.tag="Annihile"; c.dmg_mul=2.0f; c.pierces=true; c.color=0xC080FFFF; return c; }
-    if (mask == va) { c.tag="Eclipse";  c.cd_mul=0.7f;  c.dmg_mul=1.3f; c.color=0x6040A0FF; return c; }
-    if (mask == vfae){c.tag="Esprit";   c.dmg_mul=1.6f; c.spawn_fairy=true; c.lifesteal=true; c.color=0xC080FFFF; return c; }
-    if (mask == faef){c.tag="Feu fee";  c.dmg_mul=1.5f; c.homing=true; c.status=EL_FIRE; c.color=0xFFA0E0FF; return c; }
-    if (mask == faew){c.tag="Source";   c.spawn_fairy=true; c.dmg_mul=1.2f; c.color=0xA0D0FFFF; return c; }
-    if (mask == faee){c.tag="Verger";   c.dmg_mul=1.4f; c.spawn_fairy=true; c.color=0xA0FFA0FF; return c; }
-    if (mask == faea){c.tag="Sylphe";   c.cd_mul=0.65f; c.homing=true; c.color=0xE0E0FFFF; return c; }
-    if (mask == fael){c.tag="Etincelle";c.dmg_mul=1.4f; c.chain=true; c.spawn_fairy=true; c.color=0xFFFFA0FF; return c; }
-
-    if (combo_only(mask, EL_FIRE))      { c.tag="Brule";  c.dmg_mul=1.2f; c.status=EL_FIRE; c.color=0xFF8040FF; return c; }
-    if (combo_only(mask, EL_WATER))     { c.tag="Glacial";c.dmg_mul=1.1f; c.status=EL_WATER; c.color=0x80B0FFFF; return c; }
-    if (combo_only(mask, EL_EARTH))     { c.tag="Pierre"; c.dmg_mul=1.4f; c.color=0xA08060FF; return c; }
-    if (combo_only(mask, EL_LIGHTNING)) { c.tag="Eclair"; c.dmg_mul=1.2f; c.chain=true; c.status=EL_LIGHTNING; c.color=0xFFEC60FF; return c; }
-    if (combo_only(mask, EL_AIR))       { c.tag="Vent";   c.cd_mul=0.75f; c.range_mul=1.2f; c.color=0xC0E0FFFF; return c; }
-    if (combo_only(mask, EL_VOID))      { c.tag="Vide";   c.pierces=true; c.lifesteal=true; c.color=0x8030B0FF; return c; }
-    if (combo_only(mask, EL_FAE))       { c.tag="Feerie"; c.spawn_fairy=true; c.color=0xF080F0FF; return c; }
-
-    if (combo_has(mask, EL_FIRE))      { c.status = EL_FIRE;      c.dmg_mul *= 1.15f; }
-    if (combo_has(mask, EL_WATER))     { c.status = EL_WATER;     c.dmg_mul *= 1.10f; }
-    if (combo_has(mask, EL_LIGHTNING)) { c.chain = true;          c.dmg_mul *= 1.10f; }
-    if (combo_has(mask, EL_EARTH))     { c.dmg_mul *= 1.20f; }
-    if (combo_has(mask, EL_AIR))       { c.cd_mul *= 0.85f; c.range_mul *= 1.10f; }
-    if (combo_has(mask, EL_VOID))      { c.pierces = true; c.lifesteal = true; }
-    if (combo_has(mask, EL_FAE))       { c.spawn_fairy = true; }
-    c.tag = "Hybride"; c.color = 0xC0C0FFFF;
     return c;
 }
 
@@ -600,7 +828,8 @@ void update_weapons(Game *g) {
         if (!w->owned) continue;
         w->cooldown -= dt;
         if (w->cooldown > 0.f) continue;
-        ComboFx fx = compute_combo(weapon_combo_id(w));
+        int mask = weapon_combo_id(w);
+        ComboFx fx = compute_combo(mask);
 
         /* applique les stats joueur dans le combo fx */
         bool is_melee = (w->kind == W_FISTS || w->kind == W_SWORD ||
@@ -625,7 +854,6 @@ void update_weapons(Game *g) {
          * vient de se declencher. On affiche son nom une fois quand le
          * loadout change, pour eviter le spam. */
         if (w->element_count == 3) {
-            int mask = weapon_combo_id(w);
             if (mask != g->combo_callout_mask && fx.tag) {
                 g->combo_callout_mask = mask;
                 g->combo_callout_t = 2.5f;
@@ -659,6 +887,20 @@ void update_weapons(Game *g) {
             if (t < 0) fire = false;
         }
         if (!fire) continue;
+
+        /* Triple feedback loop : si l'arme porte un triple combo, on
+         * (re)synchronise le loop actif et on applique son boost si
+         * l'intensite a depasse l'overload threshold. */
+        if (w->element_count == 3) {
+            refresh_active_loop(g, mask);
+        }
+        {
+            const TripleLoopDef *tdef = triple_find(g->player.active_loop_mask);
+            apply_loop_modifiers(&fx, tdef,
+                g->player.active_loop_idx >= 0
+                    ? &g->player.loop_states[g->player.active_loop_idx]
+                    : NULL);
+        }
 
         switch (w->kind) {
             case W_FISTS:  fire_fists(g, w, fx);  break;

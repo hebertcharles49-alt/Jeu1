@@ -1392,6 +1392,26 @@ void render_world(Game *g) {
    Expose en non-static car appelee par main.c. */
 void render_world_overlay_ui(Game *g) {
     GfxCtx *gc = g->renderer;
+    /* Aura pulsante autour du joueur quand le triple combo est en overload.
+     * Pose des particules en couronne -- elles seront rendues a la frame
+     * suivante par draw_particles_3d. */
+    {
+        int lidx = g->player.active_loop_idx;
+        if (lidx >= 0 && g->player.loop_states[lidx].overloaded) {
+            float alpha = sinf(g->time * 8.0f) * 0.4f + 0.5f;
+            uint32_t aura = triple_loop_aura_color(lidx);
+            uint32_t col = (aura & 0xFFFFFF00u) | (uint32_t)(alpha * 255.f);
+            int n = 24;
+            float r = 18.f;
+            for (int i = 0; i < n; i++) {
+                float a = (i / (float)n) * 6.2831f + g->time * 2.f;
+                particle_spawn_kind(g,
+                    g->player.x + cosf(a) * r,
+                    g->player.y + sinf(a) * r,
+                    0, 0, 0.06f, col, 2.5f, 0);
+            }
+        }
+    }
     /* HP bars + noms au-dessus des ennemis */
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];

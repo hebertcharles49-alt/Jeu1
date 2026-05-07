@@ -277,6 +277,10 @@ void game_start_new_run(Game *g) {
     p->level = 1; p->xp = 0; p->xp_to_next = 6;
     p->souls = 0; p->coins = 0;
     p->active_weapon = 0;
+    /* triple feedback loop : aucune jauge active au depart */
+    p->active_loop_idx  = -1;
+    p->active_loop_mask = 0;
+    g->enemy_alive_count = 0;
 
     /* poings sur les 2 slots */
     weapon_init_defaults(&p->weapons[0], W_FISTS); p->weapons[0].owned = true;
@@ -310,6 +314,11 @@ void game_next_floor(Game *g) {
     g->player.x = g->dungeon.spawn_x * TILE + TILE / 2;
     g->player.y = g->dungeon.spawn_y * TILE + TILE / 2;
     memset(g->enemies, 0, sizeof(g->enemies));
+    /* triple feedback loop : reset entre les etages (intensity, proc_count, etc) */
+    memset(g->player.loop_states, 0, sizeof(g->player.loop_states));
+    g->player.active_loop_idx  = -1;
+    g->player.active_loop_mask = 0;
+    g->enemy_alive_count = 0;
     memset(g->projectiles, 0, sizeof(g->projectiles));
     memset(g->pickups, 0, sizeof(g->pickups));
     memset(g->fairies, 0, sizeof(g->fairies));
