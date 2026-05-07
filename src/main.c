@@ -266,6 +266,10 @@ void game_start_new_run(Game *g) {
     g->boss_intro_t = 0.f;
     g->shop_visits = 0;
     g->shop_reroll_cost = 5;
+    g->combo_callout_t = 0.f;
+    g->combo_callout_mask = 0;
+    g->scroll_t = 0.f;
+    g->current_attack_crit = false;
 
     Player *p = &g->player;
     p->hero = (HeroClass)g->hero_cursor;
@@ -609,7 +613,8 @@ void game_run(Game *g) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
             g->run_time += g->dt;
-            if (g->scroll_t > 0.f) g->scroll_t -= g->dt;
+            if (g->scroll_t > 0.f)         g->scroll_t -= g->dt;
+            if (g->combo_callout_t > 0.f)  g->combo_callout_t -= g->dt;
             if (g->boss_intro_t > 0.f) g->boss_intro_t -= dt;
             if (g->flash_t > 0.f)      g->flash_t -= dt;
             update_player(g);

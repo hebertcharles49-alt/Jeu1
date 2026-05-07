@@ -1457,6 +1457,40 @@ void render_world_overlay_ui(Game *g) {
                   INTERNAL_H/2 + 4, "CONFRONTATION", 0xFFD040FF);
     }
 
+    /* Signature Combo callout : nom du combo triple en grand au-dessus du
+     * joueur. Anim : pop/scale rapide les 0.3s puis stable, fade-out 0.5s. */
+    if (g->combo_callout_t > 0.f && g->combo_callout[0]) {
+        float t = g->combo_callout_t;
+        float life = 2.5f;
+        float age = life - t;
+        float alpha = 1.f;
+        float yoff = 0.f;
+        if (age < 0.30f) {
+            /* pop : remonte */
+            yoff = -8.f - (1.f - age / 0.30f) * 12.f;
+            alpha = age / 0.30f;
+        } else if (t < 0.5f) {
+            yoff = -8.f - (0.5f - t) * 14.f;   /* monte en disparaissant */
+            alpha = t / 0.5f;
+        } else {
+            yoff = -8.f;
+        }
+        v3 head = v3_make(g->player.x / TILE, 1.6f, g->player.y / TILE);
+        int sx, sy;
+        if (world_to_screen(gc, head, &sx, &sy)) {
+            int ialpha = (int)(255.f * alpha);
+            if (ialpha < 0)   ialpha = 0;
+            if (ialpha > 255) ialpha = 255;
+            uint32_t col = (g->combo_callout_color & 0xFFFFFF00u) | (uint32_t)ialpha;
+            int tw = text_width(g->combo_callout);
+            /* texte avec ombre noire pour lisibilite sur n'importe quel fond */
+            text_draw(gc, sx - tw/2 + 1, (int)(sy + yoff) + 1,
+                      g->combo_callout, (uint32_t)(ialpha & 0xFF));
+            text_draw(gc, sx - tw/2,     (int)(sy + yoff),
+                      g->combo_callout, col);
+        }
+    }
+
     /* parchemin de lore : overlay bas d'ecran. Fade in/out doux. */
     if (g->scroll_t > 0.f && g->scroll_text[0]) {
         float t = g->scroll_t;

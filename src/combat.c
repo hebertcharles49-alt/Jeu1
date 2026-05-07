@@ -617,6 +617,30 @@ void update_weapons(Game *g) {
         if (crit) pmul *= p->crit_dmg;
         fx.dmg_mul *= pmul;
         fx.range_mul *= p->range_mul;
+        /* expose le flag de crit aux degats : enemy_take_damage l'utilisera
+         * pour colorer + scaler le dmgnum et le hitstop. */
+        g->current_attack_crit = crit;
+
+        /* Signature Combo callout : un combo triple (3 elements distincts)
+         * vient de se declencher. On affiche son nom une fois quand le
+         * loadout change, pour eviter le spam. */
+        if (w->element_count == 3) {
+            int mask = weapon_combo_id(w);
+            if (mask != g->combo_callout_mask && fx.tag) {
+                g->combo_callout_mask = mask;
+                g->combo_callout_t = 2.5f;
+                g->combo_callout_color = fx.color;
+                snprintf(g->combo_callout, sizeof(g->combo_callout),
+                         "%s !", fx.tag);
+                /* burst circulaire de particules autour du joueur */
+                for (int k = 0; k < 36; k++) {
+                    float a = (k / 36.f) * 6.2831f;
+                    particle_spawn_kind(g, p->x, p->y,
+                                        cosf(a) * 130.f, sinf(a) * 130.f,
+                                        0.7f, fx.color, 3.5f, 2);
+                }
+            }
+        }
 
         /* Gating coherent : toutes les armes "actives" (qui produisent un
          * impact visible / coute du calcul) sont gatees sur la presence
@@ -645,6 +669,7 @@ void update_weapons(Game *g) {
             case W_AXE:    fire_axe(g, w, fx);    break;
             default: break;
         }
+        g->current_attack_crit = false;   /* ne fuit pas vers l'arme suivante */
         /* atk_speed_mul < 1 = plus rapide */
         w->cooldown = w->base_cd * fx.cd_mul * p->atk_speed_mul;
     }

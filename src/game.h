@@ -23,10 +23,10 @@ typedef struct GfxCtx GfxCtx;
 
 #define MAX_ENEMIES 256
 #define MAX_PROJECTILES 1024
-#define MAX_PARTICLES 1024
+#define MAX_PARTICLES 2048
 #define MAX_PICKUPS 96
 #define MAX_FAIRIES 32
-#define MAX_DMGNUM 64
+#define MAX_DMGNUM 128
 
 #define WEAPON_SLOTS 2
 #define MAX_ELEMENTS_PER_WEAPON 3
@@ -436,6 +436,17 @@ typedef struct {
     /* parchemin de lore actuel (overlay UI temporaire) */
     char          scroll_text[224];
     float         scroll_t;
+
+    /* Signature Combo : nom du combo triple actif, affiche en gros au-
+     * dessus du joueur. Recalcul lorsqu'on change de loadout. */
+    char          combo_callout[40];
+    float         combo_callout_t;
+    int           combo_callout_mask;     /* dernier mask annonce */
+    uint32_t      combo_callout_color;
+
+    /* flag de crit pour l'attaque en cours : positionne par update_weapons,
+     * lu par enemy_take_damage pour colorer/scale le dmgnum. */
+    bool          current_attack_crit;
 
     /* shop */
     ShopItem      shop_items[SHOP_SLOTS];

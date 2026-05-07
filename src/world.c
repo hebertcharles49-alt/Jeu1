@@ -174,7 +174,25 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     break;
                 default: break;
             }
-            /* elite roll : 5% par etage atteint, plafond 50%, sauf boss */
+            /* affinite elementaire de base (resistances/faiblesses thematiques)
+             * Utilise par elem_effectiveness :
+             *   T[atk][e->element] -> multiplicateur de degats subis.
+             * Couvre les non-elites/boss qui sinon auraient EL_NONE = neutre. */
+            switch (kind) {
+                case EK_ZOMBIE: e->element = EL_DARK;  /* mort -> faible HOLY x2 */
+                                break;
+                case EK_BANDIT: e->element = EL_NONE;  /* humain neutre */
+                                break;
+                case EK_DEMON:  e->element = EL_FIRE;  /* feu -> resiste FIRE 0.5
+                                                          weak to WATER 2x */
+                                break;
+                case EK_SLIME:  e->element = EL_WATER; /* aquatique -> resiste WATER 0.5
+                                                          weak to LIGHTNING 2x */
+                                break;
+                default: break;
+            }
+            /* elite roll : 5% par etage atteint, plafond 50%, sauf boss.
+             * L'elite remplace l'affinite par une des 10 (visible via aura). */
             if (kind != EK_BOSS) {
                 float chance = 0.05f * (float)g->floor_index;
                 if (chance > 0.50f) chance = 0.50f;
@@ -281,21 +299,27 @@ int fairy_spawn(Game *g, float x, float y, Element el) {
 }
 
 int dmgnum_spawn(Game *g, float x, float y, int amount, uint32_t color, bool big) {
+    /* recyclage : si pool plein, on remplace celui dont la life est la
+     * plus faible (le moins d'info perdue cote joueur). */
+    int free_slot = -1, oldest = 0;
+    float oldest_life = g->dmgnums[0].life;
     for (int i = 0; i < MAX_DMGNUM; i++) {
-        if (!g->dmgnums[i].alive) {
-            DamageNumber *d = &g->dmgnums[i];
-            d->alive = true;
-            d->x = x + (rand() % 8) - 4;
-            d->y = y - 6;
-            d->vy = -28.f;
-            d->life = d->life_max = 0.7f;
-            d->color = color;
-            d->big = big;
-            snprintf(d->text, sizeof(d->text), "%d", amount);
-            return i;
+        if (!g->dmgnums[i].alive) { free_slot = i; break; }
+        if (g->dmgnums[i].life < oldest_life) {
+            oldest = i; oldest_life = g->dmgnums[i].life;
         }
     }
-    return -1;
+    int idx = (free_slot >= 0) ? free_slot : oldest;
+    DamageNumber *d = &g->dmgnums[idx];
+    d->alive = true;
+    d->x = x + (rand() % 10) - 5;
+    d->y = y - 8;
+    d->vy = big ? -68.f : -52.f;     /* arc plus haut, surtout sur les gros coups */
+    d->life = d->life_max = big ? 1.10f : 0.85f;
+    d->color = color;
+    d->big = big;
+    snprintf(d->text, sizeof(d->text), "%d", amount);
+    return idx;
 }
 
 /* ---------- COLLISION ---------- */
@@ -720,15 +744,43 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el, float kx
     if (el == EL_LIGHTNING) { e->stun_t = 0.4f; }
     e->knockback_x += kx;
     e->knockback_y += ky;
-    /* damage number */
+    /* damage number : couleur par element + 'big' pour gros coups + crits */
     if (dmg > 0.f) {
-        bool big = (dmg > 30.f) || e->is_boss;
+        bool crit = g->current_attack_crit;
+        bool big = crit || (dmg > 30.f) || e->is_boss;
         uint32_t col = big ? 0xFFD060FF : 0xFFFFFFFF;
         if (el == EL_FIRE)      col = 0xFF8040FF;
         if (el == EL_LIGHTNING) col = 0xFFEC60FF;
         if (el == EL_WATER)     col = 0x80B0FFFF;
         if (el == EL_VOID)      col = 0xC080FFFF;
-        dmgnum_spawn(g, e->x, e->y - e->r, (int)(dmg + 0.5f), col, big);
+        if (el == EL_HOLY)      col = 0xFFE890FF;
+        if (el == EL_DARK)      col = 0xC080A0FF;
+        if (el == EL_FAE)       col = 0xF080F0FF;
+        if (crit) col = 0xFFFF40FF;
+        int idx = dmgnum_spawn(g, e->x, e->y - e->r, (int)(dmg + 0.5f), col, big);
+        if (idx >= 0 && crit) {
+            /* prefixe "!" pour les coups critiques */
+            DamageNumber *d = &g->dmgnums[idx];
+            char buf[16];
+            snprintf(buf, sizeof(buf), "!%s", d->text);
+            snprintf(d->text, sizeof(d->text), "%s", buf);
+        }
+    }
+    /* hitstop scale : plus le coup est gros, plus le freeze est long.
+     * On prend le max pour ne pas reset un hitstop encore plus gros
+     * declenche dans la meme frame. */
+    {
+        float new_stop = 0.020f + dmg * 0.0009f;
+        if (g->current_attack_crit) new_stop += 0.04f;
+        if (new_stop > 0.180f) new_stop = 0.180f;
+        if (new_stop > g->hitstop_t) g->hitstop_t = new_stop;
+        /* shake aussi proportionnel */
+        float new_shake = 1.5f + dmg * 0.045f;
+        if (new_shake > 8.f) new_shake = 8.f;
+        if (new_shake > g->shake_mag || g->shake_t < 0.05f) {
+            g->shake_mag = new_shake;
+            g->shake_t = 0.18f;
+        }
     }
     /* lifesteal hook */
     if (g->player.lifesteal > 0.f && dmg > 0.f) {
