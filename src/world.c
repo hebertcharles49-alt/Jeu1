@@ -599,41 +599,100 @@ void update_player(Game *g) {
 }
 
 /* ---------- ENEMIES ---------- */
+/* Tables de drop par kind d'ennemi : *uniquement les ennemis "interessants"
+ * laissent du loot*. Les zombies/slimes lambdas donnent juste un soupcon
+ * d'XP, les bandits-demons donnent plus, les elites/boss tout. Evite la
+ * "diarrhea de loot" qui rendait chaque cadavre identique. */
+typedef struct {
+    int xp_count;          /* nombre d'orbes XP */
+    int coin_chance;       /* % */
+    int coin_max;          /* nombre max de coins si proc */
+    int food_chance;       /* % */
+    int soul_chance;       /* % */
+    int scroll_per1000;    /* probabilite x1000 */
+    int element_chance;    /* % */
+    int item_chance;       /* % equipement */
+} DropProfile;
+
+static DropProfile drop_profile_for(Enemy *e) {
+    DropProfile d = {0, 0, 0, 0, 0, 0, 0, 0};
+    if (e->is_boss) {
+        d.xp_count = 12; d.coin_chance = 100; d.coin_max = 8;
+        d.food_chance = 100; d.soul_chance = 100;
+        d.scroll_per1000 = 600; d.element_chance = 80; d.item_chance = 100;
+        return d;
+    }
+    if (e->is_elite) {
+        d.xp_count = 4; d.coin_chance = 100; d.coin_max = 4;
+        d.food_chance = 60; d.soul_chance = 35;
+        d.scroll_per1000 = 60; d.element_chance = 25; d.item_chance = 100;
+        return d;
+    }
+    switch (e->kind) {
+        case EK_ZOMBIE:
+            d.xp_count = 1; d.coin_chance = 18; d.coin_max = 1;
+            d.food_chance = 4; d.soul_chance = 2;
+            d.scroll_per1000 = 8; d.element_chance = 2; d.item_chance = 1;
+            break;
+        case EK_SLIME:
+            d.xp_count = 1; d.coin_chance = 12; d.coin_max = 1;
+            d.food_chance = 2; d.soul_chance = 2;
+            d.scroll_per1000 = 5; d.element_chance = 1; d.item_chance = 1;
+            break;
+        case EK_BANDIT:
+            d.xp_count = 2; d.coin_chance = 55; d.coin_max = 2;
+            d.food_chance = 8; d.soul_chance = 6;
+            d.scroll_per1000 = 18; d.element_chance = 4; d.item_chance = 3;
+            break;
+        case EK_DEMON:
+            d.xp_count = 4; d.coin_chance = 90; d.coin_max = 4;
+            d.food_chance = 18; d.soul_chance = 14;
+            d.scroll_per1000 = 35; d.element_chance = 9; d.item_chance = 6;
+            break;
+        default: break;
+    }
+    return d;
+}
+
 static void enemy_drop_loot(Game *g, Enemy *e) {
-    int xpcount = 1 + e->xp_drop;
-    for (int i = 0; i < xpcount; i++) {
+    DropProfile d = drop_profile_for(e);
+    /* XP : toujours present (sinon plus de progression) */
+    for (int i = 0; i < d.xp_count; i++) {
         float a = (rand() % 360) * 0.01745f;
         pickup_spawn(g, PU_XP, 0, e->x + cosf(a) * 4, e->y + sinf(a) * 4);
     }
-    for (int i = 0; i < e->coin_drop; i++) {
-        float a = (rand() % 360) * 0.01745f;
-        pickup_spawn(g, PU_COIN, 1, e->x + cosf(a) * 6, e->y + sinf(a) * 6);
+    /* Coins : roll global puis nombre */
+    if (d.coin_chance > 0 && (rand() % 100) < d.coin_chance) {
+        int n = 1 + (rand() % (d.coin_max > 0 ? d.coin_max : 1));
+        for (int i = 0; i < n; i++) {
+            float a = (rand() % 360) * 0.01745f;
+            pickup_spawn(g, PU_COIN, 1, e->x + cosf(a) * 6, e->y + sinf(a) * 6);
+        }
     }
-    /* Nourriture variee : petit poulet (8 PV), grosse cuisse (16), pain (12).
-     * Chaque drop pioche au hasard un type. La chance reste la meme. */
-    if ((rand() % 100) < (e->is_boss ? 100 : 7)) {
+    /* Nourriture variee : petit poulet (8 PV), pain (12), grosse cuisse (16) */
+    if (d.food_chance > 0 && (rand() % 100) < d.food_chance) {
         int t = rand() % 3;
         int heal = (t == 0) ? 8 : (t == 1) ? 16 : 12;
         pickup_spawn(g, PU_FOOD, heal, e->x, e->y);
     }
-    if ((rand() % 100) < (e->is_boss ? 100 : 6)) pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
-    /* parchemins de lore : rare. Garanti chez le boss, 1.5% chez les autres. */
-    if ((rand() % 1000) < (e->is_boss ? 600 : 15))
+    if (d.soul_chance > 0 && (rand() % 100) < d.soul_chance)
+        pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
+    /* Parchemin de lore : trouvaille rare */
+    if (d.scroll_per1000 > 0 && (rand() % 1000) < d.scroll_per1000)
         pickup_spawn(g, PU_SCROLL, 0, e->x, e->y);
-    if ((rand() % 100) < (e->is_boss ? 60 : 5)) {
+    /* Element seulement parmi ceux deja decouverts */
+    if (d.element_chance > 0 && (rand() % 100) < d.element_chance) {
         int unlocked[16]; int n = 0;
         for (int el = 1; el < EL_COUNT; el++)
             if (g->meta.element_discovered[el]) unlocked[n++] = el;
         if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
     }
-    /* equipement : elite garanti, boss garanti, normaux 4% */
+    /* Equipement */
     if (e->is_boss) {
-        Item it = item_drop_for_floor(g, g->floor_index, false, true);
-        pickup_spawn_item(g, it, e->x, e->y);
-        /* boss en debloque un second */
+        Item it1 = item_drop_for_floor(g, g->floor_index, false, true);
+        pickup_spawn_item(g, it1, e->x, e->y);
         Item it2 = item_drop_for_floor(g, g->floor_index, false, true);
         pickup_spawn_item(g, it2, e->x + 12, e->y + 12);
-        /* arme bonus si le joueur a encore des poings */
         bool has_fists = false;
         for (int s = 0; s < WEAPON_SLOTS; s++)
             if (g->player.weapons[s].kind == W_FISTS) { has_fists = true; break; }
@@ -644,11 +703,8 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
             if (wn > 0)
                 pickup_spawn(g, PU_WEAPON, weapons[rand() % wn], e->x - 12, e->y - 12);
         }
-    } else if (e->is_elite) {
-        Item it = item_drop_for_floor(g, g->floor_index, true, false);
-        pickup_spawn_item(g, it, e->x, e->y);
-    } else if ((rand() % 100) < 4) {
-        Item it = item_drop_for_floor(g, g->floor_index, false, false);
+    } else if (d.item_chance > 0 && (rand() % 100) < d.item_chance) {
+        Item it = item_drop_for_floor(g, g->floor_index, e->is_elite, false);
         pickup_spawn_item(g, it, e->x, e->y);
     }
 }

@@ -737,59 +737,97 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
 }
 
 static void draw_pickup_3d(Game *g, Pickup *pk) {
-    v3 pos = v3_make(pk->x / TILE, 0.4f + sinf(pk->hover_t) * 0.05f, pk->y / TILE);
-    float r=0.7f, gg=0.7f, b=0.7f, sz=0.25f;
+    /* Hover plus marque + pillar de lumiere couleur sous le pickup pour
+     * qu'il soit visible meme dans un coin sombre / cache derriere un mur. */
+    float hover = sinf(pk->hover_t) * 0.10f + 0.10f;
+    v3 pos = v3_make(pk->x / TILE, 0.55f + hover, pk->y / TILE);
+    float r=0.7f, gg=0.7f, b=0.7f, sz=0.40f;
+    bool draw_pillar = true;
     switch (pk->kind) {
-        case PU_XP:      r=0.25f; gg=0.75f; b=1.0f;   sz=0.20f; break;
-        case PU_HEART:   r=1.0f;  gg=0.25f; b=0.38f;  sz=0.25f; break;
-        case PU_SOUL:    r=0.50f; gg=0.88f; b=0.50f;  sz=0.25f; break;
-        case PU_COIN:    r=1.0f;  gg=0.82f; b=0.25f;  sz=0.22f; break;
+        case PU_XP:      r=0.30f; gg=0.80f; b=1.0f;   sz=0.32f; break;
+        case PU_HEART:   r=1.0f;  gg=0.25f; b=0.38f;  sz=0.40f; break;
+        case PU_SOUL:    r=0.55f; gg=0.95f; b=0.55f;  sz=0.40f; break;
+        case PU_COIN:    r=1.0f;  gg=0.85f; b=0.25f;  sz=0.32f; break;
         case PU_ELEMENT: {
             uint32_t c = element_color((Element)pk->value);
             r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
-            sz=0.30f; break;
+            sz=0.50f; break;
         }
-        case PU_WEAPON:  r=0.88f; gg=0.88f; b=1.0f;   sz=0.30f; break;
-        case PU_CHEST:   r=0.50f; gg=0.31f; b=0.19f;  sz=0.45f; break;
+        case PU_WEAPON:  r=0.92f; gg=0.92f; b=1.0f;   sz=0.55f; break;
+        case PU_CHEST:   r=0.55f; gg=0.34f; b=0.20f;  sz=0.70f; draw_pillar = false; break;
         case PU_PORTAL: {
-            float a = g->time * 4.f;
-            for (int i = 0; i < 6; i++) {
-                float ang = a + i * 1.05f;
+            /* gros disque + halo */
+            float a = g->time * 3.f;
+            for (int i = 0; i < 10; i++) {
+                float ang = a + i * 0.628f;
                 gfx_box_draw(g->renderer,
-                    v3_make(pos.x + cosf(ang)*0.4f, pos.y + sinf(ang*0.5f)*0.2f + 0.4f,
-                            pos.z + sinf(ang)*0.4f),
-                    v3_make(0.10f, 0.10f, 0.10f), 0.5f, 0.88f, 1.0f);
+                    v3_make(pos.x + cosf(ang)*0.55f,
+                            0.40f + sinf(ang*0.5f + g->time)*0.30f,
+                            pos.z + sinf(ang)*0.55f),
+                    v3_make(0.14f, 0.14f, 0.14f),
+                    0.55f, 0.90f, 1.0f);
             }
-            gfx_box_draw(g->renderer, pos, v3_make(0.5f, 0.05f, 0.5f), 0.25f, 0.44f, 0.75f);
+            /* socle bleu lumineux */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.85f, 0.06f, 0.85f), 0.30f, 0.60f, 1.0f);
+            /* pillar haut de lumiere */
+            for (int i = 0; i < 4; i++) {
+                gfx_box_draw(g->renderer,
+                    v3_make(pos.x, 0.5f + i * 0.6f, pos.z),
+                    v3_make(0.10f, 0.5f, 0.10f),
+                    0.30f + i * 0.10f, 0.60f, 1.0f);
+            }
             return;
         }
         case PU_ITEM: {
             uint32_t c = rarity_color(pk->item.rarity);
             r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
-            sz=0.30f; break;
+            sz=0.50f; break;
         }
         case PU_FOOD: {
-            /* poulet : 2 cubes pour la cuisse */
-            gfx_box_draw(g->renderer, pos, v3_make(0.30f, 0.18f, 0.18f),
-                         0.78f, 0.55f, 0.30f);    /* corps brun */
+            /* poulet : corps brun grossi + os blanc visible */
+            gfx_box_draw(g->renderer, pos, v3_make(0.45f, 0.28f, 0.28f),
+                         0.78f, 0.55f, 0.30f);
             gfx_box_draw(g->renderer,
-                         v3_make(pos.x, pos.y + 0.14f, pos.z),
-                         v3_make(0.10f, 0.12f, 0.10f),
-                         0.95f, 0.88f, 0.75f);    /* os blanc */
+                         v3_make(pos.x, pos.y + 0.20f, pos.z),
+                         v3_make(0.16f, 0.18f, 0.16f),
+                         0.95f, 0.88f, 0.75f);
+            /* pillar */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.50f, 0.04f, 0.50f),
+                         0.85f, 0.45f, 0.20f);
             return;
         }
         case PU_SCROLL: {
-            /* parchemin : cube creme + bande rouge */
-            gfx_box_draw(g->renderer, pos, v3_make(0.32f, 0.10f, 0.22f),
+            /* parchemin : roule plus gros + sceau rouge + halo dore */
+            gfx_box_draw(g->renderer, pos, v3_make(0.50f, 0.16f, 0.32f),
                          0.92f, 0.86f, 0.65f);
             gfx_box_draw(g->renderer,
-                         v3_make(pos.x, pos.y + 0.06f, pos.z),
-                         v3_make(0.10f, 0.04f, 0.24f),
+                         v3_make(pos.x, pos.y + 0.10f, pos.z),
+                         v3_make(0.16f, 0.06f, 0.34f),
                          0.70f, 0.18f, 0.18f);
+            /* halo dore au sol */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.55f, 0.04f, 0.55f),
+                         0.90f, 0.75f, 0.30f);
             return;
         }
     }
+    /* corps principal */
     gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
+    /* halo plat brillant a la base = "spot light" sous le pickup,
+     * tres lisible meme dans les couloirs sombres */
+    if (draw_pillar) {
+        float hr = r * 0.7f + 0.2f, hg = gg * 0.7f + 0.2f, hb = b * 0.7f + 0.2f;
+        gfx_box_draw(g->renderer, v3_make(pos.x, 0.04f, pos.z),
+                     v3_make(sz + 0.20f, 0.03f, sz + 0.20f),
+                     hr, hg, hb);
+        /* mini-pillar fin pour attirer l'oeil */
+        float pulse = 0.5f + 0.5f * sinf(g->time * 4.f + pk->hover_t * 2.f);
+        gfx_box_draw(g->renderer, v3_make(pos.x, 0.30f, pos.z),
+                     v3_make(0.05f, 0.55f * pulse, 0.05f),
+                     hr, hg, hb);
+    }
 }
 
 static void draw_projectile_3d(Game *g, Projectile *pr) {
@@ -2033,7 +2071,7 @@ void render_help(Game *g) {
     text_draw(g->renderer, 8, y, "Nettoie les pieces, abats le BOSS, prends le portail", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Shop entre etages: pieces dorees", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Inventaire: 12 slots + 6 equipements (casque/torse/etc)", 0xCCCCCCFF); y += 9;
-    text_draw(g->renderer, 8, y, "FUSION: marque 3 items identiques (M) puis F", 0xCCCCCCFF); y += 9;
+    text_draw(g->renderer, 8, y, "FUSION: si 3 items identiques presents -> F les fusionne automatiquement", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Raretes: Commun < Magique < Rare < Epique < Legendaire (+100%)", 0xCCCCCCFF); y += 12;
     text_draw(g->renderer, 8, y, "ELEMENTS (sensibilites Pokemon-like):", 0xFFE080FF); y += 9;
     text_draw(g->renderer, 8, y, " EAU > FEU   FOUDRE > EAU   AIR > FOUDRE   TERRE > AIR", 0x80FFC0FF); y += 9;
@@ -2186,6 +2224,10 @@ void render_inventory(Game *g) {
     int gridx = 30, gridy = 24;
     int cell = 28;
     text_draw(g->renderer, gridx, gridy - 9, "SAC (12)", 0xCCCCFFFF);
+    /* auto-detection d'un groupe fusion : on l'affiche en surbrillance
+     * verte pour que le joueur sache qu'il peut presser F sans rien marquer. */
+    int fa = -1, fb = -1, fc = -1;
+    bool has_auto_fuse = inventory_find_fusion_group(g, &fa, &fb, &fc);
     for (int i = 0; i < INVENTORY_SLOTS; i++) {
         int row = i / 4, col = i % 4;
         int sx = gridx + col * cell;
@@ -2194,6 +2236,11 @@ void render_inventory(Game *g) {
         bool mk = false;
         for (int m = 0; m < g->inv_marked_count; m++)
             if (g->inv_marked[m] == i) mk = true;
+        /* highlight auto-fuse group si rien n'est manuellement marque */
+        if (g->inv_marked_count == 0 && has_auto_fuse &&
+            (i == fa || i == fb || i == fc)) {
+            mk = true;
+        }
         render_item_slot(g, sx, sy, &g->player.inventory[i], sel, mk);
     }
 
@@ -2255,10 +2302,10 @@ void render_inventory(Game *g) {
     text_drawf(g->renderer, gridx, spy + 42, 0xFFFFFFFF, "Regen %.1f /s", p->regen_per_sec);
     text_drawf(g->renderer, gridx, spy + 50, 0xFFFFFFFF, "Vol vie %.0f%%", p->lifesteal * 100.f);
 
-    /* fusion preview */
+    /* fusion preview : montre l'etat manuel s'il y en a un, sinon l'auto-detect */
     if (g->inv_marked_count > 0) {
         text_drawf(g->renderer, gridx + 90, spy, 0x80FF80FF,
-                   "FUSION (%d/3)", g->inv_marked_count);
+                   "FUSION (%d/3 marques)", g->inv_marked_count);
         if (g->inv_marked_count == 3) {
             int a = g->inv_marked[0];
             Item *base = &g->player.inventory[a];
@@ -2270,6 +2317,14 @@ void render_inventory(Game *g) {
                 text_draw(g->renderer, gridx + 90, spy + 10, "Deja max", 0xFFC080FF);
             }
         }
+    } else if (has_auto_fuse) {
+        Item *base = &g->player.inventory[fa];
+        text_draw(g->renderer, gridx + 90, spy, "FUSION DETECTEE", 0x80FF80FF);
+        text_drawf(g->renderer, gridx + 90, spy + 10, 0x80FF80FF,
+                   "F = %s %s",
+                   rarity_name(base->rarity + 1), slot_name(base->slot));
+        text_draw(g->renderer, gridx + 90, spy + 20,
+                  "(verts = items utilises)", 0x80C080FF);
     }
 
     /* message */
@@ -2277,8 +2332,8 @@ void render_inventory(Game *g) {
         text_draw(g->renderer, INTERNAL_W/2 - text_width(g->inv_msg)/2,
                   INTERNAL_H - 28, g->inv_msg, 0xFFFF40FF);
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("FLECHES NAVIGUER  E EQUIPER  M MARQUER  F FUSIONNER  X RAZ")/2,
-              INTERNAL_H - 18, "FLECHES NAVIGUER  E EQUIPER  M MARQUER  F FUSIONNER  X RAZ", 0xCCCCCCFF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("FLECHES NAVIGUER  E EQUIPER  F FUSIONNER (auto)  M MARQUER  X RAZ")/2,
+              INTERNAL_H - 18, "FLECHES NAVIGUER  E EQUIPER  F FUSIONNER (auto)  M MARQUER  X RAZ", 0xCCCCCCFF);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP POUR FERMER")/2,
               INTERNAL_H - 8, "ECHAP POUR FERMER", 0xFFFF80FF);
 }

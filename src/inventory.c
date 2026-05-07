@@ -217,15 +217,49 @@ bool inventory_unequip(Game *g, int equip_index) {
     return false;
 }
 
-/* fuse: 3 items in inventory, identical (slot, rarity, base_kind) -> next rarity, same slot */
+/* helper : trouve le premier groupe de 3 items identiques dans l'inventaire.
+ * Renvoie true si trouve et remplit out_a/b/c. Sinon false. */
+bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
+    Player *p = &g->player;
+    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+        Item *ii = &p->inventory[i];
+        if (!ii->occupied || ii->rarity >= R_LEGENDARY) continue;
+        int matches[3] = { i, -1, -1 };
+        int cnt = 1;
+        for (int j = i + 1; j < INVENTORY_SLOTS && cnt < 3; j++) {
+            Item *jj = &p->inventory[j];
+            if (!jj->occupied) continue;
+            if (jj->slot == ii->slot && jj->rarity == ii->rarity &&
+                jj->base_kind == ii->base_kind) {
+                matches[cnt++] = j;
+            }
+        }
+        if (cnt == 3) {
+            if (out_a) *out_a = matches[0];
+            if (out_b) *out_b = matches[1];
+            if (out_c) *out_c = matches[2];
+            return true;
+        }
+    }
+    return false;
+}
+
+/* fuse: si l'utilisateur a marque manuellement 3 items, on les utilise.
+ * Sinon on auto-detecte le premier groupe de 3 identiques et on fusionne.
+ * Plus besoin de marquer manuellement dans le cas standard. */
 bool inventory_fuse(Game *g) {
     Player *p = &g->player;
-    if (g->inv_marked_count != 3) {
-        snprintf(g->inv_msg, sizeof(g->inv_msg), "Marque 3 items identiques (F)");
-        g->inv_msg_t = 2.f;
-        return false;
+    int a, b, c;
+    if (g->inv_marked_count == 3) {
+        a = g->inv_marked[0]; b = g->inv_marked[1]; c = g->inv_marked[2];
+    } else {
+        if (!inventory_find_fusion_group(g, &a, &b, &c)) {
+            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                     "Aucune fusion possible : il faut 3 items identiques");
+            g->inv_msg_t = 2.5f;
+            return false;
+        }
     }
-    int a = g->inv_marked[0], b = g->inv_marked[1], c = g->inv_marked[2];
     Item *ia = &p->inventory[a];
     Item *ib = &p->inventory[b];
     Item *ic = &p->inventory[c];
@@ -248,12 +282,10 @@ bool inventory_fuse(Game *g) {
     }
     Rarity newr = (Rarity)(ia->rarity + 1);
     Item fused = item_make(ia->slot, newr, ia->base_kind);
-    fused.stat_value *= 1.20f;     /* +20% bonus via fusion */
-    /* clear sources */
+    fused.stat_value *= 1.20f;
     ia->occupied = false;
     ib->occupied = false;
     ic->occupied = false;
-    /* place fused in slot a */
     p->inventory[a] = fused;
     g->inv_marked_count = 0;
     sfx_play(g, SFX_FUSE);

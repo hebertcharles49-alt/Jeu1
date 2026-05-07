@@ -614,6 +614,7 @@ void  inventory_pickup(Game *g, Item it);            /* tries to add to first em
 bool  inventory_equip(Game *g, int inv_index);       /* swap inv slot with matching equip slot */
 bool  inventory_unequip(Game *g, int equip_index);   /* move equip back to first free inv slot */
 bool  inventory_fuse(Game *g);                       /* fuse 3 marked items */
+bool  inventory_find_fusion_group(Game *g, int *a, int *b, int *c);
 const char *item_kind_name(EquipSlot s);
 const char *item_label(const Item *it, char *buf, int bufsz);
 void        update_inventory_input(Game *g);
