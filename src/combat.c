@@ -557,6 +557,41 @@ static ComboFx compute_combo(int mask) {
     return c;
 }
 
+/* ==============================================================
+   API combos pour les ennemis : on resout le meme compute_combo et on
+   projette les proprietes selectionnees sur leurs projectiles. C'est la
+   bonne porte d'entree pour faire heriter chain/AOE/homing/element a un
+   tir d'ennemi sans dupliquer la table de combos.
+   ============================================================== */
+void combo_apply_to_enemy_projectile(int mask, Projectile *pr) {
+    if (mask == 0 || !pr) return;
+    ComboFx fx = compute_combo(mask);
+    /* chain : seulement si pas deja chain (eviter de re-stack) */
+    if (fx.chain        && pr->chains  == 0) pr->chains  = 2;
+    if (fx.aoe_explode  && pr->aoe     == 0.f) pr->aoe   = 28.f;
+    if (fx.homing       && pr->homing  == 0.f) pr->homing = 1.2f;
+    if (fx.pierces      && pr->pierce  == 0) pr->pierce  = 1;
+    /* extra_proj : non gere ici (le spawn est cote AI) */
+    /* dmg : on amplifie modestement, le boss a deja son scaling de plancher */
+    pr->dmg *= (0.6f + fx.dmg_mul * 0.4f);
+    /* element : on prend la composante "status" si l'AI ne l'a pas deja
+     * positionne sur un element fort. */
+    if (fx.status && pr->primary == EL_NONE) pr->primary = fx.status;
+}
+
+/* nom + couleur de la signature : utilises par render.c pour afficher
+ * "Vorgar Tempete" au-dessus d'un boss. */
+const char *combo_name(int mask) {
+    if (mask == 0) return "";
+    ComboFx fx = compute_combo(mask);
+    return fx.tag ? fx.tag : "";
+}
+uint32_t combo_color(int mask) {
+    if (mask == 0) return 0xFFFFFFFF;
+    ComboFx fx = compute_combo(mask);
+    return fx.color;
+}
+
 /* ---------- WEAPON FIRING ---------- */
 static int nearest_enemy(Game *g, float x, float y, float range, float *out_d) {
     int best = -1; float bestd = range * range;

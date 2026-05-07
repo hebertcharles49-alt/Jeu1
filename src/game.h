@@ -148,6 +148,7 @@ typedef struct {
     int   kind;
     int   variant;
     Element element;          /* affinity for resistances */
+    int    combo_mask;        /* bitmask d'elements (1<<EL_*) -> compute_combo() */
     bool   is_elite;
     float fire_dot;
     float fire_dps;
@@ -519,6 +520,14 @@ void     loop_on_hit(Game *g);
 void     loop_on_kill(Game *g);
 void     loop_decay(Game *g, float dt);
 uint32_t triple_loop_aura_color(int loop_idx);
+
+/* combos cote ennemis : applique les proprietes d'un combo (chain/AOE/
+ * homing/pierce/element) sur un projectile que l'ennemi vient de spawner.
+ * Utilise par world.c pour faire heriter aux projectiles ennemis le
+ * comportement de leur combo signature. */
+void        combo_apply_to_enemy_projectile(int mask, Projectile *pr);
+const char *combo_name (int mask);
+uint32_t    combo_color(int mask);
 
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);

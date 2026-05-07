@@ -206,6 +206,36 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     e->xp_drop *= 2;
                 }
             }
+            /* combo signature de l'ennemi : determine quels effets ses
+             * projectiles heritent (chain/AOE/homing/element).
+             *   - normaux : 1 element matchant l'affinite (single mask)
+             *   - elites  : 2 elements (l'affinite + 1 random complementaire)
+             *   - boss    : triple combo iconique selon le variant. Les masks
+             *               correspondent aux TRIPLE_LOOPS dans combat.c. */
+            e->combo_mask = 0;
+            if (e->is_boss) {
+                static const int BOSS_MASKS[5] = {
+                    (1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING), /* Tempete */
+                    (1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR),       /* Volcan  */
+                    (1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING),   /* Dechirure */
+                    (1<<EL_WATER)|(1<<EL_EARTH)|(1<<EL_LIGHTNING),/* Tsunami */
+                    (1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE),         /* Phenix  */
+                };
+                e->combo_mask = BOSS_MASKS[e->variant % 5];
+                /* l'element principal du boss = un de ceux du combo, pour
+                 * que elem_effectiveness reste coherent avec son aura. */
+                if (e->element == EL_NONE)
+                    e->element = (Element)(EL_FIRE + ((g->floor_index - 1) % 7));
+            } else if (e->is_elite) {
+                /* affinite (elem) + 1 element complementaire random */
+                int second = 1 + rand() % (EL_COUNT - 1);
+                while (second == (int)e->element)
+                    second = 1 + rand() % (EL_COUNT - 1);
+                e->combo_mask = (1 << e->element) | (1 << second);
+            } else {
+                /* normaux : single bit = leur affinite */
+                if (e->element != EL_NONE) e->combo_mask = (1 << e->element);
+            }
             /* nom procedural */
             enemy_generate_name(e, g->floor_index);
             return i;
@@ -616,6 +646,12 @@ void update_player(Game *g) {
                     sfx_play(g, SFX_LEVELUP);
                     break;
                 }
+                case PU_SHRINE:
+                    /* TODO : appliquer un Pacte (recette shrine_only via shop_apply_recipe).
+                     * Pour l'instant le sanctuaire est consomme sans effet, le temps
+                     * que la mecanique d'offre/refus soit cablee. */
+                    sfx_play(g, SFX_LEVELUP);
+                    break;
             }
             pk->alive = false;
         }
@@ -898,6 +934,7 @@ static void boss_update(Game *g, Enemy *e, float dt) {
                     pr.vx = cosf(a) * 90.f; pr.vy = sinf(a) * 90.f;
                     pr.life = 4.f; pr.r = 3.5f; pr.dmg = 12.f * diff; pr.owner = 1;
                     pr.reflectable = true; pr.primary = EL_FIRE;
+                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
                     projectile_spawn(g, pr);
                 }
                 sfx_play(g, SFX_SHOOT);
@@ -911,6 +948,7 @@ static void boss_update(Game *g, Enemy *e, float dt) {
                     pr.vx = cosf(a) * 110.f; pr.vy = sinf(a) * 110.f;
                     pr.life = 3.f; pr.r = 3.f; pr.dmg = 10.f * diff; pr.owner = 1;
                     pr.primary = EL_VOID;
+                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
                     projectile_spawn(g, pr);
                 }
                 sfx_play(g, SFX_SHOOT);
@@ -925,6 +963,7 @@ static void boss_update(Game *g, Enemy *e, float dt) {
                     pr.vx = cosf(a) * 130.f; pr.vy = sinf(a) * 130.f;
                     pr.life = 3.f; pr.r = 3.f; pr.dmg = 14.f * diff; pr.owner = 1;
                     pr.primary = EL_LIGHTNING;
+                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
                     projectile_spawn(g, pr);
                 }
                 sfx_play(g, SFX_SHOOT);
@@ -938,6 +977,7 @@ static void boss_update(Game *g, Enemy *e, float dt) {
                     pr.vx = 0; pr.vy = 0;
                     pr.life = 2.f; pr.r = 4.f; pr.dmg = 16.f * diff; pr.owner = 1;
                     pr.primary = EL_EARTH;
+                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
                     projectile_spawn(g, pr);
                 }
                 sfx_play(g, SFX_EXPLODE);
@@ -1039,6 +1079,7 @@ void update_enemies(Game *g) {
             pr.life = 4.f; pr.r = 3.f;
             pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
             pr.primary = EL_VOID;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
             projectile_spawn(g, pr);
             sfx_play(g, SFX_SHOOT);
         }
@@ -1053,6 +1094,7 @@ void update_enemies(Game *g) {
                 pr.life = 4.f; pr.r = 3.f;
                 pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = true;
                 pr.primary = EL_FIRE;
+                combo_apply_to_enemy_projectile(e->combo_mask, &pr);
                 projectile_spawn(g, pr);
             }
             sfx_play(g, SFX_SHOOT);

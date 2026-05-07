@@ -812,6 +812,19 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
                          0.90f, 0.75f, 0.30f);
             return;
         }
+        case PU_SHRINE: {
+            /* autel de pierre : 3 cubes empiles + flamme bleue */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.10f, pos.z),
+                         v3_make(0.55f, 0.20f, 0.55f),
+                         0.40f, 0.40f, 0.45f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.32f, pos.z),
+                         v3_make(0.40f, 0.22f, 0.40f),
+                         0.50f, 0.50f, 0.55f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.55f, pos.z),
+                         v3_make(0.16f, 0.20f, 0.16f),
+                         0.40f, 0.70f, 1.0f);  /* flamme bleue */
+            return;
+        }
     }
     /* corps principal */
     gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
@@ -1432,6 +1445,18 @@ void render_world_overlay_ui(Game *g) {
             uint32_t col = e->is_boss ? 0xFFD040FF : element_color(e->element);
             text_draw(gc, sx - nw/2 + 1, sy - 9, e->name, 0x000000FF);
             text_draw(gc, sx - nw/2,     sy - 10, e->name, col);
+            /* signature de combo : pour bien lire le pattern de l'ennemi */
+            if (e->combo_mask) {
+                const char *sig = combo_name(e->combo_mask);
+                if (sig && sig[0]) {
+                    char buf[40];
+                    snprintf(buf, sizeof(buf), "[%s]", sig);
+                    int sw = text_width(buf);
+                    uint32_t scol = combo_color(e->combo_mask);
+                    text_draw(gc, sx - sw/2 + 1, sy - 19, buf, 0x000000FF);
+                    text_draw(gc, sx - sw/2,     sy - 20, buf, scol);
+                }
+            }
         }
     }
     /* damage numbers */
