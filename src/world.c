@@ -395,7 +395,7 @@ void update_player(Game *g) {
     if (!aabb_solid(g, p->x + dx, p->y, p->r - 1)) p->x += dx; else p->vx = 0;
     if (!aabb_solid(g, p->x, p->y + dy, p->r - 1)) p->y += dy; else p->vy = 0;
 
-    /* weapon select (bindings) */
+    /* weapon select : touches (bindings) + molette souris */
     {
         SDL_Scancode kswap = g->settings.keys[BIND_WEAPON_SWAP];
         SDL_Scancode k1    = g->settings.keys[BIND_WEAPON_1];
@@ -404,6 +404,29 @@ void update_player(Game *g) {
             p->active_weapon = (p->active_weapon + 1) % WEAPON_SLOTS;
         if (k1 && g->keys[k1] && !g->keys_prev[k1]) p->active_weapon = 0;
         if (k2 && g->keys[k2] && !g->keys_prev[k2]) p->active_weapon = 1;
+        if (g->mouse_wheel != 0)
+            p->active_weapon = (p->active_weapon + WEAPON_SLOTS +
+                                (g->mouse_wheel > 0 ? 1 : -1)) % WEAPON_SLOTS;
+    }
+
+    /* particules de pas quand on bouge : petit puff de poussiere */
+    {
+        static float foot_t = 0.f;
+        float vsq = p->vx * p->vx + p->vy * p->vy;
+        if (vsq > 100.f) {
+            foot_t += dt;
+            float interval = 0.18f;
+            if (foot_t > interval) {
+                foot_t -= interval;
+                /* puff au pied, leger offset cote oppose */
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, p->x + cosf(a) * 4.f, p->y + sinf(a) * 4.f,
+                                    cosf(a) * 8.f, sinf(a) * 8.f,
+                                    0.30f, 0x40302048, 1.5f, 0);
+            }
+        } else {
+            foot_t = 0.f;
+        }
     }
 
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
@@ -415,17 +438,31 @@ void update_player(Game *g) {
         if (p->hp > p->maxhp) p->hp = p->maxhp;
     }
 
-    /* pickup pull / collect */
+    /* pickup pull / collect : aimant a loot. Rayon de pull plus genereux
+     * pour XP / coins / food (ramassage en passant). Items "interactifs"
+     * (parchemins, equipement, coffres) ont un rayon plus court pour eviter
+     * de se les coller dessus sans le vouloir. */
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i];
         if (!pk->alive) continue;
         float ddx = p->x - pk->x, ddy = p->y - pk->y;
         float d2 = ddx * ddx + ddy * ddy;
-        float pull = 70.f;
-        if (d2 < pull * pull) {
+        float pull, vmag;
+        switch (pk->kind) {
+            case PU_XP:
+            case PU_COIN:
+            case PU_SOUL:
+            case PU_FOOD:
+                pull = 130.f; vmag = 220.f; break;     /* magnet generous */
+            case PU_PORTAL:
+                pull = 0.f;   vmag = 0.f;  break;      /* pas de pull, on doit y aller */
+            default:
+                pull = 60.f;  vmag = 140.f; break;
+        }
+        if (pull > 0.f && d2 < pull * pull) {
             float d = sqrtf(d2) + 0.01f;
-            pk->x += ddx / d * 140.f * dt;
-            pk->y += ddy / d * 140.f * dt;
+            pk->x += ddx / d * vmag * dt;
+            pk->y += ddy / d * vmag * dt;
         }
         if (d2 < 12.f * 12.f) {
             switch (pk->kind) {

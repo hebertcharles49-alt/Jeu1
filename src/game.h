@@ -409,6 +409,7 @@ typedef struct {
     int           mouse_x, mouse_y;
     int           mouse_btn;
     int           mouse_btn_prev;
+    int           mouse_wheel;     /* delta vertical de molette ce frame */
     Uint8         keys_prev[SDL_NUM_SCANCODES];
 
     float         time;

@@ -23,9 +23,11 @@ bool mouse_clicked(Game *g) {
 static void poll_input(Game *g, bool *quit) {
     SDL_Event ev;
     g->mouse_btn_prev = g->mouse_btn;
+    g->mouse_wheel = 0;
     if (g->keys) memcpy(g->keys_prev, g->keys, SDL_NUM_SCANCODES);
     while (SDL_PollEvent(&ev)) {
         if (ev.type == SDL_QUIT) *quit = true;
+        if (ev.type == SDL_MOUSEWHEEL) g->mouse_wheel += ev.wheel.y;
         if (ev.type == SDL_KEYDOWN) {
             SDL_Scancode sc = ev.key.keysym.scancode;
             /* capture pour rebind */
