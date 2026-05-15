@@ -165,9 +165,22 @@ const char *subclass_name(WeaponKind a, WeaponKind b) {
     return "Aventurier";
 }
 
+/* nombre de slots talisman selon la qualite de l'arme :
+ *   COMMON / MAGIC -> 1   (qualite 1 ou 2 = 1 slot)
+ *   RARE / EPIC    -> 2   (qualite 3 ou 4 = 2 slots)
+ *   LEGENDARY      -> 3   (qualite 5 = 3 slots)
+ * Cap dur a MAX_ELEMENTS_PER_WEAPON. */
+int weapon_slot_count(Rarity r) {
+    int n = 1 + ((int)r) / 2;
+    if (n < 1) n = 1;
+    if (n > MAX_ELEMENTS_PER_WEAPON) n = MAX_ELEMENTS_PER_WEAPON;
+    return n;
+}
+
 void weapon_init_defaults(Weapon *w, WeaponKind kind) {
     memset(w, 0, sizeof(*w));
     w->kind = kind;
+    w->rarity = R_COMMON;
     switch (kind) {
         case W_FISTS:
             w->base_cd = 0.30f; w->base_dmg = 6.f;  w->base_range = 16.f; break;
@@ -186,10 +199,14 @@ void weapon_init_defaults(Weapon *w, WeaponKind kind) {
 }
 
 void weapon_attach_element(Weapon *w, Element e) {
-    if (w->element_count >= MAX_ELEMENTS_PER_WEAPON) {
-        for (int i = 0; i < MAX_ELEMENTS_PER_WEAPON - 1; i++)
+    int max_slots = weapon_slot_count(w->rarity);
+    if (w->element_count >= max_slots) {
+        /* rotation : on degage le plus ancien pour faire de la place,
+         * dans la limite des slots autorises par la qualite de l'arme. */
+        for (int i = 0; i < max_slots - 1; i++)
             w->elements[i] = w->elements[i + 1];
-        w->elements[MAX_ELEMENTS_PER_WEAPON - 1] = e;
+        w->elements[max_slots - 1] = e;
+        w->element_count = max_slots;
     } else {
         w->elements[w->element_count++] = e;
     }

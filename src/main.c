@@ -452,35 +452,73 @@ static void update_choose_hero(Game *g) {
     }
 }
 
+/* table des stats de level-up (utilisee par render_levelup et apply).
+ * base_value = palier R_COMMON. Les rarites superieures multiplient. */
+typedef struct {
+    const char *name;
+    float       base_value;
+} LevelStat;
+static const LevelStat LEVEL_STATS[8] = {
+    { "PV max",        20.f  },   /* axis 0 */
+    { "Vitesse",       12.f  },   /* axis 1 */
+    { "Degats",         0.15f },  /* axis 2 - +X% global */
+    { "Armure",         1.0f },   /* axis 3 */
+    { "Regen / s",      0.6f },   /* axis 4 */
+    { "Vol de vie",     0.04f },  /* axis 5 - +X% lifesteal */
+    { "Portee",         0.10f },  /* axis 6 - +X% portee */
+    { "Atk speed",      0.10f },  /* axis 7 - +X% atk speed */
+};
+
+/* multiplicateurs par rarete : meme philosophie que Item (Common 1, Magic 1.4,
+ * Rare 2, Epic 3, Legendaire 5). Une rarete elevee transforme l'effet. */
+static const float LEVELUP_RARITY_MUL[R_COUNT] = {
+    [R_COMMON]    = 1.00f,
+    [R_MAGIC]     = 1.40f,
+    [R_RARE]      = 2.00f,
+    [R_EPIC]      = 3.00f,
+    [R_LEGENDARY] = 5.00f,
+};
+
+/* renvoie la valeur effective scaled par la rarete pour l'axe donne */
+static float level_stat_value(int axis, Rarity r) {
+    if (axis < 0 || axis >= (int)(sizeof(LEVEL_STATS)/sizeof(LEVEL_STATS[0]))) return 0.f;
+    if (r < 0 || r >= R_COUNT) r = R_COMMON;
+    return LEVEL_STATS[axis].base_value * LEVELUP_RARITY_MUL[r];
+}
+
 static void apply_levelup_choice(Game *g, int c) {
-    int val = g->levelup_choices[c];
+    int axis = g->levelup_choices[c];
+    Rarity rar = (Rarity)g->levelup_choice_rarity[c];
+    if (rar < 0 || rar >= R_COUNT) rar = R_COMMON;
+    float v = level_stat_value(axis, rar);
     Player *p = &g->player;
-    /* val = stat id, sans option element (les elements se decouvrent via gameplay) */
-    switch (val) {
-        case 0: p->maxhp += 20.f; p->hp += 20.f; break;
-        case 1: p->speed += 12.f; break;
-        case 2: p->dmg_mul *= 1.15f; break;
-        case 3: p->armor += 1.f; break;
-        case 4: p->regen_per_sec += 0.6f; break;
-        case 5: p->lifesteal += 0.04f; break;
+    switch (axis) {
+        case 0: p->maxhp += v; p->hp += v; break;
+        case 1: p->speed += v; break;
+        case 2: p->dmg_mul *= (1.f + v); break;
+        case 3: p->armor += v; break;
+        case 4: p->regen_per_sec += v; break;
+        case 5: p->lifesteal += v; break;
         case 6:
-            /* +10% range : reduit cooldown de toutes armes */
             for (int i = 0; i < WEAPON_SLOTS; i++)
-                if (p->weapons[i].owned) p->weapons[i].base_range *= 1.10f;
+                if (p->weapons[i].owned) p->weapons[i].base_range *= (1.f + v);
             break;
         case 7:
             for (int i = 0; i < WEAPON_SLOTS; i++)
-                if (p->weapons[i].owned) p->weapons[i].base_cd *= 0.90f;
-            break;
-        case 8:
-            /* heal complet */
-            p->hp = p->maxhp;
+                if (p->weapons[i].owned) p->weapons[i].base_cd *= (1.f - v);
             break;
         default: break;
     }
     sfx_play(g, SFX_LEVELUP);
     g->state = GS_RUN;
 }
+
+/* signature publique appelee par render_levelup (definie dans render.c) */
+const char *level_stat_name (int axis) {
+    if (axis < 0 || axis >= (int)(sizeof(LEVEL_STATS)/sizeof(LEVEL_STATS[0]))) return "?";
+    return LEVEL_STATS[axis].name;
+}
+float        level_stat_value_for(int axis, Rarity r) { return level_stat_value(axis, r); }
 
 static void update_levelup(Game *g) {
     for (int c = 0; c < 3; c++) {
@@ -641,17 +679,19 @@ void game_run(Game *g) {
                 g->player.xp -= g->player.xp_to_next;
                 g->player.xp_to_next = (int)(g->player.xp_to_next * 1.4f) + 1;
                 g->player.level++;
-                /* uniquement des stats : les elements se decouvrent via
-                   pickups dans le donjon, pas au level-up. */
-                int statpool[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
-                int N = 9;
-                for (int i = N - 1; i > 0; i--) {
+                /* 8 axes de stats nommees (cf LEVEL_STATS dans apply_levelup_choice).
+                 * Chaque choix tire un axe distinct + une rarete via la table
+                 * elite par etage : c'est la meme logique probabiliste que
+                 * pour le loot, donc legendaire reste rare et sent fort. */
+                int statpool[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+                for (int i = 7; i > 0; i--) {
                     int j = rand() % (i + 1);
                     int t = statpool[i]; statpool[i] = statpool[j]; statpool[j] = t;
                 }
                 for (int c = 0; c < 3; c++) {
-                    g->levelup_choice_kind[c] = 2; /* tous stats */
-                    g->levelup_choices[c] = statpool[c];
+                    g->levelup_choice_kind[c] = 2;
+                    g->levelup_choices[c]      = statpool[c];
+                    g->levelup_choice_rarity[c]= (int)rarity_for_floor_elite(g->floor_index);
                 }
                 g->state = GS_LEVELUP;
                 sfx_play(g, SFX_LEVELUP);

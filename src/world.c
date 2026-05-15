@@ -544,17 +544,21 @@ void update_player(Game *g) {
                     break;
                 }
                 case PU_WEAPON: {
-                    int kind = pk->value;
-                    /* place into a slot: prefer a fists slot */
+                    /* value packe : kind dans les 8 bits bas, rarity dans les
+                     * 8 bits suivants. Permet aux drops d'amener une qualite
+                     * d'arme variee sans changer la signature pickup_spawn. */
+                    int kind   = pk->value & 0xFF;
+                    int rarity = (pk->value >> 8) & 0xFF;
+                    if (rarity < 0 || rarity >= R_COUNT) rarity = R_COMMON;
                     int slot = -1;
                     for (int s = 0; s < WEAPON_SLOTS; s++)
                         if (p->weapons[s].kind == W_FISTS) { slot = s; break; }
                     if (slot < 0) slot = p->active_weapon;
                     weapon_init_defaults(&p->weapons[slot], (WeaponKind)kind);
+                    p->weapons[slot].rarity = (Rarity)rarity;
                     p->weapons[slot].owned = true;
                     p->active_weapon = slot;
                     sfx_play(g, SFX_LEVELUP);
-                    /* DECOUVERTE permanente */
                     if (kind > 0 && kind < W_COUNT && !g->meta.weapon_discovered[kind]) {
                         g->meta.weapon_discovered[kind] = true;
                         save_write(&g->meta);
@@ -574,7 +578,12 @@ void update_player(Game *g) {
                                 if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
                             if (wn > 0) {
                                 int wpick = weapons[rand() % wn];
-                                pickup_spawn(g, PU_WEAPON, wpick, pk->x, pk->y - 6);
+                                /* arme issue d'un coffre : qualite roule sur
+                                 * la table elite par etage, comme l'equipement. */
+                                Rarity wr = rarity_for_floor_elite(g->floor_index);
+                                pickup_spawn(g, PU_WEAPON,
+                                             wpick | (((int)wr) << 8),
+                                             pk->x, pk->y - 6);
                             }
                         }
                     }
@@ -762,8 +771,14 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
             int weapons[8]; int wn = 0;
             for (int wk = W_SWORD; wk < W_COUNT; wk++)
                 if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
-            if (wn > 0)
-                pickup_spawn(g, PU_WEAPON, weapons[rand() % wn], e->x - 12, e->y - 12);
+            if (wn > 0) {
+                /* arme drop par boss : qualite tiree de la table boss
+                 * (skewed Epic+ aux etages tardifs). */
+                Rarity wr = rarity_for_floor_boss(g->floor_index);
+                pickup_spawn(g, PU_WEAPON,
+                             weapons[rand() % wn] | (((int)wr) << 8),
+                             e->x - 12, e->y - 12);
+            }
         }
     } else if (d.item_chance > 0 && (rand() % 100) < d.item_chance) {
         Item it = item_drop_for_floor(g, g->floor_index, e->is_elite, false);
@@ -1031,8 +1046,15 @@ void update_enemies(Game *g) {
 
         e->knockback_x *= 0.85f;
         e->knockback_y *= 0.85f;
-        e->x += e->knockback_x * dt;
-        e->y += e->knockback_y * dt;
+        /* knockback : bloque par les murs comme la marche normale */
+        {
+            float kdx = e->knockback_x * dt;
+            float kdy = e->knockback_y * dt;
+            if (!aabb_solid(g, e->x + kdx, e->y, e->r - 1)) e->x += kdx;
+            else                                            e->knockback_x = 0;
+            if (!aabb_solid(g, e->x, e->y + kdy, e->r - 1)) e->y += kdy;
+            else                                            e->knockback_y = 0;
+        }
 
         if (e->is_boss) { boss_update(g, e, dt); continue; }
 
@@ -1205,6 +1227,25 @@ void update_room_logic(Game *g) {
                     pickup_spawn(g, PU_CHEST, 0,
                                  (r->x + r->w / 2) * TILE,
                                  (r->y + r->h / 2) * TILE);
+                }
+                /* Loot contextuel "petit objet flottant" (Isaac).
+                 * 35% : un PU_FOOD pose entre coffre et entree.
+                 * 12% supp : un parchemin de lore (rare).
+                 * Position : un coin du milieu de la piece (pas pile sur
+                 * le coffre, pour qu'on les distingue). */
+                if ((rand() % 100) < 35) {
+                    int t = rand() % 3;
+                    int heal = (t == 0) ? 8 : (t == 1) ? 16 : 12;
+                    int ox = r->x + 1 + rand() % (r->w - 2);
+                    int oy = r->y + 1 + rand() % (r->h - 2);
+                    pickup_spawn(g, PU_FOOD, heal,
+                                 ox * TILE + TILE/2, oy * TILE + TILE/2);
+                }
+                if ((rand() % 100) < 12) {
+                    int ox = r->x + 1 + rand() % (r->w - 2);
+                    int oy = r->y + 1 + rand() % (r->h - 2);
+                    pickup_spawn(g, PU_SCROLL, 0,
+                                 ox * TILE + TILE/2, oy * TILE + TILE/2);
                 }
             }
         }

@@ -1943,42 +1943,50 @@ void render_levelup(Game *g) {
     gfx_set_blend(g->renderer, false);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("MONTEE DE NIVEAU")/2, 30,
               "MONTEE DE NIVEAU", 0xFFFF80FF);
-    Weapon *w = &g->player.weapons[g->player.active_weapon];
-    text_drawf(g->renderer, INTERNAL_W/2 - 100, 46, 0xC0C0FFFF,
-               "ARME ACTIVE %s   (TAB POUR CHANGER AVANT MAJ)", weapon_name(w->kind));
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("Trois talents -- chacun avec sa qualite")/2,
+              46, "Trois talents -- chacun avec sa qualite", 0xC0C0FFFF);
 
-    int boxw = 130, boxh = 56;
+    int boxw = 150, boxh = 80;
     int total_w = boxw * 3 + 12;
     int sx = (INTERNAL_W - total_w) / 2;
     int sy = 70;
     for (int c = 0; c < 3; c++) {
-        int kind = g->levelup_choice_kind[c];
-        int v = g->levelup_choices[c];
+        int axis  = g->levelup_choices[c];
+        Rarity r  = (Rarity)g->levelup_choice_rarity[c];
+        if (r < 0 || r >= R_COUNT) r = R_COMMON;
+        uint32_t rcol = rarity_color(r);
+
         fill_rect(g->renderer, sx, sy, boxw, boxh, 0x18101DFF);
-        rect_outline(g->renderer, sx, sy, boxw, boxh, 0xFFFF80FF);
-        text_drawf(g->renderer, sx + 4, sy + 4, 0xFFFF80FF, "[%d]", c + 1);
-        if (kind == 1) {
-            Element e = (Element)v;
-            text_drawf(g->renderer, sx + 24, sy + 4, element_color(e),
-                       "ELEMENT %s", element_name(e));
-            text_drawf(g->renderer, sx + 4, sy + 18, 0xCCCCCCFF, "Greffe sur %s",
-                       weapon_name(w->kind));
-            Weapon test = *w;
-            weapon_attach_element(&test, e);
-            char buf[80]; weapon_describe(&test, buf, sizeof(buf));
-            text_draw(g->renderer, sx + 4, sy + 30, buf, 0xFFC0FFFF);
+        rect_outline(g->renderer, sx, sy, boxw, boxh, rcol);
+        /* bandeau couleur de rarete en haut */
+        fill_rect(g->renderer, sx, sy, boxw, 4, rcol);
+
+        text_drawf(g->renderer, sx + 6, sy + 8, 0xFFFF80FF, "[%d]", c + 1);
+        text_draw(g->renderer, sx + 24, sy + 8, rarity_name(r), rcol);
+
+        const char *axn = level_stat_name(axis);
+        float v = level_stat_value_for(axis, r);
+        char buf[64];
+        /* axes pourcentage : 2, 5, 6, 7. Les autres sont des valeurs flat. */
+        if (axis == 2 || axis == 5 || axis == 6 || axis == 7) {
+            snprintf(buf, sizeof(buf), "+%d%% %s", (int)(v * 100.f + 0.5f), axn);
         } else {
-            const char *lbl = "?";
-            if      (v == 0) lbl = "+20 PV MAX";
-            else if (v == 1) lbl = "+10 VITESSE";
-            else if (v == 2) lbl = "+15% DEGATS";
-            text_drawf(g->renderer, sx + 24, sy + 4, 0xFFE080FF, "STAT");
-            text_draw(g->renderer, sx + 4, sy + 24, lbl, 0xFFFFFFFF);
+            /* affichage compact : entier si presque rond, sinon 1 decimale */
+            if (fabsf(v - (int)(v + 0.5f)) < 0.05f)
+                snprintf(buf, sizeof(buf), "+%d %s", (int)(v + 0.5f), axn);
+            else
+                snprintf(buf, sizeof(buf), "+%.1f %s", v, axn);
         }
+        text_draw(g->renderer, sx + 6, sy + 30, buf, 0xFFFFFFFF);
+
+        /* aperçu chiffre permanent */
+        text_drawf(g->renderer, sx + 6, sy + boxh - 14, 0x808088FF,
+                   "x%.2f vs commun", v / (level_stat_value_for(axis, R_COMMON) + 0.0001f));
         sx += boxw + 6;
     }
-    text_draw(g->renderer, INTERNAL_W/2 - 80, INTERNAL_H - 20,
-              "1 / 2 / 3 POUR CHOISIR   I INVENTAIRE", 0xFFFFFFFF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("1 / 2 / 3 ou CLIC POUR CHOISIR   I INVENTAIRE")/2,
+              INTERNAL_H - 20,
+              "1 / 2 / 3 ou CLIC POUR CHOISIR   I INVENTAIRE", 0xFFFFFFFF);
 }
 
 /* ---------- DEAD ---------- */

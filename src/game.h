@@ -52,6 +52,16 @@ typedef enum {
     EL_COUNT
 } Element;
 
+/* ---------- Rarity (avant Weapon car utilisee dedans) ---------- */
+typedef enum {
+    R_COMMON = 0,
+    R_MAGIC,
+    R_RARE,
+    R_EPIC,
+    R_LEGENDARY,
+    R_COUNT
+} Rarity;
+
 /* ---------- Weapons ---------- */
 typedef enum {
     W_FISTS = 0,
@@ -70,6 +80,8 @@ typedef struct {
     float      base_cd;
     float      base_dmg;
     float      base_range;
+    Rarity     rarity;       /* qualite : determine le nombre de slots talisman
+                                R_COMMON/MAGIC -> 1, RARE/EPIC -> 2, LEGENDARY -> 3 */
     Element    elements[MAX_ELEMENTS_PER_WEAPON];
     int        element_count;
 } Weapon;
@@ -112,14 +124,7 @@ typedef enum {
     SLOT_NONE
 } EquipSlot;
 
-typedef enum {
-    R_COMMON = 0,
-    R_MAGIC,
-    R_RARE,
-    R_EPIC,
-    R_LEGENDARY,
-    R_COUNT
-} Rarity;
+/* (Rarity declaree plus haut) */
 
 typedef struct {
     bool      occupied;
@@ -439,6 +444,7 @@ typedef struct {
 
     int           levelup_choices[3];
     int           levelup_choice_kind[3];
+    int           levelup_choice_rarity[3];   /* R_COMMON..R_LEGENDARY par choix */
     int           hero_cursor;
     int           hub_cursor;
     int           title_cursor;
@@ -582,6 +588,11 @@ void        weapon_init_defaults(Weapon *w, WeaponKind kind);
 void        weapon_attach_element(Weapon *w, Element e);
 void        weapon_describe(const Weapon *w, char *buf, int bufsz);
 int         weapon_combo_id(const Weapon *w);
+int         weapon_slot_count(Rarity r);   /* talisman slots autorises */
+
+/* tables level-up (definies dans main.c, exposees pour render.c) */
+const char *level_stat_name (int axis);
+float       level_stat_value_for(int axis, Rarity r);
 
 void        save_load(MetaSave *m);
 void        save_write(const MetaSave *m);
