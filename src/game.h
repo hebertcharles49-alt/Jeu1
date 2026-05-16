@@ -34,6 +34,14 @@ typedef struct GfxCtx GfxCtx;
 #define INVENTORY_SLOTS 12
 #define EQUIP_SLOTS 6     /* helm, chest, legs, boots, belt, gloves */
 
+/* mapping inv_cursor : 0-11 sac, 12-17 equipement, 18-19 armes,
+ * 20-22 talismans arme 0, 23-25 talismans arme 1. */
+#define INV_CURSOR_BAG_BASE       0
+#define INV_CURSOR_EQUIP_BASE     12
+#define INV_CURSOR_WEAPON_BASE    18
+#define INV_CURSOR_TALISMAN_BASE  20
+#define INV_CURSOR_MAX            26
+
 #define MAX_FLOORS 10
 
 /* ---------- Elements ---------- */
@@ -336,6 +344,7 @@ typedef struct {
     int  spawn_timer_ms;
     bool is_boss_room;
     bool boss_spawned;
+    bool is_debug_room;       /* salle bac-a-sable spawnee via options.debug_room */
 } Room;
 
 typedef struct {
@@ -395,6 +404,9 @@ typedef struct {
     int          sfx_volume;        /* 0..4 */
     int          sfx_mute;
     int          dlss_on;           /* 0 = nearest, 1 = linear upscale */
+    int          debug_room;        /* 1 = salle bac-a-sable a cote de l'entree
+                                       avec un exemplaire de chaque arme,
+                                       element et equipement legendaire. */
 } Settings;
 
 /* ---------- Game state ---------- */
@@ -538,6 +550,11 @@ uint32_t    combo_color(int mask);
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);
 bool  tile_solid(TileKind t);
+/* Salle debug (options.debug_room) : carve une chambre supplementaire reliee
+ * a la salle de spawn et la remplit d'un exemplaire de chaque arme,
+ * element et equipement legendaire. Idempotent : ne fait rien si la salle
+ * existe deja sur le dungeon (room avec is_debug_room). */
+void  dungeon_add_debug_room(Game *g);
 
 int   enemy_spawn(Game *g, int kind, float x, float y);
 int   projectile_spawn(Game *g, Projectile p);
@@ -678,5 +695,9 @@ bool  inventory_find_fusion_group(Game *g, int *a, int *b, int *c);
 const char *item_kind_name(EquipSlot s);
 const char *item_label(const Item *it, char *buf, int bufsz);
 void        update_inventory_input(Game *g);
+/* renvoie le rect ecran d'un slot de l'inventaire (sac, equipement, arme,
+ * talisman). cursor_idx suit le mapping INV_CURSOR_* (voir render.c).
+ * Retourne false si l'index est hors-bornes. */
+bool        inv_layout_rect(int cursor_idx, int *x, int *y, int *w, int *h);
 
 #endif

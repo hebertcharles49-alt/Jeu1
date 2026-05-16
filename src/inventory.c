@@ -295,82 +295,138 @@ bool inventory_fuse(Game *g) {
     return true;
 }
 
+/* Cycle l'element d'un slot talisman (clic) :
+ *   vide -> premier element decouvert -> suivant -> ... -> dernier -> vide.
+ * Tient compte uniquement des elements decouverts via meta.element_discovered. */
+static void talisman_cycle(Game *g, int weapon_idx, int talisman_idx) {
+    Weapon *w = &g->player.weapons[weapon_idx];
+    if (!w->owned) return;
+    int active_n = weapon_slot_count(w->rarity);
+    if (talisman_idx >= active_n) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Talisman verrouille (ameliore la qualite de l'arme)");
+        g->inv_msg_t = 2.0f;
+        return;
+    }
+    /* construit la liste des elements decouverts */
+    Element pool[EL_COUNT]; int pn = 0;
+    for (int e = 1; e < EL_COUNT; e++)
+        if (g->meta.element_discovered[e]) pool[pn++] = (Element)e;
+    if (pn == 0) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Aucun element decouvert");
+        g->inv_msg_t = 1.5f;
+        return;
+    }
+    Element current = (talisman_idx < w->element_count)
+                        ? w->elements[talisman_idx] : EL_NONE;
+    /* trouve le prochain : current -> pool[idx+1], avec EL_NONE -> pool[0] */
+    int next = -1;
+    if (current == EL_NONE) {
+        next = 0;
+    } else {
+        for (int i = 0; i < pn; i++) if (pool[i] == current) { next = i + 1; break; }
+        /* current pas trouve (element non decouvert) -> repart sur pool[0] */
+        if (next < 0) next = 0;
+    }
+    if (next >= pn) {
+        /* fin de la liste -> retire le talisman */
+        if (talisman_idx < w->element_count) {
+            for (int k = talisman_idx; k < w->element_count - 1; k++)
+                w->elements[k] = w->elements[k + 1];
+            w->elements[w->element_count - 1] = EL_NONE;
+            w->element_count--;
+        }
+    } else {
+        /* assigne pool[next] dans le slot talisman_idx, en etendant
+         * element_count si necessaire (les slots intermediaires ont deja
+         * une valeur ; on n'ajoute qu'a la fin pour rester coherent). */
+        if (talisman_idx < w->element_count) {
+            w->elements[talisman_idx] = pool[next];
+        } else {
+            w->elements[w->element_count++] = pool[next];
+        }
+    }
+    sfx_play(g, SFX_PICKUP);
+}
+
 /* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
-    /* mouse hover/click sur slots */
-    int cell = 28;
-    for (int i = 0; i < INVENTORY_SLOTS; i++) {
-        int row = i / 4, col = i % 4;
-        int sx = 30 + col * cell;
-        int sy = 24 + row * cell;
-        if (mouse_in_rect(g, sx, sy, 26, 26)) {
+    /* mouse hover/click : on parcourt TOUS les slots possibles (sac,
+     * equipement, armes, talismans) en utilisant le layout commun. */
+    for (int i = 0; i < INV_CURSOR_MAX; i++) {
+        int x, y, w, h;
+        if (!inv_layout_rect(i, &x, &y, &w, &h)) continue;
+        if (mouse_in_rect(g, x, y, w, h)) {
             g->inv_cursor = i;
             if (mouse_clicked(g)) {
-                inventory_equip(g, i);
+                if (i < INV_CURSOR_EQUIP_BASE) {
+                    inventory_equip(g, i);
+                } else if (i < INV_CURSOR_WEAPON_BASE) {
+                    inventory_unequip(g, i - INV_CURSOR_EQUIP_BASE);
+                } else if (i < INV_CURSOR_TALISMAN_BASE) {
+                    /* slot arme : pas d'action click pour l'instant
+                     * (les armes ne se "deposent" pas dans le sac). */
+                } else {
+                    int rel = i - INV_CURSOR_TALISMAN_BASE;
+                    talisman_cycle(g, rel / 3, rel % 3);
+                }
             }
         }
     }
-    int eqx = INTERNAL_W - 60;
-    for (int i = 0; i < EQUIP_SLOTS; i++) {
-        int sx = eqx;
-        int sy = 24 + i * cell;
-        if (mouse_in_rect(g, sx, sy, 26, 26)) {
-            g->inv_cursor = 12 + i;
-            if (mouse_clicked(g)) {
-                inventory_unequip(g, i);
-            }
-        }
+    /* navigation clavier : on garde la grille du sac (fleches) +
+     * Tab pour cycler les "zones" (sac -> equip -> armes -> talismans). */
+    if (g->keys[SDL_SCANCODE_TAB] && !g->keys_prev[SDL_SCANCODE_TAB]) {
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE)         g->inv_cursor = INV_CURSOR_EQUIP_BASE;
+        else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE)   g->inv_cursor = INV_CURSOR_WEAPON_BASE;
+        else if (g->inv_cursor < INV_CURSOR_TALISMAN_BASE) g->inv_cursor = INV_CURSOR_TALISMAN_BASE;
+        else                                                g->inv_cursor = 0;
     }
-    /* 12 inventory slots laid out 4x3, then 6 equipment slots */
-    /* cursor < 12 = inv, 12..17 = equip */
-    if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT]) {
-        if (g->inv_cursor < 12) {
-            int row = g->inv_cursor / 4;
-            int col = g->inv_cursor % 4;
-            col++;
-            if (col >= 4) col = 3;
-            g->inv_cursor = row * 4 + col;
-        } else {
-            int e = g->inv_cursor - 12;
-            e = (e + 1) % EQUIP_SLOTS;
-            g->inv_cursor = 12 + e;
-        }
+    /* fleches : navigation locale a chaque zone */
+    bool kr = (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT]);
+    bool kl = (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT]);
+    bool kd = (g->keys[SDL_SCANCODE_DOWN]  && !g->keys_prev[SDL_SCANCODE_DOWN]);
+    bool ku = (g->keys[SDL_SCANCODE_UP]    && !g->keys_prev[SDL_SCANCODE_UP]);
+    if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
+        int row = g->inv_cursor / 4, col = g->inv_cursor % 4;
+        if (kr) col = (col + 1) % 4;
+        if (kl) col = (col + 3) % 4;
+        if (kd) { row++; if (row >= 3) { g->inv_cursor = INV_CURSOR_EQUIP_BASE; goto nav_done; } }
+        if (ku) { row--; if (row < 0)  { row = 0; } }
+        g->inv_cursor = row * 4 + col;
+    } else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
+        int e = g->inv_cursor - INV_CURSOR_EQUIP_BASE;
+        if (kr) e = (e + 1) % EQUIP_SLOTS;
+        if (kl) e = (e + EQUIP_SLOTS - 1) % EQUIP_SLOTS;
+        if (kd) { g->inv_cursor = INV_CURSOR_WEAPON_BASE; goto nav_done; }
+        if (ku) { g->inv_cursor = 0; goto nav_done; }
+        g->inv_cursor = INV_CURSOR_EQUIP_BASE + e;
+    } else if (g->inv_cursor < INV_CURSOR_TALISMAN_BASE) {
+        int w = g->inv_cursor - INV_CURSOR_WEAPON_BASE;
+        if (kr) w = (w + 1) % WEAPON_SLOTS;
+        if (kl) w = (w + WEAPON_SLOTS - 1) % WEAPON_SLOTS;
+        if (kd) { g->inv_cursor = INV_CURSOR_TALISMAN_BASE + w * 3; goto nav_done; }
+        if (ku) { g->inv_cursor = INV_CURSOR_EQUIP_BASE; goto nav_done; }
+        g->inv_cursor = INV_CURSOR_WEAPON_BASE + w;
+    } else {
+        int rel = g->inv_cursor - INV_CURSOR_TALISMAN_BASE;
+        int wi = rel / 3, ti = rel % 3;
+        if (kr) { ti++; if (ti >= 3) { wi = (wi + 1) % WEAPON_SLOTS; ti = 0; } }
+        if (kl) { ti--; if (ti < 0)  { wi = (wi + WEAPON_SLOTS - 1) % WEAPON_SLOTS; ti = 2; } }
+        if (ku) { g->inv_cursor = INV_CURSOR_WEAPON_BASE + wi; goto nav_done; }
+        g->inv_cursor = INV_CURSOR_TALISMAN_BASE + wi * 3 + ti;
     }
-    if (g->keys[SDL_SCANCODE_LEFT] && !g->keys_prev[SDL_SCANCODE_LEFT]) {
-        if (g->inv_cursor < 12) {
-            int row = g->inv_cursor / 4;
-            int col = g->inv_cursor % 4;
-            col--; if (col < 0) col = 0;
-            g->inv_cursor = row * 4 + col;
-        } else {
-            int e = g->inv_cursor - 12;
-            e = (e - 1 + EQUIP_SLOTS) % EQUIP_SLOTS;
-            g->inv_cursor = 12 + e;
-        }
-    }
-    if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN]) {
-        if (g->inv_cursor < 12) {
-            int row = g->inv_cursor / 4;
-            int col = g->inv_cursor % 4;
-            row++;
-            if (row >= 3) g->inv_cursor = 12;        /* down past inventory -> equip */
-            else g->inv_cursor = row * 4 + col;
-        }
-    }
-    if (g->keys[SDL_SCANCODE_UP] && !g->keys_prev[SDL_SCANCODE_UP]) {
-        if (g->inv_cursor >= 12) {
-            g->inv_cursor = 8;                       /* enter inv from equip */
-        } else {
-            int row = g->inv_cursor / 4;
-            int col = g->inv_cursor % 4;
-            row--;
-            if (row >= 0) g->inv_cursor = row * 4 + col;
-        }
-    }
-    /* E = equip / unequip */
+nav_done:;
+    /* E = equip / unequip / cycle talisman */
     if (g->keys[SDL_SCANCODE_E] && !g->keys_prev[SDL_SCANCODE_E]) {
-        if (g->inv_cursor < 12) inventory_equip(g, g->inv_cursor);
-        else                    inventory_unequip(g, g->inv_cursor - 12);
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
+            inventory_equip(g, g->inv_cursor);
+        } else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
+            inventory_unequip(g, g->inv_cursor - INV_CURSOR_EQUIP_BASE);
+        } else if (g->inv_cursor >= INV_CURSOR_TALISMAN_BASE) {
+            int rel = g->inv_cursor - INV_CURSOR_TALISMAN_BASE;
+            talisman_cycle(g, rel / 3, rel % 3);
+        }
     }
     /* M = mark for fusion */
     if (g->keys[SDL_SCANCODE_M] && !g->keys_prev[SDL_SCANCODE_M]) {

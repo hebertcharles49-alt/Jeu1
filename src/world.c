@@ -133,6 +133,110 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     }
 }
 
+/* ---------- DEBUG ROOM ----------
+ * Salle bac-a-sable adjacente a la salle de spawn, peuplee d'un exemplaire
+ * de chaque arme, element et piece d'equipement legendaire. Permet
+ * d'essayer toutes les combinaisons sans grinder. Idempotent : si la
+ * salle debug existe deja (is_debug_room), on ne re-spawne pas.
+ *
+ * Doit etre appelee APRES dungeon_generate et APRES tout reset de pickups
+ * (par exemple dans game_next_floor : memset(pickups), puis
+ * dungeon_add_debug_room). */
+void dungeon_add_debug_room(Game *g) {
+    Dungeon *d = &g->dungeon;
+    if (d->room_count <= 0 || d->room_count >= 32) return;
+    /* idempotence : si une salle debug existe deja, on re-spawne juste les
+     * pickups (utile entre deux etages). */
+    int debug_idx = -1;
+    for (int i = 0; i < d->room_count; i++)
+        if (d->rooms[i].is_debug_room) { debug_idx = i; break; }
+
+    if (debug_idx < 0) {
+        Room *spawn = &d->rooms[0];
+        int rw = 11, rh = 9;
+        /* On essaye 4 cotes autour de la salle de spawn. */
+        int candidates[4][2] = {
+            { spawn->x + spawn->w + 2,            spawn->y                  },   /* droite */
+            { spawn->x - rw - 2,                   spawn->y                  },   /* gauche */
+            { spawn->x,                            spawn->y + spawn->h + 2   },   /* dessous */
+            { spawn->x,                            spawn->y - rh - 2         },   /* dessus */
+        };
+        int rx = -1, ry = -1;
+        for (int c = 0; c < 4; c++) {
+            int tx = candidates[c][0], ty = candidates[c][1];
+            if (tx <= 1 || ty <= 1 || tx + rw >= MAP_W - 1 || ty + rh >= MAP_H - 1) continue;
+            bool overlap = false;
+            for (int i = 0; i < d->room_count; i++) {
+                Room *o = &d->rooms[i];
+                if (tx < o->x + o->w + 1 && tx + rw + 1 > o->x &&
+                    ty < o->y + o->h + 1 && ty + rh + 1 > o->y) {
+                    overlap = true; break;
+                }
+            }
+            if (!overlap) { rx = tx; ry = ty; break; }
+        }
+        if (rx < 0) return;     /* pas la place : on abandonne silencieusement */
+        carve_room(d, rx, ry, rw, rh);
+        /* corridor depuis le centre de la salle spawn jusqu'au centre debug */
+        carve_corridor(d,
+                       spawn->x + spawn->w / 2, spawn->y + spawn->h / 2,
+                       rx + rw / 2,             ry + rh / 2);
+        Room *r = &d->rooms[d->room_count];
+        r->x = rx; r->y = ry; r->w = rw; r->h = rh;
+        r->cleared = true;
+        r->enemies_to_spawn = 0;
+        r->is_boss_room = false;
+        r->boss_spawned = false;
+        r->is_debug_room = true;
+        debug_idx = d->room_count;
+        d->room_count++;
+        d->gen_id++;            /* invalide la cache mesh render */
+    }
+    Room *r = &d->rooms[debug_idx];
+
+    /* peuplement : on dispose les pickups sur une grille reguliere. */
+    float ox = (r->x + 1) * (float)TILE + TILE / 2.f;
+    float oy = (r->y + 1) * (float)TILE + TILE / 2.f;
+    float step = (float)TILE;
+    int col = 0, row = 0;
+    #define DBG_PLACE(spawn_call) do { \
+        float xx = ox + col * step; \
+        float yy = oy + row * step; \
+        spawn_call; \
+        col++; \
+        if (col >= (r->w - 2)) { col = 0; row++; } \
+    } while (0)
+
+    /* Rangee 1 : armes commun + legendaire (W_SWORD..W_AXE) */
+    for (int wk = W_SWORD; wk < W_COUNT; wk++) {
+        DBG_PLACE(pickup_spawn(g, PU_WEAPON, wk | (((int)R_COMMON)    << 8), xx, yy));
+    }
+    col = 0; row++;
+    for (int wk = W_SWORD; wk < W_COUNT; wk++) {
+        DBG_PLACE(pickup_spawn(g, PU_WEAPON, wk | (((int)R_LEGENDARY) << 8), xx, yy));
+    }
+    /* Rangee suivante : un exemplaire de chaque element (talisman) */
+    col = 0; row++;
+    for (int e = 1; e < EL_COUNT; e++) {
+        DBG_PLACE(pickup_spawn(g, PU_ELEMENT, e, xx, yy));
+    }
+    /* Rangee suivante : equipement legendaire pour chaque slot */
+    col = 0; row++;
+    for (int s = 0; s < EQUIP_SLOTS; s++) {
+        Item it = item_make((EquipSlot)s, R_LEGENDARY, 4);
+        DBG_PLACE(pickup_spawn_item(g, it, xx, yy));
+    }
+    /* Quelques goodies : food, coin pile */
+    col = 0; row++;
+    DBG_PLACE(pickup_spawn(g, PU_FOOD, 16, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_FOOD, 16, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_COIN, 10, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_COIN, 10, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_SOUL, 0,  xx, yy));
+
+    #undef DBG_PLACE
+}
+
 /* ---------- ENTITY POOLS ---------- */
 int enemy_spawn(Game *g, int kind, float x, float y) {
     for (int i = 0; i < MAX_ENEMIES; i++) {

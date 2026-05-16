@@ -292,6 +292,14 @@ void game_start_new_run(Game *g) {
     dungeon_generate(&g->dungeon, g->floor_index, (unsigned)rand());
     p->x = g->dungeon.spawn_x * TILE + TILE / 2;
     p->y = g->dungeon.spawn_y * TILE + TILE / 2;
+    if (g->settings.debug_room) {
+        /* en mode debug, on revele tout pour pouvoir reellement utiliser
+         * le contenu de la salle (sinon les armes/elements non decouverts
+         * ne s'affichent meme pas a l'UI). */
+        for (int e = 1; e < EL_COUNT;  e++) g->meta.element_discovered[e] = true;
+        for (int w = 1; w < W_COUNT;   w++) g->meta.weapon_discovered[w]  = true;
+        dungeon_add_debug_room(g);
+    }
     g->state = GS_RUN;
 }
 
@@ -326,6 +334,7 @@ void game_next_floor(Game *g) {
     g->boss_intro_t = 0.f;
     g->player.hp += 25.f;
     if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
+    if (g->settings.debug_room) dungeon_add_debug_room(g);
     g->state = GS_RUN;
 }
 
