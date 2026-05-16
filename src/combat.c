@@ -348,6 +348,23 @@ static const EmergentRule EMERGENT_RULES[] = {
     { TAG_SHADOW|TAG_UNSTABLE,       .dmg_add= 0.20f, .homing=true                         },
     { TAG_DIVINE|TAG_FLUID,          .aoe_explode=true, .spawn_fairy=true                  },
     { TAG_FLUID|TAG_HEAVY,           .dmg_add= 0.10f, .aoe_explode=true, .cd_mul=1.20f     },
+    /* === extension : on couvre plus de paires de tags === */
+    /* Sacre + Tenebres : choc cosmique, gros buff mais lent */
+    { TAG_DIVINE|TAG_SHADOW,         .dmg_add= 0.40f, .cd_mul=1.25f,    .aoe_explode=true  },
+    /* Acier + Feu : forge, perce-armure +dmg */
+    { TAG_METALLIC|TAG_HOT,          .dmg_add= 0.25f, .pierces=true                        },
+    /* Eau + Air : brume, projectiles supplementaires + range */
+    { TAG_FLUID|TAG_LIGHT,           .extra_proj=1,   .range_mul=1.15f                     },
+    /* Terre + Vide : effondrement, AOE + grande zone */
+    { TAG_HEAVY|TAG_CORROSIVE,       .dmg_add= 0.15f, .aoe_explode=true                    },
+    /* Persistant + Conducteur : feu + chaine, brule traversante */
+    { TAG_PERSISTENT|TAG_CONDUCTIVE, .chain=true,     .dmg_add= 0.10f                      },
+    /* Sacre + Vide : exorcisme, aoe + homing */
+    { TAG_DIVINE|TAG_CORROSIVE,      .aoe_explode=true, .homing=true                       },
+    /* Acier + Air : lame de vent, range et perce */
+    { TAG_METALLIC|TAG_LIGHT,        .pierces=true,   .range_mul=1.25f                     },
+    /* Fee + Feu : etincelle volante, homing + extra_proj */
+    { TAG_HOMING_TAG|TAG_HOT,        .extra_proj=1,   .homing=true,     .dmg_add= 0.10f    },
 };
 static const int N_EMERGENT = (int)(sizeof(EMERGENT_RULES)/sizeof(EMERGENT_RULES[0]));
 
@@ -386,6 +403,32 @@ static const ComboName COMBO_NAMES[] = {
     { (1<<EL_FAE)|(1<<EL_EARTH),        "Verger",     0xA0FFA0FF },
     { (1<<EL_FAE)|(1<<EL_AIR),          "Sylphe",     0xE0E0FFFF },
     { (1<<EL_FAE)|(1<<EL_LIGHTNING),    "Etincelle",  0xFFFFA0FF },
+    /* === paires Acier === */
+    { (1<<EL_STEEL)|(1<<EL_FIRE),       "Forge",         0xFFB060FF },
+    { (1<<EL_STEEL)|(1<<EL_WATER),      "Trempe",        0x90B0D0FF },
+    { (1<<EL_STEEL)|(1<<EL_EARTH),      "Lame",          0xA0A090FF },
+    { (1<<EL_STEEL)|(1<<EL_LIGHTNING),  "Magneto",       0xC0E0FFFF },
+    { (1<<EL_STEEL)|(1<<EL_AIR),        "Lame du Vent",  0xD0E0F0FF },
+    { (1<<EL_STEEL)|(1<<EL_VOID),       "Acier Noir",    0x404048FF },
+    { (1<<EL_STEEL)|(1<<EL_FAE),        "Mithril",       0xE0E0F8FF },
+    { (1<<EL_STEEL)|(1<<EL_DARK),       "Lame Maudite",  0x303038FF },
+    { (1<<EL_STEEL)|(1<<EL_HOLY),       "Excalibur",     0xFFF0A0FF },
+    /* === paires Tenebres (sans EL_FIRE deja "Feu noir") === */
+    { (1<<EL_DARK)|(1<<EL_WATER),       "Encre",         0x202040FF },
+    { (1<<EL_DARK)|(1<<EL_EARTH),       "Necrose",       0x504030FF },
+    { (1<<EL_DARK)|(1<<EL_LIGHTNING),   "Anatheme",      0x6040A0FF },
+    { (1<<EL_DARK)|(1<<EL_AIR),         "Murmure",       0x404048FF },
+    { (1<<EL_DARK)|(1<<EL_VOID),        "Neant",         0x101018FF },
+    { (1<<EL_DARK)|(1<<EL_FAE),         "Spectre",       0x804080FF },
+    { (1<<EL_DARK)|(1<<EL_HOLY),        "Crepuscule",    0x806080FF },
+    /* === paires Sacre === */
+    { (1<<EL_HOLY)|(1<<EL_FIRE),        "Flamme Sainte", 0xFFD060FF },
+    { (1<<EL_HOLY)|(1<<EL_WATER),       "Benediction",   0xC0E0FFFF },
+    { (1<<EL_HOLY)|(1<<EL_EARTH),       "Sanctuaire",    0xE0D8A0FF },
+    { (1<<EL_HOLY)|(1<<EL_LIGHTNING),   "Foudre Divine", 0xFFF0A0FF },
+    { (1<<EL_HOLY)|(1<<EL_AIR),         "Souffle Divin", 0xFFF8D0FF },
+    { (1<<EL_HOLY)|(1<<EL_VOID),        "Exorcisme",     0xE0C0FFFF },
+    { (1<<EL_HOLY)|(1<<EL_FAE),         "Grace",         0xFFE0FFFF },
     { (1<<EL_FIRE),       "Brule",    0xFF8040FF },
     { (1<<EL_WATER),      "Glacial",  0x80B0FFFF },
     { (1<<EL_EARTH),      "Pierre",   0xA08060FF },
@@ -404,9 +447,14 @@ static const ComboName COMBO_NAMES[] = {
    Tous les effets overload sont dans la donnee.
    Aucun if/else sur le mask dans les fonctions.
    ============================================================== */
+/* ==============================================================
+   COUCHE 4 -- TripleLoopDef : feedback loop des triples
+   Tous les effets overload sont dans la donnee.
+   L'index dans le tableau == l'identite du loop ; on ne stocke plus
+   loop_idx dans la donnee pour eviter l'invariant manuel fragile.
+   ============================================================== */
 typedef struct {
     int      mask;
-    int      loop_idx;
     float    gain_on_hit;
     float    gain_on_kill;
     float    decay_rate;
@@ -416,36 +464,75 @@ typedef struct {
     float    ov_dmg_mul;          /* dmg_mul += ov_dmg_mul * overload  */
     float    ov_chain_add;        /* chain active si > 0               */
     float    ov_proj_add;         /* extra_proj += (int)(ov * val)     */
-    float    ov_lifesteal_mul;    /* lifesteal amplifie                */
+    float    ov_lifesteal_mul;    /* lifesteal *= 1 + ov_lifesteal_mul */
     float    ov_self_dmg;         /* degat/s sur le joueur si overloaded */
-    bool     ov_explode_on_spawn;
+    bool     ov_explode_on_spawn; /* force fx.aoe_explode = true       */
     bool     ov_spawn_fairy;
 } TripleLoopDef;
 
 static const TripleLoopDef TRIPLE_LOOPS[] = {
     {
-        .mask=(1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING), .loop_idx=0,
+        .mask=(1<<EL_FIRE)|(1<<EL_WATER)|(1<<EL_LIGHTNING),     /* Tempete   */
         .gain_on_hit=0.06f, .gain_on_kill=0.15f, .decay_rate=0.08f,
         .overload_threshold=1.0f, .aura_color=0x80C0FFFF,
         .ov_dmg_mul=0.40f, .ov_chain_add=3.0f, .ov_self_dmg=1.0f,
     },
     {
-        .mask=(1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR), .loop_idx=1,
+        .mask=(1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR),           /* Volcan    */
         .gain_on_hit=0.08f, .gain_on_kill=0.10f, .decay_rate=0.05f,
         .overload_threshold=1.0f, .aura_color=0xFF6020FF,
         .ov_proj_add=2.0f, .ov_dmg_mul=-0.35f, .ov_explode_on_spawn=true,
     },
     {
-        .mask=(1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING), .loop_idx=2,
+        .mask=(1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING),       /* Dechirure */
         .gain_on_hit=0.12f, .gain_on_kill=0.08f, .decay_rate=0.03f,
         .overload_threshold=1.0f, .aura_color=0xA040C0FF,
         .ov_lifesteal_mul=2.0f, .ov_self_dmg=0.5f,
     },
     {
-        .mask=(1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE), .loop_idx=3,
+        .mask=(1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE),             /* Phenix    */
         .gain_on_hit=0.05f, .gain_on_kill=0.20f, .decay_rate=0.10f,
         .overload_threshold=1.0f, .aura_color=0xFF8040FF,
         .ov_proj_add=1.5f, .ov_spawn_fairy=true,
+    },
+    /* === triples qui avaient un nom mais aucun loop -- repare === */
+    {
+        .mask=(1<<EL_WATER)|(1<<EL_EARTH)|(1<<EL_LIGHTNING),    /* Tsunami   */
+        .gain_on_hit=0.07f, .gain_on_kill=0.12f, .decay_rate=0.06f,
+        .overload_threshold=1.0f, .aura_color=0x60A0FFFF,
+        .ov_dmg_mul=0.30f, .ov_explode_on_spawn=true, .ov_chain_add=2.0f,
+    },
+    {
+        .mask=(1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),          /* Marais    */
+        .gain_on_hit=0.06f, .gain_on_kill=0.10f, .decay_rate=0.04f,
+        .overload_threshold=1.0f, .aura_color=0x80A8A0FF,
+        .ov_dmg_mul=0.20f, .ov_explode_on_spawn=true,
+    },
+    {
+        .mask=(1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),           /* Brume Mortelle */
+        .gain_on_hit=0.10f, .gain_on_kill=0.08f, .decay_rate=0.04f,
+        .overload_threshold=1.0f, .aura_color=0x9090C0FF,
+        .ov_dmg_mul=0.25f, .ov_lifesteal_mul=1.0f, .ov_self_dmg=0.4f,
+    },
+    {
+        .mask=(1<<EL_EARTH)|(1<<EL_AIR)|(1<<EL_VOID),           /* Effondrement */
+        .gain_on_hit=0.07f, .gain_on_kill=0.15f, .decay_rate=0.06f,
+        .overload_threshold=1.0f, .aura_color=0x806040FF,
+        .ov_dmg_mul=0.45f, .ov_proj_add=1.0f, .ov_explode_on_spawn=true,
+    },
+    /* === triples avec Acier / Tenebres / Sacre (elements orphelins) === */
+    {
+        .mask=(1<<EL_STEEL)|(1<<EL_FIRE)|(1<<EL_LIGHTNING),     /* Forge Solaire */
+        .gain_on_hit=0.08f, .gain_on_kill=0.10f, .decay_rate=0.06f,
+        .overload_threshold=1.0f, .aura_color=0xFFB060FF,
+        .ov_dmg_mul=0.50f, .ov_chain_add=2.0f,
+    },
+    {
+        .mask=(1<<EL_DARK)|(1<<EL_HOLY)|(1<<EL_LIGHTNING),      /* Jugement  */
+        .gain_on_hit=0.10f, .gain_on_kill=0.10f, .decay_rate=0.04f,
+        .overload_threshold=1.0f, .aura_color=0xFFE890FF,
+        .ov_dmg_mul=0.35f, .ov_chain_add=2.0f, .ov_explode_on_spawn=true,
+        .ov_self_dmg=0.3f,
     },
     { .mask=0 }  /* sentinel */
 };
@@ -474,8 +561,11 @@ static void apply_loop_modifiers(ComboFx *fx,
     float ov = ls->intensity - def->overload_threshold;  /* 0..1 */
     fx->dmg_mul    += def->ov_dmg_mul * ov;
     fx->extra_proj += (int)(def->ov_proj_add * ov);
-    if (def->ov_chain_add > 0.f)  fx->chain       = true;
-    if (def->ov_spawn_fairy)       fx->spawn_fairy = true;
+    if (def->ov_chain_add > 0.f)        fx->chain        = true;
+    if (def->ov_spawn_fairy)             fx->spawn_fairy  = true;
+    /* champs auparavant morts -- enfin lus */
+    if (def->ov_explode_on_spawn)        fx->aoe_explode  = true;
+    if (def->ov_lifesteal_mul > 0.f)     fx->lifesteal    = true;
 }
 
 /* -------------------------------------------------------------- */
@@ -501,13 +591,28 @@ void loop_on_kill(Game *g) {
 }
 
 /* -------------------------------------------------------------- */
+/* Tick par frame : decay HORS combat + drain HP en overload.
+ * Le nom loop_decay est conserve pour ne pas casser l'API publique mais
+ * la fonction gere maintenant les deux effets temporels. */
 void loop_decay(Game *g, float dt) {
     int idx = g->player.active_loop_idx;
-    if (idx < 0 || g->enemy_alive_count > 0) return;
+    if (idx < 0) return;
     LoopState *ls = &g->player.loop_states[idx];
-    ls->intensity -= TRIPLE_LOOPS[idx].decay_rate * dt;
-    if (ls->intensity < 0.0f) ls->intensity = 0.0f;
-    ls->overloaded = (ls->intensity > TRIPLE_LOOPS[idx].overload_threshold);
+    const TripleLoopDef *def = &TRIPLE_LOOPS[idx];
+    /* decay : seulement quand la salle est cleared */
+    if (g->enemy_alive_count == 0 && ls->intensity > 0.f) {
+        ls->intensity -= def->decay_rate * dt;
+        if (ls->intensity < 0.0f) ls->intensity = 0.0f;
+    }
+    /* drain HP : champ ov_self_dmg enfin pris en compte. C'est le
+     * risque/recompense du overload (Tempete = 1 PV/s, Dechirure = 0.5,
+     * Jugement = 0.3, etc). On ne tue pas le joueur a 1 PV minimum,
+     * pour eviter la mort par bug ; le combat normal fait le reste. */
+    if (ls->intensity > def->overload_threshold && def->ov_self_dmg > 0.f) {
+        g->player.hp -= def->ov_self_dmg * dt;
+        if (g->player.hp < 1.f) g->player.hp = 1.f;
+    }
+    ls->overloaded = (ls->intensity > def->overload_threshold);
 }
 
 /* -------------------------------------------------------------- */
@@ -515,9 +620,28 @@ static void refresh_active_loop(Game *g, int mask) {
     if (mask == g->player.active_loop_mask) return;
     const TripleLoopDef *def = triple_find(mask);
     if (!def) { g->player.active_loop_idx = -1; g->player.active_loop_mask = 0; return; }
-    g->player.active_loop_idx  = def->loop_idx;
+    /* l'index est derive de la position dans le tableau, pas stocke. */
+    g->player.active_loop_idx  = (int)(def - TRIPLE_LOOPS);
     g->player.active_loop_mask = mask;
     /* intensity conservee si meme salle -- reset dans game_next_floor */
+}
+
+/* Priorite de status quand plusieurs elements en posent un.
+ * On garde celui de plus haute priorite plutot que le dernier visite (qui
+ * dependait de l'ordre de l'enum). Plus haut = remplace.
+ * Rationale gameplay : Vide/Tenebres > Feu (drain > burn), Sacre > Feu
+ * (purification), Foudre/Fee < Feu. Inchangee si tu veux un autre meta. */
+static int status_priority(Element e) {
+    switch (e) {
+        case EL_VOID:      return 90;
+        case EL_DARK:      return 85;
+        case EL_HOLY:      return 80;
+        case EL_FIRE:      return 70;
+        case EL_LIGHTNING: return 60;
+        case EL_WATER:     return 50;
+        case EL_FAE:       return 40;
+        default:           return 0;
+    }
 }
 
 /* ==============================================================
@@ -531,6 +655,7 @@ static ComboFx compute_combo(int mask) {
 
     /* Couche 1 */
     uint32_t active_tags = 0;
+    int      best_status_prio = -1;
     for (int e = 1; e < EL_COUNT; e++) {
         if (!(mask & (1 << e))) continue;
         const ElemBase *b = &ELEM_BASE[e];
@@ -545,7 +670,11 @@ static ComboFx compute_combo(int mask) {
         c.spawn_fairy  |= b->spawn_fairy;
         c.lifesteal    |= b->lifesteal;
         c.extra_proj   += b->extra_proj;
-        if (b->status != EL_NONE) c.status = b->status;
+        /* status par priorite, pas par dernier visite */
+        if (b->status != EL_NONE) {
+            int p = status_priority(b->status);
+            if (p > best_status_prio) { c.status = b->status; best_status_prio = p; }
+        }
         c.color         = b->color_tint;
     }
 
@@ -902,22 +1031,28 @@ void update_weapons(Game *g) {
          * pour colorer + scaler le dmgnum et le hitstop. */
         g->current_attack_crit = crit;
 
-        /* Signature Combo callout : un combo triple (3 elements distincts)
+        /* Signature Combo callout : un combo (2 ou 3 elements distincts)
          * vient de se declencher. On affiche son nom une fois quand le
-         * loadout change, pour eviter le spam. */
-        if (w->element_count == 3) {
+         * loadout change, pour eviter le spam. Triple = grosse fanfare,
+         * paire = callout plus court et plus discret pour ne pas occulter
+         * la vraie signature des triples. */
+        if (w->element_count >= 2) {
             if (mask != g->combo_callout_mask && fx.tag) {
-                g->combo_callout_mask = mask;
-                g->combo_callout_t = 2.5f;
+                bool is_triple = (w->element_count == 3);
+                g->combo_callout_mask  = mask;
+                g->combo_callout_t     = is_triple ? 2.5f : 1.2f;
                 g->combo_callout_color = fx.color;
                 snprintf(g->combo_callout, sizeof(g->combo_callout),
-                         "%s !", fx.tag);
-                /* burst circulaire de particules autour du joueur */
-                for (int k = 0; k < 36; k++) {
-                    float a = (k / 36.f) * 6.2831f;
+                         "%s%s", fx.tag, is_triple ? " !" : "");
+                /* burst circulaire de particules : 36 pour triple, 14 pour paire */
+                int kn = is_triple ? 36 : 14;
+                float spd = is_triple ? 130.f : 75.f;
+                float life = is_triple ? 0.7f : 0.45f;
+                for (int k = 0; k < kn; k++) {
+                    float a = (k / (float)kn) * 6.2831f;
                     particle_spawn_kind(g, p->x, p->y,
-                                        cosf(a) * 130.f, sinf(a) * 130.f,
-                                        0.7f, fx.color, 3.5f, 2);
+                                        cosf(a) * spd, sinf(a) * spd,
+                                        life, fx.color, 3.0f, 2);
                 }
             }
         }
