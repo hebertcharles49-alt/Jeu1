@@ -117,10 +117,11 @@ void game_recompute_player_stats(Game *g) {
     sb.speed += g->meta.perm_speed;
     sb.dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
 
-    /* equipement */
+    /* equipement : stat de base + affixes (Diablo-like) */
     for (int s = 0; s < EQUIP_SLOTS; s++) {
         if (!p->equipped[s].occupied) continue;
-        float v = p->equipped[s].stat_value;
+        Item *it = &p->equipped[s];
+        float v = it->stat_value;
         switch ((EquipSlot)s) {
             case SLOT_HELM:   sb.maxhp   += v;          break;
             case SLOT_CHEST:  sb.armor   += v;          break;
@@ -129,6 +130,25 @@ void game_recompute_player_stats(Game *g) {
             case SLOT_BELT:   sb.regen   += v;          break;
             case SLOT_GLOVES: sb.dmg_mul *= (1.f + v);  break;
             default: break;
+        }
+        /* Affixes : tous additifs sur la stat correspondante. dmg_mul est
+         * additif sur la fraction (donc +5% = sb.dmg_mul *= 1.05). */
+        for (int a = 0; a < it->affix_count; a++) {
+            const ItemAffix *af = &it->affixes[a];
+            switch (af->kind) {
+                case AFFIX_HP:          sb.maxhp       += af->value; break;
+                case AFFIX_ARMOR:       sb.armor       += af->value; break;
+                case AFFIX_SPEED:       sb.speed       += af->value; break;
+                case AFFIX_DMG_PCT:     sb.dmg_mul     *= (1.f + af->value); break;
+                case AFFIX_CRIT_CHANCE: sb.crit_chance += af->value; break;
+                case AFFIX_LIFESTEAL:   sb.lifesteal   += af->value; break;
+                case AFFIX_REGEN:       sb.regen       += af->value; break;
+                /* atk_speed multiplicateur : <1 = plus rapide. On reduit
+                 * sb.atk_speed (donc cooldown plus court). */
+                case AFFIX_ATK_SPEED:   sb.atk_speed   *= (1.f - af->value); break;
+                case AFFIX_DODGE:       sb.dodge       += af->value; break;
+                default: break;
+            }
         }
     }
 

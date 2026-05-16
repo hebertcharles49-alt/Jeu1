@@ -80,6 +80,96 @@ const char *slot_stat_unit(EquipSlot s) {
     }
 }
 
+/* ---- AFFIXES ----
+ * Plage [min, max] par AFFIX, additive avec rarete et sub_kind :
+ *   val_min = base_min + sub_kind * step
+ *   val_max = base_max + sub_kind * step
+ * Le roll final est uniforme dans [val_min, val_max], multiplie par
+ * rarity_mul(rarity) sauf pour les valeurs deja en % (fractions).
+ * Le compte d'affixes vient directement de la rarete. */
+typedef struct {
+    Affix kind;
+    float base_min, base_max, step;
+    bool  is_fraction;        /* true = stocke comme 0..1 (affichee en %) */
+} AffixDef;
+
+static const AffixDef AFFIX_DEFS[AFFIX_COUNT] = {
+    [AFFIX_NONE]        = {0},
+    [AFFIX_HP]          = { AFFIX_HP,           5.f,  10.f, 2.0f,  false },
+    [AFFIX_ARMOR]       = { AFFIX_ARMOR,        1.f,   2.f, 0.4f,  false },
+    [AFFIX_SPEED]       = { AFFIX_SPEED,        3.f,   6.f, 1.2f,  false },
+    [AFFIX_DMG_PCT]     = { AFFIX_DMG_PCT,      0.03f, 0.05f, 0.01f, true },
+    [AFFIX_CRIT_CHANCE] = { AFFIX_CRIT_CHANCE,  0.02f, 0.04f, 0.008f, true },
+    [AFFIX_LIFESTEAL]   = { AFFIX_LIFESTEAL,    0.01f, 0.03f, 0.006f, true },
+    [AFFIX_REGEN]       = { AFFIX_REGEN,        0.20f, 0.40f, 0.08f, false },
+    [AFFIX_ATK_SPEED]   = { AFFIX_ATK_SPEED,    0.03f, 0.06f, 0.012f, true },
+    [AFFIX_DODGE]       = { AFFIX_DODGE,        0.02f, 0.04f, 0.008f, true },
+};
+
+const char *affix_name(Affix a) {
+    switch (a) {
+        case AFFIX_HP:          return "PV";
+        case AFFIX_ARMOR:       return "Armure";
+        case AFFIX_SPEED:       return "Vitesse";
+        case AFFIX_DMG_PCT:     return "Degats";
+        case AFFIX_CRIT_CHANCE: return "Crit";
+        case AFFIX_LIFESTEAL:   return "Vol vie";
+        case AFFIX_REGEN:       return "Regen/s";
+        case AFFIX_ATK_SPEED:   return "Vit. atk";
+        case AFFIX_DODGE:       return "Esquive";
+        default:                return "?";
+    }
+}
+
+void affix_label(const ItemAffix *af, char *buf, int bufsz) {
+    if (!af || af->kind == AFFIX_NONE) { snprintf(buf, bufsz, "—"); return; }
+    const AffixDef *d = &AFFIX_DEFS[af->kind];
+    if (d->is_fraction) {
+        snprintf(buf, bufsz, "+%.1f%% %s", af->value * 100.f, affix_name(af->kind));
+    } else {
+        snprintf(buf, bufsz, "+%.1f %s", af->value, affix_name(af->kind));
+    }
+}
+
+/* nombre d'affixes selon la rarete : 0/1/2/3/4. */
+static int affix_count_for_rarity(Rarity r) {
+    switch (r) {
+        case R_COMMON:    return 0;
+        case R_MAGIC:     return 1;
+        case R_RARE:      return 2;
+        case R_EPIC:      return 3;
+        case R_LEGENDARY: return 4;
+        default:          return 0;
+    }
+}
+
+/* roule N affixes distincts (sans doublon) sur l'item. */
+static void roll_affixes(Item *it) {
+    int n = affix_count_for_rarity(it->rarity);
+    if (n > MAX_AFFIXES) n = MAX_AFFIXES;
+    /* pool : tous les affixes sauf AFFIX_NONE */
+    Affix pool[AFFIX_COUNT - 1];
+    int pn = 0;
+    for (int a = 1; a < AFFIX_COUNT; a++) pool[pn++] = (Affix)a;
+    /* Fisher-Yates partiel */
+    for (int i = 0; i < n && i < pn; i++) {
+        int j = i + rand() % (pn - i);
+        Affix tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    it->affix_count = 0;
+    float rmul = rarity_mul(it->rarity);  /* aussi applique aux affixes */
+    for (int i = 0; i < n; i++) {
+        const AffixDef *d = &AFFIX_DEFS[pool[i]];
+        float vmin = d->base_min + (float)it->base_kind * d->step;
+        float vmax = d->base_max + (float)it->base_kind * d->step;
+        float roll = vmin + (vmax - vmin) * ((float)rand() / (float)RAND_MAX);
+        roll *= rmul;
+        it->affixes[i].kind  = pool[i];
+        it->affixes[i].value = roll;
+        it->affix_count++;
+    }
+}
+
 Item item_make(EquipSlot slot, Rarity rarity, int sub_kind) {
     Item it = {0};
     it.occupied = true;
@@ -89,6 +179,7 @@ Item item_make(EquipSlot slot, Rarity rarity, int sub_kind) {
     it.stat_value = slot_base_stat(slot) * rarity_mul(rarity);
     /* sub_kind variations bump it slightly */
     it.stat_value *= 1.f + sub_kind * 0.05f;
+    roll_affixes(&it);
     return it;
 }
 

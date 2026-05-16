@@ -134,12 +134,34 @@ typedef enum {
 
 /* (Rarity declaree plus haut) */
 
+/* Affixes Diablo-like : un item peut porter de 0 a 4 affixes additionnels,
+ * selon sa rarete (commun=0, magique=1, rare=2, epique=3, legendaire=4).
+ * Chaque affixe roule sa valeur dans une plage min/max au moment du drop. */
+typedef enum {
+    AFFIX_NONE = 0,
+    AFFIX_HP,           /* +X PV max */
+    AFFIX_ARMOR,        /* +X armure */
+    AFFIX_SPEED,        /* +X vitesse */
+    AFFIX_DMG_PCT,      /* +X% degats (fraction : 0.05 = +5%) */
+    AFFIX_CRIT_CHANCE,  /* +X% chance crit (fraction) */
+    AFFIX_LIFESTEAL,    /* +X% vol de vie (fraction) */
+    AFFIX_REGEN,        /* +X regen / s */
+    AFFIX_ATK_SPEED,    /* +X% vitesse d'attaque (fraction, additive) */
+    AFFIX_DODGE,        /* +X% esquive (fraction) */
+    AFFIX_COUNT
+} Affix;
+
+typedef struct { Affix kind; float value; } ItemAffix;
+#define MAX_AFFIXES 4
+
 typedef struct {
     bool      occupied;
     EquipSlot slot;
     Rarity    rarity;
     int       base_kind;     /* sub-kind, used as identity for fusion */
     float     stat_value;    /* effective scaled stat */
+    ItemAffix affixes[MAX_AFFIXES];
+    int       affix_count;
 } Item;
 
 /* ---------- Entities ---------- */
@@ -345,6 +367,7 @@ typedef struct {
     bool is_boss_room;
     bool boss_spawned;
     bool is_debug_room;       /* salle bac-a-sable spawnee via options.debug_room */
+    bool visited;             /* devient true quand le joueur entre dedans (minimap) */
 } Room;
 
 typedef struct {
@@ -711,6 +734,9 @@ Rarity rarity_for_floor_boss(int floor_index);
 
 /* inventory */
 Item  item_make(EquipSlot slot, Rarity rarity, int sub_kind);
+const char *affix_name (Affix a);
+/* formate un libelle court pour un affixe ("+12 PV", "+5% Vol vie", ...). */
+void        affix_label(const ItemAffix *af, char *buf, int bufsz);
 Item  item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss);
 void  inventory_pickup(Game *g, Item it);            /* tries to add to first empty inv slot */
 bool  inventory_equip(Game *g, int inv_index);       /* swap inv slot with matching equip slot */

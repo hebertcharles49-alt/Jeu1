@@ -1619,6 +1619,63 @@ void render_hud(Game *g) {
     /* tip */
     text_draw(g->renderer, INTERNAL_W - 122, INTERNAL_H - 12, "TAB ARMES   I INVENTAIRE", 0x808080FF);
     text_draw(g->renderer, INTERNAL_W - 122, INTERNAL_H - 4,  "ESPACE DASH", 0x808080FF);
+
+    /* ---- MINIMAP (top-right) ---- */
+    {
+        Dungeon *d = &g->dungeon;
+        int mm_w = 60, mm_h = 60;
+        int mm_x = INTERNAL_W - mm_w - 4;
+        int mm_y = 4;
+        int ox = mm_x + 2, oy = mm_y + 2;
+        /* fond */
+        gfx_set_blend(g->renderer, true);
+        fill_rect(g->renderer, mm_x, mm_y, mm_w, mm_h, 0x000000B0);
+        gfx_set_blend(g->renderer, false);
+        rect_outline(g->renderer, mm_x, mm_y, mm_w, mm_h, 0x404048FF);
+        /* salles visitees (1 px par tile, MAP_W=56 -> fit dans 56x56) */
+        int ptx = (int)(g->player.x / TILE);
+        int pty = (int)(g->player.y / TILE);
+        for (int i = 0; i < d->room_count; i++) {
+            Room *r = &d->rooms[i];
+            if (!r->visited) continue;
+            int rx = ox + r->x;
+            int ry = oy + r->y;
+            uint32_t col = 0x606068FF;          /* visitee normale */
+            if (!r->cleared)         col = 0xA0A040FF;
+            if (r->is_boss_room)     col = 0xC04040FF;
+            if (r->is_debug_room)    col = 0x40A0C0FF;
+            fill_rect(g->renderer, rx, ry, r->w, r->h, col);
+            /* contour subtil */
+            rect_outline(g->renderer, rx, ry, r->w, r->h, 0x18181EFF);
+        }
+        /* portes visibles : on traverse une bande etroite autour de chaque
+         * salle visitee et on pose un pixel chaud sur les T_DOOR. */
+        for (int i = 0; i < d->room_count; i++) {
+            Room *r = &d->rooms[i];
+            if (!r->visited) continue;
+            for (int x = r->x - 1; x <= r->x + r->w; x++) {
+                for (int y = r->y - 1; y <= r->y + r->h; y++) {
+                    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+                    if (d->tiles[y][x] == T_DOOR) {
+                        fill_rect(g->renderer, ox + x, oy + y, 1, 1, 0xFFC080FF);
+                    }
+                }
+            }
+        }
+        /* portail de sortie (clignote) si visible */
+        if (d->boss_dead) {
+            int px = ox + d->exit_x, py = oy + d->exit_y;
+            uint32_t pc = ((int)(g->time * 4.f) & 1) ? 0x80E0FFFF : 0x4070C0FF;
+            fill_rect(g->renderer, px - 1, py - 1, 3, 3, pc);
+        }
+        /* joueur : point jaune clignotant */
+        int px = ox + ptx, py = oy + pty;
+        uint32_t playerc = ((int)(g->time * 5.f) & 1) ? 0xFFFF80FF : 0xFFFFFFFF;
+        fill_rect(g->renderer, px - 1, py - 1, 3, 3, playerc);
+
+        /* legende minuscule sous la minimap */
+        text_draw(g->renderer, mm_x, mm_y + mm_h + 1, "MAP", 0x808080FF);
+    }
 }
 
 /* ---------- HUB ---------- */
@@ -2767,12 +2824,16 @@ void render_inventory(Game *g) {
     fill_rect(g->renderer, dpx, dpy, dpw, dph, 0x14101AFF);
     rect_outline(g->renderer, dpx, dpy, dpw, dph, 0x404048FF);
     /* contenu : depend du cursor */
-    if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
-        Item *it = &p->inventory[g->inv_cursor];
+    if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
+        bool is_equip = (g->inv_cursor >= INV_CURSOR_EQUIP_BASE);
+        Item *it = is_equip
+                     ? &p->equipped[g->inv_cursor - INV_CURSOR_EQUIP_BASE]
+                     : &p->inventory[g->inv_cursor];
         if (it->occupied) {
             text_drawf(g->renderer, dpx + 4, dpy + 4, rarity_color(it->rarity),
-                       "%s", rarity_name(it->rarity));
-            text_drawf(g->renderer, dpx + 4, dpy + 14, 0xFFFFFFFF, "%s", slot_name(it->slot));
+                       "%s%s", rarity_name(it->rarity), is_equip ? " (equipe)" : "");
+            text_drawf(g->renderer, dpx + 4, dpy + 14, 0xFFFFFFFF, "%s",
+                       slot_name(it->slot));
             const char *unit = "";
             switch (it->slot) {
                 case SLOT_HELM:   unit = "PV";    break;
@@ -2783,27 +2844,25 @@ void render_inventory(Game *g) {
                 case SLOT_GLOVES: unit = "DMG";   break;
                 default: break;
             }
+            int ay = dpy + 26;
             if (it->slot == SLOT_GLOVES || it->slot == SLOT_BOOTS) {
-                text_drawf(g->renderer, dpx + 4, dpy + 26, 0x80FFC0FF,
+                text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
                            "+%.0f%% %s", it->stat_value * 100.f, unit);
             } else {
-                text_drawf(g->renderer, dpx + 4, dpy + 26, 0x80FFC0FF,
+                text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
                            "+%.1f %s", it->stat_value, unit);
             }
-            text_drawf(g->renderer, dpx + 4, dpy + 36, 0xCCCCCCFF,
-                       "Variant %d", it->base_kind);
-        } else {
-            text_draw(g->renderer, dpx + 4, dpy + 4, "(slot vide)", 0x808080FF);
-        }
-    } else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
-        Item *it = &p->equipped[g->inv_cursor - INV_CURSOR_EQUIP_BASE];
-        if (it->occupied) {
-            text_drawf(g->renderer, dpx + 4, dpy + 4, rarity_color(it->rarity),
-                       "%s %s", rarity_name(it->rarity), slot_name(it->slot));
-            text_draw (g->renderer, dpx + 4, dpy + 14, "(equipe)", 0x80FFC0FF);
-        } else {
+            ay += 10;
+            for (int a = 0; a < it->affix_count; a++) {
+                char ab[40]; affix_label(&it->affixes[a], ab, sizeof(ab));
+                text_draw(g->renderer, dpx + 4, ay, ab, 0xC0E0FFFF);
+                ay += 9;
+            }
+        } else if (is_equip) {
             text_drawf(g->renderer, dpx + 4, dpy + 4, 0x808080FF, "Slot vide : %s",
                        slot_name((EquipSlot)(g->inv_cursor - INV_CURSOR_EQUIP_BASE)));
+        } else {
+            text_draw(g->renderer, dpx + 4, dpy + 4, "(slot vide)", 0x808080FF);
         }
     } else if (g->inv_cursor < INV_CURSOR_TALISMAN_BASE) {
         Weapon *w = &p->weapons[g->inv_cursor - INV_CURSOR_WEAPON_BASE];

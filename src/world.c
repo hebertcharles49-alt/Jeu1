@@ -39,6 +39,36 @@ static int rand_range(int lo, int hi) {
     return lo + rand() % (hi - lo);
 }
 
+/* distance Manhattan entre les centres de 2 salles */
+static int room_center_dist(const Room *a, const Room *b) {
+    int ax = a->x + a->w / 2, ay = a->y + a->h / 2;
+    int bx = b->x + b->w / 2, by = b->y + b->h / 2;
+    int dx = ax - bx; if (dx < 0) dx = -dx;
+    int dy = ay - by; if (dy < 0) dy = -dy;
+    return dx + dy;
+}
+
+/* Pose des T_DOOR a la jonction entre un couloir et l interieur d une
+ * salle : pour chaque tile sur le rectangle des "murs" entourant la salle
+ * (les tiles juste en dehors de x..x+w, y..y+h), si elle est devenue
+ * T_FLOOR (carvee par un corridor) on la transforme en T_DOOR. */
+static void place_doors_for_room(Dungeon *d, const Room *r) {
+    /* haut + bas */
+    for (int x = r->x - 1; x <= r->x + r->w; x++) {
+        if (x <= 0 || x >= MAP_W - 1) continue;
+        int yt = r->y - 1, yb = r->y + r->h;
+        if (yt > 0       && d->tiles[yt][x] == T_FLOOR) d->tiles[yt][x] = T_DOOR;
+        if (yb < MAP_H-1 && d->tiles[yb][x] == T_FLOOR) d->tiles[yb][x] = T_DOOR;
+    }
+    /* gauche + droite */
+    for (int y = r->y - 1; y <= r->y + r->h; y++) {
+        if (y <= 0 || y >= MAP_H - 1) continue;
+        int xl = r->x - 1, xr = r->x + r->w;
+        if (xl > 0       && d->tiles[y][xl] == T_FLOOR) d->tiles[y][xl] = T_DOOR;
+        if (xr < MAP_W-1 && d->tiles[y][xr] == T_FLOOR) d->tiles[y][xr] = T_DOOR;
+    }
+}
+
 void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     srand(seed);
     int prev_gen = d->gen_id;
@@ -51,8 +81,13 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
 
     int target_rooms = 6 + floor_index / 2;
     if (target_rooms > 12) target_rooms = 12;
+    /* portee max d un couloir (Manhattan) entre deux salles : evite les
+     * couloirs interminables qui traversent toute la carte. On accepte une
+     * salle uniquement si elle a au moins une voisine deja placee dans ce
+     * rayon (sauf la toute premiere). */
+    const int MAX_LINK_DIST = 22;
     int placed = 0, attempts = 0;
-    while (placed < target_rooms && attempts < 250) {
+    while (placed < target_rooms && attempts < 400) {
         attempts++;
         int rw = rand_range(7, 13);
         int rh = rand_range(7, 11);
@@ -67,6 +102,17 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
             }
         }
         if (overlap) continue;
+        /* proximite : la salle doit etre a portee d au moins une voisine */
+        if (placed > 0) {
+            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0 };
+            bool ok = false;
+            for (int i = 0; i < placed; i++) {
+                if (room_center_dist(&candidate, &d->rooms[i]) <= MAX_LINK_DIST) {
+                    ok = true; break;
+                }
+            }
+            if (!ok) continue;
+        }
         d->rooms[placed].x = rx;
         d->rooms[placed].y = ry;
         d->rooms[placed].w = rw;
@@ -80,38 +126,70 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         placed++;
     }
     d->room_count = placed;
-    /* connect via corridors */
-    for (int i = 1; i < placed; i++) {
-        Room *a = &d->rooms[i - 1];
-        Room *b = &d->rooms[i];
-        int ax = a->x + a->w / 2;
-        int ay = a->y + a->h / 2;
-        int bx = b->x + b->w / 2;
-        int by = b->y + b->h / 2;
-        carve_corridor(d, ax, ay, bx, by);
+
+    /* connexion en MST simple (Prim) : chaque salle non connectee est
+     * reliee a la salle deja connectee la plus proche. Resultat : pas de
+     * cycle, pas de couloir de plus de MAX_LINK_DIST a chaque arete. */
+    bool connected[32] = {0};
+    if (placed > 0) connected[0] = true;
+    for (int k = 1; k < placed; k++) {
+        int best_from = -1, best_to = -1, best_d = 1 << 30;
+        for (int i = 0; i < placed; i++) {
+            if (!connected[i]) continue;
+            for (int j = 0; j < placed; j++) {
+                if (connected[j]) continue;
+                int dij = room_center_dist(&d->rooms[i], &d->rooms[j]);
+                if (dij < best_d) { best_d = dij; best_from = i; best_to = j; }
+            }
+        }
+        if (best_to < 0) break;
+        Room *a = &d->rooms[best_from];
+        Room *b = &d->rooms[best_to];
+        carve_corridor(d, a->x + a->w / 2, a->y + a->h / 2,
+                          b->x + b->w / 2, b->y + b->h / 2);
+        connected[best_to] = true;
     }
+
     if (placed >= 1) {
         d->spawn_x = d->rooms[0].x + d->rooms[0].w / 2;
         d->spawn_y = d->rooms[0].y + d->rooms[0].h / 2;
         d->rooms[0].cleared = true;
         d->rooms[0].enemies_to_spawn = 0;
+        d->rooms[0].visited = true;        /* salle d'entree deja sur la minimap */
     }
-    /* boss room = last */
-    d->boss_room_idx = placed - 1;
+
+    /* Boss room : la salle la PLUS LOIN de la salle de spawn (Manhattan).
+     * On garantit aussi une distance minimum sinon on rejette : evite que
+     * le boss spawn juste a cote de l entree sur les petits donjons. */
+    d->boss_room_idx = -1;
     if (placed >= 2) {
-        Room *r = &d->rooms[placed - 1];
-        r->is_boss_room = true;
-        r->enemies_to_spawn = 0;   /* no normal enemies; boss handles it */
-        r->cleared = false;
-        d->exit_x = r->x + r->w / 2;
-        d->exit_y = r->y + r->h / 2;
-        /* runes around boss spawn */
-        int cx = r->x + r->w / 2, cy = r->y + r->h / 2;
-        for (int yy = -2; yy <= 2; yy++) for (int xx = -2; xx <= 2; xx++) {
-            if (abs(xx) + abs(yy) == 3 && cx+xx>0 && cy+yy>0 && cx+xx<MAP_W-1 && cy+yy<MAP_H-1) {
-                d->tiles[cy + yy][cx + xx] = T_RUNE;
+        int best = -1, bestd = -1;
+        for (int i = 1; i < placed; i++) {
+            int dd = room_center_dist(&d->rooms[0], &d->rooms[i]);
+            if (dd > bestd) { bestd = dd; best = i; }
+        }
+        /* si l etage est minuscule et tout est proche, on prend quand meme
+         * le plus loin -- mieux que pas de boss. */
+        if (best > 0) {
+            d->boss_room_idx = best;
+            Room *r = &d->rooms[best];
+            r->is_boss_room = true;
+            r->enemies_to_spawn = 0;   /* no normal enemies; boss handles it */
+            r->cleared = false;
+            d->exit_x = r->x + r->w / 2;
+            d->exit_y = r->y + r->h / 2;
+            int cx = r->x + r->w / 2, cy = r->y + r->h / 2;
+            for (int yy = -2; yy <= 2; yy++) for (int xx = -2; xx <= 2; xx++) {
+                if (abs(xx) + abs(yy) == 3 && cx+xx>0 && cy+yy>0 && cx+xx<MAP_W-1 && cy+yy<MAP_H-1) {
+                    d->tiles[cy + yy][cx + xx] = T_RUNE;
+                }
             }
         }
+    }
+
+    /* portes : a poser APRES tous les corridors, sur le perimetre des salles */
+    for (int i = 0; i < placed; i++) {
+        place_doors_for_room(d, &d->rooms[i]);
     }
     /* decorate other rooms */
     for (int ri = 0; ri < placed; ri++) {
@@ -1285,6 +1363,7 @@ void update_room_logic(Game *g) {
     for (int i = 0; i < g->dungeon.room_count; i++) {
         Room *r = &g->dungeon.rooms[i];
         if (!point_in_room(r, p->x, p->y)) continue;
+        r->visited = true;     /* la salle apparait sur la minimap */
 
         if (r->is_boss_room) {
             if (!r->boss_spawned) {
