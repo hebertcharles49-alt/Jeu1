@@ -738,6 +738,29 @@ uint32_t combo_color(int mask) {
     return fx.color;
 }
 
+/* iterateur sur COMBO_NAMES (sans la sentinelle) -- consomme par le codex. */
+int combo_table_count(void) {
+    int n = 0;
+    for (const ComboName *c = COMBO_NAMES; c->name != NULL; c++) n++;
+    return n;
+}
+
+bool combo_table_get(int i, int *out_mask, const char **out_name, uint32_t *out_color) {
+    int n = combo_table_count();
+    if (i < 0 || i >= n) return false;
+    const ComboName *c = &COMBO_NAMES[i];
+    if (out_mask)  *out_mask  = c->mask;
+    if (out_name)  *out_name  = c->name;
+    if (out_color) *out_color = c->color;
+    return true;
+}
+
+int combo_mask_element_count(int mask) {
+    int n = 0;
+    for (int b = 1; b < 32; b++) if (mask & (1 << b)) n++;
+    return n;
+}
+
 /* ---------- WEAPON FIRING ---------- */
 static int nearest_enemy(Game *g, float x, float y, float range, float *out_d) {
     int best = -1; float bestd = range * range;
@@ -1011,6 +1034,11 @@ void update_weapons(Game *g) {
         if (w->cooldown > 0.f) continue;
         int mask = weapon_combo_id(w);
         ComboFx fx = compute_combo(mask);
+        /* codex : enregistre la decouverte du combo des qu il a un nom. */
+        if (mask != 0 && !meta_combo_is_seen(&g->meta, mask)) {
+            meta_combo_mark(&g->meta, mask);
+            save_write(&g->meta);
+        }
 
         /* applique les stats joueur dans le combo fx */
         bool is_melee = (w->kind == W_FISTS || w->kind == W_SWORD ||

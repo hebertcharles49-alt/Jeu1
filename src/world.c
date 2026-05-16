@@ -639,11 +639,9 @@ void update_player(Game *g) {
                         save_write(&g->meta);
                     }
                     int mask = weapon_combo_id(w);
-                    bool found = false;
-                    for (int s = 0; s < g->meta.combo_seen_count; s++)
-                        if (g->meta.combo_seen[s] == mask) { found = true; break; }
-                    if (!found && g->meta.combo_seen_count < 64) {
-                        g->meta.combo_seen[g->meta.combo_seen_count++] = mask;
+                    if (mask != 0 && !meta_combo_is_seen(&g->meta, mask)) {
+                        meta_combo_mark(&g->meta, mask);
+                        save_write(&g->meta);
                     }
                     break;
                 }

@@ -47,6 +47,7 @@ static void poll_input(Game *g, bool *quit) {
                         g->state = g->opt_return ? g->opt_return : GS_TITLE;
                         break;
                     case GS_CHOOSE_HERO:g->state = GS_HUB; break;
+                    case GS_CODEX:      g->state = GS_HUB; break;
                     case GS_INVENTORY:  g->state = g->state_prev; break;
                     case GS_LEVELUP:    /* pas d'echap */ break;
                     case GS_SHOP:       game_next_floor(g); break;
@@ -393,24 +394,31 @@ static void update_hub(Game *g) {
         hub_perm_apply(g, g->hub_cursor);
     }
 
-    /* zones bas d'ecran : DEBUTER / OPTIONS / AIDE */
+    /* zones bas d'ecran : DEBUTER / OPTIONS / CODEX / AIDE */
     int by = INTERNAL_H - 30;
-    int bw = 120, bh = 16;
-    /* trois boutons centres */
-    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
+    int bw = 96, bh = 16;
+    int gx = INTERNAL_W/2 - (bw * 4 + 18) / 2;
     if (mouse_in_rect(g, gx, by, bw, bh) && mouse_clicked(g))
         g->state = GS_CHOOSE_HERO;
     if (mouse_in_rect(g, gx + bw + 6, by, bw, bh) && mouse_clicked(g)) {
         g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
         g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
     }
-    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g))
+    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g)) {
+        g->state = GS_CODEX;
+        g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
+    }
+    if (mouse_in_rect(g, gx + (bw + 6) * 3, by, bw, bh) && mouse_clicked(g))
         g->state = GS_HELP;
 
     if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R])
         g->state = GS_CHOOSE_HERO;
     if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H])
         g->state = GS_HELP;
+    if (g->keys[SDL_SCANCODE_K] && !g->keys_prev[SDL_SCANCODE_K]) {
+        g->state = GS_CODEX;
+        g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
+    }
 }
 
 static void update_choose_hero(Game *g) {
@@ -665,6 +673,8 @@ void game_run(Game *g) {
                 g->opt_waiting_rebind = false;
                 g->state = GS_OPTIONS;
             }
+        } else if (g->state == GS_CODEX) {
+            update_codex(g);
         } else if (g->state == GS_CHOOSE_HERO) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
@@ -760,6 +770,7 @@ void game_run(Game *g) {
         else if (g->state == GS_HELP)        render_help(g);
         else if (g->state == GS_OPTIONS)     render_options(g);
         else if (g->state == GS_HUB)         render_hub(g);
+        else if (g->state == GS_CODEX)       render_codex(g);
         else if (g->state == GS_CHOOSE_HERO) render_choose_hero(g);
         else if (g->state == GS_SHOP) {
             render_shop(g);

@@ -377,6 +377,9 @@ typedef struct {
     int  victories;
     int  combo_seen[64];
     int  combo_seen_count;
+    /* meilleure rarete vue par (slot, sub_kind) -- -1 = jamais decouvert.
+     * sub_kind est borne a 5 dans item_drop_for_floor (rand()%5). */
+    int  item_seen_rarity[EQUIP_SLOTS][5];
 } MetaSave;
 
 /* ---------- SHOP (Brotato-like) ---------- */
@@ -421,6 +424,7 @@ typedef enum {
     GS_LEVELUP,
     GS_SHOP,
     GS_INVENTORY,
+    GS_CODEX,
     GS_DEAD,
     GS_VICTORY,
     GS_QUIT,
@@ -519,6 +523,11 @@ typedef struct {
      * update_enemies. Utilise par loop_decay : la jauge ne decroit que
      * quand la salle est vide. */
     int           enemy_alive_count;
+
+    /* codex */
+    int           codex_tab;       /* 0=combos 1=talismans 2=equip 3=armes */
+    int           codex_cursor;    /* row in current tab */
+    int           codex_scroll;    /* premier item visible (defilement) */
 } Game;
 
 /* ---------- API ---------- */
@@ -546,6 +555,22 @@ uint32_t triple_loop_aura_color(int loop_idx);
 void        combo_apply_to_enemy_projectile(int mask, Projectile *pr);
 const char *combo_name (int mask);
 uint32_t    combo_color(int mask);
+/* iterateur sur la table COMBO_NAMES (sans la sentinelle).
+ * Renvoie le nombre d entrees. combo_table_get remplit out_* pour i in [0..N). */
+int         combo_table_count(void);
+bool        combo_table_get(int i, int *out_mask, const char **out_name, uint32_t *out_color);
+/* nombre d'elements distincts dans le mask (1, 2, 3, ...) */
+int         combo_mask_element_count(int mask);
+/* render */
+void        render_codex(Game *g);
+/* navigation codex (clavier + souris) */
+void        update_codex(Game *g);
+/* helper meta : marque un combo decouvert (no-op si deja seen). */
+void        meta_combo_mark(MetaSave *m, int mask);
+bool        meta_combo_is_seen(const MetaSave *m, int mask);
+/* helper meta : enregistre la decouverte d un item (slot, sub_kind) avec la
+ * rarete a laquelle on l a vu (garde la max). sub_kind est borne a 0..4. */
+void        meta_item_mark(MetaSave *m, EquipSlot slot, int sub_kind, Rarity r);
 
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);

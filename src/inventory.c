@@ -175,6 +175,9 @@ const char *item_label(const Item *it, char *buf, int bufsz) {
 /* push an item into first empty inventory slot */
 void inventory_pickup(Game *g, Item it) {
     Player *p = &g->player;
+    /* codex : on enregistre la decouverte (slot, sub_kind, rarete) */
+    meta_item_mark(&g->meta, it.slot, it.base_kind, it.rarity);
+    save_write(&g->meta);
     for (int i = 0; i < INVENTORY_SLOTS; i++) {
         if (!p->inventory[i].occupied) {
             p->inventory[i] = it;
