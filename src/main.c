@@ -117,10 +117,15 @@ void game_recompute_player_stats(Game *g) {
     sb.speed += g->meta.perm_speed;
     sb.dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
 
-    /* equipement : stat de base + affixes (Diablo-like) */
+    /* equipement : stat de base + affixes (Diablo-like) ; les uniques
+     * shortent par unique_apply_to_block (effets pre-definis). */
     for (int s = 0; s < EQUIP_SLOTS; s++) {
         if (!p->equipped[s].occupied) continue;
         Item *it = &p->equipped[s];
+        if (it->is_unique) {
+            unique_apply_to_block(it->unique_id, &sb);
+            continue;
+        }
         float v = it->stat_value;
         switch ((EquipSlot)s) {
             case SLOT_HELM:   sb.maxhp   += v;          break;

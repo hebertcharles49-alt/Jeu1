@@ -170,6 +170,56 @@ static void roll_affixes(Item *it) {
     }
 }
 
+/* Pools pour les noms procedurals (Diablo-like).
+ * Le nom prend la forme : "<Noun_slot> <Adjective>" pour les
+ * communs/magiques, et "<Noun_slot> <Adjective> de <Subject>" pour
+ * les rares et au-dessus. */
+static const char *NOUN_BY_SLOT[EQUIP_SLOTS] = {
+    [SLOT_HELM]   = "Casque",
+    [SLOT_CHEST]  = "Cuirasse",
+    [SLOT_LEGS]   = "Jambieres",
+    [SLOT_BOOTS]  = "Bottes",
+    [SLOT_BELT]   = "Ceinture",
+    [SLOT_GLOVES] = "Gants",
+};
+static const char *ADJECTIVES[] = {
+    "Rouille", "Forge", "Ancien", "Cisele", "Vermeil",
+    "Spectral", "Ombre", "Solaire", "Lunaire", "Brulant",
+    "Glace", "Sanglant", "Tempetueux", "Ferrugineux", "Saint",
+    "Maudit", "Sauvage", "Royal", "Brise", "Hante",
+};
+static const char *SUBJECTS[] = {
+    "Vipere", "Lion", "Corbeau", "Loup", "Dragon",
+    "Tisseur", "Pelerin", "Veuve", "Sentinelle", "Forgeron",
+    "Cendre", "Tonnerre", "Marche", "Geant", "Sorcier",
+    "Profanateur", "Augure", "Eclat", "Cataclysme", "Ravage",
+};
+#define N_ADJ      ((int)(sizeof(ADJECTIVES)/sizeof(ADJECTIVES[0])))
+#define N_SUBJ     ((int)(sizeof(SUBJECTS)/sizeof(SUBJECTS[0])))
+
+void item_generate_name(Item *it) {
+    if (!it || !it->occupied) return;
+    /* hash deterministe sur les caracteristiques structurelles : meme item
+     * = meme nom, mais 2 drops differents auront en general des noms
+     * differents. */
+    uint32_t h = (uint32_t)it->slot * 131u
+               + (uint32_t)it->rarity * 7919u
+               + (uint32_t)it->base_kind * 53u
+               + (uint32_t)it->affix_count * 1009u;
+    for (int i = 0; i < it->affix_count; i++)
+        h = h * 31u + (uint32_t)it->affixes[i].kind * 17u
+              + (uint32_t)(it->affixes[i].value * 1000.f);
+    const char *noun = (it->slot >= 0 && it->slot < EQUIP_SLOTS)
+                         ? NOUN_BY_SLOT[it->slot] : "Objet";
+    const char *adj  = ADJECTIVES[h % N_ADJ];
+    if (it->rarity >= R_RARE) {
+        const char *subj = SUBJECTS[(h / N_ADJ) % N_SUBJ];
+        snprintf(it->name, sizeof(it->name), "%s %s de %s", noun, adj, subj);
+    } else {
+        snprintf(it->name, sizeof(it->name), "%s %s", noun, adj);
+    }
+}
+
 Item item_make(EquipSlot slot, Rarity rarity, int sub_kind) {
     Item it = {0};
     it.occupied = true;
@@ -177,9 +227,9 @@ Item item_make(EquipSlot slot, Rarity rarity, int sub_kind) {
     it.rarity   = rarity;
     it.base_kind= sub_kind;
     it.stat_value = slot_base_stat(slot) * rarity_mul(rarity);
-    /* sub_kind variations bump it slightly */
     it.stat_value *= 1.f + sub_kind * 0.05f;
     roll_affixes(&it);
+    item_generate_name(&it);
     return it;
 }
 
@@ -241,11 +291,17 @@ Rarity rarity_for_floor_boss(int floor_index) {
 }
 
 Item item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss) {
+    /* roll unique en premier : si proc, on retourne directement le unique. */
+    int uid = unique_roll_drop(floor_index, elite, boss);
+    if (uid >= 0) {
+        Item u = unique_make(uid);
+        if (g && uid >= 0 && uid < 32) g->meta.unique_seen[uid] = true;
+        return u;
+    }
     Rarity rarity;
     if (boss)        rarity = rarity_for_floor_boss(floor_index);
     else if (elite)  rarity = rarity_for_floor_elite(floor_index);
     else {
-        /* drop normal : commun majoritaire avec quelques magiques */
         int r = rand() % 100;
         if (r < 70 - floor_index * 2)  rarity = R_COMMON;
         else if (r < 92 - floor_index) rarity = R_MAGIC;
@@ -291,6 +347,45 @@ bool inventory_equip(Game *g, int inv_index) {
     *dst = *src;
     *src = tmp;
     game_recompute_player_stats(g);
+    return true;
+}
+
+int item_sell_value(const Item *it) {
+    if (!it || !it->occupied) return 0;
+    /* base : 6 coins, x mul de rarete, +25% pour uniques. */
+    static const int BASE[R_COUNT] = { 6, 12, 25, 50, 100 };
+    int v = BASE[it->rarity];
+    if (it->is_unique) v = (int)(v * 1.25f);
+    /* bonus modeste par affixe present (~+2 par roll) */
+    v += it->affix_count * 2;
+    return v;
+}
+
+bool inventory_destroy(Game *g, int inv_index) {
+    if (inv_index < 0 || inv_index >= INVENTORY_SLOTS) return false;
+    Item *src = &g->player.inventory[inv_index];
+    if (!src->occupied) return false;
+    /* on refuse de detruire un unique pour ne pas faire perdre un drop rare
+     * par accident. Le joueur peut quand meme le vendre. */
+    if (src->is_unique) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Impossible de detruire un item unique");
+        g->inv_msg_t = 2.0f;
+        return false;
+    }
+    /* unmark s'il etait marque pour fusion */
+    for (int i = 0; i < g->inv_marked_count; i++) {
+        if (g->inv_marked[i] == inv_index) {
+            for (int j = i; j < g->inv_marked_count - 1; j++)
+                g->inv_marked[j] = g->inv_marked[j + 1];
+            g->inv_marked_count--;
+            break;
+        }
+    }
+    src->occupied = false;
+    sfx_play(g, SFX_FUSE);
+    snprintf(g->inv_msg, sizeof(g->inv_msg), "Detruit");
+    g->inv_msg_t = 1.0f;
     return true;
 }
 
@@ -549,6 +644,23 @@ nav_done:;
     /* X = drop / clear marks */
     if (g->keys[SDL_SCANCODE_X] && !g->keys_prev[SDL_SCANCODE_X]) {
         g->inv_marked_count = 0;
+    }
+    /* DELETE = detruit l'item sous le curseur (sac uniquement). */
+    if (g->keys[SDL_SCANCODE_DELETE] && !g->keys_prev[SDL_SCANCODE_DELETE]) {
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
+            inventory_destroy(g, g->inv_cursor);
+        }
+    }
+    /* V = vendre l'item du sac contre des coins (no shop UI requis :
+     * Brotato-like, gain immediat). */
+    if (g->keys[SDL_SCANCODE_V] && !g->keys_prev[SDL_SCANCODE_V]) {
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
+            int gain = shop_sell_item(g, g->inv_cursor);
+            if (gain > 0) {
+                snprintf(g->inv_msg, sizeof(g->inv_msg), "Vendu : +%d coins", gain);
+                g->inv_msg_t = 1.6f;
+            }
+        }
     }
     if (g->inv_msg_t > 0.f) g->inv_msg_t -= g->dt;
 }

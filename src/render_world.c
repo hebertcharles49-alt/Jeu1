@@ -616,9 +616,34 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
             return;
         }
         case PU_ITEM: {
-            uint32_t c = rarity_color(pk->item.rarity);
-            r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
-            sz=0.50f; break;
+            /* socle / pedestal sous l'item, hauteur graduee par rarete. Donne
+             * un repere visuel "loot drop" facile a repérer. Les uniques ont
+             * un socle plus haut + une teinte chaude (orange). */
+            uint32_t c = pk->item.is_unique ? 0xFF8030FF
+                                            : rarity_color(pk->item.rarity);
+            float rr = ((c>>24)&0xFF)/255.f;
+            float gg2 = ((c>>16)&0xFF)/255.f;
+            float bb = ((c>>8)&0xFF)/255.f;
+            /* base sombre (socle) */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.55f, 0.08f, 0.55f),
+                         0.20f, 0.18f, 0.22f);
+            /* anneau coloré dessus pour signaler la rarete */
+            float ph = 0.10f + 0.05f * (int)pk->item.rarity;
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.10f, pos.z),
+                         v3_make(0.42f, ph, 0.42f),
+                         rr * 0.5f, gg2 * 0.5f, bb * 0.5f);
+            /* item lui-meme (cube flottant) */
+            r = rr; gg = gg2; b = bb; sz = 0.50f;
+            /* uniques : aura clignotante au-dessus */
+            if (pk->item.is_unique) {
+                float pulse = 0.5f + 0.5f * sinf(g->time * 4.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, pos.y + 0.6f, pos.z),
+                             v3_make(0.20f, 0.20f, 0.20f),
+                             rr * pulse, gg2 * pulse, bb * pulse);
+            }
+            break;
         }
         case PU_FOOD: {
             /* poulet : corps brun grossi + os blanc visible */
@@ -877,6 +902,28 @@ void render_world(Game *g) {
    Expose en non-static car appelee par main.c. */
 void render_world_overlay_ui(Game *g) {
     GfxCtx *gc = g->renderer;
+    /* Nom des items poses au sol, visible quand le joueur s'approche.
+     * On utilise une distance generous (90 px monde = ~6 tiles) pour
+     * que les drops ne soient pas perdus dans le decor. */
+    for (int i = 0; i < MAX_PICKUPS; i++) {
+        Pickup *pk = &g->pickups[i];
+        if (!pk->alive || pk->kind != PU_ITEM) continue;
+        float dx = pk->x - g->player.x, dy = pk->y - g->player.y;
+        if (dx * dx + dy * dy > 90.f * 90.f) continue;
+        v3 head = v3_make(pk->x / TILE, 1.4f, pk->y / TILE);
+        int sx, sy;
+        if (!world_to_screen(gc, head, &sx, &sy)) continue;
+        const char *nm = pk->item.name[0] ? pk->item.name
+                                          : slot_name(pk->item.slot);
+        uint32_t col = pk->item.is_unique ? 0xFF8030FF
+                                          : rarity_color(pk->item.rarity);
+        int tw = text_width(nm);
+        /* fond sombre pour la lisibilite */
+        gfx_set_blend(gc, true);
+        fill_rect(gc, sx - tw/2 - 2, sy - 3, tw + 4, 9, 0x00000090);
+        gfx_set_blend(gc, false);
+        text_draw(gc, sx - tw/2, sy - 2, nm, col);
+    }
     /* Aura pulsante autour du joueur quand le triple combo est en overload.
      * Pose des particules en couronne -- elles seront rendues a la frame
      * suivante par draw_particles_3d. */

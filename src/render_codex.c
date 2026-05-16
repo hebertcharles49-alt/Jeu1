@@ -19,7 +19,10 @@
  * (1 = commun, 2 = rare, 3 = epique, 4+ = legendaire) -> donne au joueur
  * une indication de "puissance" avant la decouverte.
  */
-static const char *CODEX_TAB_NAMES[4] = { "COMBOS", "TALISMANS", "EQUIPEMENT", "ARMES" };
+#define CODEX_TAB_COUNT 5
+static const char *CODEX_TAB_NAMES[CODEX_TAB_COUNT] = {
+    "COMBOS", "TALISMANS", "EQUIPEMENT", "ARMES", "UNIQUES"
+};
 
 static uint32_t codex_combo_rarity_color(int mask) {
     int n = combo_mask_element_count(mask);
@@ -36,6 +39,7 @@ static int codex_tab_count(int tab) {
         case 1: return EL_COUNT - 1;        /* on saute EL_NONE */
         case 2: return EQUIP_SLOTS * 5;
         case 3: return W_COUNT - 1;         /* on saute W_FISTS */
+        case 4: return unique_def_count();  /* uniques */
         default: return 0;
     }
 }
@@ -108,6 +112,22 @@ static void codex_draw_entry(Game *g, int sx, int sy, int lw, int tab, int idx,
         } else {
             text_draw(g->renderer, sx + 14, sy + 4, "?", rarity_color(R_RARE));
         }
+    } else if (tab == 4) {
+        /* uniques : couleur orange (legendaire+) si decouvert, "?" sinon. */
+        bool seen = (idx >= 0 && idx < 32) && g->meta.unique_seen[idx];
+        uint32_t col = 0xFF8030FF;        /* orange unique */
+        fill_rect(g->renderer, sx + 2, sy + 3, 8, 8,
+                  seen ? col : 0x202028FF);
+        rect_outline(g->renderer, sx + 2, sy + 3, 8, 8, 0x000000FF);
+        if (seen) {
+            text_drawf(g->renderer, sx + 14, sy + 4, col, "%s",
+                       unique_def_name(idx));
+            text_drawf(g->renderer, sx + lw - 130, sy + 4, 0xCCCCCCFF,
+                       "%s", unique_def_desc(idx));
+        } else {
+            text_draw(g->renderer, sx + 14, sy + 4, "?", col);
+            text_draw(g->renderer, sx + lw - 90, sy + 4, "non decouvert", 0x606068FF);
+        }
     }
 }
 
@@ -116,11 +136,11 @@ void render_codex(Game *g) {
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x080612FF);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("CODEX")/2, 6, "CODEX", 0xFFE080FF);
 
-    /* tabs */
-    int tabw = 110, tabh = 14, gap = 4;
-    int total_w = tabw * 4 + gap * 3;
+    /* tabs : 5 onglets desormais, tabw adapte pour rester centre. */
+    int tabw = 90, tabh = 14, gap = 4;
+    int total_w = tabw * CODEX_TAB_COUNT + gap * (CODEX_TAB_COUNT - 1);
     int tx = (INTERNAL_W - total_w) / 2;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < CODEX_TAB_COUNT; i++) {
         int x = tx + i * (tabw + gap);
         bool sel = (g->codex_tab == i);
         fill_rect(g->renderer, x, 22, tabw, tabh, sel ? 0x303060FF : 0x18181EFF);
@@ -143,6 +163,7 @@ void render_codex(Game *g) {
             case 1: if (g->meta.element_discovered[i + 1]) n_seen++; break;
             case 2: if (g->meta.item_seen_rarity[i/5][i%5] >= 0) n_seen++; break;
             case 3: if (g->meta.weapon_discovered[i + 1]) n_seen++; break;
+            case 4: if (i >= 0 && i < 32 && g->meta.unique_seen[i]) n_seen++; break;
         }
     }
     text_drawf(g->renderer, INTERNAL_W - 90, 8, 0xCCCCCCFF,
@@ -181,11 +202,11 @@ void update_codex(Game *g) {
     int max_visible = (INTERNAL_H - list_y - 26) / row_h;
     if (max_visible < 1) max_visible = 1;
 
-    /* tabs souris */
-    int tabw = 110, tabh = 14, gap = 4;
-    int total_w = tabw * 4 + gap * 3;
+    /* tabs souris (5 onglets) */
+    int tabw = 90, tabh = 14, gap = 4;
+    int total_w = tabw * CODEX_TAB_COUNT + gap * (CODEX_TAB_COUNT - 1);
     int tx = (INTERNAL_W - total_w) / 2;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < CODEX_TAB_COUNT; i++) {
         int x = tx + i * (tabw + gap);
         if (mouse_in_rect(g, x, 22, tabw, tabh) && mouse_clicked(g)) {
             g->codex_tab = i;
@@ -211,13 +232,13 @@ void update_codex(Game *g) {
     if ((g->keys[SDL_SCANCODE_Q]   && !g->keys_prev[SDL_SCANCODE_Q]) ||
         (g->keys[SDL_SCANCODE_TAB] && !g->keys_prev[SDL_SCANCODE_TAB] &&
          g->keys[SDL_SCANCODE_LSHIFT])) {
-        g->codex_tab = (g->codex_tab + 3) % 4;
+        g->codex_tab = (g->codex_tab + CODEX_TAB_COUNT - 1) % CODEX_TAB_COUNT;
         g->codex_cursor = 0; g->codex_scroll = 0;
     }
     if ((g->keys[SDL_SCANCODE_E]   && !g->keys_prev[SDL_SCANCODE_E]) ||
         (g->keys[SDL_SCANCODE_TAB] && !g->keys_prev[SDL_SCANCODE_TAB] &&
          !g->keys[SDL_SCANCODE_LSHIFT])) {
-        g->codex_tab = (g->codex_tab + 1) % 4;
+        g->codex_tab = (g->codex_tab + 1) % CODEX_TAB_COUNT;
         g->codex_cursor = 0; g->codex_scroll = 0;
     }
     /* defilement */

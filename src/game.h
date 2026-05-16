@@ -162,6 +162,13 @@ typedef struct {
     float     stat_value;    /* effective scaled stat */
     ItemAffix affixes[MAX_AFFIXES];
     int       affix_count;
+    /* Nom procedural (Diablo-like). Genere via item_generate_name() au
+     * drop. Pour les uniques, c'est le nom fixe de l'entree UNIQUE_DEFS. */
+    char      name[40];
+    /* Items uniques : si is_unique = true, unique_id pointe vers
+     * UNIQUE_DEFS[unique_id]. Cf uniques.c. */
+    bool      is_unique;
+    int       unique_id;
 } Item;
 
 /* ---------- Entities ---------- */
@@ -403,6 +410,8 @@ typedef struct {
     /* meilleure rarete vue par (slot, sub_kind) -- -1 = jamais decouvert.
      * sub_kind est borne a 5 dans item_drop_for_floor (rand()%5). */
     int  item_seen_rarity[EQUIP_SLOTS][5];
+    /* uniques decouverts (par id). Cf uniques.c. */
+    bool unique_seen[32];
 } MetaSave;
 
 /* ---------- SHOP (Brotato-like) ---------- */
@@ -724,6 +733,9 @@ uint32_t shop_recipe_color(int recipe_id);   /* couleur d'aperçu */
 void  shop_apply_recipe(Game *g, int recipe_id);
 /* applique l effet d une recette sur un StatBlock (additif). */
 void  shop_recipe_apply_to_block(int recipe_id, StatBlock *sb);
+/* vente d'un item du sac : donne coins selon item_sell_value puis libere
+ * le slot. Renvoie le gain en coins ou 0 si echec. */
+int   shop_sell_item(Game *g, int inv_index);
 
 /* procedural names */
 void  enemy_generate_name(Enemy *e, int floor_index);
@@ -740,6 +752,29 @@ Item  item_make(EquipSlot slot, Rarity rarity, int sub_kind);
 const char *affix_name (Affix a);
 /* formate un libelle court pour un affixe ("+12 PV", "+5% Vol vie", ...). */
 void        affix_label(const ItemAffix *af, char *buf, int bufsz);
+/* genere un nom procedural pour un item normal (non-unique). Deterministe
+ * sur (slot, rarity, base_kind, affixes) pour rester stable. */
+void        item_generate_name(Item *it);
+/* detruit un item du sac (libere le slot, no-op si vide). */
+bool        inventory_destroy(Game *g, int inv_index);
+/* valeur de revente en coins (rarity-based). */
+int         item_sell_value(const Item *it);
+
+/* ---- UNIQUES ----
+ * Items pre-definis avec un effet de gameplay specifique. Drop tres rare
+ * sur elite/boss. Cf uniques.c pour la table. */
+int         unique_def_count(void);          /* nb d'entrees dans UNIQUE_DEFS */
+const char *unique_def_name(int id);
+const char *unique_def_desc(int id);
+EquipSlot   unique_def_slot(int id);
+/* construit un Item complet (occupied, slot, rarity=R_LEGENDARY, name,
+ * is_unique=true, unique_id=id, affixes vides). Pour la table de loot. */
+Item        unique_make(int id);
+/* applique les bonus du unique sur le StatBlock du joueur. */
+void        unique_apply_to_block(int id, StatBlock *sb);
+/* roule un unique sur l'etage : -1 = pas de drop. Probabilite croissante
+ * avec elite/boss/etage. */
+int         unique_roll_drop(int floor_index, bool elite, bool boss);
 Item  item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss);
 void  inventory_pickup(Game *g, Item it);            /* tries to add to first empty inv slot */
 bool  inventory_equip(Game *g, int inv_index);       /* swap inv slot with matching equip slot */

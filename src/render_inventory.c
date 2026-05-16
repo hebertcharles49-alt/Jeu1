@@ -259,34 +259,50 @@ void render_inventory(Game *g) {
                      ? &p->equipped[g->inv_cursor - INV_CURSOR_EQUIP_BASE]
                      : &p->inventory[g->inv_cursor];
         if (it->occupied) {
-            text_drawf(g->renderer, dpx + 4, dpy + 4, rarity_color(it->rarity),
-                       "%s%s", rarity_name(it->rarity), is_equip ? " (equipe)" : "");
-            text_drawf(g->renderer, dpx + 4, dpy + 14, 0xFFFFFFFF, "%s",
-                       slot_name(it->slot));
-            const char *unit = "";
-            switch (it->slot) {
-                case SLOT_HELM:   unit = "PV";    break;
-                case SLOT_CHEST:  unit = "ARM";   break;
-                case SLOT_LEGS:   unit = "VIT";   break;
-                case SLOT_BOOTS:  unit = "DASH";  break;
-                case SLOT_BELT:   unit = "REG";   break;
-                case SLOT_GLOVES: unit = "DMG";   break;
-                default: break;
-            }
+            /* nom procedural / unique en haut, en couleur de rarete (orange
+             * pour les uniques pour les distinguer des autres legendaires). */
+            uint32_t name_col = it->is_unique ? 0xFF8030FF : rarity_color(it->rarity);
+            text_drawf(g->renderer, dpx + 4, dpy + 4, name_col, "%s",
+                       it->name[0] ? it->name : slot_name(it->slot));
+            text_drawf(g->renderer, dpx + 4, dpy + 14, rarity_color(it->rarity),
+                       "%s%s%s",
+                       it->is_unique ? "UNIQUE " : "",
+                       rarity_name(it->rarity),
+                       is_equip ? " (equipe)" : "");
             int ay = dpy + 26;
-            if (it->slot == SLOT_GLOVES || it->slot == SLOT_BOOTS) {
-                text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
-                           "+%.0f%% %s", it->stat_value * 100.f, unit);
+            if (it->is_unique) {
+                /* description fixe du unique au lieu de la stat de base. */
+                text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF, "%s",
+                           unique_def_desc(it->unique_id));
+                ay += 10;
             } else {
-                text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
-                           "+%.1f %s", it->stat_value, unit);
+                const char *unit = "";
+                switch (it->slot) {
+                    case SLOT_HELM:   unit = "PV";    break;
+                    case SLOT_CHEST:  unit = "ARM";   break;
+                    case SLOT_LEGS:   unit = "VIT";   break;
+                    case SLOT_BOOTS:  unit = "DASH";  break;
+                    case SLOT_BELT:   unit = "REG";   break;
+                    case SLOT_GLOVES: unit = "DMG";   break;
+                    default: break;
+                }
+                if (it->slot == SLOT_GLOVES || it->slot == SLOT_BOOTS) {
+                    text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
+                               "+%.0f%% %s", it->stat_value * 100.f, unit);
+                } else {
+                    text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF,
+                               "+%.1f %s", it->stat_value, unit);
+                }
+                ay += 10;
+                for (int a = 0; a < it->affix_count; a++) {
+                    char ab[40]; affix_label(&it->affixes[a], ab, sizeof(ab));
+                    text_draw(g->renderer, dpx + 4, ay, ab, 0xC0E0FFFF);
+                    ay += 9;
+                }
             }
-            ay += 10;
-            for (int a = 0; a < it->affix_count; a++) {
-                char ab[40]; affix_label(&it->affixes[a], ab, sizeof(ab));
-                text_draw(g->renderer, dpx + 4, ay, ab, 0xC0E0FFFF);
-                ay += 9;
-            }
+            /* valeur de revente */
+            text_drawf(g->renderer, dpx + 4, ay + 2, 0xFFD080FF,
+                       "Vente : %d coins", item_sell_value(it));
         } else if (is_equip) {
             text_drawf(g->renderer, dpx + 4, dpy + 4, 0x808080FF, "Slot vide : %s",
                        slot_name((EquipSlot)(g->inv_cursor - INV_CURSOR_EQUIP_BASE)));
@@ -359,7 +375,7 @@ void render_inventory(Game *g) {
         text_draw(g->renderer, INTERNAL_W/2 - text_width(g->inv_msg)/2,
                   INTERNAL_H - 28, g->inv_msg, 0xFFFF40FF);
     }
-    const char *foot1 = "CLIC EQUIPE/CYCLE  E EQUIPER  F FUSION  M MARQUER  X RAZ";
+    const char *foot1 = "E EQUIPER  F FUSION  V VENDRE  SUPPR DETRUIRE  M MARQUER";
     text_draw(g->renderer, INTERNAL_W/2 - text_width(foot1)/2,
               INTERNAL_H - 18, foot1, 0xCCCCCCFF);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP POUR FERMER")/2,
