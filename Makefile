@@ -4,7 +4,9 @@
 
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -Wextra -std=c99
-SRCS    := src/main.c src/world.c src/combat.c src/render.c src/meta.c src/audio.c src/inventory.c src/options.c src/shop.c src/names.c src/mods.c src/gfx.c
+# Auto-detection : on prend tous les .c sous src/ . Pour ajouter un fichier,
+# il suffit de le poser ici, pas besoin de toucher au Makefile.
+SRCS    := $(wildcard src/*.c)
 OBJDIR  := build
 OBJS    := $(SRCS:src/%.c=$(OBJDIR)/%.o)
 

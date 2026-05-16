@@ -1,0 +1,292 @@
+/*
+ * dungeon.c - generation procedurale du donjon (rooms + corridors + portes)
+ * + salle bac-a-sable du mode debug.
+ *
+ * Extrait de world.c pour separer la generation du donjon du gameplay
+ * (player/enemies/pickups/room_logic). Les helpers carve_*, rand_range,
+ * room_center_dist, place_doors_for_room sont prives a ce fichier.
+ */
+#include "game.h"
+#include <stdlib.h>
+#include <string.h>
+
+bool tile_solid(TileKind t) {
+    return t == T_VOID || t == T_WALL;
+}
+
+/* ---------- DUNGEON GENERATION ---------- */
+static void carve_room(Dungeon *d, int x, int y, int w, int h) {
+    for (int yy = y; yy < y + h; yy++) {
+        for (int xx = x; xx < x + w; xx++) {
+            if (xx <= 0 || yy <= 0 || xx >= MAP_W - 1 || yy >= MAP_H - 1) continue;
+            d->tiles[yy][xx] = T_FLOOR;
+        }
+    }
+}
+
+static void carve_corridor(Dungeon *d, int x1, int y1, int x2, int y2) {
+    int x = x1, y = y1;
+    while (x != x2) {
+        if (x > 0 && y > 0 && x < MAP_W - 1 && y < MAP_H - 1) d->tiles[y][x] = T_FLOOR;
+        x += (x2 > x) ? 1 : -1;
+    }
+    while (y != y2) {
+        if (x > 0 && y > 0 && x < MAP_W - 1 && y < MAP_H - 1) d->tiles[y][x] = T_FLOOR;
+        y += (y2 > y) ? 1 : -1;
+    }
+    if (x > 0 && y > 0 && x < MAP_W - 1 && y < MAP_H - 1) d->tiles[y][x] = T_FLOOR;
+}
+
+static int rand_range(int lo, int hi) {
+    if (hi <= lo) return lo;
+    return lo + rand() % (hi - lo);
+}
+
+/* distance Manhattan entre les centres de 2 salles */
+static int room_center_dist(const Room *a, const Room *b) {
+    int ax = a->x + a->w / 2, ay = a->y + a->h / 2;
+    int bx = b->x + b->w / 2, by = b->y + b->h / 2;
+    int dx = ax - bx; if (dx < 0) dx = -dx;
+    int dy = ay - by; if (dy < 0) dy = -dy;
+    return dx + dy;
+}
+
+/* Pose des T_DOOR a la jonction entre un couloir et l interieur d une
+ * salle : pour chaque tile sur le rectangle des "murs" entourant la salle
+ * (les tiles juste en dehors de x..x+w, y..y+h), si elle est devenue
+ * T_FLOOR (carvee par un corridor) on la transforme en T_DOOR. */
+static void place_doors_for_room(Dungeon *d, const Room *r) {
+    for (int x = r->x - 1; x <= r->x + r->w; x++) {
+        if (x <= 0 || x >= MAP_W - 1) continue;
+        int yt = r->y - 1, yb = r->y + r->h;
+        if (yt > 0       && d->tiles[yt][x] == T_FLOOR) d->tiles[yt][x] = T_DOOR;
+        if (yb < MAP_H-1 && d->tiles[yb][x] == T_FLOOR) d->tiles[yb][x] = T_DOOR;
+    }
+    for (int y = r->y - 1; y <= r->y + r->h; y++) {
+        if (y <= 0 || y >= MAP_H - 1) continue;
+        int xl = r->x - 1, xr = r->x + r->w;
+        if (xl > 0       && d->tiles[y][xl] == T_FLOOR) d->tiles[y][xl] = T_DOOR;
+        if (xr < MAP_W-1 && d->tiles[y][xr] == T_FLOOR) d->tiles[y][xr] = T_DOOR;
+    }
+}
+
+void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
+    srand(seed);
+    int prev_gen = d->gen_id;
+    memset(d, 0, sizeof(*d));
+    d->gen_id = prev_gen + 1;          /* invalide la cache mesh render */
+    d->level_index = floor_index;
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++)
+            d->tiles[y][x] = T_WALL;
+
+    int target_rooms = 6 + floor_index / 2;
+    if (target_rooms > 12) target_rooms = 12;
+    /* portee max d un couloir (Manhattan) entre deux salles : evite les
+     * couloirs interminables qui traversent toute la carte. */
+    const int MAX_LINK_DIST = 22;
+    int placed = 0, attempts = 0;
+    while (placed < target_rooms && attempts < 400) {
+        attempts++;
+        int rw = rand_range(7, 13);
+        int rh = rand_range(7, 11);
+        int rx = rand_range(2, MAP_W - rw - 2);
+        int ry = rand_range(2, MAP_H - rh - 2);
+        bool overlap = false;
+        for (int i = 0; i < placed; i++) {
+            Room *o = &d->rooms[i];
+            if (rx < o->x + o->w + 1 && rx + rw + 1 > o->x &&
+                ry < o->y + o->h + 1 && ry + rh + 1 > o->y) {
+                overlap = true; break;
+            }
+        }
+        if (overlap) continue;
+        if (placed > 0) {
+            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0 };
+            bool ok = false;
+            for (int i = 0; i < placed; i++) {
+                if (room_center_dist(&candidate, &d->rooms[i]) <= MAX_LINK_DIST) {
+                    ok = true; break;
+                }
+            }
+            if (!ok) continue;
+        }
+        d->rooms[placed].x = rx;
+        d->rooms[placed].y = ry;
+        d->rooms[placed].w = rw;
+        d->rooms[placed].h = rh;
+        d->rooms[placed].cleared = false;
+        d->rooms[placed].enemies_to_spawn = 3 + floor_index + rand() % 3;
+        d->rooms[placed].spawn_timer_ms = 0;
+        d->rooms[placed].is_boss_room = false;
+        d->rooms[placed].boss_spawned = false;
+        carve_room(d, rx, ry, rw, rh);
+        placed++;
+    }
+    d->room_count = placed;
+
+    /* connexion en MST simple (Prim) sur les centres de salles. */
+    bool connected[32] = {0};
+    if (placed > 0) connected[0] = true;
+    for (int k = 1; k < placed; k++) {
+        int best_from = -1, best_to = -1, best_d = 1 << 30;
+        for (int i = 0; i < placed; i++) {
+            if (!connected[i]) continue;
+            for (int j = 0; j < placed; j++) {
+                if (connected[j]) continue;
+                int dij = room_center_dist(&d->rooms[i], &d->rooms[j]);
+                if (dij < best_d) { best_d = dij; best_from = i; best_to = j; }
+            }
+        }
+        if (best_to < 0) break;
+        Room *a = &d->rooms[best_from];
+        Room *b = &d->rooms[best_to];
+        carve_corridor(d, a->x + a->w / 2, a->y + a->h / 2,
+                          b->x + b->w / 2, b->y + b->h / 2);
+        connected[best_to] = true;
+    }
+
+    if (placed >= 1) {
+        d->spawn_x = d->rooms[0].x + d->rooms[0].w / 2;
+        d->spawn_y = d->rooms[0].y + d->rooms[0].h / 2;
+        d->rooms[0].cleared = true;
+        d->rooms[0].enemies_to_spawn = 0;
+        d->rooms[0].visited = true;        /* salle d'entree deja sur la minimap */
+    }
+
+    /* Boss room : la salle la PLUS LOIN de la salle de spawn. */
+    d->boss_room_idx = -1;
+    if (placed >= 2) {
+        int best = -1, bestd = -1;
+        for (int i = 1; i < placed; i++) {
+            int dd = room_center_dist(&d->rooms[0], &d->rooms[i]);
+            if (dd > bestd) { bestd = dd; best = i; }
+        }
+        if (best > 0) {
+            d->boss_room_idx = best;
+            Room *r = &d->rooms[best];
+            r->is_boss_room = true;
+            r->enemies_to_spawn = 0;
+            r->cleared = false;
+            d->exit_x = r->x + r->w / 2;
+            d->exit_y = r->y + r->h / 2;
+            int cx = r->x + r->w / 2, cy = r->y + r->h / 2;
+            for (int yy = -2; yy <= 2; yy++) for (int xx = -2; xx <= 2; xx++) {
+                if (abs(xx) + abs(yy) == 3 && cx+xx>0 && cy+yy>0 && cx+xx<MAP_W-1 && cy+yy<MAP_H-1) {
+                    d->tiles[cy + yy][cx + xx] = T_RUNE;
+                }
+            }
+        }
+    }
+
+    /* portes : a poser APRES tous les corridors, sur le perimetre des salles */
+    for (int i = 0; i < placed; i++) {
+        place_doors_for_room(d, &d->rooms[i]);
+    }
+    /* decorate other rooms */
+    for (int ri = 0; ri < placed; ri++) {
+        Room *r = &d->rooms[ri];
+        int xs[2] = { r->x + 1, r->x + r->w - 2 };
+        int ys[2] = { r->y + 1, r->y + r->h - 2 };
+        for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) {
+            int tx = xs[a], ty = ys[b];
+            if (d->tiles[ty][tx] == T_FLOOR) d->tiles[ty][tx] = T_TORCH;
+        }
+        if (!r->is_boss_room && ri > 0) {
+            for (int k = 0; k < 2 + rand() % 3; k++) {
+                int tx = r->x + 1 + rand() % (r->w - 2);
+                int ty = r->y + 1 + rand() % (r->h - 2);
+                if (d->tiles[ty][tx] == T_FLOOR) d->tiles[ty][tx] = (rand() % 2) ? T_BLOOD : T_BONES;
+            }
+        }
+    }
+}
+
+/* ---------- DEBUG ROOM ----------
+ * Salle bac-a-sable adjacente a la salle de spawn, peuplee d'un exemplaire
+ * de chaque arme, element et piece d'equipement legendaire. Idempotent. */
+void dungeon_add_debug_room(Game *g) {
+    Dungeon *d = &g->dungeon;
+    if (d->room_count <= 0 || d->room_count >= 32) return;
+    int debug_idx = -1;
+    for (int i = 0; i < d->room_count; i++)
+        if (d->rooms[i].is_debug_room) { debug_idx = i; break; }
+
+    if (debug_idx < 0) {
+        Room *spawn = &d->rooms[0];
+        int rw = 11, rh = 9;
+        int candidates[4][2] = {
+            { spawn->x + spawn->w + 2, spawn->y                },   /* droite */
+            { spawn->x - rw - 2,        spawn->y                },   /* gauche */
+            { spawn->x,                 spawn->y + spawn->h + 2 },   /* dessous */
+            { spawn->x,                 spawn->y - rh - 2       },   /* dessus */
+        };
+        int rx = -1, ry = -1;
+        for (int c = 0; c < 4; c++) {
+            int tx = candidates[c][0], ty = candidates[c][1];
+            if (tx <= 1 || ty <= 1 || tx + rw >= MAP_W - 1 || ty + rh >= MAP_H - 1) continue;
+            bool overlap = false;
+            for (int i = 0; i < d->room_count; i++) {
+                Room *o = &d->rooms[i];
+                if (tx < o->x + o->w + 1 && tx + rw + 1 > o->x &&
+                    ty < o->y + o->h + 1 && ty + rh + 1 > o->y) {
+                    overlap = true; break;
+                }
+            }
+            if (!overlap) { rx = tx; ry = ty; break; }
+        }
+        if (rx < 0) return;
+        carve_room(d, rx, ry, rw, rh);
+        carve_corridor(d,
+                       spawn->x + spawn->w / 2, spawn->y + spawn->h / 2,
+                       rx + rw / 2,             ry + rh / 2);
+        Room *r = &d->rooms[d->room_count];
+        r->x = rx; r->y = ry; r->w = rw; r->h = rh;
+        r->cleared = true;
+        r->enemies_to_spawn = 0;
+        r->is_boss_room = false;
+        r->boss_spawned = false;
+        r->is_debug_room = true;
+        debug_idx = d->room_count;
+        d->room_count++;
+        d->gen_id++;
+    }
+    Room *r = &d->rooms[debug_idx];
+
+    float ox = (r->x + 1) * (float)TILE + TILE / 2.f;
+    float oy = (r->y + 1) * (float)TILE + TILE / 2.f;
+    float step = (float)TILE;
+    int col = 0, row = 0;
+    #define DBG_PLACE(spawn_call) do { \
+        float xx = ox + col * step; \
+        float yy = oy + row * step; \
+        spawn_call; \
+        col++; \
+        if (col >= (r->w - 2)) { col = 0; row++; } \
+    } while (0)
+
+    for (int wk = W_SWORD; wk < W_COUNT; wk++) {
+        DBG_PLACE(pickup_spawn(g, PU_WEAPON, wk | (((int)R_COMMON)    << 8), xx, yy));
+    }
+    col = 0; row++;
+    for (int wk = W_SWORD; wk < W_COUNT; wk++) {
+        DBG_PLACE(pickup_spawn(g, PU_WEAPON, wk | (((int)R_LEGENDARY) << 8), xx, yy));
+    }
+    col = 0; row++;
+    for (int e = 1; e < EL_COUNT; e++) {
+        DBG_PLACE(pickup_spawn(g, PU_ELEMENT, e, xx, yy));
+    }
+    col = 0; row++;
+    for (int s = 0; s < EQUIP_SLOTS; s++) {
+        Item it = item_make((EquipSlot)s, R_LEGENDARY, 4);
+        DBG_PLACE(pickup_spawn_item(g, it, xx, yy));
+    }
+    col = 0; row++;
+    DBG_PLACE(pickup_spawn(g, PU_FOOD, 16, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_FOOD, 16, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_COIN, 10, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_COIN, 10, xx, yy));
+    DBG_PLACE(pickup_spawn(g, PU_SOUL, 0,  xx, yy));
+
+    #undef DBG_PLACE
+}

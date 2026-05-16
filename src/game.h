@@ -641,6 +641,9 @@ uint32_t    element_color(Element e);
 const char *weapon_name(WeaponKind w);
 const char *hero_name(HeroClass h);
 const char *hero_desc(HeroClass h);
+/* couleurs (cape + tunique) du heros, partagees entre render_choose_hero
+ * et la paper-doll inventaire. Cf heroes.c. */
+void        hero_palette(HeroClass h, uint32_t *cape, uint32_t *tunic);
 const char *enemy_name(EnemyKind k);
 const char *subclass_name(WeaponKind a, WeaponKind b);
 const char *slot_name(EquipSlot s);
