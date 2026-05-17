@@ -120,6 +120,10 @@ void do_aoe_at(Game *g, float x, float y, float radius, float dmg, Element statu
         surface_spawn(g, SURF_FIRE, x, y, radius * 0.6f, 0.f);
     } else if (status == EL_WATER && (rand() % 100) < 35) {
         surface_spawn(g, SURF_WATER, x, y, radius * 0.7f, 0.f);
+    } else if (status == EL_HOLY && (rand() % 100) < 50) {
+        surface_spawn(g, SURF_HOLY, x, y, radius * 0.6f, 0.f);
+    } else if (status == EL_DARK && (rand() % 100) < 40) {
+        surface_spawn(g, SURF_SHADOW, x, y, radius * 0.6f, 0.f);
     }
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];

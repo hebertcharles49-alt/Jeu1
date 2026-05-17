@@ -321,6 +321,10 @@ typedef enum {
     SURF_STEAM,        /* nuage transitoire, bref, condense -> water */
     SURF_MUD,          /* boue : slow fort, pas conductrice */
     SURF_BLOOD,        /* "vie + eau" : regen lent au contact */
+    /* nouvelles surfaces tier 2 (elements rares) */
+    SURF_HOLY,         /* eau benie : regen rapide + cleanse status */
+    SURF_SHADOW,       /* ombre : DOT dark + slow leger */
+    SURF_TAR,          /* goudron : huile corrompue, slow extreme */
     SURF_COUNT
 } SurfaceKind;
 
@@ -745,6 +749,12 @@ void  surface_earth_hit    (Game *g, float x, float y, float radius);
 /* appele a la mort d un ennemi : si une eau est dans le rayon, elle
  * devient sang. Sinon a 20% spawne une petite flaque de sang. */
 void  surface_blood_drop   (Game *g, float x, float y);
+/* convertit les SURF_OIL en SURF_TAR (huile corrompue) si touchees par
+ * un proj EL_DARK ou EL_VOID. */
+void  surface_void_hit     (Game *g, float x, float y, float radius);
+/* peuple chaque salle (sauf spawn) de quelques surfaces ambient typees
+ * par le biome courant. Appele apres world_assets_populate. */
+void  surfaces_seed_biome  (Game *g);
 
 void  render_world(Game *g);
 void  render_world_overlay_ui(Game *g);   /* HP bars/noms/dmgnums en UI 2D */

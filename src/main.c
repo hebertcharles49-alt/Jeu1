@@ -356,6 +356,7 @@ void game_start_new_run(Game *g) {
     p->y = g->dungeon.spawn_y * TILE + TILE / 2;
     world_assets_reset(g);
     world_assets_populate(g);
+    surfaces_seed_biome(g);
     if (g->settings.debug_room) {
         /* en mode debug, on revele tout pour pouvoir reellement utiliser
          * le contenu de la salle (sinon les armes/elements non decouverts
@@ -402,6 +403,7 @@ void game_next_floor(Game *g) {
     if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
     world_assets_reset(g);
     world_assets_populate(g);
+    surfaces_seed_biome(g);
     if (g->settings.debug_room) dungeon_add_debug_room(g);
     g->state = GS_RUN;
 }

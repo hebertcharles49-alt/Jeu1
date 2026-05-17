@@ -47,6 +47,10 @@ static const SurfaceSpec S_SPEC[SURF_COUNT] = {
     [SURF_STEAM]       = { 1.5f, 0.0f, 0.85f, false, false },
     [SURF_MUD]         = { 6.0f, 0.0f, 0.35f, false, false },
     [SURF_BLOOD]       = { 8.0f, -1.f, 0.80f, false, false },  /* dmg<0 = regen */
+    /* tier 2 elemental */
+    [SURF_HOLY]        = { 6.0f, -2.f, 1.00f, false, false },  /* regen rapide */
+    [SURF_SHADOW]      = { 5.0f, 4.0f, 0.85f, false, false },
+    [SURF_TAR]         = { 9.0f, 0.0f, 0.25f, true,  false },  /* extreme slow */
 };
 
 int surface_spawn(Game *g, SurfaceKind kind, float x, float y,
@@ -171,7 +175,51 @@ static void surface_interact_pair(Game *g, Surface *a, Surface *b) {
         ice->alive = false;
         return;
     }
-    /* WATER + ICE : pas d interaction marquante, on n efface pas */
+    /* HOLY + SHADOW : annulation cosmique (purification mutuelle, gros
+     * burst dore). Le pendant surface des tags DIVINE + CURSED. */
+    if ((a->kind == SURF_HOLY && b->kind == SURF_SHADOW) ||
+        (a->kind == SURF_SHADOW && b->kind == SURF_HOLY)) {
+        float cx = (a->x + b->x) * 0.5f;
+        float cy = (a->y + b->y) * 0.5f;
+        for (int k = 0; k < 24; k++) {
+            float ang = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, cx, cy,
+                                cosf(ang) * 100.f, sinf(ang) * 100.f,
+                                0.55f, 0xFFE890FF, 2.5f, 2);
+        }
+        sfx_play(g, SFX_EXPLODE);
+        a->alive = false; b->alive = false;
+        return;
+    }
+    /* HOLY + BLOOD : le sang est purifie -> le pool de regen passe en
+     * HOLY (regen plus rapide), HOLY consomme. */
+    if ((a->kind == SURF_HOLY && b->kind == SURF_BLOOD) ||
+        (a->kind == SURF_BLOOD && b->kind == SURF_HOLY)) {
+        Surface *blood = (a->kind == SURF_BLOOD) ? a : b;
+        Surface *holy  = (a->kind == SURF_HOLY)  ? a : b;
+        blood->kind = SURF_HOLY;
+        blood->life = S_SPEC[SURF_HOLY].life_def;
+        blood->life_max = blood->life;
+        holy->alive = false;
+        return;
+    }
+    /* TAR + FIRE : ignition violente (boule de feu r*1.8). */
+    if ((a->kind == SURF_TAR && b->kind == SURF_FIRE) ||
+        (a->kind == SURF_FIRE && b->kind == SURF_TAR)) {
+        Surface *tar = (a->kind == SURF_TAR) ? a : b;
+        tar->kind = SURF_FIRE;
+        tar->r *= 1.8f;
+        tar->life = S_SPEC[SURF_FIRE].life_def * 1.5f;
+        tar->life_max = tar->life;
+        for (int k = 0; k < 30; k++) {
+            float ang = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, tar->x, tar->y,
+                                cosf(ang) * 140.f, sinf(ang) * 140.f - 30.f,
+                                0.85f, 0xFF4020FF, 3.2f, 2);
+        }
+        sfx_play(g, SFX_EXPLODE);
+        return;
+    }
 }
 
 static void surface_tick_interactions(Game *g) {
@@ -322,6 +370,15 @@ void update_surfaces(Game *g) {
             case SURF_BLOOD:
                 particle_spawn_kind(g, ox, oy, 0, -2.f, 0.45f,
                                     0xA02020A0, 1.5f, 0); break;
+            case SURF_HOLY:
+                particle_spawn_kind(g, ox, oy, 0, -18.f, 0.60f,
+                                    0xFFE890C0, 2.0f, 0); break;
+            case SURF_SHADOW:
+                particle_spawn_kind(g, ox, oy, 0, -6.f, 0.55f,
+                                    0x402060A0, 1.8f, 0); break;
+            case SURF_TAR:
+                particle_spawn_kind(g, ox, oy, 0, 2.f, 0.55f,
+                                    0x201020FF, 1.7f, 0); break;
             default: break;
         }
     }
@@ -348,6 +405,13 @@ void render_surfaces(Game *g) {
             case SURF_STEAM:       r=0.85f; gr=0.85f; b=0.85f; break;
             case SURF_MUD:         r=0.40f; gr=0.28f; b=0.18f; break;
             case SURF_BLOOD:       r=0.55f; gr=0.10f; b=0.12f; break;
+            case SURF_HOLY: {
+                float p = 0.7f + 0.3f * sinf(g->time * 2.f);
+                r = 1.00f * p; gr = 0.92f * p; b = 0.55f * p;
+                break;
+            }
+            case SURF_SHADOW:      r=0.15f; gr=0.10f; b=0.20f; break;
+            case SURF_TAR:         r=0.08f; gr=0.06f; b=0.10f; break;
             default: break;
         }
         /* fade out a fin de vie */
@@ -412,5 +476,63 @@ void surface_blood_drop(Game *g, float x, float y) {
     }
     if ((rand() % 100) < 20) {
         surface_spawn(g, SURF_BLOOD, x, y, 10.f, 0.f);
+    }
+}
+
+/* VOID / DARK proj sur huile -> goudron (extreme slow). */
+void surface_void_hit(Game *g, float x, float y, float radius) {
+    float r2 = radius * radius;
+    for (int i = 0; i < MAX_SURFACES; i++) {
+        Surface *s = &g->surfaces[i];
+        if (!s->alive || s->kind != SURF_OIL) continue;
+        float dx = s->x - x, dy = s->y - y;
+        if (dx * dx + dy * dy >= r2 + s->r * s->r) continue;
+        s->kind = SURF_TAR;
+        s->life = S_SPEC[SURF_TAR].life_def;
+        s->life_max = s->life;
+        for (int k = 0; k < 10; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, s->x, s->y,
+                                cosf(a) * 20.f, sinf(a) * 20.f,
+                                0.55f, 0x301020FF, 1.8f, 0);
+        }
+    }
+}
+
+/* === BIOME SEEDING ===
+ * Pose des surfaces ambient dans chaque salle (sauf spawn) selon le
+ * biome courant. Cree un environnement coherent des l entree, qui
+ * interagit avec les attaques du joueur sans qu il ait a tout
+ * generer lui-meme. */
+void surfaces_seed_biome(Game *g) {
+    int bi = biome_for_floor(g->floor_index);
+    for (int i = 1; i < g->dungeon.room_count; i++) {     /* skip spawn */
+        const Room *r = &g->dungeon.rooms[i];
+        if (r->is_debug_room) continue;
+        /* count = 1..3 selon le biome ; les rooms tres petites en ont moins */
+        int budget = 1 + rand() % 3;
+        if (r->w * r->h < 50) budget = 1;
+        if (r->is_boss_room) budget = 4;     /* la salle du boss est marquee */
+        for (int k = 0; k < budget; k++) {
+            int tx = r->x + 1 + rand() % (r->w - 2);
+            int ty = r->y + 1 + rand() % (r->h - 2);
+            float wx = tx * (float)TILE + (float)TILE * 0.5f;
+            float wy = ty * (float)TILE + (float)TILE * 0.5f;
+            SurfaceKind kind = SURF_NONE;
+            float radius = 14.f;
+            switch (bi) {
+                case 0: /* Crypte (DARK)     */ kind = SURF_BLOOD;  break;
+                case 1: /* Cavernes (EARTH)  */ kind = SURF_MUD;    break;
+                case 2: /* Marais (WATER)    */ kind = SURF_WATER;  radius = 18.f; break;
+                case 3: /* Forge (FIRE)      */ kind = SURF_OIL;    radius = 16.f; break;
+                case 4: /* Sanctuaire (HOLY) */ kind = SURF_HOLY;   break;
+                default: break;
+            }
+            if (kind != SURF_NONE) {
+                /* vie longue car ce sont des features de la salle, pas
+                 * des consequences d attaques. */
+                surface_spawn(g, kind, wx, wy, radius, 60.f);
+            }
+        }
     }
 }
