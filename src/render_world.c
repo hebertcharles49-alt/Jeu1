@@ -432,16 +432,29 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                  v3_make(w + 0.05f, 0.01f, w + 0.05f),
                  0.02f, 0.01f, 0.04f);
 
-    /* SLIME : grosse bulle + reflet */
+    /* SLIME : grosse bulle + reflet + noyau interne + drip occasionnel */
     if (e->kind == EK_SLIME) {
+        /* corps externe */
         gfx_box_draw(g->renderer,
                      v3_make(pos.x, h * 0.5f + wobble, pos.z),
                      v3_make(w + wobble*0.5f, h + wobble, w + wobble*0.5f),
                      r, gg, b);
+        /* noyau interne plus sombre / sature, visible a travers */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.04f, h * 0.4f + wobble, pos.z + 0.04f),
+                     v3_make(0.22f, 0.20f, 0.22f),
+                     r * 0.45f, gg * 0.55f, b * 0.45f);
+        /* reflet blanc en haut */
         gfx_box_draw(g->renderer,
                      v3_make(pos.x - 0.08f, h * 0.85f + wobble, pos.z - 0.08f),
                      v3_make(0.10f, 0.10f, 0.10f),
                      1.f, 1.f, 1.f);
+        /* drip vert qui tombe occasionnellement */
+        if ((rand() % 200) < 4) {
+            particle_spawn_kind(g, e->x + (rand()%6)-3,
+                                e->y + (rand()%6)-3,
+                                0, 18.f, 0.40f, 0xB0E060FF, 1.6f, 0);
+        }
         return;
     }
 
@@ -694,18 +707,36 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
     /* details par kind */
     switch (e->kind) {
         case EK_DEMON: {
-            /* cornes */
+            /* cornes courbees */
             gfx_box_draw(g->renderer,
                          v3_make(pos.x - 0.18f, head_y + 0.30f, pos.z),
                          v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
             gfx_box_draw(g->renderer,
                          v3_make(pos.x + 0.18f, head_y + 0.30f, pos.z),
                          v3_make(0.10f, 0.20f, 0.10f), 0.4f, 0.15f, 0.2f);
-            /* dents */
+            /* dents pointues */
             gfx_box_draw(g->renderer,
                          v3_make(pos.x, head_y - 0.10f, pos.z + w * 0.37f),
                          v3_make(0.18f, 0.06f, 0.04f),
                          1.f, 1.f, 1.f);
+            /* ailes : 2 boxes plates sur les cotes, animees en sin */
+            float wing_flap = sinf(g->time * 6.f + e->x) * 0.15f;
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x - (w/2 + 0.20f), body_y + 0.10f,
+                                 pos.z - 0.05f),
+                         v3_make(0.04f, 0.34f, 0.32f + wing_flap),
+                         0.30f, 0.08f, 0.12f);
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x + (w/2 + 0.20f), body_y + 0.10f,
+                                 pos.z - 0.05f),
+                         v3_make(0.04f, 0.34f, 0.32f + wing_flap),
+                         0.30f, 0.08f, 0.12f);
+            /* halo de braise au pied */
+            float ember = 0.5f + 0.5f * sinf(g->time * 4.f);
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, 0.04f, pos.z),
+                         v3_make(w * 1.4f, 0.02f, w * 1.4f),
+                         1.0f * ember, 0.40f * ember, 0.10f * ember);
             break;
         }
         case EK_BANDIT: {
@@ -714,6 +745,18 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                          v3_make(pos.x, head_y + 0.04f, pos.z + w * 0.36f),
                          v3_make(w * 0.65f, 0.13f, 0.04f),
                          0.05f, 0.05f, 0.07f);
+            /* cape qui flotte derriere : ondulation sin sur Z arriere */
+            float flap = sinf(g->time * 5.f + e->y) * 0.06f;
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, body_y + 0.05f,
+                                 pos.z - (w * 0.50f + flap)),
+                         v3_make(w * 0.85f, (h - leg_h) * 0.95f, 0.04f),
+                         0.55f, 0.10f, 0.10f);
+            /* dague brillante dans la main droite */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x + (w/2 + 0.16f), body_y, pos.z + 0.10f),
+                         v3_make(0.04f, 0.04f, 0.18f),
+                         0.90f, 0.92f, 0.95f);
             break;
         }
         case EK_ZOMBIE: {
@@ -722,6 +765,31 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                          v3_make(pos.x, body_y + 0.05f, pos.z + w * 0.43f),
                          v3_make(0.20f, 0.10f, 0.04f),
                          0.45f, 0.65f, 0.2f);
+            /* bras tendus en avant pendant le telegraph de lunge
+             * (ai_t2 > 0.18 = phase telegraphique, voir ai_zombie). */
+            if (e->ai_t2 > 0.18f) {
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - 0.12f, body_y + 0.05f,
+                                     pos.z + w * 0.60f),
+                             v3_make(0.10f, 0.10f, 0.30f),
+                             r * 0.9f, gg * 0.9f, b * 0.9f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.12f, body_y + 0.05f,
+                                     pos.z + w * 0.60f),
+                             v3_make(0.10f, 0.10f, 0.30f),
+                             r * 0.9f, gg * 0.9f, b * 0.9f);
+                /* glow rouge au sol pour signaler le bond imminent */
+                float lp = 0.5f + 0.5f * sinf(g->time * 18.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, 0.03f, pos.z),
+                             v3_make(w * 1.2f, 0.02f, w * 1.2f),
+                             1.0f * lp, 0.15f * lp, 0.10f * lp);
+            }
+            /* mache qui pendouille */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, head_y - 0.10f, pos.z + w * 0.34f),
+                         v3_make(0.16f, 0.06f, 0.04f),
+                         0.45f, 0.32f, 0.22f);
             break;
         }
         default: break;

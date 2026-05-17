@@ -352,54 +352,177 @@ static void ai_contact_damage(Game *g, Enemy *e, float dmg) {
     }
 }
 
+/* ZOMBIE : lent par defaut, mais 2 mecaniques signature :
+ *   1. cluster speed : +5 speed par voisin zombie dans 50px (cap 4 -> +20),
+ *      donne la sensation de "horde qui converge".
+ *   2. lunge : si player < 24px, telegraphe 0.35s puis bondit sur le joueur
+ *      avec un knockback impose + 12 dmg. ai_t2 = 0 normal, > 0 lunge timer. */
+static int count_zombie_cluster(Game *g, Enemy *self) {
+    int n = 0;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *o = &g->enemies[i];
+        if (o == self || !o->alive || o->kind != EK_ZOMBIE) continue;
+        float dx = o->x - self->x, dy = o->y - self->y;
+        if (dx*dx + dy*dy < 50.f * 50.f) n++;
+    }
+    if (n > 4) n = 4;
+    return n;
+}
+
 static void ai_zombie(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
     float diff = powf(1.15f, (float)(g->floor_index - 1));
-    ai_move_toward(g, e, dt, dx, dy, dist, 50.f, false);
+    e->ai_t += dt;
+    /* lunge state machine */
+    if (e->ai_t2 > 0.f) {
+        e->ai_t2 -= dt;
+        /* premiere moitie = telegraph (ne bouge pas), seconde moitie = bond */
+        if (e->ai_t2 > 0.18f) {
+            /* telegraph : sparks rouges */
+            if ((rand() % 100) < 50) {
+                particle_spawn_kind(g, e->x, e->y, 0, -25,
+                                    0.25f, 0xAA3333FF, 1.8f, 2);
+            }
+            ai_contact_damage(g, e, 7.f * diff);
+            return;
+        }
+        /* bond : direction figee dans knockback_x/y au moment du trigger */
+        float vx = e->knockback_x * 240.f;
+        float vy = e->knockback_y * 240.f;
+        ai_move_toward(g, e, dt, vx, vy, 1.f, 1.f, false);
+        ai_contact_damage(g, e, 12.f * diff);
+        if (e->ai_t2 <= 0.f) {
+            e->knockback_x = 0; e->knockback_y = 0;
+        }
+        return;
+    }
+    /* cluster speed boost */
+    int allies = count_zombie_cluster(g, e);
+    float speed = 50.f + allies * 5.f;
+    ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
+    /* trigger lunge */
+    if (dist < 26.f && e->ai_t > 1.0f) {
+        e->ai_t = 0.f;
+        e->ai_t2 = 0.55f;
+        /* freeze direction */
+        e->knockback_x = dx / dist;
+        e->knockback_y = dy / dist;
+        sfx_play(g, SFX_HIT);
+    }
     ai_contact_damage(g, e, 7.f * diff);
 }
 
+/* SLIME : hop discret + petite flaque d acide pose en l air a chaque
+ * "atterrissage" (quand le hop multiplier est minimum). La flaque damage
+ * sur passage. Garde le split a la mort (deja gere dans enemy_take_damage). */
 static void ai_slime(Game *g, Enemy *e, int i, float dt, float dx, float dy, float dist) {
     float diff = powf(1.15f, (float)(g->floor_index - 1));
-    float hop = 0.6f + 0.4f * sinf(g->time * 6.f + i);
+    float hop_sin = sinf(g->time * 6.f + i);
+    float hop = 0.6f + 0.4f * hop_sin;
     ai_move_toward(g, e, dt, dx, dy, dist, 95.f * hop, false);
+    /* drop d'acide quand le hop est au plus bas (atterrissage). On utilise
+     * ai_t2 comme cooldown pour eviter de poser une flaque par frame. */
+    e->ai_t2 -= dt;
+    if (hop_sin < -0.85f && e->ai_t2 <= 0.f) {
+        e->ai_t2 = 0.6f;
+        for (int k = 0; k < 5; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 8.f, sinf(a) * 8.f - 4.f,
+                                1.30f, 0x80B040A0, 2.0f, 0);
+        }
+        Player *p = &g->player;
+        float pdx = p->x - e->x, pdy = p->y - e->y;
+        if (pdx*pdx + pdy*pdy < 18.f * 18.f &&
+            p->invuln_t <= 0.f && p->dash_t <= 0.f) {
+            player_take_damage(g, 2.f * diff);
+        }
+    }
     ai_contact_damage(g, e, 5.f * diff);
 }
 
+/* BANDIT : kite + 3-shot spread + roll lateral occasionnel pour
+ * repositionner et eviter les attaques melee. */
 static void ai_bandit(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
     float diff = powf(1.15f, (float)(g->floor_index - 1));
-    /* kite : ne s approche pas en deca de 100 px */
-    if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 35.f, false);
     e->ai_t += dt;
-    if (e->ai_t > 1.4f && dist < 220.f) {
+    /* roll lateral toutes les 4s si le joueur est proche (< 130px) */
+    if (e->ai_t2 > 0.f) {
+        e->ai_t2 -= dt;
+        /* roll : vitesse perpendiculaire forte */
+        float perp_x = -dy / dist, perp_y = dx / dist;
+        if ((int)(e->facing * 13.f) & 1) { perp_x = -perp_x; perp_y = -perp_y; }
+        ai_move_toward(g, e, dt, perp_x, perp_y, 1.f, 180.f, false);
+        if ((rand() % 100) < 40) {
+            particle_spawn_kind(g, e->x, e->y, (rand()%30)-15, -10,
+                                0.30f, 0x60504040, 1.5f, 0);
+        }
+    } else {
+        /* kite : ne s approche pas en deca de 100 px */
+        if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 35.f, false);
+        if (dist < 130.f && (rand() % 600) < 5) {
+            e->ai_t2 = 0.35f;     /* declenche un roll */
+        }
+    }
+    /* triple shot : 3 daguettes en eventail */
+    if (e->ai_t > 1.6f && dist < 220.f && e->ai_t2 <= 0.f) {
         e->ai_t = 0;
-        Projectile pr = {0};
-        pr.x = e->x; pr.y = e->y;
-        pr.vx = dx / dist * 110.f;
-        pr.vy = dy / dist * 110.f;
-        pr.life = 4.f; pr.r = 3.f;
-        pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
-        pr.primary = EL_VOID;
-        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-        projectile_spawn(g, pr);
+        for (int k = -1; k <= 1; k++) {
+            float a0 = atan2f(dy, dx);
+            float a = a0 + k * 0.20f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 130.f;
+            pr.vy = sinf(a) * 130.f;
+            pr.life = 2.5f; pr.r = 3.f;
+            pr.dmg = 6.f * diff; pr.owner = 1; pr.reflectable = true;
+            pr.primary = EL_VOID;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
         sfx_play(g, SFX_SHOOT);
     }
     ai_contact_damage(g, e, 7.f * diff);
 }
 
+/* DEMON : kite + 3-shot AIME (plus lisible que l ancien radial 8 qui
+ * remplissait l ecran). Laisse une trace de feu sous lui qui ralentit le
+ * joueur s'il marche dedans (visuel + dmg sur contact via particules). */
 static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
     float diff = powf(1.15f, (float)(g->floor_index - 1));
     if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 30.f, false);
     e->ai_t += dt;
-    if (e->ai_t > 1.6f && dist < 240.f) {
+    /* trace de feu : flamme statique posee tous les 0.30s, joue le role
+     * d'AOE persistant + signal visuel "ici il a marche". */
+    if (e->ai_t2 <= 0.f) {
+        e->ai_t2 = 0.30f;
+        for (int k = 0; k < 4; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 6.f, sinf(a) * 6.f - 5.f,
+                                1.20f, 0xFF6020A0, 2.2f, 0);
+        }
+        /* mini-dmg de zone si le joueur est tres proche du pied */
+        Player *p = &g->player;
+        float pdx = p->x - e->x, pdy = p->y - e->y;
+        if (pdx*pdx + pdy*pdy < 14.f * 14.f &&
+            p->invuln_t <= 0.f && p->dash_t <= 0.f) {
+            player_take_damage(g, 2.f * diff);
+        }
+    } else {
+        e->ai_t2 -= dt;
+    }
+    /* triple aim shot */
+    if (e->ai_t > 1.4f && dist < 260.f) {
         e->ai_t = 0;
-        for (int k = 0; k < 8; k++) {
-            float a = (k / 8.f) * 6.2831f + g->time * 0.3f;
+        float a0 = atan2f(dy, dx);
+        for (int k = -1; k <= 1; k++) {
+            float a = a0 + k * 0.18f;
             Projectile pr = {0};
             pr.x = e->x; pr.y = e->y;
-            pr.vx = cosf(a) * 90.f;
-            pr.vy = sinf(a) * 90.f;
-            pr.life = 4.f; pr.r = 3.f;
-            pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = true;
+            pr.vx = cosf(a) * 120.f;
+            pr.vy = sinf(a) * 120.f;
+            pr.life = 3.f; pr.r = 3.5f;
+            pr.dmg = 9.f * diff; pr.owner = 1; pr.reflectable = true;
             pr.primary = EL_FIRE;
             combo_apply_to_enemy_projectile(e->combo_mask, &pr);
             projectile_spawn(g, pr);
