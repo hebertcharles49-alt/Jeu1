@@ -321,6 +321,7 @@ void game_start_new_run(Game *g) {
     g->run_damage_dealt = 0;
     g->run_best_combo_size = 0;
     g->run_legendary_drops = 0;
+    g->killstreak_count = 0; g->killstreak_t = 0.f; g->overdrive_t = 0.f;
     g->floor_index = 1;
     g->shake_t = 0.f;
     g->portal_spawned = false;
@@ -807,6 +808,12 @@ void game_run(Game *g) {
             world_assets_tick(g);
             update_surfaces(g);
             toast_tick(g);
+            /* killstreak / overdrive timers */
+            if (g->killstreak_t > 0.f) {
+                g->killstreak_t -= dt;
+                if (g->killstreak_t <= 0.f) g->killstreak_count = 0;
+            }
+            if (g->overdrive_t > 0.f) g->overdrive_t -= dt;
             if (g->shake_t > 0.f) g->shake_t -= dt;
             if (g->player.hp <= 0.f) g->state = GS_DEAD;
             if (g->player.xp >= g->player.xp_to_next) {

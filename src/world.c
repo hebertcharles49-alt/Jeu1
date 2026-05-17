@@ -85,8 +85,11 @@ void update_room_logic(Game *g) {
                 if (fi >= 2) pool[pn++] = EK_BANDIT;
                 if (fi >= 3) pool[pn++] = EK_GHOST;
                 if (fi >= 4) pool[pn++] = EK_CHARGER;
+                if (fi >= 4) pool[pn++] = EK_HEALER;
                 if (fi >= 5) pool[pn++] = EK_DEMON;
+                if (fi >= 5) pool[pn++] = EK_BUFFER;
                 if (fi >= 6) pool[pn++] = EK_MAGE;
+                if (fi >= 6) pool[pn++] = EK_NECROMANCER;
                 int aligned = biome_aligned_kind(biome_for_floor(fi));
                 if (aligned >= 0 && pn < (int)(sizeof(pool)/sizeof(pool[0])) - 1) {
                     pool[pn++] = aligned;

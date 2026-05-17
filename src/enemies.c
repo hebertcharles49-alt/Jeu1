@@ -297,7 +297,26 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     enemy_take_damage(g, e, dmg, el, kx, ky);
     if (dmg > 0.f) g->run_damage_dealt += (int)dmg;
     loop_on_hit(g);
-    if (e->hp <= 0.f && !already_dead) loop_on_kill(g);
+    if (e->hp <= 0.f && !already_dead) {
+        loop_on_kill(g);
+        /* killstreak : reset le timer + increment ; trigger overdrive
+         * a 5 kills consecutifs (fenetre 3s par kill). */
+        g->killstreak_count++;
+        g->killstreak_t     = 3.0f;
+        if (g->killstreak_count >= 5 && g->overdrive_t <= 0.f) {
+            g->overdrive_t = 5.0f;
+            g->shake_t = 0.20f; g->shake_mag = 4.f;
+            /* burst d aura : 30 particules rouges autour du joueur */
+            for (int k = 0; k < 30; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, g->player.x, g->player.y,
+                                    cosf(a) * 110.f, sinf(a) * 110.f,
+                                    0.55f, 0xFF3030FF, 3.0f, 2);
+            }
+            sfx_play(g, SFX_BOSS);
+            toast_push(g, "OVERDRIVE !", 0xFF3030FF, 4.0f);
+        }
+    }
 }
 
 /* forward decls : les boss utilisent les helpers ai_<x> definis plus bas. */
@@ -933,6 +952,13 @@ static void ai_move_toward(Game *g, Enemy *e, float dt,
 
 static void ai_contact_damage(Game *g, Enemy *e, float dmg) {
     Player *p = &g->player;
+    /* BUFFER aura : si dmg_flat > 0 (set par ai_buffer pour les voisins),
+     * on amplifie. Decay rapide pour qu il faille rester pres du totem. */
+    if (e->dmg_flat > 0.f) {
+        dmg *= (1.f + e->dmg_flat);
+        e->dmg_flat *= 0.92f;     /* decay -- l aura s estompe si on s eloigne */
+        if (e->dmg_flat < 0.02f) e->dmg_flat = 0.f;
+    }
     float pdx = p->x - e->x;
     float pdy = p->y - e->y;
     float pd = sqrtf(pdx * pdx + pdy * pdy);
@@ -1292,6 +1318,129 @@ static void ai_mage(Game *g, Enemy *e, float dt, float dx, float dy, float dist)
     ai_contact_damage(g, e, 3.f * diff);
 }
 
+/* HEALER : "Hierophante". Kite a 140 px, et toutes les 1.5s emet une
+ * pulse de heal qui restaure 8 PV (* diff) aux ennemis dans 80 px.
+ * Pas de degats direct (faible contact). Cible prioritaire pour le
+ * joueur car amplifie tous les autres. */
+static void ai_healer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    if (dist > 160.f)      ai_move_toward(g, e, dt, dx, dy, dist, 28.f, false);
+    else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 30.f, false);
+    e->ai_t += dt;
+    if (e->ai_t > 1.5f) {
+        e->ai_t = 0.f;
+        /* particules de halo dore */
+        for (int k = 0; k < 18; k++) {
+            float a = (k / 18.f) * 6.2831f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 60.f, sinf(a) * 60.f,
+                                0.45f, 0xFFE890C0, 2.3f, 0);
+        }
+        /* heal pulse */
+        for (int j = 0; j < MAX_ENEMIES; j++) {
+            Enemy *o = &g->enemies[j];
+            if (o == e || !o->alive || o->dying_t > 0.f) continue;
+            float ddx = o->x - e->x, ddy = o->y - e->y;
+            if (ddx*ddx + ddy*ddy < 80.f * 80.f) {
+                float h = 8.f * diff;
+                o->hp += h;
+                if (o->hp > o->maxhp) o->hp = o->maxhp;
+                /* damage number vert pour signaler le heal */
+                dmgnum_spawn(g, o->x, o->y - o->r, (int)h, 0x80FF80FF, false);
+            }
+        }
+        sfx_play(g, SFX_LEVELUP);
+    }
+    ai_contact_damage(g, e, 4.f * diff);
+}
+
+/* BUFFER : totem statique. Ne bouge pas. Emet une aura visible qui
+ * boost les degats des ennemis voisins de +30%. L impl est passive
+ * cote AI : on stocke le boost dans une variable globale lue par les
+ * autres ai_<kind> (cf calcul). Simplifie : on applique un mini "buff"
+ * timer aux voisins -> melee enemies tapent plus fort si proches. */
+static void ai_buffer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    (void)dx; (void)dy; (void)dist;
+    e->ai_t += dt;
+    /* aura visuelle continue : anneau acier */
+    if ((rand() % 100) < 35) {
+        float a = (rand() % 360) * 0.01745f;
+        particle_spawn_kind(g, e->x + cosf(a) * 24.f,
+                            e->y + sinf(a) * 24.f,
+                            0, -4.f,
+                            0.55f, 0xC0C8D0C0, 1.8f, 0);
+    }
+    /* applique le buff aux voisins via fire_dot a 0 mais hit_flash bref :
+     * en pratique on les marque avec hit_flash = 0.05 pour les "highlighter"
+     * dans le rendu. Le boost de degats reel se fait dans world_enemy_damage
+     * lookup -> non, ce serait invasif. Plus simple : laisse l aura visuelle
+     * + leger boost local applique en augmentant la stat dmg_flat des voisins
+     * uniquement quand ils tirent (ils lisent e->dmg_flat). */
+    if (e->ai_t > 0.40f) {
+        e->ai_t = 0.f;
+        for (int j = 0; j < MAX_ENEMIES; j++) {
+            Enemy *o = &g->enemies[j];
+            if (o == e || !o->alive || o->dying_t > 0.f) continue;
+            float ddx = o->x - e->x, ddy = o->y - e->y;
+            if (ddx*ddx + ddy*ddy < 90.f * 90.f) {
+                o->dmg_flat = 0.30f;     /* +30% applique cote calcul de proj */
+                /* hit_flash leger pour aura jaune transitoire */
+                if (o->hit_flash < 0.10f) o->hit_flash = 0.10f;
+            }
+        }
+    }
+    /* contact dmg legerement plus fort pour pas etre passif total */
+    ai_contact_damage(g, e, 6.f * diff);
+}
+
+/* NECROMANCER : kite tres lent, et toutes les 5s raise un EK_ZOMBIE
+ * dans 30 px. Cappe a 2 zombies actifs vivants raise par ce necro
+ * (compte global pour simplifier). */
+static void ai_necromancer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    if (dist > 200.f)      ai_move_toward(g, e, dt, dx, dy, dist, 20.f, false);
+    else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 20.f, false);
+    e->ai_t += dt;
+    if (e->ai_t > 5.0f) {
+        e->ai_t = 0.f;
+        /* compte zombies vivants */
+        int z = 0;
+        for (int j = 0; j < MAX_ENEMIES; j++)
+            if (g->enemies[j].alive && g->enemies[j].kind == EK_ZOMBIE) z++;
+        if (z < 2) {
+            int idx = enemy_spawn(g, EK_ZOMBIE,
+                                  e->x + (rand() % 40) - 20,
+                                  e->y + (rand() % 40) - 20);
+            (void)idx;
+            /* particules d invocation : volutes noires */
+            for (int k = 0; k < 14; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, e->x, e->y,
+                                    cosf(a) * 50.f, sinf(a) * 50.f - 20.f,
+                                    0.55f, 0x402060FF, 2.2f, 0);
+            }
+            sfx_play(g, SFX_BOSS);
+        }
+    }
+    /* tir occasionnel : void bolt droit */
+    e->ai_t2 += dt;
+    if (e->ai_t2 > 2.0f && dist < 220.f) {
+        e->ai_t2 = 0.f;
+        Projectile pr = {0};
+        pr.x = e->x; pr.y = e->y;
+        pr.vx = dx / dist * 95.f;
+        pr.vy = dy / dist * 95.f;
+        pr.life = 3.f; pr.r = 3.f;
+        pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
+        pr.primary = EL_DARK;
+        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+        projectile_spawn(g, pr);
+        sfx_play(g, SFX_SHOOT);
+    }
+    ai_contact_damage(g, e, 5.f * diff);
+}
+
 static void ai_dispatch(Game *g, Enemy *e, int i, float dt) {
     Player *p = &g->player;
     float dx = p->x - e->x;
@@ -1306,7 +1455,10 @@ static void ai_dispatch(Game *g, Enemy *e, int i, float dt) {
         case EK_RAT:     ai_rat    (g, e, i, dt, dx, dy, dist); break;
         case EK_GHOST:   ai_ghost  (g, e,    dt, dx, dy, dist); break;
         case EK_CHARGER: ai_charger(g, e,    dt, dx, dy, dist); break;
-        case EK_MAGE:    ai_mage   (g, e,    dt, dx, dy, dist); break;
+        case EK_MAGE:        ai_mage       (g, e,    dt, dx, dy, dist); break;
+        case EK_HEALER:      ai_healer     (g, e,    dt, dx, dy, dist); break;
+        case EK_BUFFER:      ai_buffer     (g, e,    dt, dx, dy, dist); break;
+        case EK_NECROMANCER: ai_necromancer(g, e,    dt, dx, dy, dist); break;
         default: break;
     }
 }

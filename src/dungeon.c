@@ -11,7 +11,7 @@
 #include <string.h>
 
 bool tile_solid(TileKind t) {
-    return t == T_VOID || t == T_WALL;
+    return t == T_VOID || t == T_WALL || t == T_WALL_CRACKED;
 }
 
 /* ---------- DUNGEON GENERATION ---------- */
@@ -187,6 +187,31 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     /* portes : a poser APRES tous les corridors, sur le perimetre des salles */
     for (int i = 0; i < placed; i++) {
         place_doors_for_room(d, &d->rooms[i]);
+    }
+    /* murs fissures : ~3 par salle non-boss sur le perimetre (T_WALL ->
+     * T_WALL_CRACKED). Permet au joueur de creer ses propres raccourcis
+     * via les AOE. Aucun cracked wall en boss room (gardons l arene). */
+    for (int i = 0; i < placed; i++) {
+        Room *r = &d->rooms[i];
+        if (r->is_boss_room) continue;
+        int n_cracks = 2 + (rand() % 2);
+        int attempts = 0;
+        while (n_cracks > 0 && attempts < 20) {
+            attempts++;
+            /* tire un cote au hasard, puis une position sur ce cote */
+            int side = rand() % 4;
+            int x, y;
+            switch (side) {
+                case 0: x = r->x + rand() % r->w; y = r->y - 1;          break;
+                case 1: x = r->x + rand() % r->w; y = r->y + r->h;       break;
+                case 2: x = r->x - 1;          y = r->y + rand() % r->h; break;
+                default: x = r->x + r->w;      y = r->y + rand() % r->h; break;
+            }
+            if (x <= 0 || y <= 0 || x >= MAP_W - 1 || y >= MAP_H - 1) continue;
+            if (d->tiles[y][x] != T_WALL) continue;
+            d->tiles[y][x] = T_WALL_CRACKED;
+            n_cracks--;
+        }
     }
     /* decorate other rooms */
     for (int ri = 0; ri < placed; ri++) {

@@ -114,6 +114,37 @@ void burst_particles(Game *g, float x, float y, int n, uint32_t color, float spe
 
 void do_aoe_at(Game *g, float x, float y, float radius, float dmg, Element status, uint32_t color) {
     bool attract = g->player.u_explosions_attract;
+    /* murs fissures dans le rayon : convertis en T_FLOOR (destruction).
+     * Seulement si l AOE a un mini dmg (eviter de tout casser avec une
+     * micro explosion). */
+    if (dmg > 10.f) {
+        int rt = (int)(radius / TILE) + 1;
+        int tx0 = (int)(x / TILE) - rt;
+        int ty0 = (int)(y / TILE) - rt;
+        int tx1 = (int)(x / TILE) + rt;
+        int ty1 = (int)(y / TILE) + rt;
+        for (int ty = ty0; ty <= ty1; ty++) {
+            for (int tx = tx0; tx <= tx1; tx++) {
+                if (tx <= 0 || ty <= 0 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
+                if (g->dungeon.tiles[ty][tx] != T_WALL_CRACKED) continue;
+                float cx = tx * (float)TILE + TILE * 0.5f;
+                float cy = ty * (float)TILE + TILE * 0.5f;
+                float dxw = cx - x, dyw = cy - y;
+                if (dxw*dxw + dyw*dyw > radius * radius) continue;
+                g->dungeon.tiles[ty][tx] = T_FLOOR;
+                g->dungeon.gen_id++;   /* invalide la cache du mesh */
+                /* burst de gravats */
+                for (int k = 0; k < 14; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    float s = 60.f + (rand() % 80);
+                    particle_spawn_kind(g, cx, cy,
+                                        cosf(a) * s, sinf(a) * s,
+                                        0.55f, 0x806050FF, 2.5f, 2);
+                }
+                sfx_play(g, SFX_EXPLODE);
+            }
+        }
+    }
     /* surface au sol : feu / glace selon l element. 40% de chance pour
      * eviter de saturer le pool. */
     if (status == EL_FIRE && (rand() % 100) < 40) {
@@ -385,6 +416,12 @@ void update_weapons(Game *g) {
         }
         bool crit = (rand() / (float)RAND_MAX) < p->crit_chance;
         if (crit) pmul *= p->crit_dmg;
+        /* OVERDRIVE actif : +30% dmg, atk_speed_mul plus court, crit
+         * roll redouble (deja roule). */
+        if (g->overdrive_t > 0.f) {
+            pmul *= 1.30f;
+            fx.cd_mul *= 0.67f;       /* atk speed +50% (cd ~0.67x) */
+        }
         fx.dmg_mul *= pmul;
         fx.range_mul *= p->range_mul;
         g->current_attack_crit = crit;

@@ -182,6 +182,10 @@ typedef enum {
     EK_GHOST,         /* float + phase murs + teleport sur hit */
     EK_CHARGER,       /* telegraph 0.8s puis charge en ligne droite */
     EK_MAGE,          /* kite + homing fae + blink si trop proche */
+    /* "support" enemies : modifient les alliees voisines */
+    EK_HEALER,        /* heal pulse 8 PV / 1.5s sur les ennemis < 80 px */
+    EK_BUFFER,        /* totem statique : aura damage +30% pour voisins */
+    EK_NECROMANCER,   /* raise EK_ZOMBIE toutes les 5s, capped a 2 */
     EK_BOSS,
     EK_COUNT
 } EnemyKind;
@@ -419,6 +423,7 @@ typedef enum {
     T_TORCH,
     T_BONES,
     T_RUNE,
+    T_WALL_CRACKED,    /* mur destructible : casse par AOE > seuil */
 } TileKind;
 
 typedef struct {
@@ -621,6 +626,15 @@ typedef struct {
      * update_enemies. Utilise par loop_decay : la jauge ne decroit que
      * quand la salle est vide. */
     int           enemy_alive_count;
+
+    /* OVERDRIVE killstreak : "moment de rupture".
+     *   - chaque kill incremente killstreak_count + reset killstreak_t = 3s.
+     *   - quand le compteur atteint OVERDRIVE_TRIGGER (5), overdrive_t
+     *     passe a 5s : +50% atk speed, +30% dmg, +20% crit, aura visible.
+     *   - quand killstreak_t expire, le compteur retombe a 0. */
+    int           killstreak_count;
+    float         killstreak_t;
+    float         overdrive_t;
 
     /* codex */
     int           codex_tab;       /* 0=combos 1=talismans 2=equip 3=armes */

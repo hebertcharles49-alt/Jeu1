@@ -63,8 +63,11 @@ const char *enemy_name(EnemyKind k) {
         case EK_RAT:     return "Rat";
         case EK_GHOST:   return "Spectre";
         case EK_CHARGER: return "Taureau";
-        case EK_MAGE:    return "Sorcier";
-        case EK_BOSS:    return "Boss";
+        case EK_MAGE:        return "Sorcier";
+        case EK_HEALER:      return "Hierophante";
+        case EK_BUFFER:      return "Totem";
+        case EK_NECROMANCER: return "Necromancien";
+        case EK_BOSS:        return "Boss";
         default: return "?";
     }
 }

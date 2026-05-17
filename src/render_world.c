@@ -92,13 +92,18 @@ MAYBE_UNUSED static bool tile_is_floor(TileKind t) {
 /* Tint biome applique lors du build du mesh. Set par build_dungeon_mesh,
  * lu par emit_wall_column / emit_floor_top via tile/wall_color_*. */
 static float s_biome_r = 1.f, s_biome_g = 1.f, s_biome_b = 1.f;
+/* tint additionnel pour les murs fissures (plus sombre + plus bas) */
+static float s_wall_tint = 1.f;
+static float s_wall_height = 0.f;       /* override de hauteur ; 0 = WALL_H */
 
 static void emit_wall_column(float x, float z) {
     float x0 = x, x1 = x + 1.f;
     float z0 = z, z1 = z + 1.f;
-    float y0 = 0.f, y1 = WALL_H;
+    float y0 = 0.f, y1 = (s_wall_height > 0.f) ? s_wall_height : WALL_H;
     float r, g, b; wall_color_side(&r, &g, &b);
-    r *= s_biome_r; g *= s_biome_g; b *= s_biome_b;
+    r *= s_biome_r * s_wall_tint;
+    g *= s_biome_g * s_wall_tint;
+    b *= s_biome_b * s_wall_tint;
     /* +X face */
     mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
                    v3_make(1,0,0), r,g,b);
@@ -113,7 +118,9 @@ static void emit_wall_column(float x, float z) {
                    v3_make(0,0,-1), r*1.1f,g*1.1f,b*1.1f);
     /* top (lit) */
     float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
-    tr *= s_biome_r; tg *= s_biome_g; tb *= s_biome_b;
+    tr *= s_biome_r * s_wall_tint;
+    tg *= s_biome_g * s_wall_tint;
+    tb *= s_biome_b * s_wall_tint;
     mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
                    v3_make(0,1,0), tr,tg,tb);
 }
@@ -144,7 +151,13 @@ static void build_dungeon_mesh(Game *g) {
             TileKind t = d->tiles[y][x];
             if (t == T_VOID) continue;
             if (t == T_WALL) {
+                s_wall_tint = 1.f; s_wall_height = 0.f;
                 emit_wall_column((float)x, (float)y);
+            } else if (t == T_WALL_CRACKED) {
+                /* murs fissures : plus bas (0.7) + tint plus sombre. */
+                s_wall_tint = 0.55f; s_wall_height = 0.70f;
+                emit_wall_column((float)x, (float)y);
+                s_wall_tint = 1.f;   s_wall_height = 0.f;
             } else {
                 emit_floor_top((float)x, (float)y, t);
             }
@@ -178,14 +191,17 @@ static void hero_color(HeroClass h, float *r, float *g, float *b,
 
 static void enemy_color(Enemy *e, float *r, float *g, float *b) {
     switch (e->kind) {
-        case EK_ZOMBIE:  *r=0.31f;*g=0.50f;*b=0.25f; break;
-        case EK_BANDIT:  *r=0.50f;*g=0.38f;*b=0.25f; break;
-        case EK_DEMON:   *r=0.63f;*g=0.13f;*b=0.25f; break;
-        case EK_SLIME:   *r=0.25f;*g=0.63f;*b=0.63f; break;
-        case EK_RAT:     *r=0.30f;*g=0.18f;*b=0.14f; break;
-        case EK_GHOST:   *r=0.65f;*g=0.65f;*b=0.85f; break;
-        case EK_CHARGER: *r=0.55f;*g=0.30f;*b=0.18f; break;
-        case EK_MAGE:    *r=0.35f;*g=0.20f;*b=0.55f; break;
+        case EK_ZOMBIE:      *r=0.31f;*g=0.50f;*b=0.25f; break;
+        case EK_BANDIT:      *r=0.50f;*g=0.38f;*b=0.25f; break;
+        case EK_DEMON:       *r=0.63f;*g=0.13f;*b=0.25f; break;
+        case EK_SLIME:       *r=0.25f;*g=0.63f;*b=0.63f; break;
+        case EK_RAT:         *r=0.30f;*g=0.18f;*b=0.14f; break;
+        case EK_GHOST:       *r=0.65f;*g=0.65f;*b=0.85f; break;
+        case EK_CHARGER:     *r=0.55f;*g=0.30f;*b=0.18f; break;
+        case EK_MAGE:        *r=0.35f;*g=0.20f;*b=0.55f; break;
+        case EK_HEALER:      *r=0.95f;*g=0.85f;*b=0.55f; break;
+        case EK_BUFFER:      *r=0.65f;*g=0.65f;*b=0.75f; break;
+        case EK_NECROMANCER: *r=0.20f;*g=0.13f;*b=0.30f; break;
         case EK_BOSS:   *r=1.00f;*g=0.13f;*b=0.50f; break;
         default:        *r=0.5f;*g=0.5f;*b=0.5f; break;
     }
@@ -632,6 +648,115 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                      v3_make(pos.x + 0.45f, 0.80f + bob, pos.z),
                      v3_make(0.06f, 0.06f, 0.06f),
                      0.9f * gp, 0.5f * gp, 1.0f * gp);
+        return;
+    }
+
+    /* HEALER (Hierophante) : silhouette en robe doree + halo cardinal
+     * + sceptre lumineux. Pulse jaune en continu pour signaler son role. */
+    if (e->kind == EK_HEALER) {
+        float pulse = 0.7f + 0.3f * sinf(g->time * 4.f);
+        /* halo dore au sol (toujours visible, plus large pendant pulse) */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.04f, pos.z),
+                     v3_make(w * 2.0f + 0.20f * pulse, 0.02f,
+                             w * 2.0f + 0.20f * pulse),
+                     1.0f * pulse, 0.85f * pulse, 0.30f * pulse);
+        /* robe blanche */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.40f, pos.z),
+                     v3_make(w * 1.05f, h * 0.85f, w * 1.05f),
+                     r, gg, b);
+        /* mitre haute pointu */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.30f, pos.z),
+                     v3_make(0.30f, 0.40f, 0.30f),
+                     1.0f, 0.92f, 0.55f);
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.55f, pos.z),
+                     v3_make(0.10f, 0.12f, 0.10f),
+                     1.0f, 0.95f, 0.65f);
+        /* sceptre lumineux dans la main droite */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w / 2 + 0.18f), h * 0.50f, pos.z),
+                     v3_make(0.06f, 0.55f, 0.06f),
+                     0.80f, 0.60f, 0.30f);
+        float gp = 0.6f + 0.4f * sinf(g->time * 6.f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w / 2 + 0.18f), h * 0.85f, pos.z),
+                     v3_make(0.10f, 0.10f, 0.10f),
+                     1.0f * gp, 0.90f * gp, 0.45f * gp);
+        return;
+    }
+
+    /* BUFFER (Totem) : statique, totem en pierre avec un crystal qui
+     * pulse + 3 anneaux qui flottent autour. Pas de jambes. */
+    if (e->kind == EK_BUFFER) {
+        float pulse = 0.6f + 0.4f * sinf(g->time * 3.f);
+        /* base trapue */
+        gfx_box_draw(g->renderer, v3_make(pos.x, 0.20f, pos.z),
+                     v3_make(0.55f, 0.40f, 0.55f),
+                     r * 0.7f, gg * 0.7f, b * 0.7f);
+        /* colonne moyenne */
+        gfx_box_draw(g->renderer, v3_make(pos.x, 0.62f, pos.z),
+                     v3_make(0.42f, 0.45f, 0.42f),
+                     r * 0.9f, gg * 0.9f, b * 0.9f);
+        /* tete avec gemme acier */
+        gfx_box_draw(g->renderer, v3_make(pos.x, 1.00f, pos.z),
+                     v3_make(0.32f, 0.22f, 0.32f),
+                     r, gg, b);
+        gfx_box_draw(g->renderer, v3_make(pos.x, 1.20f, pos.z),
+                     v3_make(0.16f, 0.18f, 0.16f),
+                     0.85f * pulse, 0.92f * pulse, 1.0f * pulse);
+        /* 3 anneaux qui orbitent en hauteur differente */
+        for (int ri = 0; ri < 3; ri++) {
+            float ang = g->time * (1.5f + ri * 0.5f) + ri * 2.f;
+            float radius = 0.45f + ri * 0.05f;
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x + cosf(ang) * radius,
+                        0.65f + ri * 0.12f,
+                        pos.z + sinf(ang) * radius),
+                v3_make(0.08f, 0.04f, 0.08f),
+                0.80f, 0.82f, 0.92f);
+        }
+        return;
+    }
+
+    /* NECROMANCER : silhouette en robe sombre, hood profond, baton avec
+     * crane au sommet. Particules d ame autour. */
+    if (e->kind == EK_NECROMANCER) {
+        /* robe sombre */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.35f, pos.z),
+                     v3_make(w * 1.10f, h * 0.65f, w * 1.10f),
+                     r, gg, b);
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.75f, pos.z),
+                     v3_make(w * 0.80f, h * 0.40f, w * 0.80f),
+                     r * 0.7f, gg * 0.7f, b * 0.7f);
+        /* hood */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.28f, pos.z),
+                     v3_make(0.45f, 0.30f, 0.45f),
+                     r * 0.45f, gg * 0.45f, b * 0.50f);
+        /* yeux violets */
+        float ep = 0.7f + 0.3f * sinf(g->time * 5.f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.13f, h + 0.30f, pos.z + 0.32f),
+                     v3_make(0.05f, 0.05f, 0.04f),
+                     0.70f * ep, 0.30f * ep, 1.00f * ep);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.13f, h + 0.30f, pos.z + 0.32f),
+                     v3_make(0.05f, 0.05f, 0.04f),
+                     0.70f * ep, 0.30f * ep, 1.00f * ep);
+        /* baton avec crane */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w/2 + 0.18f), h * 0.45f, pos.z),
+                     v3_make(0.06f, 0.75f, 0.06f),
+                     0.35f, 0.25f, 0.15f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w/2 + 0.18f), h * 0.95f, pos.z),
+                     v3_make(0.16f, 0.18f, 0.16f),
+                     0.90f, 0.88f, 0.78f);
+        /* ame qui flotte */
+        if ((rand() % 100) < 30) {
+            particle_spawn_kind(g, e->x, e->y - 4,
+                                (rand() % 20) - 10, -25.f,
+                                0.6f, 0x6020A0A0, 1.6f, 0);
+        }
         return;
     }
 
@@ -1389,6 +1514,29 @@ void render_world_overlay_ui(Game *g) {
                     g->player.y + sinf(a) * r,
                     0, 0, 0.06f, col, 2.5f, 0);
             }
+        }
+    }
+    /* OVERDRIVE aura : couronne rouge serree autour du joueur pendant
+     * toute la duree. Plus serre que l aura overload pour distinguer. */
+    if (g->overdrive_t > 0.f) {
+        int n = 18;
+        float radius = 14.f;
+        for (int i = 0; i < n; i++) {
+            float a = (i / (float)n) * 6.2831f + g->time * 4.f;
+            particle_spawn_kind(g,
+                g->player.x + cosf(a) * radius,
+                g->player.y + sinf(a) * radius,
+                cosf(a) * -10.f, sinf(a) * -10.f,
+                0.10f, 0xFF3030FF, 2.2f, 0);
+        }
+        /* tag "OVERDRIVE" au-dessus du joueur */
+        v3 head = v3_make(g->player.x / TILE, 1.5f, g->player.y / TILE);
+        int sx, sy;
+        if (world_to_screen(gc, head, &sx, &sy)) {
+            const char *m = "OVERDRIVE";
+            int tw = text_width(m);
+            text_draw(gc, sx - tw/2 + 1, sy - 18 + 1, m, 0x000000FF);
+            text_draw(gc, sx - tw/2,     sy - 18,     m, 0xFF3030FF);
         }
     }
     /* HP bars + noms au-dessus des ennemis */

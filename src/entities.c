@@ -75,6 +75,19 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     e->hp = e->maxhp = 22.f * diff;
                     e->r = 6.f; e->xp_drop = 3; e->coin_drop = 3;
                     break;
+                case EK_HEALER:
+                    e->hp = e->maxhp = 18.f * diff;
+                    e->r = 6.f; e->xp_drop = 3; e->coin_drop = 2;
+                    break;
+                case EK_BUFFER:
+                    /* totem : ne bouge pas, plus de HP en compensation. */
+                    e->hp = e->maxhp = 32.f * diff;
+                    e->r = 7.f; e->xp_drop = 3; e->coin_drop = 2;
+                    break;
+                case EK_NECROMANCER:
+                    e->hp = e->maxhp = 26.f * diff;
+                    e->r = 6.f; e->xp_drop = 4; e->coin_drop = 3;
+                    break;
                 case EK_BOSS:
                     e->hp = e->maxhp = 220.f * diff;
                     e->r = 14.f; e->xp_drop = 12; e->coin_drop = 30;
@@ -94,7 +107,10 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                 case EK_RAT:     e->element = EL_NONE;     break;
                 case EK_GHOST:   e->element = EL_DARK;     break;
                 case EK_CHARGER: e->element = EL_EARTH;    break;
-                case EK_MAGE:    e->element = EL_FAE;      break;
+                case EK_MAGE:        e->element = EL_FAE;    break;
+                case EK_HEALER:      e->element = EL_HOLY;   break;
+                case EK_BUFFER:      e->element = EL_STEEL;  break;
+                case EK_NECROMANCER: e->element = EL_DARK;   break;
                 default: break;
             }
             /* elite roll : 5% par etage atteint, plafond 50%, sauf boss.
