@@ -68,12 +68,21 @@ void update_room_logic(Game *g) {
             if (spawn_interval < 120) spawn_interval = 120;
             while (r->spawn_timer_ms >= spawn_interval && r->enemies_to_spawn > 0) {
                 r->spawn_timer_ms -= spawn_interval;
+                /* Spawn pool floor-gated : la variete s ouvre avec la
+                 * progression pour eviter de noyer le joueur etage 1. */
                 int kind;
-                int roll = rand() % 100;
-                if (roll < 45) kind = EK_ZOMBIE;
-                else if (roll < 70) kind = EK_SLIME;
-                else if (roll < 88) kind = EK_BANDIT;
-                else kind = EK_DEMON;
+                int fi = g->floor_index;
+                /* on construit un tableau temporaire de candidats valides */
+                int pool[16]; int pn = 0;
+                pool[pn++] = EK_ZOMBIE; pool[pn++] = EK_ZOMBIE;     /* x2 commun */
+                pool[pn++] = EK_SLIME;
+                pool[pn++] = EK_RAT;    pool[pn++] = EK_RAT;        /* swarm */
+                if (fi >= 2) pool[pn++] = EK_BANDIT;
+                if (fi >= 3) pool[pn++] = EK_GHOST;
+                if (fi >= 4) pool[pn++] = EK_CHARGER;
+                if (fi >= 5) pool[pn++] = EK_DEMON;
+                if (fi >= 6) pool[pn++] = EK_MAGE;
+                kind = pool[rand() % pn];
                 int sx = r->x + 1 + rand() % (r->w - 2);
                 int sy = r->y + 1 + rand() % (r->h - 2);
                 enemy_spawn(g, kind, sx * TILE + TILE / 2, sy * TILE + TILE / 2);

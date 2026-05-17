@@ -173,10 +173,14 @@ typedef struct {
 
 /* ---------- Entities ---------- */
 typedef enum {
-    EK_ZOMBIE = 0,
-    EK_BANDIT,
-    EK_DEMON,
-    EK_SLIME,
+    EK_ZOMBIE = 0,    /* lent, contact, shambler */
+    EK_BANDIT,        /* kite + voids arrows */
+    EK_DEMON,         /* radial fire spreader */
+    EK_SLIME,         /* hopper, split a la mort */
+    EK_RAT,           /* swarm, tres rapide, zigzag, faible */
+    EK_GHOST,         /* float + phase murs + teleport sur hit */
+    EK_CHARGER,       /* telegraph 0.8s puis charge en ligne droite */
+    EK_MAGE,          /* kite + homing fae + blink si trop proche */
     EK_BOSS,
     EK_COUNT
 } EnemyKind;

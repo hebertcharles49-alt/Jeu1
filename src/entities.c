@@ -56,6 +56,25 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     e->r = 5.f; e->xp_drop = 1; e->coin_drop = 1;
                     e->split_left = 1;
                     break;
+                case EK_RAT:
+                    e->hp = e->maxhp = 8.f * diff;
+                    e->r = 4.f; e->xp_drop = 1; e->coin_drop = 0;
+                    break;
+                case EK_GHOST:
+                    e->hp = e->maxhp = 25.f * diff;
+                    e->r = 6.f; e->xp_drop = 3; e->coin_drop = 2;
+                    break;
+                case EK_CHARGER:
+                    e->hp = e->maxhp = 50.f * diff;
+                    e->r = 9.f; e->xp_drop = 4; e->coin_drop = 3;
+                    /* ai_t2 sert au state-machine charge : 0=cooldown,
+                     * 1=telegraph, 2=charging. Voir enemies.c. */
+                    e->ai_t2 = 0.f;
+                    break;
+                case EK_MAGE:
+                    e->hp = e->maxhp = 22.f * diff;
+                    e->r = 6.f; e->xp_drop = 3; e->coin_drop = 3;
+                    break;
                 case EK_BOSS:
                     e->hp = e->maxhp = 220.f * diff;
                     e->r = 14.f; e->xp_drop = 12; e->coin_drop = 30;
@@ -68,10 +87,14 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
             }
             /* affinite elementaire de base */
             switch (kind) {
-                case EK_ZOMBIE: e->element = EL_DARK;  break;
-                case EK_BANDIT: e->element = EL_NONE;  break;
-                case EK_DEMON:  e->element = EL_FIRE;  break;
-                case EK_SLIME:  e->element = EL_WATER; break;
+                case EK_ZOMBIE:  e->element = EL_DARK;     break;
+                case EK_BANDIT:  e->element = EL_NONE;     break;
+                case EK_DEMON:   e->element = EL_FIRE;     break;
+                case EK_SLIME:   e->element = EL_WATER;    break;
+                case EK_RAT:     e->element = EL_NONE;     break;
+                case EK_GHOST:   e->element = EL_DARK;     break;
+                case EK_CHARGER: e->element = EL_EARTH;    break;
+                case EK_MAGE:    e->element = EL_FAE;      break;
                 default: break;
             }
             /* elite roll : 5% par etage atteint, plafond 50%, sauf boss. */

@@ -56,11 +56,15 @@ const char *hero_desc(HeroClass h) {
 
 const char *enemy_name(EnemyKind k) {
     switch (k) {
-        case EK_ZOMBIE: return "Zombie";
-        case EK_BANDIT: return "Bandit";
-        case EK_DEMON:  return "Demon";
-        case EK_SLIME:  return "Slime";
-        case EK_BOSS:   return "Boss";
+        case EK_ZOMBIE:  return "Zombie";
+        case EK_BANDIT:  return "Bandit";
+        case EK_DEMON:   return "Demon";
+        case EK_SLIME:   return "Slime";
+        case EK_RAT:     return "Rat";
+        case EK_GHOST:   return "Spectre";
+        case EK_CHARGER: return "Taureau";
+        case EK_MAGE:    return "Sorcier";
+        case EK_BOSS:    return "Boss";
         default: return "?";
     }
 }

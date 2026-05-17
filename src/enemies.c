@@ -319,8 +319,283 @@ static void boss_update(Game *g, Enemy *e, float dt) {
     }
 }
 
-void update_enemies(Game *g) {
+/* ============================================================
+ *  AI PAR KIND -- chaque ennemi a sa signature comportementale
+ * ============================================================ */
+
+/* helpers communs */
+static void ai_move_toward(Game *g, Enemy *e, float dt,
+                            float dx, float dy, float dist, float speed,
+                            bool phase_walls)
+{
+    if (e->slow_t > 0.f) speed *= 0.4f;
+    float vx = dx / dist * speed;
+    float vy = dy / dist * speed;
+    float nx = e->x + vx * dt;
+    float ny = e->y + vy * dt;
+    if (phase_walls) { e->x = nx; e->y = ny; return; }
+    if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx;
+    if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny;
+}
+
+static void ai_contact_damage(Game *g, Enemy *e, float dmg) {
     Player *p = &g->player;
+    float pdx = p->x - e->x;
+    float pdy = p->y - e->y;
+    float pd = sqrtf(pdx * pdx + pdy * pdy);
+    if (pd < e->r + p->r && p->invuln_t <= 0.f && p->dash_t <= 0.f) {
+        player_take_damage(g, dmg);
+        float dxn = pdx / (pd + 0.01f);
+        float dyn = pdy / (pd + 0.01f);
+        p->x += dxn * 6.f;
+        p->y += dyn * 6.f;
+    }
+}
+
+static void ai_zombie(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    ai_move_toward(g, e, dt, dx, dy, dist, 50.f, false);
+    ai_contact_damage(g, e, 7.f * diff);
+}
+
+static void ai_slime(Game *g, Enemy *e, int i, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float hop = 0.6f + 0.4f * sinf(g->time * 6.f + i);
+    ai_move_toward(g, e, dt, dx, dy, dist, 95.f * hop, false);
+    ai_contact_damage(g, e, 5.f * diff);
+}
+
+static void ai_bandit(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    /* kite : ne s approche pas en deca de 100 px */
+    if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 35.f, false);
+    e->ai_t += dt;
+    if (e->ai_t > 1.4f && dist < 220.f) {
+        e->ai_t = 0;
+        Projectile pr = {0};
+        pr.x = e->x; pr.y = e->y;
+        pr.vx = dx / dist * 110.f;
+        pr.vy = dy / dist * 110.f;
+        pr.life = 4.f; pr.r = 3.f;
+        pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
+        pr.primary = EL_VOID;
+        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+        projectile_spawn(g, pr);
+        sfx_play(g, SFX_SHOOT);
+    }
+    ai_contact_damage(g, e, 7.f * diff);
+}
+
+static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 30.f, false);
+    e->ai_t += dt;
+    if (e->ai_t > 1.6f && dist < 240.f) {
+        e->ai_t = 0;
+        for (int k = 0; k < 8; k++) {
+            float a = (k / 8.f) * 6.2831f + g->time * 0.3f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 90.f;
+            pr.vy = sinf(a) * 90.f;
+            pr.life = 4.f; pr.r = 3.f;
+            pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = true;
+            pr.primary = EL_FIRE;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        sfx_play(g, SFX_SHOOT);
+    }
+    ai_contact_damage(g, e, 11.f * diff);
+}
+
+/* RAT : tres rapide, zigzag (composante perpendiculaire sinusoidale).
+ * Faible, mais en groupe c'est dangereux. */
+static void ai_rat(Game *g, Enemy *e, int i, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    /* perpendiculaire au vecteur joueur, oscillation rapide */
+    float perp_x = -dy / dist;
+    float perp_y =  dx / dist;
+    float wobble = sinf(g->time * 10.f + i * 1.7f) * 0.7f;
+    float dirx = dx / dist + perp_x * wobble;
+    float diry = dy / dist + perp_y * wobble;
+    float dlen = sqrtf(dirx * dirx + diry * diry) + 0.001f;
+    ai_move_toward(g, e, dt, dirx / dlen, diry / dlen, 1.f, 120.f, false);
+    ai_contact_damage(g, e, 4.f * diff);
+}
+
+/* GHOST : float (visuel via bobbing render), phase a travers les murs,
+ * 35% de chance de teleporter de +/-60 px quand il prend un coup. Le
+ * teleport est gere ici en lisant hit_flash > 0 + un cooldown. */
+static void ai_ghost(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    /* teleport "reactif" : on tente sur entree de hit_flash (rising edge). */
+    e->ai_t += dt;
+    if (e->hit_flash > 0.05f && e->ai_t > 0.6f) {
+        if ((rand() % 100) < 35) {
+            float ang = (rand() % 360) * 0.01745f;
+            float dist_tp = 50.f + (rand() % 30);
+            float nx = e->x + cosf(ang) * dist_tp;
+            float ny = e->y + sinf(ang) * dist_tp;
+            /* respecte la map quand meme : si tile out of bounds, on annule */
+            int tx = (int)(nx / TILE), ty = (int)(ny / TILE);
+            if (tx > 0 && ty > 0 && tx < MAP_W - 1 && ty < MAP_H - 1) {
+                /* burst spectral au depart + arrivee */
+                for (int k = 0; k < 12; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, e->x, e->y, cosf(a)*60, sinf(a)*60,
+                                        0.35f, 0xC080FFC0, 2.f, 0);
+                    particle_spawn_kind(g, nx, ny, cosf(a)*60, sinf(a)*60,
+                                        0.35f, 0xC080FFC0, 2.f, 0);
+                }
+                e->x = nx; e->y = ny;
+                e->ai_t = 0.f;
+            }
+        }
+    }
+    /* mouvement : phase a travers les murs, lent */
+    ai_move_toward(g, e, dt, dx, dy, dist, 45.f, true);
+    ai_contact_damage(g, e, 6.f * diff);
+}
+
+/* CHARGER : state machine sur ai_t2.
+ *   0 = cooldown : mouvement lent, recale ai_t2->1 si aligne+250px
+ *   1 = telegraph : immobile, 0.8s, brille rouge
+ *   2 = charging : straight line a 280 speed, 0.9s, gros dmg
+ * Quand charging finit -> retour 0 et cooldown forc. */
+static void ai_charger(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    e->ai_t += dt;
+    int state = (int)e->ai_t2;          /* 0/1/2 -- on stocke en float */
+    if (state == 0) {
+        /* cooldown : approche lente */
+        ai_move_toward(g, e, dt, dx, dy, dist, 30.f, false);
+        /* trigger : aligne (dist < 250) ET cooldown ecoule (1.4s) */
+        if (e->ai_t > 1.4f && dist < 250.f) {
+            e->ai_t2 = 1.f;             /* -> telegraph */
+            e->ai_t = 0.f;
+            /* stocke la direction au moment de l aim (locked) */
+            e->knockback_x = dx / dist; /* hijack pour stocker dir.x */
+            e->knockback_y = dy / dist; /* dir.y */
+            sfx_play(g, SFX_HEAVY_HIT);
+        }
+    } else if (state == 1) {
+        /* telegraph : on reste sur place, emet sparks rouges */
+        if ((rand() % 100) < 60) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 30.f, sinf(a) * 30.f,
+                                0.25f, 0xFF4020FF, 2.5f, 2);
+        }
+        if (e->ai_t > 0.80f) {
+            e->ai_t2 = 2.f;             /* -> charging */
+            e->ai_t = 0.f;
+            sfx_play(g, SFX_SHOOT);
+        }
+    } else {
+        /* charging : straight line. La direction est dans knockback_x/y. */
+        float vx = e->knockback_x * 280.f;
+        float vy = e->knockback_y * 280.f;
+        float nx = e->x + vx * dt;
+        float ny = e->y + vy * dt;
+        bool wall = false;
+        if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx; else wall = true;
+        if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny; else wall = true;
+        /* coupure du charge sur mur ou sur fin du timer */
+        if (wall || e->ai_t > 0.90f) {
+            e->ai_t2 = 0.f;
+            e->ai_t = 0.f;
+            e->knockback_x = 0; e->knockback_y = 0;
+            if (wall) {
+                /* impact spectaculaire : shake + particules */
+                g->shake_t = 0.30f; g->shake_mag = 6.f;
+                for (int k = 0; k < 20; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    float s = 60.f + (rand() % 80);
+                    particle_spawn_kind(g, e->x, e->y,
+                                        cosf(a)*s, sinf(a)*s,
+                                        0.45f, 0x806050FF, 2.5f, 2);
+                }
+                sfx_play(g, SFX_HEAVY_HIT);
+                e->stun_t = 0.6f;       /* stun apres collision murale */
+            }
+        }
+        /* dmg renforces pendant la charge */
+        ai_contact_damage(g, e, 18.f * diff);
+        return;
+    }
+    /* dmg de contact en cooldown / telegraph */
+    ai_contact_damage(g, e, 8.f * diff);
+}
+
+/* MAGE : kite a 180 px, homing fae bolt toutes les 2s, blink si trop proche */
+static void ai_mage(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    e->ai_t += dt;
+    /* blink defensif */
+    if (dist < 80.f && e->ai_t2 <= 0.f) {
+        /* teleport a 220 px dans la direction opposee */
+        float bx = e->x - dx / dist * 220.f;
+        float by = e->y - dy / dist * 220.f;
+        int tx = (int)(bx / TILE), ty = (int)(by / TILE);
+        if (tx > 0 && ty > 0 && tx < MAP_W - 1 && ty < MAP_H - 1 &&
+            !aabb_solid(g, bx, by, e->r)) {
+            for (int k = 0; k < 14; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, e->x, e->y, cosf(a)*70, sinf(a)*70,
+                                    0.35f, 0xF080F0FF, 2.f, 0);
+                particle_spawn_kind(g, bx, by, cosf(a)*70, sinf(a)*70,
+                                    0.35f, 0xF080F0FF, 2.f, 0);
+            }
+            e->x = bx; e->y = by;
+            e->ai_t2 = 3.0f;            /* cooldown blink */
+            sfx_play(g, SFX_PORTAL);
+        }
+    } else {
+        /* drift lent pour maintenir distance 180 px */
+        if (dist > 200.f)      ai_move_toward(g, e, dt, dx, dy, dist, 25.f, false);
+        else if (dist < 160.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 25.f, false);
+    }
+    if (e->ai_t2 > 0.f) e->ai_t2 -= dt;
+    /* tir homing fae */
+    if (e->ai_t > 2.0f && dist < 260.f) {
+        e->ai_t = 0.f;
+        Projectile pr = {0};
+        pr.x = e->x; pr.y = e->y;
+        pr.vx = dx / dist * 90.f;
+        pr.vy = dy / dist * 90.f;
+        pr.life = 4.f; pr.r = 4.f;
+        pr.dmg = 9.f * diff; pr.owner = 1; pr.reflectable = true;
+        pr.primary = EL_FAE;
+        pr.homing = 1.5f;               /* recherche le joueur */
+        pr.target_idx = -1;
+        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+        projectile_spawn(g, pr);
+        sfx_play(g, SFX_ZAP);
+    }
+    ai_contact_damage(g, e, 3.f * diff);
+}
+
+static void ai_dispatch(Game *g, Enemy *e, int i, float dt) {
+    Player *p = &g->player;
+    float dx = p->x - e->x;
+    float dy = p->y - e->y;
+    float dist = sqrtf(dx * dx + dy * dy) + 0.01f;
+    e->facing = atan2f(dy, dx);
+    switch (e->kind) {
+        case EK_ZOMBIE:  ai_zombie (g, e,    dt, dx, dy, dist); break;
+        case EK_SLIME:   ai_slime  (g, e, i, dt, dx, dy, dist); break;
+        case EK_BANDIT:  ai_bandit (g, e,    dt, dx, dy, dist); break;
+        case EK_DEMON:   ai_demon  (g, e,    dt, dx, dy, dist); break;
+        case EK_RAT:     ai_rat    (g, e, i, dt, dx, dy, dist); break;
+        case EK_GHOST:   ai_ghost  (g, e,    dt, dx, dy, dist); break;
+        case EK_CHARGER: ai_charger(g, e,    dt, dx, dy, dist); break;
+        case EK_MAGE:    ai_mage   (g, e,    dt, dx, dy, dist); break;
+        default: break;
+    }
+}
+
+void update_enemies(Game *g) {
     float dt = g->dt;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
@@ -430,77 +705,7 @@ void update_enemies(Game *g) {
             }
         }
         if (e->is_boss) { boss_update(g, e, dt); continue; }
-
-        float dx = p->x - e->x;
-        float dy = p->y - e->y;
-        float dist = sqrtf(dx * dx + dy * dy) + 0.01f;
-        e->facing = atan2f(dy, dx);
-        float speed = 0.f;
-        switch (e->kind) {
-            case EK_ZOMBIE: speed = 50.f; break;
-            case EK_BANDIT: speed = 35.f; break;
-            case EK_DEMON:  speed = 30.f; break;
-            case EK_SLIME:  speed = 95.f; break;
-        }
-        if (e->slow_t > 0.f) speed *= 0.4f;
-        bool approach = true;
-        if ((e->kind == EK_BANDIT || e->kind == EK_DEMON) && dist < 100.f) approach = false;
-        if (approach) {
-            float vx = dx / dist * speed;
-            float vy = dy / dist * speed;
-            if (e->kind == EK_SLIME) {
-                float hop = 0.6f + 0.4f * sinf(g->time * 6.f + i);
-                vx *= hop; vy *= hop;
-            }
-            float nx = e->x + vx * dt;
-            float ny = e->y + vy * dt;
-            if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx;
-            if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny;
-        }
-        e->ai_t += dt;
-        float diff = powf(1.15f, (float)(g->floor_index - 1));
-        if (e->kind == EK_BANDIT && e->ai_t > 1.4f && dist < 220.f) {
-            e->ai_t = 0;
-            Projectile pr = {0};
-            pr.x = e->x; pr.y = e->y;
-            pr.vx = dx / dist * 110.f;
-            pr.vy = dy / dist * 110.f;
-            pr.life = 4.f; pr.r = 3.f;
-            pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
-            pr.primary = EL_VOID;
-            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-            projectile_spawn(g, pr);
-            sfx_play(g, SFX_SHOOT);
-        }
-        if (e->kind == EK_DEMON && e->ai_t > 1.6f && dist < 240.f) {
-            e->ai_t = 0;
-            for (int k = 0; k < 8; k++) {
-                float a = (k / 8.f) * 6.2831f + g->time * 0.3f;
-                Projectile pr = {0};
-                pr.x = e->x; pr.y = e->y;
-                pr.vx = cosf(a) * 90.f;
-                pr.vy = sinf(a) * 90.f;
-                pr.life = 4.f; pr.r = 3.f;
-                pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = true;
-                pr.primary = EL_FIRE;
-                combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-                projectile_spawn(g, pr);
-            }
-            sfx_play(g, SFX_SHOOT);
-        }
-        float pdx = p->x - e->x;
-        float pdy = p->y - e->y;
-        float pd = sqrtf(pdx * pdx + pdy * pdy);
-        if (pd < e->r + p->r && p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-            float dmg = 7.f * diff;
-            if (e->kind == EK_DEMON) dmg = 11.f * diff;
-            if (e->kind == EK_SLIME) dmg = 5.f * diff;
-            player_take_damage(g, dmg);
-            float dxn = pdx / (pd + 0.01f);
-            float dyn = pdy / (pd + 0.01f);
-            p->x += dxn * 6.f;
-            p->y += dyn * 6.f;
-        }
+        ai_dispatch(g, e, i, dt);
     }
     g->enemy_alive_count = 0;
     for (int i = 0; i < MAX_ENEMIES; i++)

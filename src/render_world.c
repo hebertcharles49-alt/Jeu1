@@ -163,10 +163,14 @@ static void hero_color(HeroClass h, float *r, float *g, float *b,
 
 static void enemy_color(Enemy *e, float *r, float *g, float *b) {
     switch (e->kind) {
-        case EK_ZOMBIE: *r=0.31f;*g=0.50f;*b=0.25f; break;
-        case EK_BANDIT: *r=0.50f;*g=0.38f;*b=0.25f; break;
-        case EK_DEMON:  *r=0.63f;*g=0.13f;*b=0.25f; break;
-        case EK_SLIME:  *r=0.25f;*g=0.63f;*b=0.63f; break;
+        case EK_ZOMBIE:  *r=0.31f;*g=0.50f;*b=0.25f; break;
+        case EK_BANDIT:  *r=0.50f;*g=0.38f;*b=0.25f; break;
+        case EK_DEMON:   *r=0.63f;*g=0.13f;*b=0.25f; break;
+        case EK_SLIME:   *r=0.25f;*g=0.63f;*b=0.63f; break;
+        case EK_RAT:     *r=0.30f;*g=0.18f;*b=0.14f; break;
+        case EK_GHOST:   *r=0.65f;*g=0.65f;*b=0.85f; break;
+        case EK_CHARGER: *r=0.55f;*g=0.30f;*b=0.18f; break;
+        case EK_MAGE:    *r=0.35f;*g=0.20f;*b=0.55f; break;
         case EK_BOSS:   *r=1.00f;*g=0.13f;*b=0.50f; break;
         default:        *r=0.5f;*g=0.5f;*b=0.5f; break;
     }
@@ -438,6 +442,168 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                      v3_make(pos.x - 0.08f, h * 0.85f + wobble, pos.z - 0.08f),
                      v3_make(0.10f, 0.10f, 0.10f),
                      1.f, 1.f, 1.f);
+        return;
+    }
+
+    /* RAT : silhouette tres basse, corps allonge + queue qui frette + 2
+     * yeux rouges minuscules. Pas de jambes visibles, on glisse. */
+    if (e->kind == EK_RAT) {
+        float wig = sinf(g->time * 14.f + e->x) * 0.08f;
+        /* corps allonge dans l axe du mouvement (facing) */
+        float fa = e->facing;
+        float cx = cosf(fa), cy = sinf(fa);
+        /* corps : box principal (etendu en X local) */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.18f, pos.z),
+                     v3_make(0.40f, 0.18f, 0.22f),
+                     r, gg, b);
+        /* tete : box plus petite devant */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + cx * 0.22f, 0.20f, pos.z + cy * 0.22f),
+                     v3_make(0.18f, 0.16f, 0.18f),
+                     r * 1.1f, gg * 1.1f, b * 1.1f);
+        /* queue : derriere, fretille */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - cx * 0.30f + wig * cy, 0.14f,
+                             pos.z - cy * 0.30f - wig * cx),
+                     v3_make(0.06f, 0.06f, 0.18f),
+                     r * 0.7f, gg * 0.7f, b * 0.7f);
+        /* 2 yeux rouges */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + cx * 0.28f - cy * 0.08f, 0.24f,
+                             pos.z + cy * 0.28f + cx * 0.08f),
+                     v3_make(0.04f, 0.04f, 0.04f), 1.f, 0.1f, 0.1f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + cx * 0.28f + cy * 0.08f, 0.24f,
+                             pos.z + cy * 0.28f - cx * 0.08f),
+                     v3_make(0.04f, 0.04f, 0.04f), 1.f, 0.1f, 0.1f);
+        return;
+    }
+
+    /* GHOST : flotte au-dessus du sol, pas de jambes, bobbing fort,
+     * desature + un eclat fantome qui pulse, yeux blancs. */
+    if (e->kind == EK_GHOST) {
+        float bob = sinf(g->time * 3.f + e->x) * 0.10f;
+        float pulse = 0.7f + 0.3f * sinf(g->time * 4.f);
+        /* corps : ovoide flottant */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.85f + bob, pos.z),
+                     v3_make(0.50f, 0.60f, 0.50f),
+                     r * pulse, gg * pulse, b * pulse);
+        /* "queue" effilee qui descend */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.40f + bob * 0.5f, pos.z),
+                     v3_make(0.30f, 0.40f, 0.30f),
+                     r * 0.7f, gg * 0.7f, b * 0.7f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.18f + bob * 0.3f, pos.z),
+                     v3_make(0.16f, 0.20f, 0.16f),
+                     r * 0.5f, gg * 0.5f, b * 0.5f);
+        /* yeux blancs creuses */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.13f, 0.95f + bob, pos.z + 0.22f),
+                     v3_make(0.07f, 0.07f, 0.04f), 1.0f, 1.0f, 1.0f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.13f, 0.95f + bob, pos.z + 0.22f),
+                     v3_make(0.07f, 0.07f, 0.04f), 1.0f, 1.0f, 1.0f);
+        /* sparks spectrales */
+        if ((rand() % 100) < 25) {
+            particle_spawn_kind(g, e->x, e->y - 4,
+                                (rand()%20)-10, -20.f,
+                                0.6f, 0xC080FFA0, 1.4f, 0);
+        }
+        return;
+    }
+
+    /* CHARGER : silhouette de taureau / minotaure, gros torse bas et
+     * 2 grosses cornes en avant. Pendant le telegraph (ai_t2 == 1),
+     * une aura rouge clignotante. */
+    if (e->kind == EK_CHARGER) {
+        int state = (int)e->ai_t2;
+        /* gros corps bas */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.40f, pos.z),
+                     v3_make(0.65f, 0.55f, 0.50f),
+                     r, gg, b);
+        /* tete proeminente plus basse */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.50f, pos.z + 0.30f),
+                     v3_make(0.42f, 0.32f, 0.32f),
+                     r * 1.1f, gg * 1.1f, b * 1.1f);
+        /* 2 grosses cornes blanches en avant */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.20f, 0.60f, pos.z + 0.42f),
+                     v3_make(0.10f, 0.10f, 0.30f),
+                     0.92f, 0.88f, 0.78f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.20f, 0.60f, pos.z + 0.42f),
+                     v3_make(0.10f, 0.10f, 0.30f),
+                     0.92f, 0.88f, 0.78f);
+        /* yeux rouges */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.10f, 0.54f, pos.z + 0.45f),
+                     v3_make(0.05f, 0.05f, 0.04f), 1.f, 0.1f, 0.1f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.10f, 0.54f, pos.z + 0.45f),
+                     v3_make(0.05f, 0.05f, 0.04f), 1.f, 0.1f, 0.1f);
+        /* 4 pattes courtes */
+        for (int lx = -1; lx <= 1; lx += 2)
+        for (int lz = -1; lz <= 1; lz += 2) {
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x + lx * 0.22f, 0.08f, pos.z + lz * 0.18f),
+                v3_make(0.10f, 0.14f, 0.10f),
+                r * 0.6f, gg * 0.6f, b * 0.6f);
+        }
+        /* aura rouge pendant telegraph (state 1) */
+        if (state == 1) {
+            float pulse = 0.5f + 0.5f * sinf(g->time * 20.f);
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x, 0.05f, pos.z),
+                v3_make(0.85f, 0.02f, 0.85f),
+                1.0f * pulse, 0.2f * pulse, 0.1f * pulse);
+        }
+        return;
+    }
+
+    /* MAGE : tall, robed, hood. Floating tome au-dessus. */
+    if (e->kind == EK_MAGE) {
+        float bob = sinf(g->time * 2.f + e->x) * 0.04f;
+        /* robe : trapeze elargi en bas */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.18f, pos.z),
+                     v3_make(0.50f, 0.36f, 0.50f),
+                     r * 0.7f, gg * 0.7f, b * 0.7f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.55f, pos.z),
+                     v3_make(0.38f, 0.40f, 0.38f),
+                     r, gg, b);
+        /* hood pointu */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.95f, pos.z),
+                     v3_make(0.30f, 0.30f, 0.30f),
+                     r * 0.55f, gg * 0.55f, b * 0.55f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 1.15f, pos.z),
+                     v3_make(0.16f, 0.18f, 0.16f),
+                     r * 0.45f, gg * 0.45f, b * 0.45f);
+        /* yeux bleus brillants sous le hood */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - 0.08f, 0.95f, pos.z + 0.16f),
+                     v3_make(0.05f, 0.05f, 0.03f), 0.4f, 0.7f, 1.0f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.08f, 0.95f, pos.z + 0.16f),
+                     v3_make(0.05f, 0.05f, 0.03f), 0.4f, 0.7f, 1.0f);
+        /* tome flottant a cote */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.45f, 0.70f + bob, pos.z),
+                     v3_make(0.20f, 0.10f, 0.16f),
+                     0.55f, 0.25f, 0.20f);
+        /* glow sur le tome */
+        float gp = 0.6f + 0.4f * sinf(g->time * 6.f);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + 0.45f, 0.80f + bob, pos.z),
+                     v3_make(0.06f, 0.06f, 0.06f),
+                     0.9f * gp, 0.5f * gp, 1.0f * gp);
         return;
     }
 
