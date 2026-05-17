@@ -343,15 +343,91 @@ void update_enemies(Game *g) {
         }
         if (e->slow_t > 0.f) e->slow_t -= dt;
         if (e->stun_t > 0.f) { e->stun_t -= dt; continue; }
+        /* knockback : on capture la vitesse AVANT decay pour pouvoir
+         * calculer les degats d impact si on heurte quelque chose. */
+        float kspeed = sqrtf(e->knockback_x * e->knockback_x +
+                             e->knockback_y * e->knockback_y);
         e->knockback_x *= 0.85f;
         e->knockback_y *= 0.85f;
+        bool hit_wall = false;
         {
             float kdx = e->knockback_x * dt;
             float kdy = e->knockback_y * dt;
             if (!aabb_solid(g, e->x + kdx, e->y, e->r - 1)) e->x += kdx;
-            else                                            e->knockback_x = 0;
+            else { e->knockback_x = 0; hit_wall = true; }
             if (!aabb_solid(g, e->x, e->y + kdy, e->r - 1)) e->y += kdy;
-            else                                            e->knockback_y = 0;
+            else { e->knockback_y = 0; hit_wall = true; }
+        }
+        /* impact prop : pas de collision dure, mais on declenche la
+         * destruction visuelle des props legers a la portee. */
+        if (kspeed > 90.f) {
+            if (world_assets_bump_at(g, e->x, e->y, e->r + 4.f)) {
+                /* coup d arret partiel : on conserve 60% de l elan */
+                e->knockback_x *= 0.60f;
+                e->knockback_y *= 0.60f;
+            }
+        }
+        /* impact mur : degats proportionnels a la vitesse ecrasee. Seuil
+         * 80 px/s pour que les petits knockback ne fassent pas de bruit. */
+        if (hit_wall && kspeed > 80.f) {
+            float impact_dmg = (kspeed - 80.f) * 0.06f;
+            if (impact_dmg > 30.f) impact_dmg = 30.f;
+            if (impact_dmg >= 1.f) {
+                /* dust burst sur le point d impact */
+                for (int k = 0; k < 10; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    float s = 40.f + (rand() % 60);
+                    particle_spawn_kind(g, e->x, e->y,
+                                        cosf(a) * s, sinf(a) * s,
+                                        0.30f, 0x806050C0, 2.0f, 0);
+                }
+                sfx_play(g, SFX_HEAVY_HIT);
+                /* shake court mais marque pour signaler l impact */
+                if (g->shake_t < 0.12f) {
+                    g->shake_t = 0.12f;
+                    g->shake_mag = 3.0f + impact_dmg * 0.10f;
+                }
+                /* degats : on passe par world_enemy_damage pour le dmgnum
+                 * + le hook loop_on_hit (joueur credite). */
+                world_enemy_damage(g, i, impact_dmg, EL_NONE, 0, 0);
+            }
+        }
+        /* chain enemy-enemy : si on bouge vite, on tente une collision
+         * avec un voisin. Les deux prennent des degats et l elan est
+         * partage (effet domino visible). */
+        if (kspeed > 100.f) {
+            for (int j = 0; j < MAX_ENEMIES; j++) {
+                if (j == i) continue;
+                Enemy *o = &g->enemies[j];
+                if (!o->alive || o->dying_t > 0.f) continue;
+                float ddx = o->x - e->x;
+                float ddy = o->y - e->y;
+                float rr  = e->r + o->r;
+                if (ddx*ddx + ddy*ddy < rr * rr) {
+                    float chain_dmg = (kspeed - 100.f) * 0.05f;
+                    if (chain_dmg > 20.f) chain_dmg = 20.f;
+                    if (chain_dmg < 1.f) break;
+                    world_enemy_damage(g, j, chain_dmg, EL_NONE,
+                                       e->knockback_x * 0.5f,
+                                       e->knockback_y * 0.5f);
+                    world_enemy_damage(g, i, chain_dmg * 0.5f, EL_NONE, 0, 0);
+                    /* transfert d elan (cradle de Newton) */
+                    o->knockback_x += e->knockback_x * 0.5f;
+                    o->knockback_y += e->knockback_y * 0.5f;
+                    e->knockback_x *= 0.35f;
+                    e->knockback_y *= 0.35f;
+                    /* particules d impact entre les deux */
+                    float mx = (e->x + o->x) * 0.5f;
+                    float my = (e->y + o->y) * 0.5f;
+                    for (int k = 0; k < 6; k++) {
+                        float a = (rand() % 360) * 0.01745f;
+                        particle_spawn_kind(g, mx, my,
+                                            cosf(a) * 50.f, sinf(a) * 50.f,
+                                            0.25f, 0xC0A080FF, 1.8f, 2);
+                    }
+                    break;
+                }
+            }
         }
         if (e->is_boss) { boss_update(g, e, dt); continue; }
 

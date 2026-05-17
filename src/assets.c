@@ -400,3 +400,56 @@ void world_assets_render(Game *g) {
         render_one_prop(g, p);
     }
 }
+
+bool world_assets_bump_at(Game *g, float x_world, float y_world, float radius) {
+    /* x_world / y_world sont en pixels-monde (cf Player.x/y, Enemy.x/y) ;
+     * nos props sont stockes en tile-units. On convertit. */
+    float ptx = x_world / (float)TILE;
+    float pty = y_world / (float)TILE;
+    float r2  = (radius / (float)TILE);
+    r2 = r2 * r2;
+    bool hit = false;
+    for (int i = 0; i < MAX_PROPS; i++) {
+        WorldProp *p = &S_PROPS[i];
+        if (!p->alive) continue;
+        /* pilliers / statues / bannieres sont "lourds" -- ils ne s envolent
+         * pas. Pour eux on emet juste des etincelles, pas de destruction. */
+        float dx = p->x - ptx;
+        float dy = p->y - pty;
+        if (dx * dx + dy * dy > r2) continue;
+        hit = true;
+        /* burst de particules sur la position du prop */
+        float wx = p->x * TILE;
+        float wy = p->y * TILE;
+        uint32_t col = 0xA08070FF;
+        switch (p->kind) {
+            case PROP_BARREL: case PROP_CRATE: case PROP_DEBRIS:
+                col = 0x806040FF; break;       /* eclats de bois */
+            case PROP_VASE:
+                col = 0x80A0C0FF; break;       /* poterie */
+            case PROP_BOOKPILE:
+                col = 0xC0A060FF; break;       /* parchemins */
+            case PROP_BONES:
+                col = 0xE0E0C0FF; break;       /* os pulverises */
+            case PROP_MUSHROOM:
+                col = 0xA0E0A0FF; break;       /* spores */
+            default: break;
+        }
+        for (int k = 0; k < 10; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            float s = 50.f + (rand() % 60);
+            particle_spawn_kind(g, wx, wy,
+                                cosf(a) * s, sinf(a) * s,
+                                0.40f, col, 2.0f, 2);
+        }
+        /* les props "legers" sont detruits par l impact (1-shot). On garde
+         * les pilliers / statues / bannieres : ils resistent. */
+        if (p->kind == PROP_BARREL || p->kind == PROP_CRATE ||
+            p->kind == PROP_VASE   || p->kind == PROP_BONES ||
+            p->kind == PROP_BOOKPILE || p->kind == PROP_DEBRIS ||
+            p->kind == PROP_MUSHROOM) {
+            p->alive = false;
+        }
+    }
+    return hit;
+}

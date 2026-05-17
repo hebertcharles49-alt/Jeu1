@@ -66,11 +66,32 @@ static void poll_input(Game *g, bool *quit) {
     g->mouse_btn = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) ? 1 : 0;
 }
 
+/* shake polish :
+ *   1. ease-out (t*t) au lieu de lineaire : impact maximal a t=tmax,
+ *      decroissance rapide ensuite.
+ *   2. low-pass 1-pole sur le jitter random pour adoucir le "bruit blanc"
+ *      qui rendait l ancien shake "buzzy" / pixelise.
+ *   3. cap de magnitude pour que les gros impacts ne sortent pas du FBO. */
 static void apply_shake(Game *g, int *ox, int *oy) {
-    if (g->shake_t <= 0.f) { *ox = 0; *oy = 0; return; }
-    float m = g->shake_mag * g->shake_t;
-    *ox = (int)((rand() / (float)RAND_MAX - 0.5f) * 2.f * m);
-    *oy = (int)((rand() / (float)RAND_MAX - 0.5f) * 2.f * m);
+    static float prev_x = 0.f, prev_y = 0.f;
+    if (g->shake_t <= 0.f) {
+        prev_x *= 0.5f; prev_y *= 0.5f;       /* decay residuel */
+        *ox = (int)prev_x; *oy = (int)prev_y;
+        return;
+    }
+    /* normalisation sur 0.30s (typique des hits melee). Les shakes plus
+     * longs (boss / dash perdu) auront un fade plus doux. */
+    float fade = g->shake_t / 0.30f;
+    if (fade > 1.f) fade = 1.f;
+    fade = fade * fade;                        /* ease-out quadratique */
+    float m = g->shake_mag * fade;
+    if (m > 10.f) m = 10.f;                    /* cap pour pas casser le FBO */
+    float jx = (rand() / (float)RAND_MAX - 0.5f) * 2.f * m;
+    float jy = (rand() / (float)RAND_MAX - 0.5f) * 2.f * m;
+    /* low-pass 0.55 : un peu plus de smoothing que 0.5 sans devenir mou */
+    prev_x = prev_x * 0.55f + jx * 0.45f;
+    prev_y = prev_y * 0.55f + jy * 0.45f;
+    *ox = (int)prev_x; *oy = (int)prev_y;
 }
 
 /* clamp helper : cap simple low/high */

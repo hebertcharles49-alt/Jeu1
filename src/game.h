@@ -620,6 +620,11 @@ void  world_assets_reset   (Game *g);
 void  world_assets_populate(Game *g);
 void  world_assets_tick    (Game *g);
 void  world_assets_render  (Game *g);
+/* secoue / fait sauter un prop si un objet passe a (x_world, y_world)
+ * dans le rayon donne. Renvoie true si au moins un prop a ete touche.
+ * Utilise par les knockback rapides pour donner du feedback visuel
+ * sans collision dure. */
+bool  world_assets_bump_at (Game *g, float x, float y, float radius);
 
 int   enemy_spawn(Game *g, int kind, float x, float y);
 int   projectile_spawn(Game *g, Projectile p);
