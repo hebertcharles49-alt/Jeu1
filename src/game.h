@@ -348,6 +348,18 @@ typedef struct {
     int   shop_purchased[64];   /* tableau d'index d'item achete */
     int   shop_purchased_count;
 
+    /* ---- Flags de gameplay venant des uniques build-defining ----
+     * Mis a jour par game_recompute_player_stats a partir des uniques
+     * equipes. Cf uniques.c pour qui les active. */
+    bool  u_explosions_attract;  /* les AOE tirent les ennemis vers le centre */
+    bool  u_crit_shrink;         /* chaque crit reduit player.r */
+    bool  u_corpse_mines;        /* 30% des morts laissent une mine */
+    bool  u_free_dash;           /* dash sans cooldown */
+    int   u_drone_count;         /* 0..3 fees-drones qui orbitent */
+    /* hitbox de base recuperee depuis crit_shrink : restaure progressivement
+     * quand on subit des degats. */
+    float r_base;
+
     /* ---- Triple feedback loop ----
      * Etat persistant pour chaque triple combo definissant un loop. */
     LoopState loop_states[MAX_TRIPLE_LOOPS];
@@ -788,6 +800,13 @@ typedef struct {
     float crit_chance, crit_dmg;
     float range_mul, dodge;
     float aff[EL_COUNT];
+    /* flags build-defining propages des uniques. Identiques aux champs
+     * Player.u_* ; recopies a la fin du recompute. */
+    bool  u_explosions_attract;
+    bool  u_crit_shrink;
+    bool  u_corpse_mines;
+    bool  u_free_dash;
+    int   u_drone_count;
 } StatBlock;
 
 /* shop (Brotato-like) */

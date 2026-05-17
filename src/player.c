@@ -29,6 +29,12 @@ void player_take_damage(Game *g, float dmg) {
     if (real < 1.f) real = 1.f;
     p->hp -= real;
     p->invuln_t = 0.6f;
+    /* BUILD-DEF crit_shrink : on remonte par paliers de 1.5 px a chaque hit
+     * jusqu a la taille de base. Recompense le jeu propre. */
+    if (p->u_crit_shrink && p->r_base > 0.f && p->r < p->r_base) {
+        p->r += 1.5f;
+        if (p->r > p->r_base) p->r = p->r_base;
+    }
     g->shake_t = 0.30f; g->shake_mag = 5.f;
     g->hitstop_t = 0.06f;
     g->flash_t = 0.20f;
@@ -228,7 +234,7 @@ void update_player(Game *g) {
         if (kdash == SDL_SCANCODE_UNKNOWN) kdash = SDL_SCANCODE_SPACE;
         if (g->keys[kdash] && !g->keys_prev[kdash] &&
             p->dash_cd <= 0.f && len > 0.01f) {
-            p->dash_cd = 0.7f;
+            p->dash_cd = p->u_free_dash ? 0.f : 0.7f;
             p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
         }
     }
@@ -312,4 +318,21 @@ void update_player(Game *g) {
     }
     /* feedback loop : decroit en dehors du combat */
     loop_decay(g, g->dt);
+
+    /* BUILD-DEF u_drone_count : maintient le nombre de drones (fees
+     * EL_FAE) au-dessus de u_drone_count. Refresh leur life pour
+     * qu elles persistent toute la course. */
+    if (p->u_drone_count > 0) {
+        int alive = 0;
+        for (int i = 0; i < MAX_FAIRIES; i++) {
+            Fairy *f = &g->fairies[i];
+            if (f->alive && f->element == EL_FAE) {
+                alive++;
+                f->life = 60.f;
+            }
+        }
+        for (int k = alive; k < p->u_drone_count; k++) {
+            fairy_spawn(g, p->x, p->y, EL_FAE);
+        }
+    }
 }

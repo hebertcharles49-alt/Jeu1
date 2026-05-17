@@ -113,12 +113,17 @@ void burst_particles(Game *g, float x, float y, int n, uint32_t color, float spe
 }
 
 void do_aoe_at(Game *g, float x, float y, float radius, float dmg, Element status, uint32_t color) {
+    bool attract = g->player.u_explosions_attract;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;
         float dx = e->x - x, dy = e->y - y;
         if (dx * dx + dy * dy < radius * radius) {
-            world_enemy_damage(g, i, dmg, status, dx * 2.f, dy * 2.f);
+            /* BUILD-DEF : unique "Pendentif Volcanique" inverse le knockback
+             * pour aspirer les ennemis vers le centre de l explosion. */
+            float kx = dx * 2.f, ky = dy * 2.f;
+            if (attract) { kx = -kx * 1.5f; ky = -ky * 1.5f; }
+            world_enemy_damage(g, i, dmg, status, kx, ky);
         }
     }
     int n = (int)(radius * 0.7f); if (n > 50) n = 50;
@@ -372,6 +377,19 @@ void update_weapons(Game *g) {
         fx.dmg_mul *= pmul;
         fx.range_mul *= p->range_mul;
         g->current_attack_crit = crit;
+        /* BUILD-DEF : "Couronne Spectrale" -> chaque crit reduit la hitbox.
+         * Min 2.5 px. On garde r_base pour la restauration sur degats. */
+        if (crit && p->u_crit_shrink) {
+            if (p->r_base <= 0.f) p->r_base = p->r;
+            if (p->r > 2.5f) p->r -= 0.20f;
+            /* visuel : aura blanche eclair */
+            for (int k = 0; k < 6; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, p->x, p->y,
+                                    cosf(a) * 40.f, sinf(a) * 40.f,
+                                    0.25f, 0xFFFFFFE0, 1.8f, 0);
+            }
+        }
 
         /* Signature Combo callout (paires + triples) -- visuellement
          * spectaculaire : double anneau de particules + impulse de

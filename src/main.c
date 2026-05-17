@@ -228,6 +228,12 @@ void game_recompute_player_stats(Game *g) {
     p->range_mul    = sb.range_mul;
     p->dodge        = sb.dodge;
     for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
+    /* flags build-defining */
+    p->u_explosions_attract = sb.u_explosions_attract;
+    p->u_crit_shrink        = sb.u_crit_shrink;
+    p->u_corpse_mines       = sb.u_corpse_mines;
+    p->u_free_dash          = sb.u_free_dash;
+    p->u_drone_count        = sb.u_drone_count;
     if (p->hp <= 0.f || ratio > 1.f) p->hp = p->maxhp;
     else                              p->hp = ratio * p->maxhp;
 }

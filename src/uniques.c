@@ -31,6 +31,12 @@ typedef struct {
     /* affinite elementaire (id, valeur). EL_NONE = pas d'effet. */
     Element d_aff_el;
     float   d_aff_val;
+    /* ---- Flags build-defining (rule-changing) ---- */
+    bool  u_explosions_attract; /* AOE tirent les ennemis vers le centre */
+    bool  u_crit_shrink;        /* chaque crit reduit player.r */
+    bool  u_corpse_mines;       /* 30% des morts laissent une mine */
+    bool  u_free_dash;          /* dash sans cooldown */
+    int   u_drone_count;        /* 0..3 fees-drones */
 } UniqueDef;
 
 /* 20 uniques = 2 par triple combo (Tempete, Volcan, Dechirure, Phenix,
@@ -42,18 +48,24 @@ static const UniqueDef UNIQUE_DEFS[] = {
     { "Cuirasse de Foudre",      "+3 armure, foudre +30%",
       SLOT_CHEST,   .d_armor=3.f, .d_aff_el=EL_LIGHTNING, .d_aff_val=0.30f },
     /* === Volcan (Feu+Terre+Air) === */
-    { "Pendentif Volcanique",    "+15% degats, +regen 1/s",
-      SLOT_BELT,    .d_dmg_mul=0.15f, .d_regen=1.f },
+    /* BUILD-DEF : tes AOE attirent les ennemis vers le centre. */
+    { "Pendentif Volcanique",    "Tes AOE attirent les ennemis",
+      SLOT_BELT,    .d_dmg_mul=0.10f, .u_explosions_attract=true },
     { "Bottes Volcaniques",      "+30 vitesse, feu +25%",
       SLOT_BOOTS,   .d_speed=30.f, .d_aff_el=EL_FIRE, .d_aff_val=0.25f },
     /* === Dechirure (Vide+Fee+Foudre) === */
-    { "Voile du Vide",           "+15% vol de vie, vide +20%",
-      SLOT_CHEST,   .d_lifesteal=0.15f, .d_aff_el=EL_VOID, .d_aff_val=0.20f },
-    { "Couronne Spectrale",      "+20% crit, +0.5 crit dmg",
-      SLOT_HELM,    .d_crit_chance=0.20f, .d_crit_dmg=0.5f },
+    /* BUILD-DEF : 2 drones-fees orbitent et tirent. Pas de stat -- le
+     * gameplay est lui-meme l effet. */
+    { "Voile du Vide",           "2 drones spectraux orbitent et tirent",
+      SLOT_CHEST,   .u_drone_count=2 },
+    /* BUILD-DEF : chaque crit te reduit (hitbox plus petite). Ramene a
+     * pleine taille en prenant des degats. "Devenir insaisissable". */
+    { "Couronne Spectrale",      "Chaque crit te reduit. Crit +15%",
+      SLOT_HELM,    .d_crit_chance=0.15f, .u_crit_shrink=true },
     /* === Phenix (Feu+Air+Fee) === */
-    { "Plume du Phenix",         "+5 regen/s, fee +25%",
-      SLOT_BELT,    .d_regen=5.f, .d_aff_el=EL_FAE, .d_aff_val=0.25f },
+    /* BUILD-DEF : dash sans cooldown. Mobilite infinie -- change tout. */
+    { "Plume du Phenix",         "Dash sans cooldown",
+      SLOT_BELT,    .u_free_dash=true },
     { "Manteau Solaire",         "+30% degats elementaires",
       SLOT_CHEST,   .d_dmg_mul=0.30f, .d_aff_el=EL_FIRE, .d_aff_val=0.20f },
     /* === Tsunami (Eau+Terre+Foudre) === */
@@ -67,10 +79,13 @@ static const UniqueDef UNIQUE_DEFS[] = {
     { "Talisman Brumeux",        "+25% PV max",
       SLOT_HELM,    .d_maxhp=25.f },
     /* === Brume Mortelle (Vide+Eau+Air) === */
-    { "Voile de Brume",          "+15% esquive, tenebres +20%",
-      SLOT_CHEST,   .d_dodge=0.15f, .d_aff_el=EL_DARK, .d_aff_val=0.20f },
-    { "Couronne Empoisonneuse",  "+20% degats, +5% crit",
-      SLOT_HELM,    .d_dmg_mul=0.20f, .d_crit_chance=0.05f },
+    /* BUILD-DEF : 1 drone supplementaire + esquive. Stack avec Voile du
+     * Vide pour 3 drones au total -- archetype "summoner". */
+    { "Voile de Brume",          "+15% esquive, 1 drone supplementaire",
+      SLOT_CHEST,   .d_dodge=0.15f, .u_drone_count=1 },
+    /* BUILD-DEF : 30% des morts laissent une mine qui explose au passage. */
+    { "Couronne Empoisonneuse",  "Les morts laissent des mines",
+      SLOT_HELM,    .d_dmg_mul=0.10f, .u_corpse_mines=true },
     /* === Effondrement (Terre+Air+Vide) === */
     { "Ceinture Effondrement",   "+30 PV max, +2 armure",
       SLOT_BELT,    .d_maxhp=30.f, .d_armor=2.f },
@@ -141,6 +156,14 @@ void unique_apply_to_block(int id, StatBlock *sb) {
     if (u->d_aff_el > EL_NONE && u->d_aff_el < EL_COUNT) {
         sb->aff[u->d_aff_el] += u->d_aff_val;
     }
+    /* propagation des flags rule-changing. Plusieurs uniques peuvent
+     * additionner u_drone_count, mais les bool s aggregent en OR. */
+    if (u->u_explosions_attract) sb->u_explosions_attract = true;
+    if (u->u_crit_shrink)        sb->u_crit_shrink        = true;
+    if (u->u_corpse_mines)       sb->u_corpse_mines       = true;
+    if (u->u_free_dash)          sb->u_free_dash          = true;
+    sb->u_drone_count += u->u_drone_count;
+    if (sb->u_drone_count > 4) sb->u_drone_count = 4;  /* cap MAX_FAIRIES/8 */
 }
 
 /* Tire un id d'unique au hasard avec une probabilite croissante. */

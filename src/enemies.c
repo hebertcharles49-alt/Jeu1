@@ -177,6 +177,28 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         e->hp = 0.f;
         g->run_kills++;
         enemy_drop_loot(g, e);
+        /* BUILD-DEF u_corpse_mines : 30% des morts laissent une mine
+         * statique (projectile owner=2, immobile, AOE 26). Touche tout
+         * ennemi qui passe dessus, pas le joueur. */
+        if (g->player.u_corpse_mines && !e->is_boss && (rand() % 100) < 30) {
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = 0; pr.vy = 0;
+            pr.life = 8.f; pr.r = 6.f;
+            pr.dmg = 12.f * powf(1.15f, (float)(g->floor_index - 1));
+            pr.owner = 0;        /* mine du joueur : touche les ennemis qui
+                                  * marchent dessus (proj statique AOE). */
+            pr.aoe = 26.f;
+            pr.primary = EL_VOID;
+            /* visuel : pose une particule pulsante */
+            for (int k = 0; k < 8; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, e->x, e->y,
+                                    cosf(a) * 25.f, sinf(a) * 25.f,
+                                    0.35f, 0x80300080, 1.8f, 0);
+            }
+            projectile_spawn(g, pr);
+        }
         if (e->kind == EK_SLIME && e->split_left > 0) {
             for (int s = 0; s < 2; s++) {
                 int idx = enemy_spawn(g, EK_SLIME, e->x + (rand()%16) - 8, e->y + (rand()%16) - 8);
