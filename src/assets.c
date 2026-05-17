@@ -208,14 +208,21 @@ void world_assets_tick(Game *g) {
             }
         }
     }
-    /* poussiere d ambiance dans la salle courante : 1 particule par seconde
-     * en moyenne, pour le feeling "rayons de lumiere" sans saturer. */
+    /* ambiance biome : couleur + frequence tirees de biomes.c. */
     int rid = player_room_index(g);
-    if (rid >= 0 && (rand() % 100) < 3) {
-        const Room *r = &g->dungeon.rooms[rid];
-        float px = (r->x + 1 + rand() % (r->w - 2)) * (float)TILE + (rand()%16);
-        float py = (r->y + 1 + rand() % (r->h - 2)) * (float)TILE + (rand()%16);
-        particle_spawn_kind(g, px, py, 0, -6.f, 2.0f, 0x80808060, 1.0f, 0);
+    if (rid >= 0) {
+        int bi = biome_for_floor(g->floor_index);
+        int chance = biome_ambient_chance_p1000(bi);
+        if ((rand() % 1000) < chance) {
+            const Room *r = &g->dungeon.rooms[rid];
+            float px = (r->x + 1 + rand() % (r->w - 2)) * (float)TILE + (rand() % 16);
+            float py = (r->y + 1 + rand() % (r->h - 2)) * (float)TILE + (rand() % 16);
+            /* la direction depend du biome : Forge -> embers qui montent,
+             * autres -> cendre / spores qui descendent. */
+            float vy = (bi == 3) ? -25.f : 6.f;     /* 3 = Forge */
+            particle_spawn_kind(g, px, py, 0, vy, 2.0f,
+                                biome_ambient_color(bi), 1.0f, 0);
+        }
     }
 }
 

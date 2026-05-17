@@ -69,11 +69,13 @@ void update_room_logic(Game *g) {
             while (r->spawn_timer_ms >= spawn_interval && r->enemies_to_spawn > 0) {
                 r->spawn_timer_ms -= spawn_interval;
                 /* Spawn pool floor-gated : la variete s ouvre avec la
-                 * progression pour eviter de noyer le joueur etage 1. */
+                 * progression pour eviter de noyer le joueur etage 1.
+                 * Biome bias : l ennemi aligne au biome courant a 2 slots
+                 * supplementaires (independamment de la gate par etage,
+                 * pour donner du caractere a chaque biome). */
                 int kind;
                 int fi = g->floor_index;
-                /* on construit un tableau temporaire de candidats valides */
-                int pool[16]; int pn = 0;
+                int pool[20]; int pn = 0;
                 pool[pn++] = EK_ZOMBIE; pool[pn++] = EK_ZOMBIE;     /* x2 commun */
                 pool[pn++] = EK_SLIME;
                 pool[pn++] = EK_RAT;    pool[pn++] = EK_RAT;        /* swarm */
@@ -82,6 +84,11 @@ void update_room_logic(Game *g) {
                 if (fi >= 4) pool[pn++] = EK_CHARGER;
                 if (fi >= 5) pool[pn++] = EK_DEMON;
                 if (fi >= 6) pool[pn++] = EK_MAGE;
+                int aligned = biome_aligned_kind(biome_for_floor(fi));
+                if (aligned >= 0 && pn < (int)(sizeof(pool)/sizeof(pool[0])) - 1) {
+                    pool[pn++] = aligned;
+                    pool[pn++] = aligned;
+                }
                 kind = pool[rand() % pn];
                 int sx = r->x + 1 + rand() % (r->w - 2);
                 int sy = r->y + 1 + rand() % (r->h - 2);

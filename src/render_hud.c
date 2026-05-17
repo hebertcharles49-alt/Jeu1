@@ -29,6 +29,13 @@ void render_hud(Game *g) {
 
     text_drawf(g->renderer, 4, 22, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f  ARMURE %.0f",
                g->floor_index, MAX_FLOORS, g->run_kills, g->run_time, p->armor);
+    /* badge biome : nom + couleur de l element du biome. */
+    {
+        int bi = biome_for_floor(g->floor_index);
+        Element be = biome_element(bi);
+        text_drawf(g->renderer, 230, 22, element_color(be),
+                   "* %s (%s)", biome_name(bi), element_name(be));
+    }
 
     /* subclass */
     const char *sc = subclass_name(p->weapons[0].kind, p->weapons[1].kind);

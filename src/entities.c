@@ -81,7 +81,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     e->is_boss = true;
                     e->variant = (g->floor_index - 1) % 5;
                     e->telegraph_t = 1.5f;
-                    e->element = (Element)(EL_FIRE + ((g->floor_index - 1) % 7));
+                    e->element = biome_element(biome_for_floor(g->floor_index));
                     break;
                 default: break;
             }
@@ -97,14 +97,26 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                 case EK_MAGE:    e->element = EL_FAE;      break;
                 default: break;
             }
-            /* elite roll : 5% par etage atteint, plafond 50%, sauf boss. */
+            /* elite roll : 5% par etage atteint, plafond 50%, sauf boss.
+             * Bias : 25% de chance de prendre l'element du BIOME courant
+             * au lieu d un element random -- ca renforce le theme. */
             if (kind != EK_BOSS) {
                 float chance = 0.05f * (float)g->floor_index;
                 if (chance > 0.50f) chance = 0.50f;
                 if ((rand() / (float)RAND_MAX) < chance) {
                     e->is_elite = true;
-                    e->element = (Element)(EL_FIRE + (rand() % (EL_COUNT - 1)));
-                    e->maxhp *= 2.0f;
+                    if ((rand() % 100) < 25) {
+                        Element bel = biome_element(biome_for_floor(g->floor_index));
+                        e->element = (bel != EL_NONE) ? bel
+                            : (Element)(EL_FIRE + (rand() % (EL_COUNT - 1)));
+                    } else {
+                        e->element = (Element)(EL_FIRE + (rand() % (EL_COUNT - 1)));
+                    }
+                    /* HP multiplicateur croit doucement avec l etage :
+                     * x2.0 au floor 1, x2.5 au floor 10. Donne un peu plus
+                     * de mordant aux elites en fin de run. */
+                    float elite_mul = 2.0f + (float)g->floor_index * 0.05f;
+                    e->maxhp *= elite_mul;
                     e->hp = e->maxhp;
                     e->r += 1.5f;
                     e->coin_drop *= 3;
@@ -123,7 +135,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                 };
                 e->combo_mask = BOSS_MASKS[e->variant % 5];
                 if (e->element == EL_NONE)
-                    e->element = (Element)(EL_FIRE + ((g->floor_index - 1) % 7));
+                    e->element = biome_element(biome_for_floor(g->floor_index));
             } else if (e->is_elite) {
                 int second = 1 + rand() % (EL_COUNT - 1);
                 while (second == (int)e->element)

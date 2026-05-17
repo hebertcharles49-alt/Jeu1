@@ -89,11 +89,16 @@ MAYBE_UNUSED static bool tile_is_floor(TileKind t) {
     return t != T_VOID && t != T_WALL;
 }
 
+/* Tint biome applique lors du build du mesh. Set par build_dungeon_mesh,
+ * lu par emit_wall_column / emit_floor_top via tile/wall_color_*. */
+static float s_biome_r = 1.f, s_biome_g = 1.f, s_biome_b = 1.f;
+
 static void emit_wall_column(float x, float z) {
     float x0 = x, x1 = x + 1.f;
     float z0 = z, z1 = z + 1.f;
     float y0 = 0.f, y1 = WALL_H;
     float r, g, b; wall_color_side(&r, &g, &b);
+    r *= s_biome_r; g *= s_biome_g; b *= s_biome_b;
     /* +X face */
     mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
                    v3_make(1,0,0), r,g,b);
@@ -108,6 +113,7 @@ static void emit_wall_column(float x, float z) {
                    v3_make(0,0,-1), r*1.1f,g*1.1f,b*1.1f);
     /* top (lit) */
     float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
+    tr *= s_biome_r; tg *= s_biome_g; tb *= s_biome_b;
     mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
                    v3_make(0,1,0), tr,tg,tb);
 }
@@ -117,6 +123,12 @@ static void emit_floor_top(float x, float z, TileKind t) {
     float z0 = z, z1 = z + 1.f;
     float y = 0.f;
     float r, g, b; tile_color_top(t, &r, &g, &b);
+    /* tint biome : on attenue moins sur les tiles "speciales" (torche,
+     * rune, blood) pour qu elles restent reconnaissables. */
+    float k = (t == T_FLOOR) ? 1.f : 0.5f;
+    r *= (1.f - k) + k * s_biome_r;
+    g *= (1.f - k) + k * s_biome_g;
+    b *= (1.f - k) + k * s_biome_b;
     mesh_push_quad(v3_make(x0,y,z0), v3_make(x0,y,z1), v3_make(x1,y,z1), v3_make(x1,y,z0),
                    v3_make(0,1,0), r,g,b);
 }
@@ -124,6 +136,9 @@ static void emit_floor_top(float x, float z, TileKind t) {
 static void build_dungeon_mesh(Game *g) {
     s_mesh_count = 0;
     Dungeon *d = &g->dungeon;
+    /* sync tint biome avant de pousser les quads */
+    biome_tint(biome_for_floor(g->floor_index),
+               &s_biome_r, &s_biome_g, &s_biome_b);
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++) {
             TileKind t = d->tiles[y][x];

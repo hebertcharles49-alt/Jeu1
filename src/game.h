@@ -630,6 +630,18 @@ void  world_assets_render  (Game *g);
  * sans collision dure. */
 bool  world_assets_bump_at (Game *g, float x, float y, float radius);
 
+/* ---- BIOMES ----
+ * Theme d'etage : 5 biomes qui se partagent les 10 etages, chacun avec
+ * un element signature, un tint colore sur le terrain, une couleur
+ * d ambient particles et un ennemi aligne. Cf biomes.c. */
+int         biome_for_floor       (int floor_index);
+const char *biome_name            (int biome_id);
+Element     biome_element         (int biome_id);
+void        biome_tint            (int biome_id, float *r, float *g, float *b);
+uint32_t    biome_ambient_color   (int biome_id);
+int         biome_ambient_chance_p1000(int biome_id);
+int         biome_aligned_kind    (int biome_id);   /* EnemyKind */
+
 int   enemy_spawn(Game *g, int kind, float x, float y);
 int   projectile_spawn(Game *g, Projectile p);
 int   particle_spawn(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size);

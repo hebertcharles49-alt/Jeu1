@@ -116,7 +116,12 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         d->rooms[placed].w = rw;
         d->rooms[placed].h = rh;
         d->rooms[placed].cleared = false;
-        d->rooms[placed].enemies_to_spawn = 3 + floor_index + rand() % 3;
+        /* count par salle : 3 + floor (croissance lineaire) + jitter 3.
+         * Au-dela de floor 5 on accelere legerement pour densifier la
+         * fin de run sans noyer le debut. */
+        int n_base = 3 + floor_index + rand() % 3;
+        if (floor_index > 5) n_base += (floor_index - 5) / 2;
+        d->rooms[placed].enemies_to_spawn = n_base;
         d->rooms[placed].spawn_timer_ms = 0;
         d->rooms[placed].is_boss_room = false;
         d->rooms[placed].boss_spawned = false;
