@@ -679,6 +679,8 @@ uint32_t    element_color(Element e);
 const char *weapon_name(WeaponKind w);
 const char *hero_name(HeroClass h);
 const char *hero_desc(HeroClass h);
+/* nom thematique d un boss par variant (= biome). Cf heroes.c. */
+const char *boss_title_for_variant(int variant);
 /* couleurs (cape + tunique) du heros, partagees entre render_choose_hero
  * et la paper-doll inventaire. Cf heroes.c. */
 void        hero_palette(HeroClass h, uint32_t *cape, uint32_t *tunic);

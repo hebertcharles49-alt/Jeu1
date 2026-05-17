@@ -69,6 +69,19 @@ const char *enemy_name(EnemyKind k) {
     }
 }
 
+/* nom thematique du boss en fonction du biome / variant. variant est
+ * tire de boss_for_floor (cf entities.c) et correspond 1:1 au biome. */
+const char *boss_title_for_variant(int variant) {
+    switch (variant) {
+        case 0: return "Necropante";
+        case 1: return "Geant de Pierre";
+        case 2: return "Hydre Putride";
+        case 3: return "Forgeron des Enfers";
+        case 4: return "Avatar Divin";
+        default: return "Gardien";
+    }
+}
+
 /* sous-classe en fonction de la combinaison de 2 armes */
 const char *subclass_name(WeaponKind a, WeaponKind b) {
     if (a > b) { WeaponKind t = a; a = b; b = t; }

@@ -635,37 +635,229 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
         return;
     }
 
-    /* BOSS : grand corps + couronne + chaque element marque */
+    /* BOSS : 5 silhouettes distinctes (1 par biome).
+     * Couleur de base toujours r/gg/b (enemy_color) + tint biome ou variant.
+     * Toutes les variantes affichent un halo d element au sol + une aura
+     * de phase (rouge en phase 2, jaune en phase 1) pour signaler l etat. */
     if (e->is_boss) {
-        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.5f, pos.z),
-                     v3_make(w, h, w), r, gg, b);
-        /* tete carre */
-        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.25f, pos.z),
-                     v3_make(w * 0.7f, 0.45f, w * 0.7f),
-                     r * 1.2f, gg * 1.2f, b * 1.2f);
-        /* yeux rouges */
-        gfx_box_draw(g->renderer, v3_make(pos.x - 0.18f, h + 0.30f, pos.z + 0.32f),
-                     v3_make(0.08f, 0.08f, 0.06f), 1.f, 0.1f, 0.1f);
-        gfx_box_draw(g->renderer, v3_make(pos.x + 0.18f, h + 0.30f, pos.z + 0.32f),
-                     v3_make(0.08f, 0.08f, 0.06f), 1.f, 0.1f, 0.1f);
-        /* couronne doree */
-        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.55f, pos.z),
-                     v3_make(w * 1.0f, 0.10f, w * 1.0f), 1.0f, 0.85f, 0.25f);
-        /* 3 pointes */
-        for (int i = -1; i <= 1; i++) {
-            gfx_box_draw(g->renderer,
-                v3_make(pos.x + i * 0.30f, h + 0.70f, pos.z),
-                v3_make(0.10f, 0.18f, 0.10f),
-                1.0f, 0.85f, 0.25f);
+        /* couleur element pour les accessoires */
+        uint32_t cel = element_color(e->element);
+        float er=((cel>>24)&0xFF)/255.f, eg=((cel>>16)&0xFF)/255.f,
+              eb=((cel>>8)&0xFF)/255.f;
+        /* phase estimee : utile pour l aura visuelle */
+        float frac = e->hp / e->maxhp;
+        int phase = (frac < 0.25f) ? 2 : (frac < 0.55f ? 1 : 0);
+
+        switch (e->variant) {
+            case 0: {
+                /* NECROPANTE : robe + hood ample + orbe flottant violet */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.35f, pos.z),
+                             v3_make(w * 1.15f, h * 0.65f, w * 1.15f),
+                             r * 0.6f, gg * 0.6f, b * 0.7f);
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.75f, pos.z),
+                             v3_make(w * 0.85f, h * 0.40f, w * 0.85f),
+                             r, gg, b);
+                /* hood pointu */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.30f, pos.z),
+                             v3_make(0.55f, 0.40f, 0.55f),
+                             r * 0.4f, gg * 0.4f, b * 0.5f);
+                /* yeux blancs creux profond */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - 0.16f, h + 0.32f, pos.z + 0.36f),
+                             v3_make(0.07f, 0.07f, 0.06f), 1.f, 1.f, 1.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.16f, h + 0.32f, pos.z + 0.36f),
+                             v3_make(0.07f, 0.07f, 0.06f), 1.f, 1.f, 1.f);
+                /* orbe DARK flottant au-dessus */
+                float ob = sinf(g->time * 2.f) * 0.12f;
+                float pulse = 0.7f + 0.3f * sinf(g->time * 4.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h + 1.10f + ob, pos.z),
+                             v3_make(0.20f, 0.20f, 0.20f),
+                             er * pulse, eg * pulse, eb * pulse);
+                break;
+            }
+            case 1: {
+                /* GEANT DE PIERRE : corps massif bas + petite tete + 4 bras
+                 * trapus + un coeur de cristal qui brille. */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.55f, pos.z),
+                             v3_make(w * 1.50f, h * 1.10f, w * 1.50f),
+                             r, gg, b);
+                /* tete proportionnellement petite */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 1.20f, pos.z),
+                             v3_make(w * 0.5f, 0.32f, w * 0.5f),
+                             r * 1.1f, gg * 1.1f, b * 1.1f);
+                /* coeur cristal (centre torse) */
+                float cp = 0.6f + 0.4f * sinf(g->time * 3.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h * 0.7f, pos.z + w * 0.55f),
+                             v3_make(0.16f, 0.20f, 0.04f),
+                             er * cp, eg * cp, eb * cp);
+                /* 4 bras / poings */
+                for (int sx = -1; sx <= 1; sx += 2)
+                for (int sy = -1; sy <= 1; sy += 2) {
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + sx * (w * 0.75f),
+                                h * (sy > 0 ? 0.85f : 0.45f),
+                                pos.z),
+                        v3_make(0.22f, 0.22f, 0.22f),
+                        r * 0.8f, gg * 0.8f, b * 0.8f);
+                }
+                break;
+            }
+            case 2: {
+                /* HYDRE : corps allonge + 3 tetes en eventail + queue
+                 * crochue. Les tetes oscillent independamment. */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.50f, pos.z),
+                             v3_make(w * 1.40f, h * 0.55f, w * 0.95f),
+                             r * 0.8f, gg * 0.8f, b * 0.9f);
+                for (int hi = -1; hi <= 1; hi++) {
+                    float swing = sinf(g->time * 3.f + hi * 1.3f) * 0.10f;
+                    float neck_y = h * 0.75f + sinf(g->time * 4.f + hi) * 0.08f;
+                    /* cou */
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + hi * 0.25f + swing, neck_y,
+                                pos.z + 0.35f),
+                        v3_make(0.10f, 0.30f, 0.10f),
+                        r * 0.85f, gg * 0.85f, b * 0.85f);
+                    /* tete */
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + hi * 0.25f + swing, neck_y + 0.30f,
+                                pos.z + 0.45f),
+                        v3_make(0.20f, 0.20f, 0.20f),
+                        r * 1.1f, gg * 1.1f, b * 1.1f);
+                    /* yeux rouges sur chaque tete */
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + hi * 0.25f + swing - 0.05f,
+                                neck_y + 0.32f, pos.z + 0.56f),
+                        v3_make(0.03f, 0.03f, 0.02f), 1.f, 0.1f, 0.1f);
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + hi * 0.25f + swing + 0.05f,
+                                neck_y + 0.32f, pos.z + 0.56f),
+                        v3_make(0.03f, 0.03f, 0.02f), 1.f, 0.1f, 0.1f);
+                }
+                /* queue derriere */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h * 0.30f, pos.z - 0.60f),
+                             v3_make(0.20f, 0.20f, 0.40f),
+                             r * 0.7f, gg * 0.7f, b * 0.7f);
+                break;
+            }
+            case 3: {
+                /* FORGERON DES ENFERS : torse massif + enclume devant +
+                 * marteau a cote + braise au sol. */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.50f, pos.z),
+                             v3_make(w * 1.20f, h * 0.95f, w * 1.05f),
+                             r, gg, b);
+                /* tete carree + cornes */
+                gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.20f, pos.z),
+                             v3_make(w * 0.70f, 0.40f, w * 0.70f),
+                             r * 1.05f, gg * 1.05f, b * 1.05f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - 0.22f, h + 0.42f, pos.z),
+                             v3_make(0.08f, 0.20f, 0.08f), 0.5f, 0.2f, 0.15f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.22f, h + 0.42f, pos.z),
+                             v3_make(0.08f, 0.20f, 0.08f), 0.5f, 0.2f, 0.15f);
+                /* enclume devant */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, 0.20f, pos.z + 0.80f),
+                             v3_make(0.55f, 0.20f, 0.30f),
+                             0.35f, 0.35f, 0.40f);
+                /* marteau */
+                float swing = sinf(g->time * 4.f) * 0.10f;
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.65f + swing, h * 0.40f, pos.z),
+                             v3_make(0.10f, 0.10f, 0.45f),
+                             0.40f, 0.30f, 0.20f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.65f + swing, h * 0.85f, pos.z),
+                             v3_make(0.30f, 0.20f, 0.30f),
+                             0.55f, 0.55f, 0.60f);
+                /* braise au sol qui pulse */
+                float fp = 0.6f + 0.4f * sinf(g->time * 5.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, 0.04f, pos.z),
+                             v3_make(w * 1.8f, 0.02f, w * 1.8f),
+                             1.0f * fp, 0.45f * fp, 0.10f * fp);
+                /* yeux jaunes */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - 0.16f, h + 0.25f, pos.z + 0.36f),
+                             v3_make(0.07f, 0.07f, 0.05f),
+                             1.f, 0.85f, 0.20f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.16f, h + 0.25f, pos.z + 0.36f),
+                             v3_make(0.07f, 0.07f, 0.05f),
+                             1.f, 0.85f, 0.20f);
+                break;
+            }
+            case 4: {
+                /* AVATAR DIVIN : silhouette flottante elance + halo dore +
+                 * 2 ailes de chaque cote + couronne lumineuse. */
+                float lift = sinf(g->time * 2.5f) * 0.10f;
+                /* aucun pied : flotte */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h * 0.65f + lift, pos.z),
+                             v3_make(w * 0.85f, h * 0.85f, w * 0.85f),
+                             r, gg, b);
+                /* tete */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h + 0.30f + lift, pos.z),
+                             v3_make(w * 0.65f, 0.42f, w * 0.65f),
+                             r * 1.15f, gg * 1.15f, b * 1.15f);
+                /* halo flottant */
+                float hp = 0.7f + 0.3f * sinf(g->time * 3.f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x, h + 0.75f + lift, pos.z),
+                             v3_make(w * 1.20f, 0.06f, w * 1.20f),
+                             1.0f * hp, 0.90f * hp, 0.55f * hp);
+                /* ailes : 2 grandes plates a chaque cote, animees */
+                float flap = sinf(g->time * 3.5f) * 0.15f;
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - (w + 0.30f), h * 0.80f + lift,
+                                     pos.z),
+                             v3_make(0.04f, 0.70f, 0.40f + flap),
+                             0.95f, 0.92f, 0.80f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + (w + 0.30f), h * 0.80f + lift,
+                                     pos.z),
+                             v3_make(0.04f, 0.70f, 0.40f + flap),
+                             0.95f, 0.92f, 0.80f);
+                /* yeux dores brillants */
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x - 0.15f, h + 0.35f + lift,
+                                     pos.z + 0.35f),
+                             v3_make(0.07f, 0.07f, 0.04f),
+                             1.0f, 0.92f, 0.40f);
+                gfx_box_draw(g->renderer,
+                             v3_make(pos.x + 0.15f, h + 0.35f + lift,
+                                     pos.z + 0.35f),
+                             v3_make(0.07f, 0.07f, 0.04f),
+                             1.0f, 0.92f, 0.40f);
+                break;
+            }
         }
-        /* halo elementaire */
-        if (e->element != EL_NONE) {
-            uint32_t c = element_color(e->element);
-            float er=((c>>24)&0xFF)/255.f,eg=((c>>16)&0xFF)/255.f,eb=((c>>8)&0xFF)/255.f;
-            float pulse = 0.10f + 0.06f * sinf(g->time * 3.f);
+        /* halo element au sol commun a tous */
+        {
+            float pulse = 0.18f + 0.10f * sinf(g->time * 3.f);
             gfx_box_draw(g->renderer,
                          v3_make(pos.x, 0.05f, pos.z),
-                         v3_make(w + pulse * 2.f, 0.02f, w + pulse * 2.f), er, eg, eb);
+                         v3_make(w * 1.5f + pulse * 2.f, 0.02f,
+                                 w * 1.5f + pulse * 2.f),
+                         er, eg, eb);
+        }
+        /* aura de phase : disque pulsant rouge en phase 2, jaune en
+         * phase 1. Donne au joueur un signal visible que le boss
+         * change de comportement. */
+        if (phase >= 1) {
+            float pulse = 0.5f + 0.5f * sinf(g->time * (phase == 2 ? 12.f : 6.f));
+            float pr = (phase == 2) ? 1.0f * pulse : 1.0f * pulse;
+            float pg = (phase == 2) ? 0.15f * pulse : 0.85f * pulse;
+            float pb = (phase == 2) ? 0.10f * pulse : 0.25f * pulse;
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x, 0.10f, pos.z),
+                         v3_make(w * 2.0f, 0.04f, w * 2.0f),
+                         pr, pg, pb);
         }
         return;
     }

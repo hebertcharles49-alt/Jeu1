@@ -231,92 +231,558 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     if (e->hp <= 0.f && !already_dead) loop_on_kill(g);
 }
 
-static void boss_update(Game *g, Enemy *e, float dt) {
-    Player *p = &g->player;
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
-    if (e->telegraph_t > 0.f) { e->telegraph_t -= dt; return; }
-    e->ai_t += dt;
-    e->ai_t2 += dt;
-    float dx = p->x - e->x, dy = p->y - e->y;
-    float d = sqrtf(dx * dx + dy * dy) + 0.01f;
-    float speed = 35.f + e->variant * 6.f;
-    if (e->slow_t > 0.f) speed *= 0.5f;
-    if (d > 30.f) {
-        float vx = dx / d * speed;
-        float vy = dy / d * speed;
-        float nx = e->x + vx * dt, ny = e->y + vy * dt;
-        if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx;
-        if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny;
+/* forward decls : les boss utilisent les helpers ai_<x> definis plus bas. */
+static void ai_move_toward(Game *g, Enemy *e, float dt,
+                            float dx, float dy, float dist, float speed,
+                            bool phase_walls);
+static void ai_contact_damage(Game *g, Enemy *e, float dmg);
+
+/* ============================================================
+ *  BOSS -- 1 par biome, multi-phases, mecaniques uniques, adds.
+ *  variant 0..4 mappe 1:1 sur biome_for_floor(floor).
+ *
+ *  Etat utilise dans la struct Enemy :
+ *    e->ai_t        : timer pattern principal (reset apres chaque cast)
+ *    e->ai_t2       : timer pattern secondaire (summons, sub-patterns)
+ *    e->telegraph_t : intro 1.5s au spawn (inchange)
+ *    e->split_left  : memo de phase atteinte (0 -> 1 -> 2). On l hijack
+ *                     puisqu il sert pour le slime mais le boss n est pas
+ *                     un slime, c'est safe.
+ *
+ *  Phases :
+ *    0 : full HP -> 55%
+ *    1 :   55%   -> 25%
+ *    2 :   25%   -> mort
+ *  Le passage de phase declenche un burst de particules + invuln 0.3s.
+ * ============================================================ */
+static int boss_phase(const Enemy *e) {
+    float frac = e->hp / e->maxhp;
+    if (frac < 0.25f) return 2;
+    if (frac < 0.55f) return 1;
+    return 0;
+}
+
+static int boss_count_adds(Game *g, const Enemy *self) {
+    int n = 0;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *o = &g->enemies[i];
+        if (o == self || !o->alive || o->is_boss) continue;
+        if (o->dying_t > 0.f) continue;
+        n++;
     }
-    float pat_cd = 1.6f - e->variant * 0.1f;
-    if (e->ai_t > pat_cd) {
-        e->ai_t = 0;
-        switch (e->variant) {
-            case 0: {
+    return n;
+}
+
+/* burst spectaculaire de particules + invuln pour la transition de phase */
+static void boss_phase_transition(Game *g, Enemy *e, int new_phase) {
+    uint32_t col = element_color(e->element);
+    for (int k = 0; k < 40; k++) {
+        float a = (rand() % 360) * 0.01745f;
+        float s = 80.f + (rand() % 100);
+        particle_spawn_kind(g, e->x, e->y, cosf(a) * s, sinf(a) * s,
+                            0.6f, col, 3.5f, 2);
+    }
+    g->shake_t = 0.35f; g->shake_mag = 6.0f;
+    g->hitstop_t = 0.10f;
+    e->telegraph_t = 0.30f;      /* mini-invuln pendant le burst */
+    sfx_play(g, SFX_BOSS);
+    (void)new_phase;
+}
+
+/* -------------------- BOSS 0 : NECROPANTE (Crypte, DARK) --------------
+ * Phase 0 : 3-shot cone DARK toutes les 1.8s + summon 1 zombie/4s (cap 2)
+ * Phase 1 : ajoute teleport aleatoire toutes les 5s + 5-shot cone
+ * Phase 2 : summon 4 zombies en burst (une fois) + cone toutes les 1.1s
+ */
+static void boss_necropante(Game *g, Enemy *e, float dt, int phase,
+                             float dx, float dy, float dist)
+{
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    /* mouvement : slow chase. Plus rapide en phase 2 (rage). */
+    float speed = 32.f + phase * 8.f;
+    if (dist > 30.f) ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
+
+    /* teleport en phase 1+ : tous les 5s, choisit une tile floor random */
+    if (phase >= 1) {
+        e->ai_t2 += dt;
+        if (e->ai_t2 > 5.0f) {
+            e->ai_t2 = 0.f;
+            float ang = (rand() % 360) * 0.01745f;
+            float nd  = 80.f + (rand() % 40);
+            float nx = e->x + cosf(ang) * nd;
+            float ny = e->y + sinf(ang) * nd;
+            int tx = (int)(nx / TILE), ty = (int)(ny / TILE);
+            if (tx > 0 && ty > 0 && tx < MAP_W - 1 && ty < MAP_H - 1 &&
+                !aabb_solid(g, nx, ny, e->r)) {
                 for (int k = 0; k < 16; k++) {
-                    float a = (k / 16.f) * 6.2831f + g->time;
-                    Projectile pr = {0};
-                    pr.x = e->x; pr.y = e->y;
-                    pr.vx = cosf(a) * 90.f; pr.vy = sinf(a) * 90.f;
-                    pr.life = 4.f; pr.r = 3.5f; pr.dmg = 12.f * diff; pr.owner = 1;
-                    pr.reflectable = true; pr.primary = EL_FIRE;
-                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-                    projectile_spawn(g, pr);
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, e->x, e->y, cosf(a)*90, sinf(a)*90,
+                                        0.5f, 0x602080FF, 2.8f, 0);
                 }
-                sfx_play(g, SFX_SHOOT); break;
-            }
-            case 1: {
-                for (int k = 0; k < 6; k++) {
-                    float a = (k / 6.f) * 6.2831f + e->ai_t2 * 2.f;
-                    Projectile pr = {0};
-                    pr.x = e->x; pr.y = e->y;
-                    pr.vx = cosf(a) * 110.f; pr.vy = sinf(a) * 110.f;
-                    pr.life = 3.f; pr.r = 3.f; pr.dmg = 10.f * diff; pr.owner = 1;
-                    pr.primary = EL_VOID;
-                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-                    projectile_spawn(g, pr);
-                }
-                sfx_play(g, SFX_SHOOT); break;
-            }
-            case 2: {
-                float a0 = atan2f(dy, dx);
-                for (int k = -3; k <= 3; k++) {
-                    float a = a0 + k * 0.18f;
-                    Projectile pr = {0};
-                    pr.x = e->x; pr.y = e->y;
-                    pr.vx = cosf(a) * 130.f; pr.vy = sinf(a) * 130.f;
-                    pr.life = 3.f; pr.r = 3.f; pr.dmg = 14.f * diff; pr.owner = 1;
-                    pr.primary = EL_LIGHTNING;
-                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-                    projectile_spawn(g, pr);
-                }
-                sfx_play(g, SFX_SHOOT); break;
-            }
-            case 3: {
-                for (int k = 0; k < 5; k++) {
-                    Projectile pr = {0};
-                    pr.x = e->x + (rand()%80)-40;
-                    pr.y = e->y + (rand()%80)-40;
-                    pr.vx = 0; pr.vy = 0;
-                    pr.life = 2.f; pr.r = 4.f; pr.dmg = 16.f * diff; pr.owner = 1;
-                    pr.primary = EL_EARTH;
-                    combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-                    projectile_spawn(g, pr);
-                }
-                sfx_play(g, SFX_EXPLODE); break;
-            }
-            case 4: {
-                for (int k = 0; k < 3; k++)
-                    enemy_spawn(g, EK_ZOMBIE, e->x + (rand()%60)-30, e->y + (rand()%60)-30);
-                sfx_play(g, SFX_BOSS); break;
+                e->x = nx; e->y = ny;
             }
         }
     }
-    if (d < e->r + p->r) {
-        player_take_damage(g, 16.f * diff);
-        float ux = dx / d, uy = dy / d;
-        p->x += ux * 8.f; p->y += uy * 8.f;
+
+    /* attaque cone : 3 a 5 shots elargi avec la phase */
+    float cd = (phase == 2) ? 1.1f : 1.8f;
+    e->ai_t += dt;
+    if (e->ai_t > cd) {
+        e->ai_t = 0.f;
+        int n = 3 + phase;
+        float a0 = atan2f(dy, dx);
+        for (int k = -n/2; k <= n/2; k++) {
+            float a = a0 + k * 0.16f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 120.f; pr.vy = sinf(a) * 120.f;
+            pr.life = 3.5f; pr.r = 3.5f; pr.dmg = 10.f * diff; pr.owner = 1;
+            pr.reflectable = true; pr.primary = EL_DARK;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        sfx_play(g, SFX_SHOOT);
     }
+    /* summon : reuse ai_t comme timer combine via une marche separee. On
+     * stocke le timer dans facing (libre apres atan2) -- trop bricole.
+     * Plus simple : on summon proportionnellement au time absolu modulo. */
+    int max_adds = (phase == 2) ? 4 : 2;
+    int adds = boss_count_adds(g, e);
+    if (adds < max_adds) {
+        static float s_summon_t[5] = {0};
+        s_summon_t[0] += dt;
+        float cd_sum = (phase == 2) ? 1.2f : 4.0f;
+        if (s_summon_t[0] > cd_sum) {
+            s_summon_t[0] = 0.f;
+            int n_sum = (phase == 2 && adds == 0) ? 3 : 1;
+            for (int k = 0; k < n_sum; k++) {
+                enemy_spawn(g, EK_ZOMBIE,
+                            e->x + (rand() % 50) - 25,
+                            e->y + (rand() % 50) - 25);
+            }
+            sfx_play(g, SFX_BOSS);
+        }
+    }
+}
+
+/* -------------------- BOSS 1 : GEANT DE PIERRE (Cavernes, EARTH) ------
+ * Phase 0 : slow chase + ground pound (AOE radial telegraphe a self)
+ * Phase 1 : rocks falling -- AOE telegraphe sur le sol pres du joueur
+ * Phase 2 : charge en ligne droite sur la position du joueur (telegraphe)
+ */
+static void boss_geant(Game *g, Enemy *e, float dt, int phase,
+                       float dx, float dy, float dist)
+{
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float speed = 26.f;
+    /* state : 0 = chasse, 1 = telegraph ground pound, 2 = pound active
+     *         3 = rocks falling, 4 = charge telegraph, 5 = charging
+     * encode dans ai_t2 (cast en int). */
+    int state = (int)e->ai_t2;
+    e->ai_t += dt;
+
+    /* dispatch state */
+    if (state == 0) {
+        if (dist > 30.f) ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
+        /* trigger pattern toutes les 2.4s, le pattern depend de la phase */
+        if (e->ai_t > 2.4f) {
+            e->ai_t = 0.f;
+            if (phase == 2)      e->ai_t2 = 4.f;      /* charge telegraph */
+            else if (phase >= 1 && (rand() % 100) < 50)
+                                 e->ai_t2 = 3.f;      /* rocks falling */
+            else                 e->ai_t2 = 1.f;      /* ground pound */
+        }
+    } else if (state == 1) {
+        /* ground pound telegraph 0.8s : sparks bruns autour */
+        if ((rand() % 100) < 70) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 30.f, sinf(a) * 30.f,
+                                0.35f, 0xC09060FF, 2.2f, 0);
+        }
+        if (e->ai_t > 0.8f) { e->ai_t = 0.f; e->ai_t2 = 2.f; }
+    } else if (state == 2) {
+        /* pound : radial 12 projectiles + shake + AOE direct sur le joueur */
+        for (int k = 0; k < 12; k++) {
+            float a = (k / 12.f) * 6.2831f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 100.f; pr.vy = sinf(a) * 100.f;
+            pr.life = 2.5f; pr.r = 3.5f; pr.dmg = 14.f * diff; pr.owner = 1;
+            pr.reflectable = true; pr.primary = EL_EARTH;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        g->shake_t = 0.35f; g->shake_mag = 7.0f;
+        sfx_play(g, SFX_EXPLODE);
+        e->ai_t = 0.f; e->ai_t2 = 0.f;
+    } else if (state == 3) {
+        /* rocks falling : on place 4 marqueurs AOE puis declenche apres 1.0s.
+         * On encode l etat en sous-state via le timer (compte le temps total) */
+        if (e->ai_t < 1.0f) {
+            /* telegraph : emet sparks brunes a 4 endroits autour du joueur */
+            Player *p = &g->player;
+            for (int idx = 0; idx < 4; idx++) {
+                float ang = idx * 1.5707f + g->time * 0.5f;
+                float rx = p->x + cosf(ang) * 35.f;
+                float ry = p->y + sinf(ang) * 35.f;
+                if ((rand() % 100) < 50) {
+                    particle_spawn_kind(g, rx, ry, 0, -25,
+                                        0.30f, 0x80604030, 2.0f, 0);
+                }
+            }
+        } else {
+            /* rocks explode at the same 4 spots (snapshot du player a t=1.0) */
+            Player *p = &g->player;
+            for (int idx = 0; idx < 4; idx++) {
+                float ang = idx * 1.5707f + g->time * 0.5f;
+                float rx = p->x + cosf(ang) * 35.f;
+                float ry = p->y + sinf(ang) * 35.f;
+                /* burst */
+                for (int k = 0; k < 8; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, rx, ry,
+                                        cosf(a)*70, sinf(a)*70,
+                                        0.45f, 0xA08060FF, 2.5f, 2);
+                }
+                /* dmg si player dans le rayon de la rock */
+                float pdx = p->x - rx, pdy = p->y - ry;
+                if (pdx*pdx + pdy*pdy < 18.f * 18.f &&
+                    p->invuln_t <= 0.f && p->dash_t <= 0.f) {
+                    player_take_damage(g, 12.f * diff);
+                }
+            }
+            sfx_play(g, SFX_EXPLODE);
+            e->ai_t = 0.f; e->ai_t2 = 0.f;
+        }
+    } else if (state == 4) {
+        /* charge telegraph : aura rouge clignote */
+        if ((rand() % 100) < 60) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 25.f, sinf(a) * 25.f,
+                                0.30f, 0xFF6040FF, 2.5f, 2);
+        }
+        if (e->ai_t > 0.7f) {
+            e->ai_t = 0.f;
+            e->ai_t2 = 5.f;
+            /* freeze direction */
+            e->knockback_x = dx / dist;
+            e->knockback_y = dy / dist;
+            sfx_play(g, SFX_HEAVY_HIT);
+        }
+    } else if (state == 5) {
+        /* charging : 320 speed, 0.9s ou wall */
+        float vx = e->knockback_x * 320.f;
+        float vy = e->knockback_y * 320.f;
+        float nx = e->x + vx * dt;
+        float ny = e->y + vy * dt;
+        bool wall = false;
+        if (!aabb_solid(g, nx, e->y, e->r - 1)) e->x = nx; else wall = true;
+        if (!aabb_solid(g, e->x, ny, e->r - 1)) e->y = ny; else wall = true;
+        ai_contact_damage(g, e, 20.f * diff);
+        if (wall || e->ai_t > 0.9f) {
+            if (wall) {
+                g->shake_t = 0.4f; g->shake_mag = 8.f;
+                for (int k = 0; k < 24; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, e->x, e->y,
+                                        cosf(a)*100, sinf(a)*100, 0.5f,
+                                        0x806040FF, 2.8f, 2);
+                }
+            }
+            e->ai_t = 0.f; e->ai_t2 = 0.f;
+            e->knockback_x = 0; e->knockback_y = 0;
+        }
+    }
+}
+
+/* -------------------- BOSS 2 : HYDRE (Marais, WATER) ------------------
+ * Phase 0 : kite lent + 3 homing water orbs toutes les 2.5s
+ * Phase 1 : ajoute des flaques d acide au sol (drop pendant deplacement)
+ * Phase 2 : summon 3 slimes en burst + wave radial 8 projectiles
+ */
+static void boss_hydre(Game *g, Enemy *e, float dt, int phase,
+                       float dx, float dy, float dist)
+{
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    /* kite : essaie de rester a 150 px */
+    if (dist > 180.f)      ai_move_toward(g, e, dt, dx, dy, dist, 28.f, false);
+    else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 28.f, false);
+
+    /* phase 1+ : drop d acide au sol */
+    if (phase >= 1) {
+        e->ai_t2 += dt;
+        if (e->ai_t2 > 0.50f) {
+            e->ai_t2 = 0.f;
+            for (int k = 0; k < 4; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, e->x, e->y,
+                                    cosf(a) * 6.f, sinf(a) * 6.f,
+                                    1.50f, 0x80E040C0, 2.4f, 0);
+            }
+        }
+    }
+
+    e->ai_t += dt;
+    float cd = 2.5f - phase * 0.4f;        /* 2.5 -> 2.1 -> 1.7 */
+    if (e->ai_t > cd) {
+        e->ai_t = 0.f;
+        /* 3 homing water orbs */
+        for (int k = -1; k <= 1; k++) {
+            float a0 = atan2f(dy, dx);
+            float a = a0 + k * 0.30f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 95.f; pr.vy = sinf(a) * 95.f;
+            pr.life = 4.0f; pr.r = 4.f; pr.dmg = 11.f * diff; pr.owner = 1;
+            pr.primary = EL_WATER; pr.homing = 1.0f;
+            pr.target_idx = -1;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        /* phase 2 : burst + summon */
+        if (phase == 2) {
+            for (int k = 0; k < 8; k++) {
+                float a = (k / 8.f) * 6.2831f;
+                Projectile pr = {0};
+                pr.x = e->x; pr.y = e->y;
+                pr.vx = cosf(a) * 110.f; pr.vy = sinf(a) * 110.f;
+                pr.life = 3.f; pr.r = 3.f; pr.dmg = 9.f * diff; pr.owner = 1;
+                pr.primary = EL_WATER;
+                projectile_spawn(g, pr);
+            }
+            if (boss_count_adds(g, e) < 3) {
+                for (int k = 0; k < 2; k++) {
+                    enemy_spawn(g, EK_SLIME,
+                                e->x + (rand() % 40) - 20,
+                                e->y + (rand() % 40) - 20);
+                }
+            }
+        }
+        sfx_play(g, SFX_SHOOT);
+    }
+}
+
+/* -------------------- BOSS 3 : FORGERON DES ENFERS (Forge, FIRE) ------
+ * Phase 0 : hammer slam (telegraphe cone in front) toutes les 2.4s
+ * Phase 1 : ajoute fire wheels (3 projectiles chain) toutes les 3.5s
+ * Phase 2 : rage -- slam cooldown 1.0s + summon 2 demons
+ */
+static void boss_forgeron(Game *g, Enemy *e, float dt, int phase,
+                          float dx, float dy, float dist)
+{
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float speed = 30.f + phase * 5.f;
+    if (dist > 50.f) ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
+
+    e->ai_t += dt;
+    float slam_cd = (phase == 2) ? 1.0f : (phase == 1 ? 1.8f : 2.4f);
+    if (e->ai_t > slam_cd) {
+        e->ai_t = 0.f;
+        /* slam : 5-shot cone in player direction + AOE direct devant */
+        float a0 = atan2f(dy, dx);
+        for (int k = -2; k <= 2; k++) {
+            float a = a0 + k * 0.16f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 140.f; pr.vy = sinf(a) * 140.f;
+            pr.life = 2.5f; pr.r = 3.5f; pr.dmg = 13.f * diff; pr.owner = 1;
+            pr.primary = EL_FIRE; pr.aoe = 18.f;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        /* feu pose au sol devant */
+        float fx = e->x + dx / dist * 35.f;
+        float fy = e->y + dy / dist * 35.f;
+        for (int k = 0; k < 10; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, fx, fy,
+                                cosf(a) * 40.f, sinf(a) * 40.f - 20.f,
+                                0.80f, 0xFF6020FF, 2.5f, 2);
+        }
+        g->shake_t = 0.20f; g->shake_mag = 5.f;
+        sfx_play(g, SFX_HEAVY_HIT);
+    }
+
+    /* fire wheels en phase 1+ : timer separe via ai_t2 */
+    if (phase >= 1) {
+        e->ai_t2 += dt;
+        if (e->ai_t2 > 3.5f) {
+            e->ai_t2 = 0.f;
+            for (int k = 0; k < 3; k++) {
+                float a = (k / 3.f) * 6.2831f + g->time;
+                Projectile pr = {0};
+                pr.x = e->x; pr.y = e->y;
+                pr.vx = cosf(a) * 80.f; pr.vy = sinf(a) * 80.f;
+                pr.life = 4.f; pr.r = 4.f; pr.dmg = 10.f * diff; pr.owner = 1;
+                pr.primary = EL_FIRE; pr.chains = 2;
+                projectile_spawn(g, pr);
+            }
+            sfx_play(g, SFX_ZAP);
+        }
+    }
+
+    /* phase 2 : summon 2 demons (une seule fois grace au memo split_left) */
+    if (phase == 2 && e->split_left < 2 && boss_count_adds(g, e) < 3) {
+        e->split_left = 2;
+        for (int k = 0; k < 2; k++) {
+            enemy_spawn(g, EK_DEMON,
+                        e->x + (rand() % 60) - 30,
+                        e->y + (rand() % 60) - 30);
+        }
+        sfx_play(g, SFX_BOSS);
+    }
+}
+
+/* -------------------- BOSS 4 : AVATAR DIVIN (Sanctuaire, HOLY) --------
+ * Phase 0 : teleport + holy beam (line attack telegraphe 1.2s)
+ * Phase 1 : summon 2 mages + multi-target beams
+ * Phase 2 : beam cooldown reduit + traque le joueur via teleports
+ */
+static void boss_avatar(Game *g, Enemy *e, float dt, int phase,
+                        float dx, float dy, float dist)
+{
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    (void)dist;
+    /* state encode dans ai_t2 (cast int) : 0=idle, 1=beam telegraph, 2=fire,
+     * 3=teleport spark. */
+    int state = (int)e->ai_t2;
+    e->ai_t += dt;
+
+    if (state == 0) {
+        /* idle : on tourne lentement autour du joueur a 150px */
+        float ang = g->time * 0.6f;
+        float tx = g->player.x + cosf(ang) * 150.f;
+        float ty = g->player.y + sinf(ang) * 150.f;
+        float tdx = tx - e->x, tdy = ty - e->y;
+        float td = sqrtf(tdx * tdx + tdy * tdy) + 0.01f;
+        if (td > 8.f) ai_move_toward(g, e, dt, tdx, tdy, td, 35.f, false);
+        /* trigger pattern */
+        float cd = (phase == 2) ? 1.4f : (phase == 1 ? 2.0f : 2.6f);
+        if (e->ai_t > cd) {
+            e->ai_t = 0.f;
+            /* en phase 1+ tendance a teleporter avant de tirer */
+            if (phase >= 1 && (rand() % 100) < 40) e->ai_t2 = 3.f;
+            else                                   e->ai_t2 = 1.f;
+            /* lock direction pour le beam */
+            e->knockback_x = dx / (fabsf(dx) + fabsf(dy) + 0.01f);
+            e->knockback_y = dy / (fabsf(dx) + fabsf(dy) + 0.01f);
+            /* renormalise */
+            float nl = sqrtf(e->knockback_x * e->knockback_x +
+                             e->knockback_y * e->knockback_y) + 0.001f;
+            e->knockback_x /= nl;
+            e->knockback_y /= nl;
+        }
+    } else if (state == 1) {
+        /* beam telegraph 1.2s : ligne de particules de la position vers
+         * la direction lockee (knockback_x/y). */
+        if ((rand() % 100) < 80) {
+            float step = (rand() % 40) * 4.f;
+            float px = e->x + e->knockback_x * step;
+            float py = e->y + e->knockback_y * step;
+            particle_spawn_kind(g, px, py, 0, 0, 0.20f, 0xFFE890FF, 1.5f, 0);
+        }
+        if (e->ai_t > 1.2f) { e->ai_t = 0.f; e->ai_t2 = 2.f; }
+    } else if (state == 2) {
+        /* fire beam : 8 projectiles en ligne droite */
+        for (int k = 0; k < 8; k++) {
+            Projectile pr = {0};
+            float jit = ((rand() % 30) - 15);
+            pr.x = e->x + e->knockback_x * (k * 6.f);
+            pr.y = e->y + e->knockback_y * (k * 6.f) + jit;
+            pr.vx = e->knockback_x * 180.f;
+            pr.vy = e->knockback_y * 180.f;
+            pr.life = 2.5f; pr.r = 4.f; pr.dmg = 12.f * diff; pr.owner = 1;
+            pr.primary = EL_HOLY; pr.pierce = 3;
+            projectile_spawn(g, pr);
+        }
+        sfx_play(g, SFX_ZAP);
+        g->shake_t = 0.18f; g->shake_mag = 4.0f;
+        e->ai_t = 0.f; e->ai_t2 = 0.f;
+    } else if (state == 3) {
+        /* teleport flash : 0.3s sparks puis bouge a 220px du joueur */
+        if (e->ai_t < 0.30f) {
+            if ((rand() % 100) < 60) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, e->x, e->y, cosf(a)*70, sinf(a)*70,
+                                    0.30f, 0xFFE0FFFF, 2.f, 0);
+            }
+        } else {
+            float ang = (rand() % 360) * 0.01745f;
+            float nx = g->player.x + cosf(ang) * 220.f;
+            float ny = g->player.y + sinf(ang) * 220.f;
+            int tx = (int)(nx / TILE), ty = (int)(ny / TILE);
+            if (tx > 0 && ty > 0 && tx < MAP_W - 1 && ty < MAP_H - 1 &&
+                !aabb_solid(g, nx, ny, e->r)) {
+                e->x = nx; e->y = ny;
+                for (int k = 0; k < 20; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, nx, ny,
+                                        cosf(a)*60, sinf(a)*60,
+                                        0.40f, 0xFFE0FFFF, 2.f, 0);
+                }
+            }
+            e->ai_t = 0.f; e->ai_t2 = 1.f;       /* enchaine sur un beam */
+        }
+    }
+
+    /* phase 1+ : summon 2 mages une seule fois (memo split_left) */
+    if (phase >= 1 && e->split_left < 1 && boss_count_adds(g, e) < 3) {
+        e->split_left = 1;
+        for (int k = 0; k < 2; k++) {
+            enemy_spawn(g, EK_MAGE,
+                        e->x + (rand() % 80) - 40,
+                        e->y + (rand() % 80) - 40);
+        }
+        sfx_play(g, SFX_BOSS);
+    }
+}
+
+static void boss_update(Game *g, Enemy *e, float dt) {
+    Player *p = &g->player;
+    if (e->telegraph_t > 0.f) { e->telegraph_t -= dt; return; }
+    /* phase + transition burst */
+    int phase = boss_phase(e);
+    if (phase > e->split_left && phase > 0) {
+        /* hijack : pour memoriser la transition, on prend max() avec
+         * split_left mais on garde split_left assez pour les flags
+         * "summon-une-fois" de chaque boss. */
+        if (phase > e->split_left) {
+            boss_phase_transition(g, e, phase);
+            /* on bump split_left juste pour l invariant (les boss qui
+             * utilisent split_left comme memo de summon le re-bumperont
+             * eux-memes, l ordre est compatible). */
+            if (e->split_left < phase) {
+                /* on tape une valeur "phase-1" pour pas court-circuiter
+                 * les summons one-shot (qui testent split_left < N). */
+                if (phase == 1) {
+                    /* don t bump : laisser split_left=0 pour que le summon
+                     * one-shot puisse passer plus tard. */
+                } else {
+                    /* phase 2 : on bump si pas deja */
+                    if (e->split_left < 1) e->split_left = 1;
+                }
+            }
+        }
+    }
+
+    float dx = p->x - e->x, dy = p->y - e->y;
+    float dist = sqrtf(dx * dx + dy * dy) + 0.01f;
+    e->facing = atan2f(dy, dx);
+
+    switch (e->variant) {
+        case 0: boss_necropante(g, e, dt, phase, dx, dy, dist); break;
+        case 1: boss_geant     (g, e, dt, phase, dx, dy, dist); break;
+        case 2: boss_hydre     (g, e, dt, phase, dx, dy, dist); break;
+        case 3: boss_forgeron  (g, e, dt, phase, dx, dy, dist); break;
+        case 4: boss_avatar    (g, e, dt, phase, dx, dy, dist); break;
+        default: break;
+    }
+    /* contact dmg de base, scale avec la phase pour eviter l etreinte
+     * impossible en phase 2. */
+    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    ai_contact_damage(g, e, (14.f + phase * 4.f) * diff);
 }
 
 /* ============================================================

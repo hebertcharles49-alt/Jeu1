@@ -54,7 +54,10 @@ void update_room_logic(Game *g) {
                 int sx = r->x + r->w / 2;
                 int sy = r->y + r->h / 2;
                 enemy_spawn(g, EK_BOSS, sx * TILE + TILE / 2, sy * TILE + TILE / 2);
-                snprintf(g->boss_name, sizeof(g->boss_name), "BOSS %d / 10", g->floor_index);
+                /* nom thematique du boss : variant = biome courant. */
+                int bv = biome_for_floor(g->floor_index);
+                snprintf(g->boss_name, sizeof(g->boss_name),
+                         "%s (E%d)", boss_title_for_variant(bv), g->floor_index);
                 g->boss_intro_t = 2.5f;
                 sfx_play(g, SFX_BOSS);
             }
