@@ -18,10 +18,22 @@ void update_projectiles(Game *g) {
         if (!pr->alive) continue;
 
         pr->life -= dt;
+        /* conduction foudre : tant qu un proj EL_LIGHTNING existe, il
+         * electrifie les flaques d eau qu il survole (rayon 18 px). */
+        if (pr->primary == EL_LIGHTNING && pr->owner == 0) {
+            surface_lightning_hit(g, pr->x, pr->y, 18.f);
+        }
         if (pr->life <= 0.f) {
             if (pr->owner == 0 && pr->aoe > 0.f) {
                 do_aoe_at(g, pr->x, pr->y, pr->aoe, pr->dmg * 0.7f, pr->primary, element_color(pr->primary));
                 sfx_play(g, SFX_EXPLODE);
+            }
+            /* depot de surface a l expiration selon l element. 30% chance. */
+            if (pr->owner == 0 && (rand() % 100) < 30) {
+                if (pr->primary == EL_WATER)
+                    surface_spawn(g, SURF_WATER, pr->x, pr->y, 14.f, 0.f);
+                else if (pr->primary == EL_FIRE)
+                    surface_spawn(g, SURF_FIRE, pr->x, pr->y, 12.f, 0.f);
             }
             pr->alive = false;
             continue;

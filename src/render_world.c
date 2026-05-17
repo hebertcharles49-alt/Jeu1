@@ -1321,6 +1321,9 @@ void render_world(Game *g) {
     /* props decoratifs (assets.c) -- entre terrain et entites mobiles
      * pour le z-ordering correct. */
     world_assets_render(g);
+    /* surfaces au sol (flaques) : juste au-dessus du terrain, sous les
+     * entites. */
+    render_surfaces(g);
 
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i]; if (!pk->alive) continue;

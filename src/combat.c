@@ -114,6 +114,13 @@ void burst_particles(Game *g, float x, float y, int n, uint32_t color, float spe
 
 void do_aoe_at(Game *g, float x, float y, float radius, float dmg, Element status, uint32_t color) {
     bool attract = g->player.u_explosions_attract;
+    /* surface au sol : feu / glace selon l element. 40% de chance pour
+     * eviter de saturer le pool. */
+    if (status == EL_FIRE && (rand() % 100) < 40) {
+        surface_spawn(g, SURF_FIRE, x, y, radius * 0.6f, 0.f);
+    } else if (status == EL_WATER && (rand() % 100) < 35) {
+        surface_spawn(g, SURF_WATER, x, y, radius * 0.7f, 0.f);
+    }
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;

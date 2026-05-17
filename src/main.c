@@ -315,6 +315,7 @@ void game_start_new_run(Game *g) {
     memset(g->pickups, 0, sizeof(g->pickups));
     memset(g->fairies, 0, sizeof(g->fairies));
     memset(g->dmgnums, 0, sizeof(g->dmgnums));
+    memset(g->surfaces, 0, sizeof(g->surfaces));
     g->run_kills = 0;
     g->run_time = 0.f;
     g->run_damage_dealt = 0;
@@ -393,6 +394,7 @@ void game_next_floor(Game *g) {
     memset(g->projectiles, 0, sizeof(g->projectiles));
     memset(g->pickups, 0, sizeof(g->pickups));
     memset(g->fairies, 0, sizeof(g->fairies));
+    memset(g->surfaces, 0, sizeof(g->surfaces));
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
     g->boss_death_t = 0.f;
@@ -801,6 +803,7 @@ void game_run(Game *g) {
             update_dmgnums(g);
             update_room_logic(g);
             world_assets_tick(g);
+            update_surfaces(g);
             toast_tick(g);
             if (g->shake_t > 0.f) g->shake_t -= dt;
             if (g->player.hp <= 0.f) g->state = GS_DEAD;

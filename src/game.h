@@ -27,6 +27,7 @@ typedef struct GfxCtx GfxCtx;
 #define MAX_PICKUPS 96
 #define MAX_FAIRIES 32
 #define MAX_DMGNUM 128
+#define MAX_SURFACES 32
 
 #define WEAPON_SLOTS 2
 #define MAX_ELEMENTS_PER_WEAPON 3
@@ -298,6 +299,29 @@ typedef struct {
     bool  big;
 } DamageNumber;
 
+/* Surfaces : flaques au sol dynamiques. Spawnees par les attaques /
+ * morts d ennemis, reagissent entre elles (eau+feu = vapeur, eau+foudre
+ * = electrocution, huile+feu = explosion), et affectent les entites
+ * qui marchent dessus (slow, dmg, ignition). Cf surfaces.c. */
+typedef enum {
+    SURF_NONE = 0,
+    SURF_WATER,        /* ralentit ; conducteur */
+    SURF_OIL,          /* ralentit ; inflammable */
+    SURF_FIRE,         /* dmg over time */
+    SURF_ICE,          /* ralentit ; slip */
+    SURF_ELECTRIFIED,  /* eau electrifiee : dmg + stun */
+    SURF_COUNT
+} SurfaceKind;
+
+typedef struct {
+    bool        alive;
+    SurfaceKind kind;
+    float       x, y;
+    float       r;
+    float       life;       /* secondes restantes */
+    float       life_max;
+} Surface;
+
 /* ---------- Player ---------- */
 typedef struct {
     HeroClass hero;
@@ -493,6 +517,7 @@ typedef struct {
     Pickup        pickups[MAX_PICKUPS];
     Fairy         fairies[MAX_FAIRIES];
     DamageNumber  dmgnums[MAX_DMGNUM];
+    Surface       surfaces[MAX_SURFACES];
     MetaSave      meta;
 
     SDL_Window   *window;
@@ -693,6 +718,17 @@ void  update_pickups(Game *g);
 void  update_fairies(Game *g);
 void  update_dmgnums(Game *g);
 void  update_room_logic(Game *g);
+
+/* surfaces (flaques eau/huile/feu/glace/electrifiee). Pool prive
+ * dans Game.surfaces. */
+int   surface_spawn  (Game *g, SurfaceKind kind, float x, float y,
+                       float r, float life);
+void  update_surfaces(Game *g);
+void  render_surfaces(Game *g);     /* dessine les disques au sol */
+/* convertit toutes les SURF_WATER dans le rayon en SURF_ELECTRIFIED.
+ * Appele par projectiles.c quand un proj EL_LIGHTNING touche une
+ * surface ou un mur a proximite d eau. */
+void  surface_lightning_hit(Game *g, float x, float y, float radius);
 
 void  render_world(Game *g);
 void  render_world_overlay_ui(Game *g);   /* HP bars/noms/dmgnums en UI 2D */

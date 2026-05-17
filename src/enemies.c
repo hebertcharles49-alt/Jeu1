@@ -177,6 +177,23 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         e->hp = 0.f;
         g->run_kills++;
         enemy_drop_loot(g, e);
+        /* Signature de mort par kind : certains ennemis laissent une
+         * surface au sol (huile, glace, eau) -- ouvre des combos
+         * physiques avec les attaques du joueur. */
+        if (!e->is_boss) {
+            switch (e->kind) {
+                case EK_DEMON:
+                    /* huile sombre, inflammable. Synergise avec FIRE. */
+                    surface_spawn(g, SURF_OIL, e->x, e->y, 18.f, 0.f);
+                    break;
+                case EK_SLIME:
+                    /* eau (resque acide visuel) : ralentit + conducteur. */
+                    if ((rand() % 100) < 60)
+                        surface_spawn(g, SURF_WATER, e->x, e->y, 14.f, 0.f);
+                    break;
+                default: break;
+            }
+        }
         /* BUILD-DEF u_corpse_mines : 30% des morts laissent une mine
          * statique (projectile owner=2, immobile, AOE 26). Touche tout
          * ennemi qui passe dessus, pas le joueur. */
