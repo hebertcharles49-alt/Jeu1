@@ -55,11 +55,18 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
                 g->meta.element_discovered[e] = true;
                 save_write(&g->meta);
+                char buf[48];
+                snprintf(buf, sizeof(buf), "ELEMENT DECOUVERT : %s",
+                         element_name(e));
+                toast_push(g, buf, element_color(e), 4.0f);
             }
             int mask = weapon_combo_id(w);
             if (mask != 0 && !meta_combo_is_seen(&g->meta, mask)) {
                 meta_combo_mark(&g->meta, mask);
                 save_write(&g->meta);
+                char buf[48];
+                snprintf(buf, sizeof(buf), "COMBO : %s", combo_name(mask));
+                toast_push(g, buf, combo_color(mask), 4.0f);
             }
             break;
         }
@@ -80,6 +87,10 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             if (kind > 0 && kind < W_COUNT && !g->meta.weapon_discovered[kind]) {
                 g->meta.weapon_discovered[kind] = true;
                 save_write(&g->meta);
+                char buf[48];
+                snprintf(buf, sizeof(buf), "ARME DECOUVERTE : %s",
+                         weapon_name((WeaponKind)kind));
+                toast_push(g, buf, 0xC0E0FFFF, 4.0f);
             }
             break;
         }

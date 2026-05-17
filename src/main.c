@@ -795,6 +795,7 @@ void game_run(Game *g) {
             update_dmgnums(g);
             update_room_logic(g);
             world_assets_tick(g);
+            toast_tick(g);
             if (g->shake_t > 0.f) g->shake_t -= dt;
             if (g->player.hp <= 0.f) g->state = GS_DEAD;
             if (g->player.xp >= g->player.xp_to_next) {
@@ -891,6 +892,7 @@ void game_run(Game *g) {
                 render_world_overlay_ui(g);
             }
             render_hud(g);
+            if (g->state == GS_RUN) toast_render(g);
             if (g->state == GS_LEVELUP) render_levelup(g);
             if (g->state == GS_DEAD)    render_dead(g);
             if (g->state == GS_VICTORY) render_victory(g);

@@ -574,6 +574,17 @@ typedef struct {
     int           codex_tab;       /* 0=combos 1=talismans 2=equip 3=armes */
     int           codex_cursor;    /* row in current tab */
     int           codex_scroll;    /* premier item visible (defilement) */
+
+    /* TOASTS : 4 slots circulaires. Une notification affichee bas-droite
+     * sous le HUD pour signaler les decouvertes meta (combo, element,
+     * heros, unique, etc.) sans interrompre le gameplay. Cf game.c
+     * toast_push(). */
+    struct {
+        char     text[48];
+        uint32_t color;
+        float    life;        /* secondes restantes -- 0 = slot libre */
+        float    life_max;
+    }             toasts[4];
 } Game;
 
 /* ---------- API ---------- */
@@ -759,6 +770,12 @@ void  render_lore(Game *g);
 /* helpers souris */
 bool  mouse_in_rect(Game *g, int x, int y, int w, int h);
 bool  mouse_clicked(Game *g);
+
+/* toast notifications : reserves un slot, decremente toutes les
+ * frames. La life est dans le slot, pas globale. */
+void  toast_push (Game *g, const char *text, uint32_t color, float life);
+void  toast_tick (Game *g);
+void  toast_render(Game *g);
 
 /* StatBlock : centralise toutes les stats joueur en une seule struct,
  * pour eviter les fonctions a 15+ pointeurs. game_recompute_player_stats

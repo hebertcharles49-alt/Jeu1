@@ -159,6 +159,83 @@ bool world_to_screen(GfxCtx *gc, v3 world, int *out_sx, int *out_sy) {
     return true;
 }
 
+/* ============================================================
+ *   TOAST NOTIFICATIONS
+ * Petits messages flottants (decouvertes meta, achats, etc.) qui
+ * apparaissent en bas-droite, glissent vers la gauche en fadant.
+ * Slot circulaire de taille 4. Le plus ancien est ecrase si plein.
+ * ============================================================ */
+void toast_push(Game *g, const char *text, uint32_t color, float life) {
+    if (!g || !text) return;
+    int slot = -1;
+    float oldest_life = 1e9f;
+    int oldest = 0;
+    int n = (int)(sizeof(g->toasts) / sizeof(g->toasts[0]));
+    for (int i = 0; i < n; i++) {
+        if (g->toasts[i].life <= 0.f) { slot = i; break; }
+        if (g->toasts[i].life < oldest_life) {
+            oldest_life = g->toasts[i].life;
+            oldest = i;
+        }
+    }
+    if (slot < 0) slot = oldest;
+    snprintf(g->toasts[slot].text, sizeof(g->toasts[slot].text), "%s", text);
+    g->toasts[slot].color    = color;
+    g->toasts[slot].life     = life;
+    g->toasts[slot].life_max = life;
+}
+
+void toast_tick(Game *g) {
+    if (!g) return;
+    int n = (int)(sizeof(g->toasts) / sizeof(g->toasts[0]));
+    for (int i = 0; i < n; i++) {
+        if (g->toasts[i].life > 0.f) g->toasts[i].life -= g->dt;
+        if (g->toasts[i].life < 0.f) g->toasts[i].life = 0.f;
+    }
+}
+
+void toast_render(Game *g) {
+    if (!g) return;
+    /* on rend du plus ancien (en bas) au plus recent (en haut). On range
+     * d abord les slots vivants par life decroissante pour l affichage. */
+    int order[4]; int n_order = 0;
+    int n = (int)(sizeof(g->toasts) / sizeof(g->toasts[0]));
+    for (int i = 0; i < n; i++) {
+        if (g->toasts[i].life > 0.f) order[n_order++] = i;
+    }
+    /* tri insertion par life decroissante (plus jeune toast = grand life) */
+    for (int i = 1; i < n_order; i++) {
+        int k = order[i]; int j = i - 1;
+        while (j >= 0 && g->toasts[order[j]].life < g->toasts[k].life) {
+            order[j + 1] = order[j]; j--;
+        }
+        order[j + 1] = k;
+    }
+    int by = 50;       /* base Y juste sous le badge biome */
+    int bx = INTERNAL_W - 4;
+    for (int oi = 0; oi < n_order; oi++) {
+        int i = order[oi];
+        float t = g->toasts[i].life / g->toasts[i].life_max;
+        if (t < 0.f) t = 0.f;
+        /* slide : entre 4 px (apparition) et 16 px (sortie) */
+        int slide = (t > 0.8f) ? (int)((t - 0.8f) * 60.f)
+                  : (t < 0.2f ? (int)((0.2f - t) * 60.f) : 0);
+        int tw = text_width(g->toasts[i].text);
+        int pad = 4;
+        int bw = tw + pad * 2;
+        int x = bx - bw + slide;
+        int y = by + oi * 11;
+        /* fond translucide */
+        gfx_set_blend(g->renderer, true);
+        fill_rect(g->renderer, x, y, bw, 9, 0x000000C8);
+        gfx_set_blend(g->renderer, false);
+        /* liseret colore + texte */
+        fill_rect(g->renderer, x, y, 2, 9, g->toasts[i].color);
+        text_draw(g->renderer, x + pad, y + 1, g->toasts[i].text,
+                  g->toasts[i].color);
+    }
+}
+
 /* Vignette plein-ecran : assombrit les bords (utilise par render_world). */
 void draw_vignette(Game *g) {
     gfx_set_blend(g->renderer, true);

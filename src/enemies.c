@@ -227,6 +227,10 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
                 if (!g->meta.hero_discovered[h]) {
                     g->meta.hero_discovered[h] = true;
                     save_write(&g->meta);
+                    char buf[48];
+                    snprintf(buf, sizeof(buf), "HEROS REVELE : %s",
+                             hero_name((HeroClass)h));
+                    toast_push(g, buf, 0xFFE080FF, 5.0f);
                     break;
                 }
             }

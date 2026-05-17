@@ -295,7 +295,15 @@ Item item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss) {
     int uid = unique_roll_drop(floor_index, elite, boss);
     if (uid >= 0) {
         Item u = unique_make(uid);
-        if (g && uid >= 0 && uid < 32) g->meta.unique_seen[uid] = true;
+        if (g && uid >= 0 && uid < 32) {
+            bool already = g->meta.unique_seen[uid];
+            g->meta.unique_seen[uid] = true;
+            if (!already) {
+                char buf[48];
+                snprintf(buf, sizeof(buf), "UNIQUE : %s", unique_def_name(uid));
+                toast_push(g, buf, 0xFF8030FF, 5.5f);
+            }
+        }
         return u;
     }
     Rarity rarity;
