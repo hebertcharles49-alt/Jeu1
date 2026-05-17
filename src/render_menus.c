@@ -13,70 +13,101 @@
 extern int  hub_perm_cost(int kind);
 
 /* ---------- HUB ---------- */
-/* helpers extern (fournis par main.c -> shop_recipe etc) */
-extern int  hub_perm_cost(int kind);
-/* main.c uses static; redefine local labels for buttons */
-
-static const char *perm_btn_label(int k) {
-    switch (k) {
-        case 0: return "+10 PV MAX";
-        case 1: return "+1 ARMURE";
-        case 2: return "+5 VITESSE";
-        case 3: return "+5% DEGATS";
-        default: return "?";
+/* petite barre de progression : fill colore + outline. */
+static void hub_progress_bar(Game *g, int x, int y, int w, int seen, int total,
+                              uint32_t fill_col, const char *label)
+{
+    fill_rect(g->renderer, x, y, w, 6, 0x201824FF);
+    if (total > 0) {
+        int fw = (seen * w) / total;
+        fill_rect(g->renderer, x, y, fw, 6, fill_col);
     }
-}
-static int perm_btn_cost(int k) {
-    switch (k) {
-        case 0: return 40;
-        case 1: return 60;
-        case 2: return 50;
-        case 3: return 70;
-        default: return 999;
-    }
+    rect_outline(g->renderer, x, y, w, 6, 0x40404AFF);
+    text_drawf(g->renderer, x + w + 6, y - 1, 0xCCCCCCFF,
+               "%s %d/%d", label, seen, total);
 }
 
 void render_hub(Game *g) {
-    /* fond degrade */
+    /* fond degrade ambre */
     for (int yy = 0; yy < INTERNAL_H; yy++) {
         int v = 6 + (INTERNAL_H - yy) / 36;
         fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
                   (uint32_t)((v << 24) | ((v / 2) << 16) | ((v) << 8) | 0xFF));
     }
-    /* embers */
+    /* embers ambient */
     for (int i = 0; i < 70; i++) {
         int x = (i * 73 + (int)(g->time * 12)) % INTERNAL_W;
         int y = ((i * 37) + (int)(g->time * (i % 5 + 2) * 5)) % INTERNAL_H;
         fill_rect(g->renderer, x, y, 1, 1, (i & 3) ? 0x301820FF : 0xFFA060FF);
     }
 
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE SANCTUAIRE")/2, 10,
+    /* titre + sous-titre */
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE SANCTUAIRE")/2, 6,
               "LE SANCTUAIRE", 0xFFE080FF);
-    text_drawf(g->renderer, 8, 26, 0xC0E0FFFF,
-               "ECLATS %d   COURSES %d   MEILLEUR %d/%d   VICTOIRES %d",
-               g->meta.shards, g->meta.total_runs, g->meta.best_floor,
-               MAX_FLOORS, g->meta.victories);
-    text_draw(g->renderer, 8, 38,
-              "ACHATS PERMANENTS - Augmente tes stats pour les futures courses",
-              0x80FFC0FF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("Renforce-toi entre les courses")/2,
+              16, "Renforce-toi entre les courses", 0x80FFC0FF);
 
-    /* 4 boutons stats permanents */
-    int boxw = 118, boxh = 50, gap = 6;
+    /* === HEADER : eclats + counters + lifetime === */
+    /* gauche : eclats + 3 counters de run */
+    text_drawf(g->renderer, 8, 28, 0xFFD040FF, "* %d ECLATS", g->meta.shards);
+    fill_rect(g->renderer, 8, 28, 1, 0, 0);  /* anchor */
+    text_drawf(g->renderer, 8, 38, 0xCCCCCCFF,
+               "Courses %d   Meilleur %d/%d   Victoires %d",
+               g->meta.total_runs, g->meta.best_floor, MAX_FLOORS,
+               g->meta.victories);
+    /* droite : lifetime */
+    int rx = INTERNAL_W - 180;
+    text_draw(g->renderer, rx, 28, "LIFETIME", 0xFFE080FF);
+    text_drawf(g->renderer, rx, 38, 0xCCCCCCFF,
+               "%d kills  %d dmg  %d legendaires",
+               g->meta.lifetime_kills, g->meta.lifetime_damage,
+               g->meta.lifetime_legendaries);
+
+    /* === 4 cartes d achat permanent === */
+    int boxw = 118, boxh = 56, gap = 6;
     int total_w = 4 * boxw + 3 * gap;
     int sx0 = (INTERNAL_W - total_w) / 2;
-    int sy = 60;
+    int sy = 54;
     for (int i = 0; i < 4; i++) {
         int sx = sx0 + i * (boxw + gap);
         bool sel = (g->hub_cursor == i);
-        bool ok = (g->meta.shards >= perm_btn_cost(i));
-        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x281828FF : 0x14101AFF);
-        rect_outline(g->renderer, sx, sy, boxw, boxh,
-                     sel ? 0xFFFF40FF : (ok ? 0x404048FF : 0x60303AFF));
-        text_draw(g->renderer, sx + 8, sy + 8, perm_btn_label(i),
-                  sel ? 0xFFFF40FF : 0xFFFFFFFF);
-        text_drawf(g->renderer, sx + 8, sy + 24, 0xFFD040FF, "%d", perm_btn_cost(i));
-        fill_rect(g->renderer, sx + 8 + 16, sy + 25, 5, 5, 0xFFD040FF);
-        /* etat actuel */
+        int level = perm_stat_level(&g->meta, i);
+        int cost  = perm_stat_cost (&g->meta, i);
+        bool maxed = (level >= PERM_MAX_LEVEL);
+        bool ok    = (!maxed && g->meta.shards >= cost);
+
+        uint32_t bg = sel ? 0x281828FF : 0x14101AFF;
+        uint32_t bd = sel ? 0xFFFF40FF
+                          : (maxed ? 0x40A040FF : (ok ? 0x404048FF : 0x60303AFF));
+        fill_rect(g->renderer, sx, sy, boxw, boxh, bg);
+        rect_outline(g->renderer, sx, sy, boxw, boxh, bd);
+
+        /* titre + step en couleur claire */
+        text_drawf(g->renderer, sx + 8, sy + 6,
+                   sel ? 0xFFFF40FF : 0xFFFFFFFF,
+                   "+%d %s", perm_stat_step(i), perm_stat_label(i));
+        /* niveau actuel + barre de progression sur 10 */
+        text_drawf(g->renderer, sx + 8, sy + 18, 0x80C0FFFF,
+                   "NIVEAU %d / %d", level, PERM_MAX_LEVEL);
+        int bw = boxw - 16;
+        fill_rect(g->renderer, sx + 8, sy + 28, bw, 4, 0x201824FF);
+        int filled = (level * bw) / PERM_MAX_LEVEL;
+        fill_rect(g->renderer, sx + 8, sy + 28, filled, 4, 0x80FFC0FF);
+        rect_outline(g->renderer, sx + 8, sy + 28, bw, 4, 0x40404AFF);
+        /* cout / max */
+        if (maxed) {
+            text_draw(g->renderer, sx + 8, sy + 38, "MAXIMUM", 0x80FF80FF);
+        } else {
+            text_drawf(g->renderer, sx + 8, sy + 38,
+                       ok ? 0xFFD040FF : 0xC07070FF,
+                       "%d eclats", cost);
+            fill_rect(g->renderer, sx + 8 + 6 * (cost < 10 ? 1 :
+                                                 cost < 100 ? 2 :
+                                                 cost < 1000 ? 3 : 4) + 4,
+                      sy + 39, 4, 4,
+                      ok ? 0xFFD040FF : 0xC07070FF);
+        }
+        /* total actuel */
         int cur = 0;
         switch (i) {
             case 0: cur = g->meta.perm_hp; break;
@@ -84,37 +115,45 @@ void render_hub(Game *g) {
             case 2: cur = g->meta.perm_speed; break;
             case 3: cur = g->meta.perm_dmg_pct; break;
         }
-        text_drawf(g->renderer, sx + 8, sy + 36, 0x80FFC0FF, "actuel +%d", cur);
+        const char *unit = (i == 3) ? "%" : "";
+        text_drawf(g->renderer, sx + 8, sy + 48, 0xC0E0FFFF,
+                   "total +%d%s", cur, unit);
     }
 
-    /* CODEX */
-    int cx = 24, cy = 124;
-    text_draw(g->renderer, cx, cy, "CODEX  -  ARMES", 0xFFFF80FF);
-    int discovered_w = 0;
-    for (int i = 1; i < W_COUNT; i++) if (g->meta.weapon_discovered[i]) discovered_w++;
-    text_drawf(g->renderer, cx + 130, cy, 0xCCCCCCFF, "%d / %d", discovered_w, W_COUNT - 1);
-    cy += 12;
-    for (int i = 1; i < W_COUNT; i++) {
-        bool d = g->meta.weapon_discovered[i];
-        const char *n = d ? weapon_name((WeaponKind)i) : "??????";
-        uint32_t c = d ? 0xFFFFFFFF : 0x404040FF;
-        text_drawf(g->renderer, cx, cy, c, "- %s", n);
-        cy += 10;
-    }
-
-    int cx2 = INTERNAL_W / 2 + 20, cy2 = 124;
-    text_draw(g->renderer, cx2, cy2, "CODEX  -  ELEMENTS", 0xFFFF80FF);
-    int discovered_e = 0;
-    for (int i = 1; i < EL_COUNT; i++) if (g->meta.element_discovered[i]) discovered_e++;
-    text_drawf(g->renderer, cx2 + 160, cy2, 0xCCCCCCFF, "%d / %d", discovered_e, EL_COUNT - 1);
-    cy2 += 12;
-    for (int e = 1; e < EL_COUNT; e++) {
-        bool d = g->meta.element_discovered[e];
-        const char *n = d ? element_name((Element)e) : "??????";
-        uint32_t c = d ? element_color((Element)e) : 0x404040FF;
-        text_drawf(g->renderer, cx2, cy2, c, "- %s", n);
-        cy2 += 10;
-    }
+    /* === PROGRES DE DECOUVERTE (barres) === */
+    int py = 120;
+    text_draw(g->renderer, 8, py, "DECOUVERTES", 0xFFFF80FF);
+    py += 12;
+    /* compte les seen */
+    int n_w = 0, n_e = 0, n_c = 0, n_h = 0, n_u = 0, n_i = 0;
+    for (int i = 1; i < W_COUNT;    i++) if (g->meta.weapon_discovered[i])  n_w++;
+    for (int i = 1; i < EL_COUNT;   i++) if (g->meta.element_discovered[i]) n_e++;
+    for (int i = 0; i < HERO_COUNT; i++) if (g->meta.hero_discovered[i])    n_h++;
+    n_c = g->meta.combo_seen_count;
+    for (int i = 0; i < 32; i++) if (g->meta.unique_seen[i]) n_u++;
+    for (int s = 0; s < EQUIP_SLOTS; s++)
+        for (int k = 0; k < 5; k++)
+            if (g->meta.item_seen_rarity[s][k] >= 0) n_i++;
+    int bar_x = 8, bar_w = 110;
+    int line_h = 12;
+    hub_progress_bar(g, bar_x, py, bar_w, n_w, W_COUNT - 1,
+                     0xC0C0FFFF, "Armes");      py += line_h;
+    hub_progress_bar(g, bar_x, py, bar_w, n_e, EL_COUNT - 1,
+                     0xF080F0FF, "Elements");   py += line_h;
+    hub_progress_bar(g, bar_x, py, bar_w, n_h, HERO_COUNT,
+                     0xFFE080FF, "Heros");      py += line_h;
+    /* deuxieme colonne : codex collections */
+    int c2_x = INTERNAL_W / 2 + 20;
+    int c2_y = 132;
+    int combos_total = combo_table_count();
+    int uniq_total   = unique_def_count();
+    int items_total  = EQUIP_SLOTS * 5;
+    hub_progress_bar(g, c2_x, c2_y, bar_w, n_c, combos_total,
+                     0x80C0FFFF, "Combos");    c2_y += line_h;
+    hub_progress_bar(g, c2_x, c2_y, bar_w, n_u, uniq_total,
+                     0xFF8030FF, "Uniques");   c2_y += line_h;
+    hub_progress_bar(g, c2_x, c2_y, bar_w, n_i, items_total,
+                     0x80FFC0FF, "Items");     c2_y += line_h;
 
     /* 4 boutons bas : DEBUTER / OPTIONS / CODEX / AIDE */
     int by = INTERNAL_H - 30;
@@ -289,9 +328,30 @@ void render_choose_hero(Game *g) {
         uint32_t c = disc ? (sel ? 0xFFFF40FF : 0xFFFFFFFF) : 0x606060FF;
         text_draw(g->renderer, sx - text_width(n) / 2, sy + 22, n, c);
         if (disc && !g->meta.hero_unlocked[i]) {
+            /* badge "LOCK" + cout colore selon la solvabilite */
             int cost = 60 + i * 25;
-            char b[24]; snprintf(b, sizeof(b), "%d ECLATS", cost);
-            text_draw(g->renderer, sx - text_width(b) / 2, sy + 32, b, 0xFFC080FF);
+            bool can = (g->meta.shards >= cost);
+            uint32_t col = can ? 0x80FF80FF : 0xFF8080FF;
+            /* petit cadenas dessine en pixels (3x4) */
+            int lx = sx - 8, ly = sy - 26;
+            fill_rect(g->renderer, lx, ly, 7, 5, 0x000000FF);
+            fill_rect(g->renderer, lx + 1, ly + 1, 5, 3, 0xC0A040FF);
+            fill_rect(g->renderer, lx + 2, ly - 2, 3, 2, 0xC0A040FF);
+            fill_rect(g->renderer, lx + 1, ly - 2, 1, 2, 0xC0A040FF);
+            fill_rect(g->renderer, lx + 5, ly - 2, 1, 2, 0xC0A040FF);
+            /* cout : icone coin + texte */
+            char b[24]; snprintf(b, sizeof(b), "%d", cost);
+            int bw = text_width(b);
+            text_draw(g->renderer, sx - bw/2 + 6, sy + 32, b, col);
+            fill_rect(g->renderer, sx - bw/2 - 2, sy + 33, 5, 5, col);
+        } else if (disc) {
+            /* deja debloque : petit checkmark vert */
+            int cx = sx + 14, cy = sy - 22;
+            fill_rect(g->renderer, cx,     cy + 2, 1, 2, 0x80FF80FF);
+            fill_rect(g->renderer, cx + 1, cy + 3, 1, 2, 0x80FF80FF);
+            fill_rect(g->renderer, cx + 2, cy + 2, 1, 1, 0x80FF80FF);
+            fill_rect(g->renderer, cx + 3, cy + 1, 1, 1, 0x80FF80FF);
+            fill_rect(g->renderer, cx + 4, cy,     1, 1, 0x80FF80FF);
         }
     }
 
@@ -301,9 +361,16 @@ void render_choose_hero(Game *g) {
         text_draw(g->renderer, INTERNAL_W/2 - text_width(hero_desc(cur))/2,
                   INTERNAL_H - 56, hero_desc(cur), 0xCCCCFFFF);
         if (!g->meta.hero_unlocked[cur]) {
-            text_draw(g->renderer,
-                      INTERNAL_W/2 - text_width("VERROUILLE - CLIC POUR ACHETER")/2,
-                      INTERNAL_H - 42, "VERROUILLE - CLIC POUR ACHETER", 0xFFC080FF);
+            int cost = 60 + (int)cur * 25;
+            bool can = (g->meta.shards >= cost);
+            char msg[64];
+            snprintf(msg, sizeof(msg),
+                     can ? "VERROUILLE - CLIC POUR DEBLOQUER (%d eclats)"
+                         : "VERROUILLE - manque %d eclats",
+                     can ? cost : (cost - g->meta.shards));
+            text_draw(g->renderer, INTERNAL_W/2 - text_width(msg)/2,
+                      INTERNAL_H - 42, msg,
+                      can ? 0xFFC080FF : 0xFF8080FF);
         } else {
             text_draw(g->renderer,
                       INTERNAL_W/2 - text_width("CLIC OU ENTREE POUR PARTIR EN COURSE")/2,

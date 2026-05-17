@@ -293,6 +293,10 @@ void game_to_hub(Game *g) {
     g->meta.shards += gained;
     g->meta.total_runs++;
     if (g->floor_index > g->meta.best_floor) g->meta.best_floor = g->floor_index;
+    /* cumul lifetime pour les stats du sanctuaire */
+    g->meta.lifetime_kills       += g->run_kills;
+    g->meta.lifetime_damage      += g->run_damage_dealt;
+    g->meta.lifetime_legendaries += g->run_legendary_drops;
     save_write(&g->meta);
     g->state = GS_HUB;
 }
@@ -397,19 +401,58 @@ void game_next_floor(Game *g) {
 /* hub navigation */
 /* ---------- HUB : codex + boutique de stats permanentes ---------- */
 /* 4 boutons de stats + zones bas pour debuter/options. */
-static int hub_perm_cost(int kind) {
-    /* cout fixe par achat ; tu peux acheter plusieurs fois */
+/* === META achats permanents : cout ramp + cap 10 niveaux ===
+ * Niveau = total achete divise par step. Cout = base * (1 + level).
+ * Refuse l achat au niveau max. */
+int perm_stat_step(int kind) {
     switch (kind) {
-        case 0: return 40;   /* +10 PV */
-        case 1: return 60;   /* +1 ARMURE */
-        case 2: return 50;   /* +5 VITESSE */
-        case 3: return 70;   /* +5% DEGATS */
-        default: return 999;
+        case 0: return 10;   /* +10 PV / niveau */
+        case 1: return 1;    /* +1 ARMURE       */
+        case 2: return 5;    /* +5 VITESSE      */
+        case 3: return 5;    /* +5% DEGATS      */
+        default: return 1;
     }
 }
+
+const char *perm_stat_label(int kind) {
+    switch (kind) {
+        case 0: return "PV MAX";
+        case 1: return "ARMURE";
+        case 2: return "VITESSE";
+        case 3: return "DEGATS";
+        default: return "?";
+    }
+}
+
+int perm_stat_level(const MetaSave *m, int kind) {
+    int cur = 0;
+    switch (kind) {
+        case 0: cur = m->perm_hp;       break;
+        case 1: cur = m->perm_armor;    break;
+        case 2: cur = m->perm_speed;    break;
+        case 3: cur = m->perm_dmg_pct;  break;
+    }
+    int step = perm_stat_step(kind);
+    return (step > 0) ? cur / step : 0;
+}
+
+int perm_stat_cost(const MetaSave *m, int kind) {
+    int level = perm_stat_level(m, kind);
+    if (level >= PERM_MAX_LEVEL) return 0;       /* 0 = locked / max */
+    int base;
+    switch (kind) {
+        case 0: base = 40; break;
+        case 1: base = 60; break;
+        case 2: base = 50; break;
+        case 3: base = 70; break;
+        default: return 999;
+    }
+    return base * (1 + level);
+}
+
 static void hub_perm_apply(Game *g, int kind) {
-    int cost = hub_perm_cost(kind);
-    if (g->meta.shards < cost) return;
+    int cost = perm_stat_cost(&g->meta, kind);
+    if (cost <= 0 || g->meta.shards < cost) return;
     g->meta.shards -= cost;
     switch (kind) {
         case 0: g->meta.perm_hp     += 10; break;

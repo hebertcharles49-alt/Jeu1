@@ -416,6 +416,10 @@ typedef struct {
     int  item_seen_rarity[EQUIP_SLOTS][5];
     /* uniques decouverts (par id). Cf uniques.c. */
     bool unique_seen[32];
+    /* lifetime stats : cumul de toutes les courses. Affiche au sanctuaire. */
+    int  lifetime_kills;
+    int  lifetime_damage;
+    int  lifetime_legendaries;
 } MetaSave;
 
 /* ---------- SHOP (Brotato-like) ---------- */
@@ -687,6 +691,17 @@ const char *hero_name(HeroClass h);
 const char *hero_desc(HeroClass h);
 /* nom thematique d un boss par variant (= biome). Cf heroes.c. */
 const char *boss_title_for_variant(int variant);
+
+/* ---- META : achats permanents au sanctuaire ----
+ * 4 stats (0=HP, 1=ARMOR, 2=SPEED, 3=DMG_PCT). Le cout suit un ramp
+ * lineaire base + base * level pour eviter le farm trivial des
+ * premiers etages. Cap a 10 niveaux par stat.
+ */
+#define PERM_MAX_LEVEL 10
+int         perm_stat_level (const MetaSave *m, int kind);
+int         perm_stat_cost  (const MetaSave *m, int kind);   /* cout du prochain achat */
+const char *perm_stat_label (int kind);
+int         perm_stat_step  (int kind);                       /* delta par niveau */
 /* couleurs (cape + tunique) du heros, partagees entre render_choose_hero
  * et la paper-doll inventaire. Cf heroes.c. */
 void        hero_palette(HeroClass h, uint32_t *cape, uint32_t *tunic);

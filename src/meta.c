@@ -7,7 +7,7 @@
 
 #define SAVE_PATH "crucible_save.dat"
 #define SAVE_MAGIC 0x43525542u   /* 'CRUB' */
-#define SAVE_VERSION 5u
+#define SAVE_VERSION 6u
 
 /* re-initialise les champs ajoutes apres v3 (item_seen_rarity = -1 partout). */
 static void meta_defaults_post(MetaSave *m) {
