@@ -23,6 +23,11 @@ void update_projectiles(Game *g) {
         if (pr->primary == EL_LIGHTNING && pr->owner == 0) {
             surface_lightning_hit(g, pr->x, pr->y, 18.f);
         }
+        /* terre + eau -> boue : projectile EL_EARTH converti l eau qu il
+         * survole en boue. */
+        if (pr->primary == EL_EARTH && pr->owner == 0) {
+            surface_earth_hit(g, pr->x, pr->y, 14.f);
+        }
         if (pr->life <= 0.f) {
             if (pr->owner == 0 && pr->aoe > 0.f) {
                 do_aoe_at(g, pr->x, pr->y, pr->aoe, pr->dmg * 0.7f, pr->primary, element_color(pr->primary));

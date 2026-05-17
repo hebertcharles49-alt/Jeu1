@@ -177,6 +177,10 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         e->hp = 0.f;
         g->run_kills++;
         enemy_drop_loot(g, e);
+        /* Sang : "vie + eau". Si une SURF_WATER est proche, elle est
+         * convertie en SURF_BLOOD ; sinon petite chance (20%) de
+         * spawner du sang neuf a l endroit du cadavre. */
+        if (!e->is_boss) surface_blood_drop(g, e->x, e->y);
         /* Signature de mort par kind : certains ennemis laissent une
          * surface au sol (huile, glace, eau) -- ouvre des combos
          * physiques avec les attaques du joueur. */

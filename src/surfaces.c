@@ -43,6 +43,10 @@ static const SurfaceSpec S_SPEC[SURF_COUNT] = {
     [SURF_FIRE]        = { 3.0f, 8.0f, 1.00f, false, false },
     [SURF_ICE]         = { 5.0f, 0.0f, 0.50f, false, false },
     [SURF_ELECTRIFIED] = { 2.0f, 14.f, 0.80f, false, true  },
+    /* derives */
+    [SURF_STEAM]       = { 1.5f, 0.0f, 0.85f, false, false },
+    [SURF_MUD]         = { 6.0f, 0.0f, 0.35f, false, false },
+    [SURF_BLOOD]       = { 8.0f, -1.f, 0.80f, false, false },  /* dmg<0 = regen */
 };
 
 int surface_spawn(Game *g, SurfaceKind kind, float x, float y,
@@ -113,11 +117,13 @@ static void surface_interact_pair(Game *g, Surface *a, Surface *b) {
     float touch = (a->r + b->r) * 0.85f;
     if (dx * dx + dy * dy > touch * touch) return;
 
-    /* WATER + FIRE : vapeur (les 2 meurent, petite explosion knockback) */
+    /* WATER + FIRE : phase transition -> SURF_STEAM (les 2 meurent, le
+     * nuage condensera en eau a sa mort). Bouillonement particules. */
     if ((a->kind == SURF_WATER && b->kind == SURF_FIRE) ||
         (a->kind == SURF_FIRE  && b->kind == SURF_WATER)) {
         float cx = (a->x + b->x) * 0.5f;
         float cy = (a->y + b->y) * 0.5f;
+        float cr = (a->r + b->r) * 0.6f;
         for (int k = 0; k < 18; k++) {
             float ang = (rand() % 360) * 0.01745f;
             particle_spawn_kind(g, cx, cy,
@@ -126,6 +132,16 @@ static void surface_interact_pair(Game *g, Surface *a, Surface *b) {
         }
         sfx_play(g, SFX_EXPLODE);
         a->alive = false; b->alive = false;
+        surface_spawn(g, SURF_STEAM, cx, cy, cr, 0.f);
+        return;
+    }
+    /* STEAM + n importe quelle source de froid (ICE, WATER) : la vapeur
+     * accelere sa condensation -> sa life chute a 0.3s pour declencher
+     * le respawn d eau plus vite. */
+    if ((a->kind == SURF_STEAM && (b->kind == SURF_ICE || b->kind == SURF_WATER)) ||
+        (b->kind == SURF_STEAM && (a->kind == SURF_ICE || a->kind == SURF_WATER))) {
+        Surface *steam = (a->kind == SURF_STEAM) ? a : b;
+        if (steam->life > 0.3f) steam->life = 0.3f;
         return;
     }
     /* OIL + FIRE : ignition, l huile devient FIRE (radius gonfle).
@@ -183,7 +199,20 @@ static float surface_apply_to_pos(Game *g, float x, float y, float r,
         if (dx * dx + dy * dy >= rr * rr) continue;
         const SurfaceSpec *sp = &S_SPEC[s->kind];
         if (sp->slow_mul < slow) slow = sp->slow_mul;
-        if (sp->dmg_ps > 0.f) {
+        if (sp->dmg_ps < 0.f) {
+            /* dmg negatif = regen au contact (BLOOD). On bypass invuln_t
+             * pour que le sang serve quand le joueur saigne. */
+            if (is_player && g->player.hp < g->player.maxhp) {
+                static float acc_heal = 0.f;
+                acc_heal += -sp->dmg_ps * dt;
+                if (acc_heal >= 1.f) {
+                    g->player.hp += acc_heal;
+                    if (g->player.hp > g->player.maxhp)
+                        g->player.hp = g->player.maxhp;
+                    acc_heal = 0.f;
+                }
+            }
+        } else if (sp->dmg_ps > 0.f) {
             float dmg = sp->dmg_ps * dt;
             if (is_player) {
                 if (g->player.invuln_t <= 0.f && g->player.dash_t <= 0.f) {
@@ -228,12 +257,22 @@ static float surface_apply_to_pos(Game *g, float x, float y, float r,
 
 void update_surfaces(Game *g) {
     float dt = g->dt;
-    /* 1. life decay */
+    /* 1. life decay + condensation : la vapeur qui meurt a 40% de
+     * chance de laisser une petite flaque d eau (cycle eau<->vapeur). */
     for (int i = 0; i < MAX_SURFACES; i++) {
         Surface *s = &g->surfaces[i];
         if (!s->alive) continue;
         s->life -= dt;
-        if (s->life <= 0.f) s->alive = false;
+        if (s->life <= 0.f) {
+            if (s->kind == SURF_STEAM && (rand() % 100) < 40) {
+                /* on capture les coords AVANT d effacer */
+                float wx = s->x, wy = s->y, wr = s->r * 0.6f;
+                s->alive = false;
+                surface_spawn(g, SURF_WATER, wx, wy, wr, 3.0f);
+            } else {
+                s->alive = false;
+            }
+        }
     }
     /* 2. interactions entre surfaces */
     surface_tick_interactions(g);
@@ -274,6 +313,15 @@ void update_surfaces(Game *g) {
             case SURF_ELECTRIFIED:
                 particle_spawn_kind(g, ox, oy, 0, -40.f, 0.20f,
                                     0xFFFF80FF, 2.2f, 0); break;
+            case SURF_STEAM:
+                particle_spawn_kind(g, ox, oy, 0, -22.f, 0.55f,
+                                    0xE0E0E0A0, 2.4f, 0); break;
+            case SURF_MUD:
+                particle_spawn_kind(g, ox, oy, 0, 1.f, 0.40f,
+                                    0x60402080, 1.6f, 0); break;
+            case SURF_BLOOD:
+                particle_spawn_kind(g, ox, oy, 0, -2.f, 0.45f,
+                                    0xA02020A0, 1.5f, 0); break;
             default: break;
         }
     }
@@ -297,6 +345,9 @@ void render_surfaces(Game *g) {
                 r = 1.00f * p; gr = 0.95f * p; b = 0.35f * p;
                 break;
             }
+            case SURF_STEAM:       r=0.85f; gr=0.85f; b=0.85f; break;
+            case SURF_MUD:         r=0.40f; gr=0.28f; b=0.18f; break;
+            case SURF_BLOOD:       r=0.55f; gr=0.10f; b=0.12f; break;
             default: break;
         }
         /* fade out a fin de vie */
@@ -313,7 +364,53 @@ void render_surfaces(Game *g) {
 
 /* expose pour projectiles.c : conduction de la foudre quand un
  * projectile EL_LIGHTNING traverse une SURF_WATER. */
-void surface_lightning_hit(Game *g, float x, float y, float radius);
 void surface_lightning_hit(Game *g, float x, float y, float radius) {
     surfaces_electrify_at(g, x, y, radius);
+}
+
+/* EARTH proj sur eau -> boue. Pas de cooldown : si proj earth passe,
+ * l eau qu il touche est immediatement transformee. */
+void surface_earth_hit(Game *g, float x, float y, float radius) {
+    float r2 = radius * radius;
+    for (int i = 0; i < MAX_SURFACES; i++) {
+        Surface *s = &g->surfaces[i];
+        if (!s->alive || s->kind != SURF_WATER) continue;
+        float dx = s->x - x, dy = s->y - y;
+        if (dx * dx + dy * dy >= r2 + s->r * s->r) continue;
+        s->kind = SURF_MUD;
+        s->life = S_SPEC[SURF_MUD].life_def;
+        s->life_max = s->life;
+        for (int k = 0; k < 10; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, s->x, s->y,
+                                cosf(a) * 18.f, sinf(a) * 18.f,
+                                0.45f, 0x806040FF, 1.8f, 0);
+        }
+    }
+}
+
+/* mort d ennemi -> "vie + eau = sang". Si une SURF_WATER existe a
+ * moins de 25 px, elle est convertie en SURF_BLOOD. Sinon 20% de
+ * chance d une petite flaque de sang frais. */
+void surface_blood_drop(Game *g, float x, float y) {
+    for (int i = 0; i < MAX_SURFACES; i++) {
+        Surface *s = &g->surfaces[i];
+        if (!s->alive || s->kind != SURF_WATER) continue;
+        float dx = s->x - x, dy = s->y - y;
+        if (dx * dx + dy * dy < 25.f * 25.f) {
+            s->kind = SURF_BLOOD;
+            s->life = S_SPEC[SURF_BLOOD].life_def;
+            s->life_max = s->life;
+            for (int k = 0; k < 8; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, s->x, s->y,
+                                    cosf(a) * 20.f, sinf(a) * 20.f,
+                                    0.40f, 0x802020FF, 1.7f, 0);
+            }
+            return;     /* on convertit une seule flaque */
+        }
+    }
+    if ((rand() % 100) < 20) {
+        surface_spawn(g, SURF_BLOOD, x, y, 10.f, 0.f);
+    }
 }

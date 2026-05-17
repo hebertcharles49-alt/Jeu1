@@ -305,11 +305,22 @@ typedef struct {
  * qui marchent dessus (slow, dmg, ignition). Cf surfaces.c. */
 typedef enum {
     SURF_NONE = 0,
+    /* surfaces "base" */
     SURF_WATER,        /* ralentit ; conducteur */
     SURF_OIL,          /* ralentit ; inflammable */
     SURF_FIRE,         /* dmg over time */
     SURF_ICE,          /* ralentit ; slip */
     SURF_ELECTRIFIED,  /* eau electrifiee : dmg + stun */
+    /* surfaces "derivees" : naissent des interactions et des morts.
+     * Suivent une physique simple :
+     *   eau + chaud   -> vapeur, qui condense en eau en refroidissant
+     *   eau + terre   -> boue (slow fort, pas conductrice)
+     *   eau + vie     -> sang (regen sur passage, lifesteal local)
+     *   huile + acide -> goudron (slow extreme, inflammable) -- skip cette
+     *                    passe pour rester scoped */
+    SURF_STEAM,        /* nuage transitoire, bref, condense -> water */
+    SURF_MUD,          /* boue : slow fort, pas conductrice */
+    SURF_BLOOD,        /* "vie + eau" : regen lent au contact */
     SURF_COUNT
 } SurfaceKind;
 
@@ -729,6 +740,11 @@ void  render_surfaces(Game *g);     /* dessine les disques au sol */
  * Appele par projectiles.c quand un proj EL_LIGHTNING touche une
  * surface ou un mur a proximite d eau. */
 void  surface_lightning_hit(Game *g, float x, float y, float radius);
+/* convertit les SURF_WATER en SURF_MUD si touchees par un proj EL_EARTH. */
+void  surface_earth_hit    (Game *g, float x, float y, float radius);
+/* appele a la mort d un ennemi : si une eau est dans le rayon, elle
+ * devient sang. Sinon a 20% spawne une petite flaque de sang. */
+void  surface_blood_drop   (Game *g, float x, float y);
 
 void  render_world(Game *g);
 void  render_world_overlay_ui(Game *g);   /* HP bars/noms/dmgnums en UI 2D */
