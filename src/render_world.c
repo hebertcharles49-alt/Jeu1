@@ -1450,19 +1450,122 @@ void render_world_overlay_ui(Game *g) {
     fill_rect(gc, mx, my, 1, 1, 0xFFFFFFFF);
     /* vignette */
     draw_vignette(g);
-    /* boss intro */
+    /* === BOSS INTRO CINEMATIQUE === */
     if (g->boss_intro_t > 0.f) {
-        int alpha = (int)(180 * (g->boss_intro_t / 2.5f));
-        if (alpha > 180) alpha = 180;
+        float t = g->boss_intro_t / 2.5f;        /* normalise 0..1 */
+        if (t > 1.f) t = 1.f;
+        /* letterbox noir top/bottom qui glisse depuis les bords */
         gfx_set_blend(gc, true);
-        uint32_t col = (uint32_t)(0x20608000u | (alpha & 0xFF));
-        gfx_set_color(gc, col);
-        gfx_fill_rect(gc, 0, INTERNAL_H/2 - 18, INTERNAL_W, 36);
+        int bar_h = (int)(28.f * (1.f - t * 0.6f));
+        if (bar_h > 28) bar_h = 28;
+        fill_rect(gc, 0, 0, INTERNAL_W, bar_h, 0x000000F0);
+        fill_rect(gc, 0, INTERNAL_H - bar_h, INTERNAL_W, bar_h, 0x000000F0);
+        /* couleur element du biome pour la bande centrale */
+        int bi = biome_for_floor(g->floor_index);
+        uint32_t bcol = element_color(biome_element(bi));
+        uint32_t bandc = (bcol & 0xFFFFFF00u) | 0x60;
+        fill_rect(gc, 0, INTERNAL_H/2 - 22, INTERNAL_W, 44, 0x000000C0);
+        fill_rect(gc, 0, INTERNAL_H/2 - 22, INTERNAL_W,  2, bandc);
+        fill_rect(gc, 0, INTERNAL_H/2 + 20, INTERNAL_W,  2, bandc);
         gfx_set_blend(gc, false);
+        /* "MENACE :" en petit, biome */
+        text_drawf(gc, INTERNAL_W/2 - text_width("MENACE")/2,
+                   INTERNAL_H/2 - 16, bcol, "MENACE");
+        /* nom du boss en grand : double passe (1 px offset) pour bold-fake */
+        int nw = text_width(g->boss_name);
+        int nx = INTERNAL_W/2 - nw/2;
+        int ny = INTERNAL_H/2 - 5;
+        text_draw(gc, nx + 1, ny, g->boss_name, 0x000000FF);
+        text_draw(gc, nx,     ny, g->boss_name, 0xFFFFFFFF);
+        /* biome sous-titre */
+        char sub[48]; snprintf(sub, sizeof(sub), "- %s -", biome_name(bi));
+        text_draw(gc, INTERNAL_W/2 - text_width(sub)/2,
+                  INTERNAL_H/2 + 8, sub, 0xCCCCCCFF);
+    }
+
+    /* === BOSS DEATH CINEMATIQUE === */
+    if (g->boss_death_t > 0.f) {
+        float t = g->boss_death_t / 1.8f;
+        if (t > 1.f) t = 1.f;
+        /* fade blanc plein-ecran qui s estompe (visible 0.5s) */
+        if (g->boss_death_t > 1.3f) {
+            int alpha = (int)(220 * (g->boss_death_t - 1.3f) / 0.5f);
+            if (alpha > 0) {
+                gfx_set_blend(gc, true);
+                fill_rect(gc, 0, 0, INTERNAL_W, INTERNAL_H,
+                          (uint32_t)0xFFFFFF00u | (uint32_t)(alpha & 0xFF));
+                gfx_set_blend(gc, false);
+            }
+        }
+        /* vignette dore pulsante */
+        float pulse = 0.6f + 0.4f * sinf(g->time * 8.f);
+        gfx_set_blend(gc, true);
+        fill_rect(gc, 0, INTERNAL_H/2 - 14, INTERNAL_W, 28,
+                  (uint32_t)0xFFD04000u | (uint32_t)(int)(140 * t * pulse));
+        gfx_set_blend(gc, false);
+        /* "VAINCU" en grand avec ombre noire */
+        const char *msg = "VAINCU";
+        int mw = text_width(msg);
+        int mx = INTERNAL_W/2 - mw/2;
+        int my = INTERNAL_H/2 - 3;
+        text_draw(gc, mx + 1, my + 1, msg, 0x000000FF);
+        text_draw(gc, mx,     my,     msg, 0xFFE060FF);
+        /* nom du boss en dessous, plus discret */
         text_draw(gc, INTERNAL_W/2 - text_width(g->boss_name)/2,
-                  INTERNAL_H/2 - 6, g->boss_name, 0xFFFFFFFF);
-        text_draw(gc, INTERNAL_W/2 - text_width("CONFRONTATION")/2,
-                  INTERNAL_H/2 + 4, "CONFRONTATION", 0xFFD040FF);
+                  INTERNAL_H/2 + 10, g->boss_name, 0xCCCCCCFF);
+    }
+
+    /* === HP BAR PLEIN ECRAN POUR LE BOSS ACTIF === */
+    {
+        /* trouve le boss vivant le plus proche, s il y en a un */
+        Enemy *bb = NULL;
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy *e = &g->enemies[i];
+            if (!e->alive || !e->is_boss) continue;
+            if (e->dying_t > 0.f) continue;
+            bb = e; break;
+        }
+        if (bb && g->boss_intro_t <= 0.f && g->boss_death_t <= 0.f) {
+            int bx = 30, by = 8, bw = INTERNAL_W - 60, bh = 8;
+            /* fond noir + bord */
+            gfx_set_blend(gc, true);
+            fill_rect(gc, bx - 1, by - 1, bw + 2, bh + 2, 0x000000E0);
+            gfx_set_blend(gc, false);
+            /* fond rouge sombre */
+            fill_rect(gc, bx, by, bw, bh, 0x401010FF);
+            /* fill couleur element */
+            float frac = bb->hp / bb->maxhp;
+            if (frac < 0.f) frac = 0.f;
+            uint32_t ecol = element_color(bb->element);
+            int fillw = (int)(bw * frac);
+            fill_rect(gc, bx, by, fillw, bh, ecol);
+            /* highlight top 1px */
+            fill_rect(gc, bx, by, fillw, 1, 0xFFFFFFC0);
+            /* phase ticks : trait noir vertical a 55% et 25% */
+            int t55 = bx + (int)(bw * 0.55f);
+            int t25 = bx + (int)(bw * 0.25f);
+            fill_rect(gc, t55, by - 2, 1, bh + 4, 0xFFFFFF80);
+            fill_rect(gc, t25, by - 2, 1, bh + 4, 0xFFFFFF80);
+            /* enrage : flash rouge si <10% */
+            if (frac < 0.10f) {
+                float pulse = 0.5f + 0.5f * sinf(g->time * 14.f);
+                gfx_set_blend(gc, true);
+                fill_rect(gc, bx, by, bw, bh,
+                          (uint32_t)0xFF000000u | (uint32_t)(int)(100 * pulse));
+                gfx_set_blend(gc, false);
+            }
+            /* contour */
+            rect_outline(gc, bx, by, bw, bh, 0xFFD060FF);
+            /* nom au-dessus */
+            int tw = text_width(bb->name[0] ? bb->name : g->boss_name);
+            text_draw(gc, INTERNAL_W/2 - tw/2, by + bh + 2,
+                      bb->name[0] ? bb->name : g->boss_name, 0xFFFFFFFF);
+            /* tag "ENRAGE" en rouge a droite si frac < 10% */
+            if (frac < 0.10f) {
+                text_draw(gc, bx + bw - text_width("ENRAGE"),
+                          by + bh + 2, "ENRAGE", 0xFF4040FF);
+            }
+        }
     }
 
     /* Signature Combo callout : nom du combo triple en grand au-dessus du

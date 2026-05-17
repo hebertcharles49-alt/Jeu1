@@ -191,16 +191,37 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         }
         if (e->is_boss) {
             g->dungeon.boss_dead = true;
-            g->shake_t = 0.6f; g->shake_mag = 8.f;
-            g->hitstop_t = 0.20f;
-            for (int k = 0; k < 80; k++) {
+            /* mort cinematique : shake fort + long hitstop + flash blanc +
+             * fragments dans la couleur de l element du boss + portail. */
+            g->shake_t = 0.9f; g->shake_mag = 10.f;
+            g->hitstop_t = 0.45f;
+            g->flash_t  = 0.40f;
+            g->boss_death_t = 1.8f;    /* declenche l overlay de victoire */
+            /* fragment storm dans la couleur element */
+            uint32_t col_e = element_color(e->element);
+            for (int k = 0; k < 120; k++) {
                 float a = (rand() % 360) * 0.01745f;
-                float s = 100.f + rand() % 200;
-                particle_spawn_kind(g, e->x, e->y, cosf(a) * s, sinf(a) * s, 1.0f,
-                                    0xFFE060FF, 3.f, 2);
+                float s = 80.f + rand() % 280;
+                /* mix entre or et couleur element selon k */
+                uint32_t c = (k & 1) ? col_e : 0xFFE060FF;
+                particle_spawn_kind(g, e->x, e->y,
+                                    cosf(a) * s, sinf(a) * s,
+                                    1.2f, c, 3.5f, 2);
+            }
+            /* anneaux concentriques */
+            for (int ring = 0; ring < 3; ring++) {
+                float speed = 60.f + ring * 50.f;
+                int n = 36;
+                for (int k = 0; k < n; k++) {
+                    float a = (k / (float)n) * 6.2831f;
+                    particle_spawn_kind(g, e->x, e->y,
+                                        cosf(a) * speed, sinf(a) * speed,
+                                        0.9f + ring * 0.15f, col_e, 2.5f, 0);
+                }
             }
             pickup_spawn(g, PU_PORTAL, 0, e->x, e->y);
             sfx_play(g, SFX_BOSS);
+            sfx_play(g, SFX_EXPLODE);
             g->portal_spawned = true;
             for (int h = 0; h < HERO_COUNT; h++) {
                 if (!g->meta.hero_discovered[h]) {
@@ -495,6 +516,36 @@ static void boss_geant(Game *g, Enemy *e, float dt, int phase,
             e->knockback_x = 0; e->knockback_y = 0;
         }
     }
+    /* SURPRISE GEANT : en phase 2, meteor shower passif tous les 1.5s.
+     * Une roche tombe sur la position predite du joueur (snapshot t+0.4s),
+     * marqueur de poussiere puis projectile statique avec AOE 30 a t=0.6s. */
+    if (phase == 2) {
+        /* timer stocke dans split_left>=10 ; on encode "memo phase+timer
+         * incrementiel" via un static module local pour pas piocher dans
+         * Enemy. Note : ca compte pour tous les Geant simultanes mais on
+         * a au plus 1 boss vivant donc OK. */
+        static float meteor_t = 0.f;
+        meteor_t += dt;
+        if (meteor_t > 1.5f) {
+            meteor_t = 0.f;
+            float px = g->player.x + g->player.vx * 0.4f;
+            float py = g->player.y + g->player.vy * 0.4f;
+            for (int k = 0; k < 12; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, px + cosf(a) * 12.f,
+                                    py + sinf(a) * 12.f,
+                                    0, -8.f,
+                                    0.55f, 0x80604040, 2.0f, 0);
+            }
+            Projectile pr = {0};
+            pr.x = px; pr.y = py;
+            pr.vx = 0; pr.vy = 0;
+            pr.life = 0.60f; pr.r = 5.f;
+            pr.dmg = 16.f * diff; pr.owner = 1;
+            pr.primary = EL_EARTH; pr.aoe = 30.f;
+            projectile_spawn(g, pr);
+        }
+    }
 }
 
 /* -------------------- BOSS 2 : HYDRE (Marais, WATER) ------------------
@@ -510,6 +561,19 @@ static void boss_hydre(Game *g, Enemy *e, float dt, int phase,
     if (dist > 180.f)      ai_move_toward(g, e, dt, dx, dy, dist, 28.f, false);
     else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 28.f, false);
 
+    /* SURPRISE HYDRE : a chaque entree en phase 2, on summon une vague de
+     * 4 slimes splitters dans un cercle autour du boss. C'est un "burst"
+     * one-shot grace au memo split_left. */
+    if (phase == 2 && e->split_left < 2 && boss_count_adds(g, e) < 5) {
+        e->split_left = 2;
+        for (int k = 0; k < 4; k++) {
+            float a = (k / 4.f) * 6.2831f;
+            enemy_spawn(g, EK_SLIME,
+                        e->x + cosf(a) * 40.f,
+                        e->y + sinf(a) * 40.f);
+        }
+        sfx_play(g, SFX_BOSS);
+    }
     /* phase 1+ : drop d acide au sol */
     if (phase >= 1) {
         e->ai_t2 += dt;
@@ -742,6 +806,21 @@ static void boss_avatar(Game *g, Enemy *e, float dt, int phase,
 static void boss_update(Game *g, Enemy *e, float dt) {
     Player *p = &g->player;
     if (e->telegraph_t > 0.f) { e->telegraph_t -= dt; return; }
+    /* ENRAGE : sous 10% HP, on accelere drastiquement les timers internes
+     * (les ai_t avancent 1.6x plus vite) et on emet un signal visuel
+     * sanglant. C'est la "surprise" -- le combat termine sur un push
+     * agressif au lieu de finir tranquille. */
+    bool enraged = (e->hp / e->maxhp) < 0.10f;
+    if (enraged) {
+        dt *= 1.6f;
+        /* fountain de sparks rouges en continu */
+        if ((rand() % 100) < 50) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 40.f, sinf(a) * 40.f - 20.f,
+                                0.35f, 0xFF2030FF, 2.5f, 2);
+        }
+    }
     /* phase + transition burst */
     int phase = boss_phase(e);
     if (phase > e->split_left && phase > 0) {

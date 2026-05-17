@@ -543,6 +543,7 @@ typedef struct {
     int           audio_sample_rate;
 
     float         boss_intro_t;
+    float         boss_death_t;   /* >0 = animation de mort en cours */
     char          boss_name[32];
 
     /* options / settings */

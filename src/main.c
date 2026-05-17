@@ -311,6 +311,7 @@ void game_start_new_run(Game *g) {
     g->shake_t = 0.f;
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
+    g->boss_death_t = 0.f;
     g->shop_visits = 0;
     g->shop_reroll_cost = 5;
     g->combo_callout_t = 0.f;
@@ -381,6 +382,7 @@ void game_next_floor(Game *g) {
     memset(g->fairies, 0, sizeof(g->fairies));
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
+    g->boss_death_t = 0.f;
     g->player.hp += 25.f;
     if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
     world_assets_reset(g);
@@ -673,6 +675,9 @@ void game_run(Game *g) {
 
         if (g->hitstop_t > 0.f) { g->hitstop_t -= dt; g->dt = 0.f; }
         else                    { g->dt = dt; }
+        /* slowmo pendant la cinematique de mort du boss : on ralentit le
+         * gameplay a 30% pour laisser les fragments tomber au ralenti. */
+        if (g->boss_death_t > 0.f) g->dt *= 0.30f;
 
         g->time += dt;
 
@@ -732,6 +737,7 @@ void game_run(Game *g) {
             if (g->scroll_t > 0.f)         g->scroll_t -= g->dt;
             if (g->combo_callout_t > 0.f)  g->combo_callout_t -= g->dt;
             if (g->boss_intro_t > 0.f) g->boss_intro_t -= dt;
+            if (g->boss_death_t > 0.f) g->boss_death_t -= dt;
             if (g->flash_t > 0.f)      g->flash_t -= dt;
             update_player(g);
             update_weapons(g);
