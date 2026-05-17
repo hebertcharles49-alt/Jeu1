@@ -877,6 +877,9 @@ void render_world(Game *g) {
 
     /* ---- 3D world ---- */
     gfx_terrain_draw(gc, player_w);
+    /* props decoratifs (assets.c) -- entre terrain et entites mobiles
+     * pour le z-ordering correct. */
+    world_assets_render(g);
 
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i]; if (!pk->alive) continue;

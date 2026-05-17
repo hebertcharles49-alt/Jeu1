@@ -613,6 +613,14 @@ bool  tile_solid(TileKind t);
  * existe deja sur le dungeon (room avec is_debug_room). */
 void  dungeon_add_debug_room(Game *g);
 
+/* assets : habillage du monde (props 3D decoratifs + particules d ambiance).
+ * Cycle : populate apres dungeon_generate, tick par frame en GS_RUN,
+ * render dans render_world apres le terrain. Idempotent sur gen_id. */
+void  world_assets_reset   (Game *g);
+void  world_assets_populate(Game *g);
+void  world_assets_tick    (Game *g);
+void  world_assets_render  (Game *g);
+
 int   enemy_spawn(Game *g, int kind, float x, float y);
 int   projectile_spawn(Game *g, Projectile p);
 int   particle_spawn(Game *g, float x, float y, float vx, float vy, float life, uint32_t color, float size);

@@ -318,6 +318,8 @@ void game_start_new_run(Game *g) {
     dungeon_generate(&g->dungeon, g->floor_index, (unsigned)rand());
     p->x = g->dungeon.spawn_x * TILE + TILE / 2;
     p->y = g->dungeon.spawn_y * TILE + TILE / 2;
+    world_assets_reset(g);
+    world_assets_populate(g);
     if (g->settings.debug_room) {
         /* en mode debug, on revele tout pour pouvoir reellement utiliser
          * le contenu de la salle (sinon les armes/elements non decouverts
@@ -360,6 +362,8 @@ void game_next_floor(Game *g) {
     g->boss_intro_t = 0.f;
     g->player.hp += 25.f;
     if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
+    world_assets_reset(g);
+    world_assets_populate(g);
     if (g->settings.debug_room) dungeon_add_debug_room(g);
     g->state = GS_RUN;
 }
@@ -717,6 +721,7 @@ void game_run(Game *g) {
             update_particles(g);
             update_dmgnums(g);
             update_room_logic(g);
+            world_assets_tick(g);
             if (g->shake_t > 0.f) g->shake_t -= dt;
             if (g->player.hp <= 0.f) g->state = GS_DEAD;
             if (g->player.xp >= g->player.xp_to_next) {
