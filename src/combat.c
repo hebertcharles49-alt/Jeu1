@@ -373,7 +373,10 @@ void update_weapons(Game *g) {
         fx.range_mul *= p->range_mul;
         g->current_attack_crit = crit;
 
-        /* Signature Combo callout (paires + triples) */
+        /* Signature Combo callout (paires + triples) -- visuellement
+         * spectaculaire : double anneau de particules + impulse de
+         * shake + flash colore + chain particles vers l ennemi le plus
+         * proche pour signaler la reaction en chaine. */
         if (w->element_count >= 2 && mask != g->combo_callout_mask && fx.tag) {
             bool is_triple = (w->element_count == 3);
             g->combo_callout_mask  = mask;
@@ -381,8 +384,12 @@ void update_weapons(Game *g) {
             g->combo_callout_color = fx.color;
             snprintf(g->combo_callout, sizeof(g->combo_callout),
                      "%s%s", fx.tag, is_triple ? " !" : "");
-            int kn = is_triple ? 36 : 14;
-            float spd = is_triple ? 130.f : 75.f;
+            /* track best combo size pour l ecran de mort */
+            if (w->element_count > g->run_best_combo_size)
+                g->run_best_combo_size = w->element_count;
+            /* anneau interieur rapide */
+            int kn = is_triple ? 48 : 18;
+            float spd = is_triple ? 160.f : 90.f;
             float life = is_triple ? 0.7f : 0.45f;
             for (int k = 0; k < kn; k++) {
                 float a = (k / (float)kn) * 6.2831f;
@@ -390,6 +397,38 @@ void update_weapons(Game *g) {
                                     cosf(a) * spd, sinf(a) * spd,
                                     life, fx.color, 3.0f, 2);
             }
+            /* anneau exterieur plus lent et plus gros (triples uniquement) */
+            if (is_triple) {
+                int ko = 36;
+                for (int k = 0; k < ko; k++) {
+                    float a = (k / (float)ko) * 6.2831f + 0.087f;
+                    particle_spawn_kind(g, p->x, p->y,
+                                        cosf(a) * 240.f, sinf(a) * 240.f,
+                                        1.0f, fx.color, 4.0f, 2);
+                }
+                /* shake + hitstop pour la sensation cinematique */
+                if (g->shake_t < 0.20f) {
+                    g->shake_t = 0.20f;
+                    g->shake_mag = 5.f;
+                }
+                g->hitstop_t = 0.10f;
+            }
+            /* chain visuel : faisceau de particules vers l ennemi le plus
+             * proche pour rendre visible la "reaction en chaine". */
+            int tgt = nearest_enemy(g, p->x, p->y, 200.f, NULL);
+            if (tgt >= 0) {
+                Enemy *t = &g->enemies[tgt];
+                float dx = t->x - p->x, dy = t->y - p->y;
+                float d  = sqrtf(dx * dx + dy * dy) + 0.01f;
+                int steps = (int)(d / 4.f);
+                for (int s = 0; s < steps; s++) {
+                    float fx2 = p->x + dx * (s / (float)steps);
+                    float fy2 = p->y + dy * (s / (float)steps);
+                    particle_spawn_kind(g, fx2, fy2, 0, 0, 0.30f,
+                                        fx.color, 2.0f, 0);
+                }
+            }
+            sfx_play(g, is_triple ? SFX_EXPLODE : SFX_ZAP);
         }
 
         /* Gating : armes "actives" gatees sur la presence d'un ennemi en

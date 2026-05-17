@@ -307,6 +307,9 @@ void game_start_new_run(Game *g) {
     memset(g->dmgnums, 0, sizeof(g->dmgnums));
     g->run_kills = 0;
     g->run_time = 0.f;
+    g->run_damage_dealt = 0;
+    g->run_best_combo_size = 0;
+    g->run_legendary_drops = 0;
     g->floor_index = 1;
     g->shake_t = 0.f;
     g->portal_spawned = false;

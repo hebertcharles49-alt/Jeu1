@@ -111,13 +111,65 @@ void render_hud(Game *g) {
                 }
             }
         }
+        /* icones de salles speciales : on dessine PAR-DESSUS le fond pour
+         * que ce soit visible meme sur les petites salles.
+         *   BOSS  : croix rouge clignotante (skull-ish)
+         *   DEBUG : etoile cyan (4 branches)
+         *   SPAWN : "S" mini blanc (room 0)
+         *   PICKUPS dans salle visitee : minuscule point dore (loot non
+         *     ramasse, hint pour faire un nettoyage rapide). */
+        for (int i = 0; i < d->room_count; i++) {
+            Room *r = &d->rooms[i];
+            if (!r->visited) continue;
+            int cx = ox + r->x + r->w / 2;
+            int cy = oy + r->y + r->h / 2;
+            if (r->is_boss_room) {
+                /* boss : croix rouge clignote (skull-ish) */
+                uint32_t bc = ((int)(g->time * 3.f) & 1) ? 0xFF6060FF : 0xC02020FF;
+                fill_rect(g->renderer, cx - 2, cy,     5, 1, bc);
+                fill_rect(g->renderer, cx,     cy - 2, 1, 5, bc);
+                if (d->boss_dead) {
+                    /* boss vaincu : croix plus sombre, ne clignote plus */
+                    fill_rect(g->renderer, cx - 2, cy,     5, 1, 0x603030FF);
+                    fill_rect(g->renderer, cx,     cy - 2, 1, 5, 0x603030FF);
+                }
+            } else if (r->is_debug_room) {
+                /* etoile 4-branches cyan */
+                fill_rect(g->renderer, cx,     cy - 2, 1, 5, 0x80FFFFFF);
+                fill_rect(g->renderer, cx - 2, cy,     5, 1, 0x80FFFFFF);
+            } else if (i == 0) {
+                /* spawn : S mini blanc */
+                text_draw(g->renderer, cx - 2, cy - 3, "S", 0xFFFFFFFF);
+            }
+        }
+        /* pickups dans une salle visitee : dot dore. Coffres + items
+         * uniquement, pour eviter de spammer xp/coin sur la mini. */
+        for (int i = 0; i < MAX_PICKUPS; i++) {
+            Pickup *pk = &g->pickups[i];
+            if (!pk->alive) continue;
+            if (pk->kind != PU_ITEM && pk->kind != PU_CHEST &&
+                pk->kind != PU_WEAPON) continue;
+            int tx = (int)(pk->x / TILE), ty = (int)(pk->y / TILE);
+            /* on n affiche que si la tile est dans une salle visitee */
+            bool in_visited = false;
+            for (int r = 0; r < d->room_count && !in_visited; r++) {
+                Room *rr = &d->rooms[r];
+                if (!rr->visited) continue;
+                if (tx >= rr->x && tx < rr->x + rr->w &&
+                    ty >= rr->y && ty < rr->y + rr->h) in_visited = true;
+            }
+            if (!in_visited) continue;
+            uint32_t pc = 0xFFD040FF;
+            if (pk->kind == PU_ITEM && pk->item.is_unique) pc = 0xFF8030FF;
+            fill_rect(g->renderer, ox + tx, oy + ty, 1, 1, pc);
+        }
         /* portail de sortie (clignote) si visible */
         if (d->boss_dead) {
             int px = ox + d->exit_x, py = oy + d->exit_y;
             uint32_t pc = ((int)(g->time * 4.f) & 1) ? 0x80E0FFFF : 0x4070C0FF;
             fill_rect(g->renderer, px - 1, py - 1, 3, 3, pc);
         }
-        /* joueur : point jaune clignotant */
+        /* joueur : point jaune clignotant (par-dessus tout) */
         int px = ox + ptx, py = oy + pty;
         uint32_t playerc = ((int)(g->time * 5.f) & 1) ? 0xFFFF80FF : 0xFFFFFFFF;
         fill_rect(g->renderer, px - 1, py - 1, 3, 3, playerc);

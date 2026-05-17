@@ -324,18 +324,65 @@ void render_choose_hero(Game *g) {
 
 void render_dead(Game *g) {
     gfx_set_blend(g->renderer, true);
-    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x300010C0);
+    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x300010DC);
     gfx_set_blend(g->renderer, false);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("VAINCU")/2, 80,
-              "VAINCU", 0xFF4060FF);
-    text_drawf(g->renderer, INTERNAL_W/2 - 70, 100, 0xFFFFFFFF,
-               "ETAGE %d/%d   KILLS %d   AMES %d",
-               g->floor_index, MAX_FLOORS, g->run_kills, g->player.souls);
+    /* titre */
+    int tw = text_width("VAINCU");
+    int tx = INTERNAL_W/2 - tw/2;
+    text_draw(g->renderer, tx + 1, 50 + 1, "VAINCU", 0x000000FF);
+    text_draw(g->renderer, tx,     50,     "VAINCU", 0xFF4060FF);
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("Ta course s'acheve.")/2,
+              66, "Ta course s'acheve.", 0xCCCCCCFF);
+
+    /* panneau stats centre */
+    int px = INTERNAL_W/2 - 110;
+    int py = 84;
+    int pw = 220, ph = 110;
+    fill_rect(g->renderer, px, py, pw, ph, 0x14101AFF);
+    rect_outline(g->renderer, px, py, pw, ph, 0x80405080);
+    text_draw(g->renderer, px + 6, py + 4, "RESUME DE COURSE", 0xFFE080FF);
+
+    /* deux colonnes */
+    int col1 = px + 6;
+    int col2 = px + 110;
+    int row = py + 18;
+
+    /* helper inline : ligne "label    valeur" couleur valeur */
+    #define ROW(label, val_fmt, vcol, ...) do {                          \
+        text_draw(g->renderer, col1, row, label, 0xCCCCCCFF);            \
+        text_drawf(g->renderer, col2, row, vcol, val_fmt, __VA_ARGS__);  \
+        row += 11;                                                       \
+    } while (0)
+
+    int hero_name_color = 0xFF80FFFF;
+    text_drawf(g->renderer, col1, row, hero_name_color, "%s", hero_name(g->player.hero));
+    row += 11;
+    ROW("Etage atteint",  "%d / %d",     0xFFFFFFFF, g->floor_index, MAX_FLOORS);
+    ROW("Temps de run",   "%.1fs",       0xFFFFFFFF, g->run_time);
+    ROW("Kills",          "%d",          0xFFFFFFFF, g->run_kills);
+    ROW("Degats infliges","%d",          0xFFA070FF, g->run_damage_dealt);
+    /* meilleur combo : 1 = solo, 2 = paire, 3 = triple */
+    {
+        const char *combo_label = "neant";
+        uint32_t combo_col = 0x808080FF;
+        if (g->run_best_combo_size == 1) { combo_label = "Solo";   combo_col = rarity_color(R_COMMON); }
+        else if (g->run_best_combo_size == 2) { combo_label = "Paire";  combo_col = rarity_color(R_RARE); }
+        else if (g->run_best_combo_size == 3) { combo_label = "Triple"; combo_col = rarity_color(R_EPIC); }
+        text_draw(g->renderer, col1, row, "Meilleur combo", 0xCCCCCCFF);
+        text_drawf(g->renderer, col2, row, combo_col, "%s",
+                   g->run_best_combo_size > 0 ? combo_label : "—");
+        row += 11;
+    }
+    ROW("Drops legendaires", "%d", 0xFFD030FF, g->run_legendary_drops);
+    ROW("Ames recoltees", "%d",    0xC0FFC0FF, g->player.souls);
+    #undef ROW
+
+    /* gain permanent en bas */
     int gain = g->player.souls + g->run_kills / 4 + g->floor_index * 5;
-    text_drawf(g->renderer, INTERNAL_W/2 - 70, 112, 0xFFE080FF,
-               "GAIN PERMANENT %d ECLATS", gain);
+    text_drawf(g->renderer, INTERNAL_W/2 - 100, py + ph + 8, 0xFFE080FF,
+               "GAIN PERMANENT  +%d ECLATS", gain);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ENTREE POUR RETOUR AU SANCTUAIRE")/2,
-              140, "ENTREE POUR RETOUR AU SANCTUAIRE", 0xFFFFFFFF);
+              INTERNAL_H - 20, "ENTREE POUR RETOUR AU SANCTUAIRE", 0xFFFFFFFF);
 }
 
 /* ---------- VICTORY ---------- */

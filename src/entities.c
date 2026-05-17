@@ -213,6 +213,41 @@ int pickup_spawn_item(Game *g, Item it, float x, float y) {
             p->item = it;
             p->x = x; p->y = y;
             p->hover_t = (float)(rand() % 100) / 50.f;
+            /* feedback epique sur drop legendaire ou unique :
+             *   - hitstop 0.30s (pause de respiration)
+             *   - shake court mais marque
+             *   - 60 particules dorees + 24 dans la couleur rarete
+             *   - SFX_BOSS pour la solennite
+             *   - increment du compteur de run pour l ecran de mort
+             * Le rendu pulsant + aura est gere par draw_pickup_3d. */
+            if (it.rarity == R_LEGENDARY || it.is_unique) {
+                g->hitstop_t = 0.30f;
+                g->shake_t = 0.35f; g->shake_mag = 5.5f;
+                g->run_legendary_drops++;
+                uint32_t col_e = it.is_unique ? 0xFF8030FF
+                                              : rarity_color(R_LEGENDARY);
+                for (int k = 0; k < 60; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    float s = 60.f + (rand() % 140);
+                    particle_spawn_kind(g, x, y,
+                                        cosf(a) * s, sinf(a) * s,
+                                        0.85f, 0xFFE060FF, 3.0f, 2);
+                }
+                for (int k = 0; k < 24; k++) {
+                    float a = (rand() % 360) * 0.01745f;
+                    particle_spawn_kind(g, x, y,
+                                        cosf(a) * 50.f, sinf(a) * 50.f,
+                                        1.20f, col_e, 2.5f, 0);
+                }
+                /* pillar vertical de lumiere */
+                for (int k = 0; k < 18; k++) {
+                    particle_spawn_kind(g, x + (rand()%6)-3,
+                                        y + (rand()%6)-3,
+                                        0, -60.f,
+                                        0.70f, col_e, 1.8f, 0);
+                }
+                sfx_play(g, SFX_BOSS);
+            }
             return i;
         }
     }

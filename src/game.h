@@ -503,6 +503,11 @@ typedef struct {
 
     int           run_kills;
     float         run_time;
+    /* stats de run affichees sur l ecran de mort */
+    int           run_damage_dealt;       /* cumul total */
+    int           run_best_combo_size;    /* nb d elements distincts du
+                                            meilleur combo joue */
+    int           run_legendary_drops;    /* nb d items legendaires / uniques drop */
 
     float         shake_t;
     float         shake_mag;

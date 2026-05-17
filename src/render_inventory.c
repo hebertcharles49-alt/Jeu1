@@ -380,4 +380,111 @@ void render_inventory(Game *g) {
               INTERNAL_H - 18, foot1, 0xCCCCCCFF);
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP POUR FERMER")/2,
               INTERNAL_H - 8, "ECHAP POUR FERMER", 0xFFFF80FF);
+
+    /* ---- TOOLTIPS ----
+     * Detection : si la souris survole un slot de l inventaire (sac ou
+     * equipement), on affiche un petit panneau a cote du curseur avec
+     * nom + rarete + stats principales. Tient compte du clamping a
+     * droite pour ne pas sortir de l ecran. */
+    for (int idx = 0; idx < INV_CURSOR_MAX; idx++) {
+        int x, y, w, h;
+        if (!inv_layout_rect(idx, &x, &y, &w, &h)) continue;
+        if (!mouse_in_rect(g, x, y, w, h)) continue;
+        /* on a besoin du Item correspondant */
+        Item *it = NULL;
+        const char *title = NULL;
+        const char *line2 = NULL;
+        char buf2[64];
+        if (idx < INV_CURSOR_EQUIP_BASE) {
+            it = &g->player.inventory[idx];
+            if (!it->occupied) continue;
+            title = it->name[0] ? it->name : slot_name(it->slot);
+        } else if (idx < INV_CURSOR_WEAPON_BASE) {
+            it = &g->player.equipped[idx - INV_CURSOR_EQUIP_BASE];
+            if (!it->occupied) continue;
+            title = it->name[0] ? it->name : slot_name(it->slot);
+        } else if (idx < INV_CURSOR_TALISMAN_BASE) {
+            Weapon *w2 = &g->player.weapons[idx - INV_CURSOR_WEAPON_BASE];
+            if (!w2->owned) continue;
+            title = weapon_name(w2->kind);
+            snprintf(buf2, sizeof(buf2), "%s  %d/%d talismans",
+                     rarity_name(w2->rarity),
+                     w2->element_count, weapon_slot_count(w2->rarity));
+            line2 = buf2;
+        } else {
+            int rel = idx - INV_CURSOR_TALISMAN_BASE;
+            int wi = rel / 3, ti = rel % 3;
+            Weapon *w2 = &g->player.weapons[wi];
+            if (!w2->owned) continue;
+            int active_n = weapon_slot_count(w2->rarity);
+            if (ti >= active_n) {
+                title = "Slot verrouille";
+                line2 = "Ameliore la qualite de l arme";
+            } else if (ti < w2->element_count) {
+                title = element_name(w2->elements[ti]);
+                line2 = "CLIC : cycler / retirer";
+            } else {
+                title = "Slot vide";
+                line2 = "CLIC : ajouter un element";
+            }
+        }
+        if (!title) continue;
+        /* layout : 132 wide, hauteur variable selon affixes */
+        int tw_title = text_width(title);
+        int n_lines = 1 + (line2 ? 1 : 0);
+        int n_affixes = (it && it->occupied) ? it->affix_count : 0;
+        bool is_unique = (it && it->occupied && it->is_unique);
+        if (it && it->occupied) {
+            n_lines += 1;                          /* rarete + slot */
+            n_lines += n_affixes;
+            if (is_unique) n_lines += 1;
+            n_lines += 1;                          /* vente */
+        }
+        int box_w = tw_title + 12;
+        if (box_w < 132) box_w = 132;
+        int box_h = 8 + n_lines * 9;
+        int tx = g->mouse_x + 10;
+        int ty = g->mouse_y + 10;
+        if (tx + box_w > INTERNAL_W - 4) tx = g->mouse_x - box_w - 10;
+        if (ty + box_h > INTERNAL_H - 24) ty = INTERNAL_H - 24 - box_h;
+        if (tx < 4) tx = 4;
+        if (ty < 4) ty = 4;
+        gfx_set_blend(g->renderer, true);
+        fill_rect(g->renderer, tx, ty, box_w, box_h, 0x000000E0);
+        gfx_set_blend(g->renderer, false);
+        rect_outline(g->renderer, tx, ty, box_w, box_h, 0x806040FF);
+        /* contenu */
+        int ly = ty + 4;
+        uint32_t title_col = 0xFFFFFFFF;
+        if (it && it->occupied) {
+            title_col = it->is_unique ? 0xFF8030FF : rarity_color(it->rarity);
+        }
+        text_draw(g->renderer, tx + 6, ly, title, title_col);
+        ly += 9;
+        if (it && it->occupied) {
+            text_drawf(g->renderer, tx + 6, ly, rarity_color(it->rarity),
+                       "%s%s",
+                       is_unique ? "UNIQUE " : "",
+                       rarity_name(it->rarity));
+            ly += 9;
+            if (is_unique) {
+                text_drawf(g->renderer, tx + 6, ly, 0x80FFC0FF,
+                           "%s", unique_def_desc(it->unique_id));
+                ly += 9;
+            }
+            for (int a = 0; a < it->affix_count; a++) {
+                char ab[40]; affix_label(&it->affixes[a], ab, sizeof(ab));
+                text_draw(g->renderer, tx + 6, ly, ab, 0xC0E0FFFF);
+                ly += 9;
+            }
+            text_drawf(g->renderer, tx + 6, ly, 0xFFD080FF,
+                       "Vente : %d coins", item_sell_value(it));
+            ly += 9;
+        }
+        if (line2) {
+            text_draw(g->renderer, tx + 6, ly, line2, 0xCCCCCCFF);
+            ly += 9;
+        }
+        break;     /* un seul tooltip a la fois */
+    }
 }
