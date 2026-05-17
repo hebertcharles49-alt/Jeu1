@@ -74,21 +74,44 @@ uint32_t element_color(Element e) {
     }
 }
 
-/* ---------- BEHAVIOR TAGS ---------- */
+/* ---------- BEHAVIOR TAGS ----------
+ * 3 familles :
+ *   1. tags DESCRIPTIFS   (0..11)  : proprietes statiques d un element.
+ *   2. tags ANTAGONISTES  (12..17) : etats actifs avec un oppose explicite
+ *      (BURNING vs WET, STABLE vs VOLATILE, DIVINE vs CURSED, FROZEN).
+ *      Ce sont les "lois physiques" qui declenchent des interactions.
+ *   3. tags DERIVES       (18..20) : creees PAR les interactions
+ *      (STEAM, ELECTROCUTE, DETONATE) et lus par les EmergentRules.
+ *
+ * Pipeline : compute_combo collecte les tags depuis ELEM_BASE, puis
+ * applique TAG_INTERACTIONS (qui peut CANCEL / CONVERT / AMPLIFY les
+ * tags presents), puis lance les EmergentRules sur le bitmask final. */
 typedef enum {
     TAG_NONE        = 0,
-    TAG_HOT         = 1 << 0,
-    TAG_FLUID       = 1 << 1,
-    TAG_HEAVY       = 1 << 2,
-    TAG_LIGHT       = 1 << 3,
-    TAG_CONDUCTIVE  = 1 << 4,
-    TAG_PERSISTENT  = 1 << 5,
-    TAG_UNSTABLE    = 1 << 6,
-    TAG_CORROSIVE   = 1 << 7,
-    TAG_DIVINE      = 1 << 8,
-    TAG_SHADOW      = 1 << 9,
-    TAG_METALLIC    = 1 << 10,
-    TAG_HOMING_TAG  = 1 << 11,
+    /* descriptifs */
+    TAG_HOT         = 1u <<  0,
+    TAG_FLUID       = 1u <<  1,
+    TAG_HEAVY       = 1u <<  2,
+    TAG_LIGHT       = 1u <<  3,
+    TAG_CONDUCTIVE  = 1u <<  4,
+    TAG_PERSISTENT  = 1u <<  5,
+    TAG_UNSTABLE    = 1u <<  6,
+    TAG_CORROSIVE   = 1u <<  7,
+    TAG_DIVINE      = 1u <<  8,
+    TAG_SHADOW      = 1u <<  9,
+    TAG_METALLIC    = 1u << 10,
+    TAG_HOMING_TAG  = 1u << 11,
+    /* antagonistes (etats actifs) */
+    TAG_BURNING     = 1u << 12,   /* oppose : WET, FROZEN */
+    TAG_WET         = 1u << 13,   /* oppose : BURNING */
+    TAG_FROZEN      = 1u << 14,   /* oppose : BURNING */
+    TAG_STABLE      = 1u << 15,   /* oppose : VOLATILE */
+    TAG_VOLATILE    = 1u << 16,   /* oppose : STABLE */
+    TAG_CURSED      = 1u << 17,   /* oppose : DIVINE */
+    /* derives (issus des interactions) */
+    TAG_STEAM       = 1u << 18,   /* BURNING + WET   */
+    TAG_ELECTROCUTE = 1u << 19,   /* CONDUCTIVE + WET */
+    TAG_DETONATE    = 1u << 20,   /* VOLATILE + BURNING */
 } BehaviorTag;
 
 #define HAS_TAGS(t, req) (((t) & (req)) == (req))
@@ -112,19 +135,87 @@ typedef struct {
 
 static const ElemBase ELEM_BASE[EL_COUNT] = {
     [EL_NONE]      = { 0 },
-    [EL_FIRE]      = { TAG_HOT|TAG_PERSISTENT,      .dmg_add= 0.15f,                                .status=EL_FIRE,      .color_tint=0xFF8040FF },
-    [EL_WATER]     = { TAG_FLUID|TAG_CONDUCTIVE,                     .cd_mul=0.90f,                  .status=EL_WATER,     .color_tint=0x80B0FFFF },
-    [EL_EARTH]     = { TAG_HEAVY,                   .dmg_add= 0.20f,               .pierces=true,                          .color_tint=0xA08060FF },
-    [EL_LIGHTNING] = { TAG_CONDUCTIVE|TAG_UNSTABLE, .dmg_add= 0.15f,               .chain=true,      .status=EL_LIGHTNING, .color_tint=0xFFEC60FF },
-    [EL_AIR]       = { TAG_LIGHT,                                    .cd_mul=0.80f, .range_mul=1.20f,                       .color_tint=0xC0E0FFFF },
-    [EL_VOID]      = { TAG_CORROSIVE|TAG_UNSTABLE,  .dmg_add= 0.25f,               .pierces=true,    .lifesteal=true,      .color_tint=0x8030B0FF },
-    [EL_FAE]       = { TAG_HOMING_TAG|TAG_LIGHT,                                    .homing=true,     .spawn_fairy=true,    .status=EL_FAE, .color_tint=0xF080F0FF },
-    [EL_STEEL]     = { TAG_METALLIC|TAG_HEAVY,      .dmg_add= 0.15f,               .pierces=true,                          .color_tint=0xC0C8D0FF },
-    [EL_DARK]      = { TAG_SHADOW|TAG_CORROSIVE,    .dmg_add= 0.10f,                                 .lifesteal=true,      .status=EL_DARK, .color_tint=0x505060FF },
-    [EL_HOLY]      = { TAG_DIVINE,                  .dmg_add= 0.10f,               .aoe_explode=true, .status=EL_HOLY,     .color_tint=0xFFE890FF },
+    [EL_FIRE]      = { TAG_HOT|TAG_PERSISTENT|TAG_BURNING,            .dmg_add= 0.15f,                                .status=EL_FIRE,      .color_tint=0xFF8040FF },
+    [EL_WATER]     = { TAG_FLUID|TAG_CONDUCTIVE|TAG_WET,                              .cd_mul=0.90f,                  .status=EL_WATER,     .color_tint=0x80B0FFFF },
+    [EL_EARTH]     = { TAG_HEAVY|TAG_STABLE,                          .dmg_add= 0.20f,               .pierces=true,                          .color_tint=0xA08060FF },
+    [EL_LIGHTNING] = { TAG_CONDUCTIVE|TAG_UNSTABLE|TAG_VOLATILE,      .dmg_add= 0.15f,               .chain=true,      .status=EL_LIGHTNING, .color_tint=0xFFEC60FF },
+    [EL_AIR]       = { TAG_LIGHT,                                                     .cd_mul=0.80f, .range_mul=1.20f,                       .color_tint=0xC0E0FFFF },
+    [EL_VOID]      = { TAG_CORROSIVE|TAG_UNSTABLE|TAG_CURSED,         .dmg_add= 0.25f,               .pierces=true,    .lifesteal=true,      .color_tint=0x8030B0FF },
+    [EL_FAE]       = { TAG_HOMING_TAG|TAG_LIGHT,                                                     .homing=true,     .spawn_fairy=true,    .status=EL_FAE, .color_tint=0xF080F0FF },
+    [EL_STEEL]     = { TAG_METALLIC|TAG_HEAVY|TAG_STABLE,             .dmg_add= 0.15f,               .pierces=true,                          .color_tint=0xC0C8D0FF },
+    [EL_DARK]      = { TAG_SHADOW|TAG_CORROSIVE|TAG_CURSED,           .dmg_add= 0.10f,                                 .lifesteal=true,      .status=EL_DARK, .color_tint=0x505060FF },
+    [EL_HOLY]      = { TAG_DIVINE|TAG_STABLE,                         .dmg_add= 0.10f,               .aoe_explode=true, .status=EL_HOLY,     .color_tint=0xFFE890FF },
 };
 _Static_assert(sizeof(ELEM_BASE)/sizeof(ELEM_BASE[0]) == EL_COUNT,
     "ELEM_BASE desynchronise avec EL_COUNT");
+
+/* ---------- COUCHE 1.5 : TAG INTERACTIONS ----------
+ * Mutent active_tags AVANT que les EmergentRules ne s appliquent.
+ *   CANCEL  : clear == require, add == 0     (les deux tags disparaissent)
+ *   CONVERT : clear == require, add != 0     (les deux remplaces par output)
+ *   AMPLIFY : clear == 0,        add != 0     (output ajoute, les deux gardes)
+ *
+ * Pass 1 : tous les CANCEL d abord (pour pas qu un CONVERT vienne
+ * remettre un tag qu un CANCEL voulait supprimer).
+ * Pass 2 : CONVERTs et AMPLIFYs dans l ordre declare.
+ *
+ * Le bool is_cancel ci-dessous discrimine les 2 passes. */
+typedef struct {
+    uint32_t require;
+    uint32_t clear;
+    uint32_t add;
+    bool     is_cancel;
+} TagInteraction;
+
+static const TagInteraction TAG_INTERACTIONS[] = {
+    /* === CANCELs (pass 1) === */
+    /* sacre + maudit -> mutuelle purification */
+    { TAG_DIVINE | TAG_CURSED,         TAG_DIVINE | TAG_CURSED,         0, true  },
+    /* stable + volatile -> annulation ordre/chaos */
+    { TAG_STABLE | TAG_VOLATILE,       TAG_STABLE | TAG_VOLATILE,       0, true  },
+    /* feu fond la glace : burning + frozen mutuellement effaces */
+    { TAG_BURNING | TAG_FROZEN,        TAG_BURNING | TAG_FROZEN,        0, true  },
+
+    /* === CONVERTs (pass 2) === */
+    /* feu + eau -> vapeur (le tag steam pilote l ancienne rule HOT|FLUID) */
+    { TAG_BURNING | TAG_WET,           TAG_BURNING | TAG_WET | TAG_HOT | TAG_FLUID,
+      TAG_STEAM, false },
+    /* eau + structure stable -> glace (creation de TAG_FROZEN) */
+    { TAG_WET | TAG_STABLE,            TAG_WET,
+      TAG_FROZEN, false },
+
+    /* === AMPLIFYs (pass 2) === */
+    /* foudre + eau : electrocution surchargee */
+    { TAG_CONDUCTIVE | TAG_WET,        0,
+      TAG_ELECTROCUTE, false },
+    /* volatile + feu : detonation */
+    { TAG_VOLATILE | TAG_BURNING,      0,
+      TAG_DETONATE, false },
+};
+static const int N_TAG_INTERACTIONS =
+    (int)(sizeof(TAG_INTERACTIONS)/sizeof(TAG_INTERACTIONS[0]));
+
+static uint32_t apply_tag_interactions(uint32_t tags) {
+    /* pass 1 : CANCELs */
+    for (int i = 0; i < N_TAG_INTERACTIONS; i++) {
+        const TagInteraction *t = &TAG_INTERACTIONS[i];
+        if (!t->is_cancel) continue;
+        if ((tags & t->require) == t->require) {
+            tags &= ~t->clear;
+            tags |=  t->add;
+        }
+    }
+    /* pass 2 : CONVERTs + AMPLIFYs */
+    for (int i = 0; i < N_TAG_INTERACTIONS; i++) {
+        const TagInteraction *t = &TAG_INTERACTIONS[i];
+        if (t->is_cancel) continue;
+        if ((tags & t->require) == t->require) {
+            tags &= ~t->clear;
+            tags |=  t->add;
+        }
+    }
+    return tags;
+}
 
 /* ---------- COUCHE 2 : EmergentRule ---------- */
 typedef struct {
@@ -141,7 +232,17 @@ typedef struct {
 } EmergentRule;
 
 static const EmergentRule EMERGENT_RULES[] = {
-    { TAG_HOT|TAG_FLUID,             .dmg_add=-0.10f, .range_mul=1.20f, .aoe_explode=true  },
+    /* === regles sur tags derives (post-interactions) === */
+    /* TAG_STEAM : remplace l ancienne regle HOT|FLUID. La conversion
+     * BURNING+WET -> STEAM la declenche. */
+    { TAG_STEAM,                     .dmg_add=-0.10f, .range_mul=1.30f, .aoe_explode=true  },
+    /* TAG_ELECTROCUTE : foudre + eau, dmg + chain force. */
+    { TAG_ELECTROCUTE,               .dmg_add= 0.30f, .chain=true                          },
+    /* TAG_DETONATE : foudre/instable + feu, dmg massif + extra_proj. */
+    { TAG_DETONATE,                  .dmg_add= 0.40f, .extra_proj=2,    .aoe_explode=true  },
+    /* TAG_FROZEN (issu de WET+STABLE) : pierce + dmg supplementaire. */
+    { TAG_FROZEN,                    .dmg_add= 0.20f, .pierces=true                        },
+    /* === regles classiques (inchangees) === */
     { TAG_CONDUCTIVE|TAG_UNSTABLE,   .dmg_add= 0.20f, .chain=true                          },
     { TAG_HEAVY|TAG_HOT,             .dmg_add= 0.25f, .cd_mul=1.20f                        },
     { TAG_LIGHT|TAG_HOT,             .extra_proj=2,   .range_mul=1.10f                     },
@@ -422,6 +523,9 @@ ComboFx combo_compute(int mask) {
         }
         c.color         = b->color_tint;
     }
+    /* Couche 1.5 : tag interactions (annulation / conversion / amplif).
+     * Mutent active_tags : les regles emergentes voient le bitmask final. */
+    active_tags = apply_tag_interactions(active_tags);
     /* Couche 2 */
     for (int i = 0; i < N_EMERGENT; i++) {
         const EmergentRule *r = &EMERGENT_RULES[i];
