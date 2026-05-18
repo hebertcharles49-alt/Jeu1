@@ -37,7 +37,7 @@ static void poll_input(Game *g, bool *quit) {
             }
             if (sc == SDL_SCANCODE_ESCAPE) {
                 switch (g->state) {
-                    case GS_RUN:        g->state = GS_HUB; g->hub_sub_open = 0; break;
+                    case GS_RUN:        g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
                     case GS_HUB:
                         /* ESC dans un sous-panneau : ferme le panneau,
                          * sinon retour au titre. */
@@ -51,8 +51,8 @@ static void poll_input(Game *g, bool *quit) {
                         settings_write(&g->settings);
                         g->state = g->opt_return ? g->opt_return : GS_TITLE;
                         break;
-                    case GS_CHOOSE_HERO:g->state = GS_HUB; g->hub_sub_open = 0; break;
-                    case GS_CODEX:      g->state = GS_HUB; g->hub_sub_open = 0; break;
+                    case GS_CHOOSE_HERO:g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
+                    case GS_CODEX:      g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
                     case GS_INVENTORY:  g->state = g->state_prev; break;
                     case GS_LEVELUP:    /* pas d'echap */ break;
                     case GS_SHOP:       game_next_floor(g); break;
@@ -336,6 +336,8 @@ void game_to_hub(Game *g) {
     g->meta.lifetime_legendaries += g->run_legendary_drops;
     save_write(&g->meta);
     g->state = GS_HUB;
+    g->hub_sub_open = 0;
+    hub_init(g);
 }
 
 void game_start_new_run(Game *g) {
@@ -571,53 +573,115 @@ bool forge_buy(Game *g, WeaponKind k) {
     return true;
 }
 
-/* Coords des batiments du hub. Doivent matcher render_menus.c HUB_BLDGS. */
-static const int HUB_BLDG_RECTS[5][5] = {
-    /* x, y, w, h, sub_id */
-    {  50,  74, 110, 78,  1 },   /* TEMPLE */
-    { 270,  60, 100, 96,  0 },   /* PORTE DU DONJON */
-    { 480,  74, 110, 78, -1 },   /* TAVERNE */
-    {  50, 178, 110, 78,  2 },   /* FORGE */
-    { 480, 178, 110, 78,  3 },   /* LICHE */
+/* === HUB walkable (style Hades) ============================
+ * GS_HUB rend la meme world-pipeline que GS_RUN mais avec :
+ *   - un donjon special : 1 grande salle vide, pas d ennemis
+ *   - 5 NPC-batiments fixes
+ *   - update_player pour la marche, pas d update_weapons/enemies
+ *   - check de proximite + prompt [E] pour interagir
+ *
+ * sub_id : 0 = DONJON (start run), -1 = TAVERNE (choose_hero),
+ *          1 = TEMPLE, 2 = FORGE, 3 = LICHE (stub).
+ * ============================================================ */
+struct HubBuilding {
+    int   sub_id;
+    float x, y;          /* world pixel coords */
+    float r;             /* rayon d interaction */
+    const char *name;
 };
 
-static void hub_enter_state_for_bldg(Game *g, int sub_id) {
-    switch (sub_id) {
-        case  0:  /* PORTE : direct sur choose_hero */
-            g->state = GS_CHOOSE_HERO;
-            break;
-        case -1:  /* TAVERNE : meme cible que la porte mais thematique */
-            g->state = GS_CHOOSE_HERO;
-            break;
-        case  1:  /* TEMPLE */
-            g->hub_sub_open = 1;
-            g->hub_sub_cursor = 0;
-            break;
-        case  2:  /* FORGE */
-            g->hub_sub_open = 2;
-            g->hub_sub_cursor = 0;
-            break;
-        case  3:  /* LICHE -- stub */
-            g->hub_sub_open = 3;
-            g->hub_sub_cursor = 0;
-            break;
+#define HUB_ROOM_W 24
+#define HUB_ROOM_H 14
+#define HUB_BLD_R  32.f
+
+static const HubBuilding HUB_BUILDINGS[5] = {
+    /* coordonnees en TILE * TILE -- positions placees apres hub_init carve */
+    {  1,  (28 - HUB_ROOM_W/2 +  3) * TILE, (28 - HUB_ROOM_H/2 + 2) * TILE, HUB_BLD_R, "TEMPLE"  },
+    {  0,  (28)                     * TILE, (28 - HUB_ROOM_H/2 + 1) * TILE, HUB_BLD_R, "DONJON"  },
+    { -1,  (28 + HUB_ROOM_W/2 -  3) * TILE, (28 - HUB_ROOM_H/2 + 2) * TILE, HUB_BLD_R, "TAVERNE" },
+    {  2,  (28 - HUB_ROOM_W/2 +  4) * TILE, (28 + HUB_ROOM_H/2 - 2) * TILE, HUB_BLD_R, "FORGE"   },
+    {  3,  (28 + HUB_ROOM_W/2 -  4) * TILE, (28 + HUB_ROOM_H/2 - 2) * TILE, HUB_BLD_R, "LICHE"   },
+};
+
+int hub_building_count(void) { return 5; }
+const HubBuilding *hub_building_get(int i) {
+    if (i < 0 || i >= 5) return NULL;
+    return &HUB_BUILDINGS[i];
+}
+float        hub_building_x      (const HubBuilding *b) { return b ? b->x : 0.f; }
+float        hub_building_y      (const HubBuilding *b) { return b ? b->y : 0.f; }
+float        hub_building_r      (const HubBuilding *b) { return b ? b->r : 0.f; }
+const char  *hub_building_name   (const HubBuilding *b) { return b ? b->name : ""; }
+int          hub_building_sub_id (const HubBuilding *b) { return b ? b->sub_id : -2; }
+
+void hub_init(Game *g) {
+    /* Reset des pools : pas d ennemis / projectiles / surfaces / pickups
+     * dans le cimetiere. On garde les charges run et le player. */
+    memset(g->enemies, 0, sizeof(g->enemies));
+    memset(g->projectiles, 0, sizeof(g->projectiles));
+    memset(g->pickups, 0, sizeof(g->pickups));
+    memset(g->surfaces, 0, sizeof(g->surfaces));
+    memset(g->fairies, 0, sizeof(g->fairies));
+    g->enemy_alive_count = 0;
+    g->portal_spawned = false;
+
+    /* Donjon : une seule grande salle centree. */
+    int prev_gen = g->dungeon.gen_id;
+    memset(&g->dungeon, 0, sizeof(g->dungeon));
+    g->dungeon.gen_id = prev_gen + 1;
+    g->dungeon.level_index = 0;       /* 0 = hub (non joue) */
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++)
+            g->dungeon.tiles[y][x] = T_WALL;
+    int rx = 28 - HUB_ROOM_W / 2;
+    int ry = 28 - HUB_ROOM_H / 2;
+    for (int y = ry; y < ry + HUB_ROOM_H; y++)
+        for (int x = rx; x < rx + HUB_ROOM_W; x++)
+            g->dungeon.tiles[y][x] = T_FLOOR;
+    /* torches aux coins pour l ambiance */
+    g->dungeon.tiles[ry + 1][rx + 1] = T_TORCH;
+    g->dungeon.tiles[ry + 1][rx + HUB_ROOM_W - 2] = T_TORCH;
+    g->dungeon.tiles[ry + HUB_ROOM_H - 2][rx + 1] = T_TORCH;
+    g->dungeon.tiles[ry + HUB_ROOM_H - 2][rx + HUB_ROOM_W - 2] = T_TORCH;
+    /* runes sous la porte du donjon (signale l exit) */
+    g->dungeon.tiles[ry + 1][rx + HUB_ROOM_W / 2] = T_RUNE;
+    g->dungeon.spawn_x = 28;
+    g->dungeon.spawn_y = 28;
+    g->dungeon.rooms[0].x = rx; g->dungeon.rooms[0].y = ry;
+    g->dungeon.rooms[0].w = HUB_ROOM_W; g->dungeon.rooms[0].h = HUB_ROOM_H;
+    g->dungeon.rooms[0].cleared = true;
+    g->dungeon.rooms[0].visited = true;
+    g->dungeon.rooms[0].enemies_to_spawn = 0;
+    g->dungeon.rooms[0].is_boss_room = false;
+    g->dungeon.room_count = 1;
+
+    /* place le joueur au centre, regarde le sud (vers la porte) */
+    g->player.x = g->dungeon.spawn_x * TILE + TILE / 2;
+    g->player.y = (28 + HUB_ROOM_H / 2 - 3) * TILE;
+    g->player.vx = g->player.vy = 0.f;
+    g->player.aim_x = g->player.x;
+    g->player.aim_y = g->player.y - 30.f;
+    g->player.dash_t = 0.f;
+    g->player.invuln_t = 0.f;
+    g->player.anim_t = 0.f;
+    /* heros par defaut si pas encore choisi */
+    if (g->player.hero < 0 || g->player.hero >= HERO_COUNT)
+        g->player.hero = HERO_GUERRIER;
+    if (g->player.maxhp <= 0.f) {
+        g->player.maxhp = 100.f;
+        g->player.hp = 100.f;
+        g->player.speed = 110.f;
+        g->player.r = 6.f;
     }
+    /* boss_dead pour ne pas declencher l etage suivant accidentellement */
+    g->dungeon.boss_dead = false;
 }
 
 static void update_hub(Game *g) {
-    /* sous-panneau ouvert : gere son input + ESC bascule au hub. */
+    /* sous-panneau ouvert : input dedie + ESC ferme. */
     if (g->hub_sub_open != 0) {
-        if (g->keys[SDL_SCANCODE_ESCAPE] && !g->keys_prev[SDL_SCANCODE_ESCAPE]) {
-            g->hub_sub_open = 0;
-            return;
-        }
-        /* TEMPLE : 4 stats grille 2x2 */
         if (g->hub_sub_open == 1) {
-            if (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
-                g->hub_sub_cursor = (g->hub_sub_cursor + 3) % 4;
-            if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
-                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % 4;
-            /* hover souris : recalcule la grille 2x2 alignee sur render */
+            /* TEMPLE -- 4 stats grille 2x2 */
             int w = 280, h = 220;
             int x = INTERNAL_W / 2 - w / 2;
             int y = INTERNAL_H / 2 - h / 2;
@@ -632,17 +696,16 @@ static void update_hub(Game *g) {
                     if (mouse_clicked(g)) hub_perm_apply(g, i);
                 }
             }
-            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+            if ((g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
+             || (g->keys[SDL_SCANCODE_A]      && !g->keys_prev[SDL_SCANCODE_A]))
+                g->hub_sub_cursor = (g->hub_sub_cursor + 3) % 4;
+            if ((g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
+             || (g->keys[SDL_SCANCODE_D]      && !g->keys_prev[SDL_SCANCODE_D]))
+                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % 4;
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]))
                 hub_perm_apply(g, g->hub_sub_cursor);
-            }
-        }
-        /* FORGE : liste de 6 armes (W_FISTS..W_AXE) */
-        else if (g->hub_sub_open == 2) {
-            if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
-                g->hub_sub_cursor = (g->hub_sub_cursor + W_COUNT - 1) % W_COUNT;
-            if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
-                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % W_COUNT;
+        } else if (g->hub_sub_open == 2) {
+            /* FORGE -- 6 armes */
             int w = 280, h = 220;
             int x = INTERNAL_W / 2 - w / 2;
             int y = INTERNAL_H / 2 - h / 2;
@@ -654,52 +717,54 @@ static void update_hub(Game *g) {
                     if (mouse_clicked(g)) forge_buy(g, (WeaponKind)k);
                 }
             }
-            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+            if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
+                g->hub_sub_cursor = (g->hub_sub_cursor + W_COUNT - 1) % W_COUNT;
+            if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
+                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % W_COUNT;
+            if (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN])
                 forge_buy(g, (WeaponKind)g->hub_sub_cursor);
-            }
         }
-        /* LICHE : stub, ESC pour fermer */
         return;
     }
 
-    /* Hub principal : navigation par souris sur les 5 batiments. */
-    int mx = g->mouse_x, my = g->mouse_y;
-    if (mouse_clicked(g)) {
-        for (int i = 0; i < 5; i++) {
-            const int *r = HUB_BLDG_RECTS[i];
-            if (mx >= r[0] && mx < r[0] + r[2] &&
-                my >= r[1] - 6 && my < r[1] + r[3] + 6) {
-                hub_enter_state_for_bldg(g, r[4]);
-                break;
-            }
+    /* Pas de sous-panneau : on joue le hub walkable. */
+    update_player(g);
+    /* Cherche un batiment dans le rayon. On stocke le sub_id sur
+     * un static local (utilise par render_world pour le prompt). */
+    int near = -1;
+    for (int i = 0; i < 5; i++) {
+        const HubBuilding *b = &HUB_BUILDINGS[i];
+        float dx = b->x - g->player.x;
+        float dy = b->y - g->player.y;
+        if (dx * dx + dy * dy < b->r * b->r) { near = i; break; }
+    }
+    /* expose au rendu via un champ Game pour le prompt overlay. */
+    g->hub_cursor = near;
+    /* E ou interact : ouvre le panneau ou demarre la run. */
+    SDL_Scancode kinter = g->settings.keys[BIND_INTERACT];
+    if (kinter == SDL_SCANCODE_UNKNOWN) kinter = SDL_SCANCODE_E;
+    bool press_e = (g->keys[kinter] && !g->keys_prev[kinter]);
+    if (press_e && near >= 0) {
+        int sid = HUB_BUILDINGS[near].sub_id;
+        switch (sid) {
+            case  0: g->state = GS_CHOOSE_HERO; break;          /* DONJON  */
+            case -1: g->state = GS_CHOOSE_HERO; break;          /* TAVERNE */
+            case  1: g->hub_sub_open = 1; g->hub_sub_cursor = 0; break;
+            case  2: g->hub_sub_open = 2; g->hub_sub_cursor = 0; break;
+            case  3: g->hub_sub_open = 3; g->hub_sub_cursor = 0; break;
         }
     }
-
-    /* 3 boutons bas */
-    int by = INTERNAL_H - 22;
-    int bw = 88, bh = 14;
-    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
-    if (mouse_in_rect(g, gx, by, bw, bh) && mouse_clicked(g)) {
-        g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
-        g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
-    }
-    if (mouse_in_rect(g, gx + bw + 6, by, bw, bh) && mouse_clicked(g)) {
-        g->state = GS_CODEX;
-        g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
-    }
-    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g))
-        g->state = GS_HELP;
-
-    /* raccourcis clavier */
-    if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R])
-        g->state = GS_CHOOSE_HERO;
-    if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H])
-        g->state = GS_HELP;
+    /* raccourcis */
     if (g->keys[SDL_SCANCODE_K] && !g->keys_prev[SDL_SCANCODE_K]) {
         g->state = GS_CODEX;
         g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
     }
+    if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
+        g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
+        g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
+    }
+    if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H])
+        g->state = GS_HELP;
 }
 
 static void update_choose_hero(Game *g) {
@@ -929,7 +994,7 @@ void game_run(Game *g) {
                 g->state = GS_HELP;
             if (mouse_in_rect(g, INTERNAL_W/2 - 100, yD, 200, 12) && mouse_clicked(g))
                 quit = true;
-            if (start) g->state = GS_HUB;
+            if (start) { g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); }
             if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) g->state = GS_HELP;
             if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
                 g->opt_return = GS_TITLE;
@@ -1054,6 +1119,7 @@ void game_run(Game *g) {
            est dessinee en passe ortho par-dessus. */
         bool show_world = (g->state == GS_RUN || g->state == GS_LEVELUP ||
                            g->state == GS_DEAD || g->state == GS_VICTORY ||
+                           g->state == GS_HUB ||
                            (g->state == GS_INVENTORY &&
                               (g->state_prev == GS_RUN || g->state_prev == GS_LEVELUP)));
         if (show_world) {

@@ -20,62 +20,6 @@ extern int  hub_perm_cost(int kind);
  *  Cf game.h hub_sub_open pour les sous-panneaux.
  * ============================================================ */
 
-/* coordonnees des batiments. Centrees pour la composition. */
-typedef struct { int x, y, w, h; const char *name; const char *sub; int sub_id; } HubBldg;
-
-static HubBldg HUB_BLDGS[5] = {
-    /* TEMPLE (sub 1)   : haut-gauche  */
-    {  50,  74, 110, 78, "TEMPLE",  "Renforcement",         1 },
-    /* PORTE DU DONJON  : centre haut. sub_id = 0 -> start run */
-    { 270,  60, 100, 96, "DONJON",  "Lancer la course",     0 },
-    /* TAVERNE (heros)  : haut-droite */
-    { 480,  74, 110, 78, "TAVERNE", "Recruter un heros",   -1 },
-    /* FORGE (sub 2)    : bas-gauche  */
-    {  50, 178, 110, 78, "FORGE",   "Armer le heros",       2 },
-    /* LICHE (sub 3)    : bas-droite  */
-    { 480, 178, 110, 78, "LICHE",   "Modificateurs",        3 },
-};
-
-static void draw_building(Game *g, const HubBldg *b, bool hover, bool locked) {
-    GfxCtx *gc = g->renderer;
-    /* base : box plus sombre en bas (sol), corps clair au-dessus */
-    uint32_t body = locked ? 0x303038FF : 0x402820FF;
-    uint32_t roof = locked ? 0x202028FF : 0x301818FF;
-    uint32_t door = 0x181014FF;
-    uint32_t outl = hover ? 0xFFE080FF : 0x60504AFF;
-    if (locked) outl = 0x505058FF;
-    /* corps */
-    fill_rect(gc, b->x, b->y + 20, b->w, b->h - 20, body);
-    /* toit (rect plus haut + plus etroit) */
-    fill_rect(gc, b->x + 8, b->y, b->w - 16, 22, roof);
-    fill_rect(gc, b->x + 14, b->y - 6, b->w - 28, 8, roof);
-    /* porte */
-    int dx = b->x + b->w / 2 - 8;
-    int dy = b->y + b->h - 26;
-    fill_rect(gc, dx, dy, 16, 24, door);
-    /* fenetres */
-    fill_rect(gc, b->x + 14, b->y + 36, 12, 10, 0xFFC060A0);
-    fill_rect(gc, b->x + b->w - 26, b->y + 36, 12, 10, 0xFFC060A0);
-    /* outline */
-    rect_outline(gc, b->x, b->y - 6, b->w, b->h + 6, outl);
-    /* enseigne : nom centre au-dessus de la porte */
-    int tw = text_width(b->name);
-    text_draw(gc, b->x + b->w / 2 - tw / 2 + 1,
-              b->y + b->h - 39 + 1, b->name, 0x000000FF);
-    text_draw(gc, b->x + b->w / 2 - tw / 2,
-              b->y + b->h - 39, b->name, hover ? 0xFFFF80FF : 0xFFE0A0FF);
-    /* sous-titre sous le batiment */
-    if (b->sub) {
-        int sw = text_width(b->sub);
-        text_draw(gc, b->x + b->w / 2 - sw / 2, b->y + b->h + 2,
-                  b->sub, locked ? 0x606060FF : 0x80C0FFFF);
-    }
-    if (locked) {
-        text_draw(gc, b->x + b->w / 2 - text_width("(bientot)") / 2,
-                  b->y + b->h + 12, "(bientot)", 0x808080FF);
-    }
-}
-
 /* sub-panneau commun : fond translucide + cadre. Renvoie l origine x/y. */
 static void sub_panel_bg(Game *g, int *out_x, int *out_y, int *out_w, int *out_h,
                           const char *title)
@@ -203,74 +147,83 @@ static void render_hub_liche(Game *g) {
               y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
+/* HUB walkable : le 3D est rendu via render_world(), donc ici on ne
+ * dessine plus que le HUD overlay (eclats / compteurs / raccourcis)
+ * et le sous-panneau ouvert le cas echeant. */
 void render_hub(Game *g) {
-    /* fond degrade sombre type cimetiere : violet sombre en haut,
-     * brun terre en bas. Plus oppressant qu un degrade ambre. */
-    for (int yy = 0; yy < INTERNAL_H; yy++) {
-        float t = (float)yy / (float)INTERNAL_H;
-        int r = (int)(0x10 + t * 0x20);
-        int gr = (int)(0x0A + t * 0x14);
-        int b = (int)(0x18 + (1.f - t) * 0x10);
-        fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
-                  (uint32_t)((r << 24) | (gr << 16) | (b << 8) | 0xFF));
-    }
-    /* etoiles + brouillard en bas */
-    for (int i = 0; i < 50; i++) {
-        int x = (i * 91 + (int)(g->time * 6)) % INTERNAL_W;
-        int y = (i * 37) % 80;
-        fill_rect(g->renderer, x, y, 1, 1, 0xC0C0FF80);
-    }
-    for (int i = 0; i < 40; i++) {
-        int x = (i * 73 + (int)(g->time * 18)) % INTERNAL_W;
-        int y = INTERNAL_H - 30 + (i % 20);
-        fill_rect(g->renderer, x, y, 2, 1, 0x40304060);
-    }
-    /* sol */
-    fill_rect(g->renderer, 0, INTERNAL_H - 40, INTERNAL_W, 40, 0x180A14FF);
-    /* tombes (silhouettes derriere les batiments) */
-    for (int i = 0; i < 8; i++) {
-        int gx = 30 + i * 80;
-        int gy = INTERNAL_H - 56;
-        fill_rect(g->renderer, gx, gy, 14, 18, 0x251820FF);
-        fill_rect(g->renderer, gx + 2, gy - 4, 10, 6, 0x251820FF);
+    GfxCtx *gc = g->renderer;
+
+    /* etiquettes 3D au-dessus de chaque batiment, projetees a l ecran. */
+    int nbld = hub_building_count();
+    for (int i = 0; i < nbld; i++) {
+        const HubBuilding *b = hub_building_get(i);
+        if (!b) continue;
+        v3 head = v3_make(hub_building_x(b) / (float)TILE,
+                          2.6f,
+                          hub_building_y(b) / (float)TILE);
+        int sx, sy;
+        if (!world_to_screen(gc, head, &sx, &sy)) continue;
+        const char *nm = hub_building_name(b);
+        int tw = text_width(nm);
+        int near_i = (i == g->hub_cursor);
+        uint32_t col = near_i ? 0xFFFF80FF : 0xFFE0A0FF;
+        /* fond sombre */
+        gfx_set_blend(gc, true);
+        fill_rect(gc, sx - tw/2 - 3, sy - 2, tw + 6, 10, 0x000000B0);
+        gfx_set_blend(gc, false);
+        text_draw(gc, sx - tw/2 + 1, sy + 1 - 0, nm, 0x000000FF);
+        text_draw(gc, sx - tw/2,     sy,         nm, col);
     }
 
-    /* titre */
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE CIMETIERE")/2, 6,
-              "LE CIMETIERE", 0xFFE080FF);
-    /* header : eclats + counters */
-    text_drawf(g->renderer, 8, 22, 0xFFD040FF, "* %d ECLATS", g->meta.shards);
-    text_drawf(g->renderer, INTERNAL_W - 220, 22, 0xCCCCCCFF,
+    /* HUD top : eclats + compteurs */
+    fill_rect(gc, 0, 0, INTERNAL_W, 14, 0x000000A0);
+    text_drawf(gc, 8, 4, 0xFFD040FF, "* %d ECLATS", g->meta.shards);
+    text_drawf(gc, INTERNAL_W - 220, 4, 0xCCCCCCFF,
                "Courses %d   Meilleur %d/%d   Victoires %d",
                g->meta.total_runs, g->meta.best_floor, MAX_FLOORS,
                g->meta.victories);
+    /* titre discret au centre */
+    text_draw(gc, INTERNAL_W/2 - text_width("LE CIMETIERE")/2, 4,
+              "LE CIMETIERE", 0xFFE080FF);
 
-    /* 5 batiments */
-    int mx = g->mouse_x, my = g->mouse_y;
-    for (int i = 0; i < 5; i++) {
-        const HubBldg *b = &HUB_BLDGS[i];
-        bool hover = (mx >= b->x && mx < b->x + b->w &&
-                      my >= b->y - 6 && my < b->y + b->h + 6);
-        bool locked = (b->sub_id == 3);   /* LICHE stub */
-        draw_building(g, b, hover, locked);
+    /* raccourcis bas */
+    int by = INTERNAL_H - 12;
+    fill_rect(gc, 0, by - 2, INTERNAL_W, 14, 0x000000A0);
+    const char *labels[3] = { "[O] OPTIONS", "[K] CODEX", "[H] AIDE" };
+    int total_w = 0;
+    for (int i = 0; i < 3; i++) total_w += text_width(labels[i]) + 16;
+    int x = INTERNAL_W/2 - total_w/2;
+    for (int i = 0; i < 3; i++) {
+        text_draw(gc, x, by, labels[i], 0xCCCCCCFF);
+        x += text_width(labels[i]) + 16;
     }
 
-    /* hint sous la porte du donjon */
-    text_draw(g->renderer, INTERNAL_W / 2 - text_width("[R] PARTIR EN COURSE") / 2,
-              156, "[R] PARTIR EN COURSE", 0x80FF80FF);
-
-    /* 3 boutons bas : OPTIONS / CODEX / AIDE (DEBUTER passe par la porte) */
-    int by = INTERNAL_H - 22;
-    int bw = 88, bh = 14;
-    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
-    const char *labels[3] = { "[O] OPTIONS", "[K] CODEX", "[H] AIDE" };
-    for (int i = 0; i < 3; i++) {
-        int bx = gx + i * (bw + 6);
-        bool hov = mouse_in_rect(g, bx, by, bw, bh);
-        fill_rect(g->renderer, bx, by, bw, bh, hov ? 0x303060FF : 0x18181EFF);
-        rect_outline(g->renderer, bx, by, bw, bh, hov ? 0xFFFF80FF : 0x404048FF);
-        text_draw(g->renderer, bx + (bw - text_width(labels[i])) / 2, by + 4,
-                  labels[i], hov ? 0xFFFF80FF : 0xCCCCCCFF);
+    /* prompt [E] interaction : le nom du batiment proche + action */
+    int near = g->hub_cursor;
+    int n = hub_building_count();
+    if (g->hub_sub_open == 0 && near >= 0 && near < n) {
+        const HubBuilding *b = hub_building_get(near);
+        if (b) {
+            const char *act;
+            int sid = hub_building_sub_id(b);
+            switch (sid) {
+                case  0: act = "ENTRER DANS LE DONJON"; break;
+                case -1: act = "RECRUTER UN HEROS";     break;
+                case  1: act = "AMELIORATIONS";         break;
+                case  2: act = "FORGER UNE ARME";       break;
+                case  3: act = "MODIFICATEURS";         break;
+                default: act = "INTERAGIR";             break;
+            }
+            char buf[96];
+            snprintf(buf, sizeof(buf), "[E] %s -- %s",
+                     hub_building_name(b), act);
+            int tw = text_width(buf);
+            int px = INTERNAL_W/2 - tw/2;
+            int py = INTERNAL_H - 30;
+            fill_rect(gc, px - 4, py - 2, tw + 8, 11, 0x000000C0);
+            rect_outline(gc, px - 4, py - 2, tw + 8, 11, 0xFFE080FF);
+            text_draw(gc, px, py, buf, 0xFFFF80FF);
+        }
     }
 
     /* sous-panneau actif par-dessus */

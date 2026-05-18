@@ -756,6 +756,21 @@ void        meta_item_mark(MetaSave *m, EquipSlot slot, int sub_kind, Rarity r);
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);
 bool  tile_solid(TileKind t);
+/* Construit la scene HUB (Cimetiere walkable) : une grande salle
+ * unique avec 5 batiments en NPC. Cf hub_buildings[] dans main.c.
+ * Reset les pools (enemies/pickups/projectiles) car le hub n'en a
+ * pas. Place le joueur au centre. */
+void  hub_init(Game *g);
+/* Accesseurs sur la table HUB_BUILDINGS de main.c (utilisee par
+ * render_world.c pour dessiner les batiments en 3D). */
+typedef struct HubBuilding HubBuilding;
+int                   hub_building_count(void);
+const HubBuilding    *hub_building_get(int i);
+float                 hub_building_x(const HubBuilding *b);
+float                 hub_building_y(const HubBuilding *b);
+float                 hub_building_r(const HubBuilding *b);
+const char           *hub_building_name(const HubBuilding *b);
+int                   hub_building_sub_id(const HubBuilding *b);
 /* Salle debug (options.debug_room) : carve une chambre supplementaire reliee
  * a la salle de spawn et la remplit d'un exemplaire de chaque arme,
  * element et equipement legendaire. Idempotent : ne fait rien si la salle

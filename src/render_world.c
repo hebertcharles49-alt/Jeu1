@@ -1468,6 +1468,76 @@ void render_world(Game *g) {
         draw_projectile_3d(g, pr);
     }
     draw_particles_3d(g);
+
+    /* HUB walkable : dessine les 5 batiments en 3D (boxes) lorsque le
+     * joueur deambule dans le cimetiere. */
+    if (g->state == GS_HUB) {
+        int n = hub_building_count();
+        for (int i = 0; i < n; i++) {
+            const HubBuilding *b = hub_building_get(i);
+            if (!b) continue;
+            float bx = hub_building_x(b) / (float)TILE;
+            float bz = hub_building_y(b) / (float)TILE;
+            int sid = hub_building_sub_id(b);
+            /* couleur par batiment */
+            float cr = 0.45f, cg = 0.30f, cb = 0.22f;
+            float rr = 0.30f, rg = 0.15f, rb = 0.18f;
+            switch (sid) {
+                case  0: /* DONJON : porte sombre / arche */
+                    cr = 0.20f; cg = 0.18f; cb = 0.25f;
+                    rr = 0.10f; rg = 0.08f; rb = 0.14f;
+                    break;
+                case -1: /* TAVERNE : bois chaud */
+                    cr = 0.55f; cg = 0.32f; cb = 0.18f;
+                    rr = 0.40f; rg = 0.20f; rb = 0.12f;
+                    break;
+                case  1: /* TEMPLE : pierre claire */
+                    cr = 0.62f; cg = 0.58f; cb = 0.50f;
+                    rr = 0.30f; rg = 0.28f; rb = 0.40f;
+                    break;
+                case  2: /* FORGE : fer/brique */
+                    cr = 0.42f; cg = 0.24f; cb = 0.20f;
+                    rr = 0.20f; rg = 0.12f; rb = 0.10f;
+                    break;
+                case  3: /* LICHE : violet froid */
+                    cr = 0.28f; cg = 0.22f; cb = 0.42f;
+                    rr = 0.18f; rg = 0.14f; rb = 0.28f;
+                    break;
+            }
+            if (sid == 0) {
+                /* DONJON : grande arche, deux piliers + linteau */
+                gfx_box_draw(gc, v3_make(bx - 0.7f, 0.9f, bz),
+                             v3_make(0.4f, 1.8f, 0.6f), cr, cg, cb);
+                gfx_box_draw(gc, v3_make(bx + 0.7f, 0.9f, bz),
+                             v3_make(0.4f, 1.8f, 0.6f), cr, cg, cb);
+                gfx_box_draw(gc, v3_make(bx, 1.9f, bz),
+                             v3_make(1.8f, 0.3f, 0.6f), rr, rg, rb);
+                /* haut symbolique : pierre tombale en V */
+                gfx_box_draw(gc, v3_make(bx, 2.25f, bz),
+                             v3_make(0.5f, 0.4f, 0.45f), rr, rg, rb);
+            } else {
+                /* maisonnette : socle + corps + toit (pyramide bas/haut)  */
+                gfx_box_draw(gc, v3_make(bx, 0.10f, bz),
+                             v3_make(1.7f, 0.20f, 1.7f), rr, rg, rb);
+                gfx_box_draw(gc, v3_make(bx, 0.75f, bz),
+                             v3_make(1.5f, 1.20f, 1.5f), cr, cg, cb);
+                gfx_box_draw(gc, v3_make(bx, 1.55f, bz),
+                             v3_make(1.7f, 0.20f, 1.7f), rr, rg, rb);
+                gfx_box_draw(gc, v3_make(bx, 1.80f, bz),
+                             v3_make(1.2f, 0.25f, 1.2f), rr, rg, rb);
+                gfx_box_draw(gc, v3_make(bx, 2.05f, bz),
+                             v3_make(0.7f, 0.20f, 0.7f), rr, rg, rb);
+                /* porte sombre */
+                gfx_box_draw(gc, v3_make(bx, 0.45f, bz - 0.74f),
+                             v3_make(0.40f, 0.60f, 0.04f), 0.08f, 0.06f, 0.05f);
+                /* lanternes : 2 petits cubes lumineux aux coins avant */
+                gfx_box_draw(gc, v3_make(bx - 0.65f, 1.05f, bz - 0.7f),
+                             v3_make(0.10f, 0.10f, 0.10f), 1.0f, 0.75f, 0.30f);
+                gfx_box_draw(gc, v3_make(bx + 0.65f, 1.05f, bz - 0.7f),
+                             v3_make(0.10f, 0.10f, 0.10f), 1.0f, 0.75f, 0.30f);
+            }
+        }
+    }
 }
 
 /* HP bars + names + dmg numbers : passe UI (apres gfx_ui_begin).
