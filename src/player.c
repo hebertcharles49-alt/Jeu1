@@ -13,9 +13,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void player_take_damage(Game *g, float dmg) {
+void player_take_damage_from(Game *g, float dmg, float srcx, float srcy) {
     Player *p = &g->player;
     if (p->invuln_t > 0.f || p->dash_t > 0.f) return;
+
+    /* direction d impact : depuis la source vers le joueur. Si la source
+     * est sur le joueur (DoT), on garde la direction precedente. */
+    float dxp = p->x - srcx, dyp = p->y - srcy;
+    float dl = sqrtf(dxp * dxp + dyp * dyp);
+    float dirx, diry;
+    if (dl > 0.5f) { dirx = dxp / dl; diry = dyp / dl; }
+    else           { dirx = p->hit_dir_x; diry = p->hit_dir_y;
+                     if (dirx == 0.f && diry == 0.f) { dirx = 0.f; diry = 1.f; } }
+
     if (p->dodge > 0.f && (rand() / (float)RAND_MAX) < p->dodge) {
         dmgnum_spawn(g, p->x, p->y, 0, 0xC0FFFFFF, false);
         for (int i = 0; i < 8; i++) {
@@ -23,8 +33,8 @@ void player_take_damage(Game *g, float dmg) {
             particle_spawn_kind(g, p->x, p->y, cosf(a) * 80, sinf(a) * 80,
                                 0.3f, 0xFFFFFFFF, 1.5f, 0);
         }
-        /* u_dodge_attack : une esquive reussie declenche une attaque
-         * gratuite de l arme active (reset le cooldown). */
+        /* feedback audio leger : un swish aigu et discret */
+        sfx_play_ex(g, SFX_SWING, 1.6f, 0.7f);
         if (p->u_dodge_attack) {
             p->weapons[p->active_weapon].cooldown = 0.f;
         }
@@ -71,12 +81,74 @@ void player_take_damage(Game *g, float dmg) {
         p->r += 1.5f;
         if (p->r > p->r_base) p->r = p->r_base;
     }
-    g->shake_t = 0.30f; g->shake_mag = 5.f;
-    g->hitstop_t = 0.06f;
-    g->flash_t = 0.20f;
-    sfx_play(g, SFX_PLAYER_HURT);
+
+    /* Polish (shake/hitstop/flash/knockback) scale par % maxhp, puis
+     * boost a faible PV pour amplifier le sens du danger. */
+    float severity = real / (p->maxhp > 1.f ? p->maxhp : 1.f);
+    if (severity < 0.f) severity = 0.f;
+    if (severity > 1.f) severity = 1.f;
+    float danger = 1.f - (p->hp / (p->maxhp > 1.f ? p->maxhp : 1.f));
+    if (danger < 0.f) danger = 0.f;
+    if (danger > 1.f) danger = 1.f;
+    float intensity = severity * (1.f + danger * 0.6f);
+    if (intensity > 1.6f) intensity = 1.6f;
+
+    g->shake_t   = 0.22f + intensity * 0.18f;
+    g->shake_mag = 4.f   + intensity * 9.f;
+    g->hitstop_t = 0.05f + intensity * 0.13f;
+    g->flash_t   = 0.20f + intensity * 0.18f;
+
+    /* knockback. aabb_solid clampera contre les murs au prochain update. */
+    float kb = 4.f + intensity * 14.f;
+    p->x += dirx * kb;
+    p->y += diry * kb;
+    p->hit_t = 0.45f + intensity * 0.25f;
+    p->hit_dir_x = dirx;
+    p->hit_dir_y = diry;
+
+    /* sparks rouges + dust dans la direction d impact, count scale severite. */
+    int nspark = 10 + (int)(intensity * 12.f);
+    for (int i = 0; i < nspark; i++) {
+        float spread = (rand() / (float)RAND_MAX - 0.5f) * 2.0f;     /* +/-1 rad */
+        float sa = atan2f(diry, dirx) + spread;
+        float sp = 90.f + (rand() / (float)RAND_MAX) * 130.f;
+        uint32_t col = (rand() % 3 == 0) ? 0xFFE040FF : 0xFF4030FF;
+        particle_spawn_kind(g,
+            p->x - dirx * 4.f, p->y - diry * 4.f,
+            cosf(sa) * sp, sinf(sa) * sp,
+            0.45f + (rand() / (float)RAND_MAX) * 0.25f,
+            col,
+            1.6f + (rand() / (float)RAND_MAX) * 1.4f, 0);
+    }
+    /* "dust kick" arriere (poussiere brun-noir) */
+    for (int i = 0; i < 6; i++) {
+        float spread = (rand() / (float)RAND_MAX - 0.5f) * 0.8f;
+        float sa = atan2f(diry, dirx) + spread;
+        particle_spawn_kind(g,
+            p->x, p->y,
+            cosf(sa) * 60.f, sinf(sa) * 60.f,
+            0.35f, 0x603020A0, 1.8f, 0);
+    }
+
+    /* grognement pitche bas a PV faibles (~0.78x sub-30%) pour sentir le
+     * danger sans changer de SFX. */
+    float pitch = 1.0f - danger * 0.22f;
+    float vol_h = 1.0f + intensity * 0.20f;
+    sfx_play_ex(g, SFX_PLAYER_HURT, pitch, vol_h);
+    /* gros coup : ajoute un thump bas pour donner du poids. Ne joue pas
+     * sur les petits tics (DoT). */
+    if (severity > 0.10f) {
+        sfx_play_ex(g, SFX_HEAVY_HIT, 0.75f + (1.f - intensity) * 0.10f,
+                    0.55f + intensity * 0.35f);
+    }
+
     dmgnum_spawn(g, p->x, p->y, (int)real, 0xFFFF80FF, true);
     if (p->hp <= 0.f) sfx_play(g, SFX_DEATH);
+}
+
+void player_take_damage(Game *g, float dmg) {
+    /* wrapper sans source : pas de knockback, sparks omnidirectionnels */
+    player_take_damage_from(g, dmg, g->player.x, g->player.y);
 }
 
 /* ---- Pickup handlers ---- */
@@ -322,6 +394,7 @@ void update_player(Game *g) {
     }
 
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
+    if (p->hit_t    > 0.f) p->hit_t    -= dt;
 
     /* regen */
     /* u_last_stand : tick le buff x2 (visible via shake + particules) */

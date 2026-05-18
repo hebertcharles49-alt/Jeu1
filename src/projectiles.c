@@ -132,7 +132,7 @@ void update_projectiles(Game *g) {
                                             0.3f, 0xC0E0FFFF, 1.6f, 0);
                     }
                 } else if (p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-                    player_take_damage(g, pr->dmg);
+                    player_take_damage_from(g, pr->dmg, pr->x, pr->y);
                 }
                 pr->alive = false;
             }

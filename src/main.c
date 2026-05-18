@@ -99,6 +99,16 @@ static void apply_shake(Game *g, int *ox, int *oy) {
     *ox = (int)prev_x; *oy = (int)prev_y;
 }
 
+/* 4 lignes a 1px sur les bords ecran, au meme inset. Sert au flash
+ * vignette et au halo low-HP. */
+static void draw_edge_lines(GfxCtx *gc, int inset, uint32_t col) {
+    gfx_set_color(gc, col);
+    gfx_fill_rect(gc, 0,                       inset,                    INTERNAL_W, 1);
+    gfx_fill_rect(gc, 0,                       INTERNAL_H - 1 - inset,   INTERNAL_W, 1);
+    gfx_fill_rect(gc, inset,                   0,                        1, INTERNAL_H);
+    gfx_fill_rect(gc, INTERNAL_W - 1 - inset,  0,                        1, INTERNAL_H);
+}
+
 /* clamp helper : cap simple low/high */
 static inline float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
@@ -1058,6 +1068,29 @@ void game_run(Game *g) {
             }
             if (g->overdrive_t > 0.f) g->overdrive_t -= dt;
             if (g->shake_t > 0.f) g->shake_t -= dt;
+            /* heartbeat audio quand PV < 25%. Periode 0.95s, deux thumps
+             * rapproches (alignes sur la pulsation visuelle main.c). */
+            if (g->player.maxhp > 0.f) {
+                float ratio = g->player.hp / g->player.maxhp;
+                static float hb_t = 0.f;
+                static int   hb_phase = 0;     /* 0 = avant boum1, 1 = avant boum2 */
+                if (ratio < 0.25f && ratio > 0.f) {
+                    hb_t += dt;
+                    float danger = (0.25f - ratio) / 0.25f;
+                    float vol = 0.4f + danger * 0.5f;
+                    if (hb_phase == 0 && hb_t >= 0.10f) {
+                        sfx_play_ex(g, SFX_HEARTBEAT, 1.0f, vol);
+                        hb_phase = 1;
+                    } else if (hb_phase == 1 && hb_t >= 0.27f) {
+                        sfx_play_ex(g, SFX_HEARTBEAT, 1.05f, vol * 0.75f);
+                        hb_phase = 2;
+                    } else if (hb_t >= 0.95f) {
+                        hb_t = 0.f; hb_phase = 0;
+                    }
+                } else {
+                    hb_t = 0.f; hb_phase = 0;
+                }
+            }
             if (g->player.hp <= 0.f) g->state = GS_DEAD;
             if (g->player.xp >= g->player.xp_to_next) {
                 g->player.xp -= g->player.xp_to_next;
@@ -1158,15 +1191,78 @@ void game_run(Game *g) {
             if (g->state == GS_LEVELUP) render_levelup(g);
             if (g->state == GS_DEAD)    render_dead(g);
             if (g->state == GS_VICTORY) render_victory(g);
+            /* === FLASH ROUGE A L IMPACT ===
+             * 1. plein-ecran rouge translucide (peak 220 a flash_t max,
+             *    fade quadratique pour relief sur le maximum)
+             * 2. vignette pulse : 4 bandes laterales rouges qui assombrissent
+             *    les bords et "respirent" — donne le punch sans noyer le jeu
+             * 3. fausse aberration chromatique : un voile bleu offset de
+             *    quelques pixels sur les bords (cheap RGB split sans shader)
+             */
             if (g->flash_t > 0.f) {
-                int alpha = (int)(180.f * (g->flash_t / 0.20f));
-                if (alpha < 0) alpha = 0;
-                if (alpha > 255) alpha = 255;
+                float ref = (g->flash_t > 0.20f) ? g->flash_t : 0.20f;
+                float k = g->flash_t / ref; if (k < 0.f) k = 0.f; if (k > 1.f) k = 1.f;
+                float kq = k * k;          /* peak rapide, fade soft */
                 gfx_set_blend(g->renderer, true);
-                uint32_t col = ((uint32_t)0xFF3C3CU << 8) | (uint32_t)(alpha & 0xFF);
-                gfx_set_color(g->renderer, col);
-                gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
+                /* (1) wash rouge */
+                int alpha = (int)(220.f * kq);
+                if (alpha > 0) {
+                    uint32_t col = ((uint32_t)0xFF2828U << 8) | (uint32_t)(alpha & 0xFF);
+                    gfx_set_color(g->renderer, col);
+                    gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
+                }
+                /* (2) vignette rouge sur les 4 bords, 6 bandes de plus en
+                 * plus opaques vers le bord. */
+                int vmax = (int)(40.f * k);
+                if (vmax > 0) {
+                    for (int s = 0; s < 6; s++) {
+                        int band = vmax * (s + 1) / 6;
+                        int a = (int)(35.f + 35.f * s) * (int)(k * 255.f) / 255;
+                        if (a < 0) a = 0;
+                        if (a > 255) a = 255;
+                        uint32_t col = (uint32_t)((0x60u << 24) | (0x08u << 16) | (0x10u << 8) | (uint32_t)a);
+                        draw_edge_lines(g->renderer, band - 1, col);
+                    }
+                }
+                /* (3) RGB split : voile cyan a droite + rouge a gauche, cheap */
+                int split = (int)(4.f * kq);
+                if (split > 0) {
+                    int a = (int)(60.f * kq);
+                    uint32_t cyan = (uint32_t)((0x00u << 24) | (0xC0u << 16) | (0xFFu << 8) | (uint32_t)a);
+                    uint32_t red  = (uint32_t)((0xFFu << 24) | (0x20u << 16) | (0x20u << 8) | (uint32_t)a);
+                    gfx_set_color(g->renderer, cyan);
+                    gfx_fill_rect(g->renderer, INTERNAL_W - split, 0, split, INTERNAL_H);
+                    gfx_set_color(g->renderer, red);
+                    gfx_fill_rect(g->renderer, 0, 0, split, INTERNAL_H);
+                }
                 gfx_set_blend(g->renderer, false);
+            }
+            /* === HALO LOW-HP : pulse rouge persistant quand PV < 25%, sync
+             * sur un "battement de coeur" doux (~1 Hz combine). Le pulse
+             * a deux pics rapproches puis pause -- comme un coeur, pas un
+             * sinus pur. Signale en continu le danger. */
+            if (g->state == GS_RUN && g->player.maxhp > 0.f) {
+                float ratio = g->player.hp / g->player.maxhp;
+                if (ratio < 0.25f && ratio > 0.f) {
+                    float danger = (0.25f - ratio) / 0.25f;
+                    float ph = fmodf(g->time, 0.95f) / 0.95f;
+                    /* deux gaussiennes : "boum-boum" puis silence */
+                    float p1 = expf(-90.f * (ph - 0.10f) * (ph - 0.10f));
+                    float p2 = expf(-90.f * (ph - 0.28f) * (ph - 0.28f));
+                    float heart = p1 + 0.65f * p2;
+                    if (heart > 1.f) heart = 1.f;
+                    gfx_set_blend(g->renderer, true);
+                    int N = 14;
+                    for (int s = 0; s < N; s++) {
+                        float t01 = (float)(N - s) / (float)N;
+                        int a = (int)(75.f * t01 * t01 * heart * danger);
+                        if (a <= 0) continue;
+                        if (a > 200) a = 200;
+                        uint32_t col = (uint32_t)((0xC0u << 24) | (0x10u << 16) | (0x20u << 8) | (uint32_t)a);
+                        draw_edge_lines(g->renderer, s, col);
+                    }
+                    gfx_set_blend(g->renderer, false);
+                }
             }
         }
         gfx_ui_end(g->renderer);

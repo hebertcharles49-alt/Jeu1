@@ -215,6 +215,28 @@ static v3 player_world_pos(Player *p) {
 static void draw_player_3d(Game *g) {
     Player *p = &g->player;
     bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
+    /* I-frame visible : pendant les invuln, anneau jaune-rouge au pied
+     * du joueur. Telegraphie clairement l etat "j en cours d echapper",
+     * tres lisible pour predire les frames. */
+    if (p->invuln_t > 0.f) {
+        v3 base = player_world_pos(p);
+        float k = p->invuln_t / 0.60f;       /* 1 a 0 */
+        if (k > 1.f) k = 1.f;
+        /* pulse rapide (10Hz) qui s ralentit en fin d invuln */
+        float pulse = 0.5f + 0.5f * sinf(g->time * 22.f);
+        float r = 0.55f + 0.10f * pulse;
+        float cr = 1.0f, cg = 0.55f + 0.3f * (1.f - k), cb = 0.20f;
+        int n_ring = 16;
+        for (int i = 0; i < n_ring; i++) {
+            float a = (i / (float)n_ring) * 6.2831f;
+            v3 spot = v3_make(base.x + cosf(a) * r,
+                              0.03f + 0.02f * pulse,
+                              base.z + sinf(a) * r);
+            gfx_box_draw(g->renderer, spot,
+                         v3_make(0.10f, 0.04f, 0.10f),
+                         cr, cg, cb);
+        }
+    }
     if (blink) return;
     v3 pos = player_world_pos(p);             /* monde continu, pas tile-aligne */
 

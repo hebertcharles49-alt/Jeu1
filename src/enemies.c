@@ -611,7 +611,7 @@ static void boss_geant(Game *g, Enemy *e, float dt, int phase,
                 float pdx = p->x - rx, pdy = p->y - ry;
                 if (pdx*pdx + pdy*pdy < 18.f * 18.f &&
                     p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-                    player_take_damage(g, 12.f * diff);
+                    player_take_damage_from(g, 12.f * diff, rx, ry);
                 }
             }
             sfx_play(g, SFX_EXPLODE);
@@ -1037,7 +1037,7 @@ static void ai_contact_damage(Game *g, Enemy *e, float dmg) {
     float pdy = p->y - e->y;
     float pd = sqrtf(pdx * pdx + pdy * pdy);
     if (pd < e->r + p->r && p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-        player_take_damage(g, dmg);
+        player_take_damage_from(g, dmg, e->x, e->y);
         float dxn = pdx / (pd + 0.01f);
         float dyn = pdy / (pd + 0.01f);
         p->x += dxn * 6.f;
@@ -1127,7 +1127,7 @@ static void ai_slime(Game *g, Enemy *e, int i, float dt, float dx, float dy, flo
         float pdx = p->x - e->x, pdy = p->y - e->y;
         if (pdx*pdx + pdy*pdy < 18.f * 18.f &&
             p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-            player_take_damage(g, 2.f * diff);
+            player_take_damage_from(g, 2.f * diff, e->x, e->y);
         }
     }
     ai_contact_damage(g, e, 5.f * diff);
@@ -1199,7 +1199,7 @@ static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist
         float pdx = p->x - e->x, pdy = p->y - e->y;
         if (pdx*pdx + pdy*pdy < 14.f * 14.f &&
             p->invuln_t <= 0.f && p->dash_t <= 0.f) {
-            player_take_damage(g, 2.f * diff);
+            player_take_damage_from(g, 2.f * diff, e->x, e->y);
         }
     } else {
         e->ai_t2 -= dt;

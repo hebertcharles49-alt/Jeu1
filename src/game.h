@@ -382,6 +382,13 @@ typedef struct {
     Weapon weapons[WEAPON_SLOTS];
     int    active_weapon;
     float invuln_t;
+    /* hit_t : compte a rebours du dernier impact (decroit dans
+     * update_player). Sert au rendu : vignette pulse, sparks, low-pass
+     * "ringing" visuel. Plus long que flash_t pour un afterglow. */
+    float hit_t;
+    /* direction du dernier impact (unit vector) pour le knockback visuel et
+     * la dust kick. */
+    float hit_dir_x, hit_dir_y;
     int   souls;
     int   coins;
     int   facing_dir;
@@ -909,6 +916,10 @@ void        text_drawf(GfxCtx *r, int x, int y, uint32_t col, const char *fmt, .
 int         text_width(const char *s);
 
 void        world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float ky);
+/* Inflige des dmg au joueur en provenance de (srcx, srcy) en pixels-monde.
+ * Sert au knockback et a la direction des sparks. Wrapper player_take_damage
+ * sans source = pas de knockback (utiliser pour DoT sols, etc). */
+void        player_take_damage_from(Game *g, float dmg, float srcx, float srcy);
 void        player_take_damage(Game *g, float dmg);
 
 /* audio */
@@ -916,11 +927,16 @@ typedef enum {
     SFX_PUNCH = 0, SFX_HIT, SFX_HEAVY_HIT, SFX_SWING, SFX_EXPLODE,
     SFX_PICKUP, SFX_COIN, SFX_LEVELUP, SFX_PLAYER_HURT, SFX_DEATH,
     SFX_BOSS, SFX_PORTAL, SFX_SHOOT, SFX_ZAP, SFX_FUSE,
+    SFX_HEARTBEAT,
     SFX_COUNT
 } SfxId;
 void  audio_init(Game *g);
 void  audio_shutdown(Game *g);
 void  sfx_play(Game *g, SfxId id);
+/* version etendue : pitch (1.0 = normal, 0.5 = octave en bas, 2.0 = en haut)
+ * et multiplicateur de volume (0..1+). Utilise par les variations
+ * contextuelles : low-HP grunt, heavy thump etc. */
+void  sfx_play_ex(Game *g, SfxId id, float pitch, float vol_mul);
 
 /* settings */
 void  settings_defaults(Settings *s);
