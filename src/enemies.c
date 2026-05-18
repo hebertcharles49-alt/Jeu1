@@ -84,12 +84,10 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
         pickup_spawn(g, PU_SOUL, 0, e->x, e->y);
     if (d.scroll_per1000 > 0 && (rand() % 1000) < d.scroll_per1000)
         pickup_spawn(g, PU_SCROLL, 0, e->x, e->y);
-    if (d.element_chance > 0 && (rand() % 100) < d.element_chance) {
-        int unlocked[16]; int n = 0;
-        for (int el = 1; el < EL_COUNT; el++)
-            if (g->meta.element_discovered[el]) unlocked[n++] = el;
-        if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], e->x, e->y);
-    }
+    /* element_chance desactive : les talismans passent par le milestone
+     * system (cf world_enemy_damage). Le champ est garde dans DropProfile
+     * pour le debug futur mais on ne tire plus dessus. */
+    (void)d.element_chance;
     if (e->is_boss) {
         Item it1 = item_drop_for_floor(g, g->floor_index, false, true);
         pickup_spawn_item(g, it1, e->x, e->y);
@@ -280,24 +278,10 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
             sfx_play(g, SFX_BOSS);
             sfx_play(g, SFX_EXPLODE);
             g->portal_spawned = true;
-            /* Boss drop : un element AU CHOIX (priorite : non-decouvert
-             * sinon random). Donne un element nouveau a chaque boss,
-             * pour structurer la progression de la run. */
-            {
-                int undiscovered[EL_COUNT]; int n_und = 0;
-                int all[EL_COUNT]; int n_all = 0;
-                for (int el = 1; el < EL_COUNT; el++) {
-                    all[n_all++] = el;
-                    if (!g->meta.element_discovered[el])
-                        undiscovered[n_und++] = el;
-                }
-                int el_pick;
-                if (n_und > 0) el_pick = undiscovered[rand() % n_und];
-                else if (n_all > 0) el_pick = all[rand() % n_all];
-                else el_pick = EL_FIRE;
-                pickup_spawn(g, PU_ELEMENT, el_pick,
-                             e->x + 18.f, e->y - 12.f);
-            }
+            /* Les drops d elements/uniques sont desormais geres par le
+             * milestone system (cf world_enemy_damage). Le boss n a plus
+             * besoin de drop garanti -- il declenche naturellement des
+             * milestones via les kills accumules. */
             for (int h = 0; h < HERO_COUNT; h++) {
                 if (!g->meta.hero_discovered[h]) {
                     g->meta.hero_discovered[h] = true;
@@ -331,6 +315,36 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     loop_on_hit(g);
     if (e->hp <= 0.f && !already_dead) {
         loop_on_kill(g);
+        /* run_kills a deja ete incremente par enemy_take_damage. */
+        /* === Drops pre-rolles (talismans + uniques) ===
+         * Si run_kills atteint le prochain milestone, on spawn a la
+         * position du cadavre. Talismans = element au choix (prefere
+         * non-decouvert). Uniques = pick aleatoire dans la table. */
+        if (g->talisman_drops_idx < RUN_TALISMAN_MAX &&
+            g->run_kills >= g->talisman_drops[g->talisman_drops_idx]) {
+            int undisc[EL_COUNT]; int n_und = 0;
+            int all[EL_COUNT]; int n_all = 0;
+            for (int el = 1; el < EL_COUNT; el++) {
+                all[n_all++] = el;
+                if (!g->meta.element_discovered[el]) undisc[n_und++] = el;
+            }
+            int el_pick = (n_und > 0)
+                            ? undisc[rand() % n_und]
+                            : (n_all > 0 ? all[rand() % n_all] : EL_FIRE);
+            pickup_spawn(g, PU_ELEMENT, el_pick, e->x, e->y);
+            g->talisman_drops_idx++;
+        }
+        if (g->unique_drops_idx < RUN_UNIQUE_MAX &&
+            g->run_kills >= g->unique_drops[g->unique_drops_idx]) {
+            int n_uniq = unique_def_count();
+            if (n_uniq > 0) {
+                int uid = rand() % n_uniq;
+                Item u = unique_make(uid);
+                if (uid >= 0 && uid < 32) g->meta.unique_seen[uid] = true;
+                pickup_spawn_item(g, u, e->x, e->y);
+            }
+            g->unique_drops_idx++;
+        }
         /* === Build-defining effects on kill === */
         /* u_kill_wave : vague de repulsion + dmg autour du joueur */
         if (g->player.u_kill_wave) {

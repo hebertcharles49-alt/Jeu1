@@ -91,19 +91,8 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                        sfx_play(g, SFX_COIN); break;
         case PU_ELEMENT: {
             Element e = (Element)pk->value;
-            /* cap par run : RUN_TALISMAN_MAX = 7 talismans equippes.
-             * Au-dela on refuse le pickup (force la curation, pas le
-             * mass-stack). */
-            if (g->run_talisman_count >= RUN_TALISMAN_MAX) {
-                toast_push(g, "Limite de talismans atteinte (7/run)",
-                           0xFF8080FF, 3.0f);
-                /* on laisse le pickup vivant pour qu il puisse etre
-                 * recupere apres avoir libere un slot. */
-                return;
-            }
             Weapon *w = &p->weapons[p->active_weapon];
             weapon_attach_element(w, e);
-            g->run_talisman_count++;
             sfx_play(g, SFX_LEVELUP);
             if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
                 g->meta.element_discovered[e] = true;
@@ -178,15 +167,11 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                     int heal = (t == 0) ? 8 : (t == 1) ? 16 : 12;
                     pickup_spawn(g, PU_FOOD, heal, fx, fy);
                 }
-                else if (rr < 70) pickup_spawn(g, PU_SOUL, 0, fx, fy);
-                else if (rr < 73) pickup_spawn(g, PU_SCROLL, 0, fx, fy);
-                else {
-                    int unlocked[8]; int n = 0;
-                    for (int e = 1; e < EL_COUNT; e++)
-                        if (g->meta.element_discovered[e]) unlocked[n++] = e;
-                    if (n > 0) pickup_spawn(g, PU_ELEMENT, unlocked[rand() % n], fx, fy);
-                    else pickup_spawn(g, PU_COIN, 2, fx, fy);
-                }
+                else if (rr < 75) pickup_spawn(g, PU_SOUL, 0, fx, fy);
+                else if (rr < 80) pickup_spawn(g, PU_SCROLL, 0, fx, fy);
+                else pickup_spawn(g, PU_COIN, 2, fx, fy);
+                /* Elements ne sortent plus des coffres -- ils sont
+                 * scheduled via les milestones de kill (cf enemies.c). */
             }
             for (int k = 0; k < 30; k++) {
                 float ang = (rand() % 360) * 0.01745f;

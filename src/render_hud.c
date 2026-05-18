@@ -45,9 +45,9 @@ void render_hud(Game *g) {
     {
         int x = 4, y = 40;
         gfx_set_blend(g->renderer, true);
-        fill_rect(g->renderer, x - 1, y - 1, 90, 122, 0x000000A0);
+        fill_rect(g->renderer, x - 1, y - 1, 90, 100, 0x000000A0);
         gfx_set_blend(g->renderer, false);
-        rect_outline(g->renderer, x - 1, y - 1, 90, 122, 0x30303AFF);
+        rect_outline(g->renderer, x - 1, y - 1, 90, 100, 0x30303AFF);
         text_draw(g->renderer, x + 2, y, "STATS", 0xFFE080FF);
         y += 10;
         text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
@@ -69,16 +69,7 @@ void render_hud(Game *g) {
         /* separateur */
         fill_rect(g->renderer, x + 2, y, 84, 1, 0x40404AFF);
         y += 3;
-        /* caps par run : talismans + uniques avec couleur d alerte si plein */
-        uint32_t tc = (g->run_talisman_count >= RUN_TALISMAN_MAX)
-                        ? 0xFF8080FF : 0xC0E0FFFF;
-        uint32_t uc = (g->run_unique_count >= RUN_UNIQUE_MAX)
-                        ? 0xFF8080FF : 0xFFD080FF;
-        text_drawf(g->renderer, x + 2, y, tc,
-                   "TALI %d/%d", g->run_talisman_count, RUN_TALISMAN_MAX); y += 9;
-        text_drawf(g->renderer, x + 2, y, uc,
-                   "UNIQ %d/%d", g->run_unique_count, RUN_UNIQUE_MAX); y += 9;
-        /* seed en bas, couleur discrete */
+        /* seed en bas, couleur discrete. Permet de partager une run. */
         text_drawf(g->renderer, x + 2, y, 0x808080FF,
                    "SEED %u", g->run_seed % 100000);
     }

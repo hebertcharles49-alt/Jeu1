@@ -661,10 +661,15 @@ typedef struct {
     /* seed de la run : capture au demarrage, utilise pour la generation
      * du donjon. Affiche pour permettre de rejouer la meme seed. */
     unsigned      run_seed;
-    /* cap par run : empeche le mass-stacking de talismans (deadlock
-     * du systeme actuel ou le joueur peut pickup en boucle). */
-    int           run_talisman_count;     /* 0..RUN_TALISMAN_MAX */
-    int           run_unique_count;       /* 0..RUN_UNIQUE_MAX */
+    /* Pre-roll des drops : a chaque run, on tire un nombre fixe de
+     * talismans (7) et d uniques (3), DISPATCHES sur les kills via
+     * milestones tries. Quand run_kills atteint un milestone, on
+     * spawne le drop. Invisible cote joueur -- seule la seed dicte
+     * l ordre des spawns. */
+    int           talisman_drops[RUN_TALISMAN_MAX];
+    int           talisman_drops_idx;
+    int           unique_drops  [RUN_UNIQUE_MAX];
+    int           unique_drops_idx;
 
     /* OVERDRIVE killstreak : "moment de rupture".
      *   - chaque kill incremente killstreak_count + reset killstreak_t = 3s.

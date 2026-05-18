@@ -352,8 +352,24 @@ void game_start_new_run(Game *g) {
      * de partager une run. */
     g->run_seed = (unsigned)time(NULL) ^ (unsigned)rand();
     srand(g->run_seed);
-    g->run_talisman_count = 0;
-    g->run_unique_count   = 0;
+    /* Pre-roll des drops : on tire les milestones de kills auxquels
+     * les talismans / uniques apparaitront. Bandes de [10..EST_MAX]
+     * pour bien repartir les drops sur toute la run.
+     *
+     * EST_MAX estime le total de kills d une run complete (env. 25 par
+     * etage * 10 etages = 250). Si la run est plus courte, les
+     * derniers drops ne sortent simplement pas. */
+    const int EST_MAX = 250;
+    int band_t = EST_MAX / RUN_TALISMAN_MAX;
+    for (int i = 0; i < RUN_TALISMAN_MAX; i++) {
+        g->talisman_drops[i] = 5 + i * band_t + rand() % (band_t - 5);
+    }
+    g->talisman_drops_idx = 0;
+    int band_u = EST_MAX / RUN_UNIQUE_MAX;
+    for (int i = 0; i < RUN_UNIQUE_MAX; i++) {
+        g->unique_drops[i] = 20 + i * band_u + rand() % (band_u - 10);
+    }
+    g->unique_drops_idx = 0;
     g->killstreak_count = 0; g->killstreak_t = 0.f; g->overdrive_t = 0.f;
     /* unique-flag state : reset au demarrage (les charges seront
      * activees au premier point_in_room avec first_visit=true). */
