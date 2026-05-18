@@ -45,9 +45,9 @@ void render_hud(Game *g) {
     {
         int x = 4, y = 40;
         gfx_set_blend(g->renderer, true);
-        fill_rect(g->renderer, x - 1, y - 1, 90, 100, 0x000000A0);
+        fill_rect(g->renderer, x - 1, y - 1, 90, 122, 0x000000A0);
         gfx_set_blend(g->renderer, false);
-        rect_outline(g->renderer, x - 1, y - 1, 90, 100, 0x30303AFF);
+        rect_outline(g->renderer, x - 1, y - 1, 90, 122, 0x30303AFF);
         text_draw(g->renderer, x + 2, y, "STATS", 0xFFE080FF);
         y += 10;
         text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
@@ -69,6 +69,21 @@ void render_hud(Game *g) {
         /* separateur */
         fill_rect(g->renderer, x + 2, y, 84, 1, 0x40404AFF);
         y += 3;
+        /* DPS smoothed (debug TTK). 0 si pas de combat actif. */
+        text_drawf(g->renderer, x + 2, y, 0xC0E0FFFF,
+                   "DPS %.0f", g->dps_smooth); y += 9;
+        /* TTK estime sur le boss vivant si on tape. */
+        if (g->dps_smooth > 1.f) {
+            for (int i = 0; i < MAX_ENEMIES; i++) {
+                Enemy *be = &g->enemies[i];
+                if (!be->alive || !be->is_boss || be->dying_t > 0.f) continue;
+                float ttk = be->hp / g->dps_smooth;
+                text_drawf(g->renderer, x + 2, y, 0xFFD080FF,
+                           "TTK %.1fs", ttk);
+                y += 9;
+                break;
+            }
+        }
         /* seed en bas, couleur discrete. Permet de partager une run. */
         text_drawf(g->renderer, x + 2, y, 0x808080FF,
                    "SEED %u", g->run_seed % 100000);

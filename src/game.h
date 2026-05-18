@@ -671,6 +671,11 @@ typedef struct {
     int           unique_drops  [RUN_UNIQUE_MAX];
     int           unique_drops_idx;
 
+    /* DPS smoothed (TTK debug + UI). Recharge a chaque world_enemy_damage
+     * et decay exponentiel chaque frame. */
+    float         dps_smooth;
+    float         dps_frame_acc;     /* dmg accumule cette frame */
+
     /* OVERDRIVE killstreak : "moment de rupture".
      *   - chaque kill incremente killstreak_count + reset killstreak_t = 3s.
      *   - quand le compteur atteint OVERDRIVE_TRIGGER (5), overdrive_t

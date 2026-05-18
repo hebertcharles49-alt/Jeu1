@@ -311,7 +311,10 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     if (e->dying_t > 0.f) return;
     bool already_dead = (e->hp <= 0.f);
     enemy_take_damage(g, e, dmg, el, kx, ky);
-    if (dmg > 0.f) g->run_damage_dealt += (int)dmg;
+    if (dmg > 0.f) {
+        g->run_damage_dealt += (int)dmg;
+        g->dps_frame_acc    += dmg;
+    }
     loop_on_hit(g);
     if (e->hp <= 0.f && !already_dead) {
         loop_on_kill(g);

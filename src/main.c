@@ -371,6 +371,7 @@ void game_start_new_run(Game *g) {
     }
     g->unique_drops_idx = 0;
     g->killstreak_count = 0; g->killstreak_t = 0.f; g->overdrive_t = 0.f;
+    g->dps_smooth = 0.f; g->dps_frame_acc = 0.f;
     /* unique-flag state : reset au demarrage (les charges seront
      * activees au premier point_in_room avec first_visit=true). */
     /* le player vient d etre memset a 0, donc phoenix_charge / last_stand
@@ -868,6 +869,12 @@ void game_run(Game *g) {
             update_surfaces(g);
             toast_tick(g);
             /* killstreak / overdrive timers */
+            /* DPS smooth : exponentiel sur 3s. Si dt=0 (hitstop) on saute. */
+            if (g->dt > 0.f) {
+                float instant_dps = g->dps_frame_acc / g->dt;
+                g->dps_smooth = g->dps_smooth * 0.92f + instant_dps * 0.08f;
+                g->dps_frame_acc = 0.f;
+            }
             if (g->killstreak_t > 0.f) {
                 g->killstreak_t -= dt;
                 if (g->killstreak_t <= 0.f) g->killstreak_count = 0;
