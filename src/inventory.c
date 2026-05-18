@@ -93,17 +93,21 @@ typedef struct {
     bool  is_fraction;        /* true = stocke comme 0..1 (affichee en %) */
 } AffixDef;
 
+/* Magnitudes augmentees x3 vs ancien design pour que les bonus de
+ * rarete soient lisibles en jeu (un Epique Offensif tape +45-55% dmg). */
 static const AffixDef AFFIX_DEFS[AFFIX_COUNT] = {
     [AFFIX_NONE]        = {0},
-    [AFFIX_HP]          = { AFFIX_HP,           5.f,  10.f, 2.0f,  false },
-    [AFFIX_ARMOR]       = { AFFIX_ARMOR,        1.f,   2.f, 0.4f,  false },
-    [AFFIX_SPEED]       = { AFFIX_SPEED,        3.f,   6.f, 1.2f,  false },
-    [AFFIX_DMG_PCT]     = { AFFIX_DMG_PCT,      0.03f, 0.05f, 0.01f, true },
-    [AFFIX_CRIT_CHANCE] = { AFFIX_CRIT_CHANCE,  0.02f, 0.04f, 0.008f, true },
-    [AFFIX_LIFESTEAL]   = { AFFIX_LIFESTEAL,    0.01f, 0.03f, 0.006f, true },
-    [AFFIX_REGEN]       = { AFFIX_REGEN,        0.20f, 0.40f, 0.08f, false },
-    [AFFIX_ATK_SPEED]   = { AFFIX_ATK_SPEED,    0.03f, 0.06f, 0.012f, true },
-    [AFFIX_DODGE]       = { AFFIX_DODGE,        0.02f, 0.04f, 0.008f, true },
+    [AFFIX_HP]          = { AFFIX_HP,           15.f,  22.f, 4.0f,  false },
+    [AFFIX_ARMOR]       = { AFFIX_ARMOR,        2.0f,  3.0f, 0.5f,  false },
+    [AFFIX_SPEED]       = { AFFIX_SPEED,       10.f,  16.f, 3.0f,  false },
+    [AFFIX_DMG_PCT]     = { AFFIX_DMG_PCT,      0.10f, 0.15f, 0.02f, true },
+    [AFFIX_CRIT_CHANCE] = { AFFIX_CRIT_CHANCE,  0.06f, 0.10f, 0.014f,true },
+    [AFFIX_LIFESTEAL]   = { AFFIX_LIFESTEAL,    0.04f, 0.08f, 0.012f,true },
+    [AFFIX_REGEN]       = { AFFIX_REGEN,        0.40f, 0.80f, 0.15f, false },
+    [AFFIX_ATK_SPEED]   = { AFFIX_ATK_SPEED,    0.10f, 0.16f, 0.022f,true },
+    [AFFIX_DODGE]       = { AFFIX_DODGE,        0.05f, 0.10f, 0.014f,true },
+    [AFFIX_RANGE_MUL]   = { AFFIX_RANGE_MUL,    0.10f, 0.18f, 0.022f,true },
+    [AFFIX_FLAT_DMG]    = { AFFIX_FLAT_DMG,     4.f,   8.f,  1.2f,  false },
 };
 
 const char *affix_name(Affix a) {
@@ -117,6 +121,8 @@ const char *affix_name(Affix a) {
         case AFFIX_REGEN:       return "Regen/s";
         case AFFIX_ATK_SPEED:   return "Vit. atk";
         case AFFIX_DODGE:       return "Esquive";
+        case AFFIX_RANGE_MUL:   return "Portee";
+        case AFFIX_FLAT_DMG:    return "Dmg flat";
         default:                return "?";
     }
 }
@@ -124,50 +130,82 @@ const char *affix_name(Affix a) {
 void affix_label(const ItemAffix *af, char *buf, int bufsz) {
     if (!af || af->kind == AFFIX_NONE) { snprintf(buf, bufsz, "—"); return; }
     const AffixDef *d = &AFFIX_DEFS[af->kind];
+    /* signe explicite : negatif imprime "-X", positif imprime "+X" */
+    const char *sign = (af->value >= 0.f) ? "+" : "";
     if (d->is_fraction) {
-        snprintf(buf, bufsz, "+%.1f%% %s", af->value * 100.f, affix_name(af->kind));
+        snprintf(buf, bufsz, "%s%.1f%% %s", sign, af->value * 100.f,
+                 affix_name(af->kind));
     } else {
-        snprintf(buf, bufsz, "+%.1f %s", af->value, affix_name(af->kind));
+        snprintf(buf, bufsz, "%s%.1f %s", sign, af->value, affix_name(af->kind));
     }
 }
 
-/* nombre d'affixes selon la rarete : 0/1/2/3/4. */
-static int affix_count_for_rarity(Rarity r) {
+/* ---- Archetypes ----
+ * Chaque base_kind (0..4) definit un profil : 3 affixes positifs
+ * (utilises selon la rarete) + 1 affixe negatif fixe. */
+typedef struct {
+    Affix pos[3];
+    Affix neg_kind;
+    float neg_scale;     /* magnitude du malus (fraction ou flat selon affix) */
+} ArchetypeProfile;
+
+static const ArchetypeProfile PROFILES[5] = {
+    /* 0 Offensif   */ { {AFFIX_DMG_PCT,   AFFIX_CRIT_CHANCE, AFFIX_CRIT_CHANCE}, AFFIX_HP,        -30.f  },
+    /* 1 Defensif   */ { {AFFIX_HP,        AFFIX_ARMOR,       AFFIX_REGEN},       AFFIX_DMG_PCT,   -0.30f },
+    /* 2 Mobilite   */ { {AFFIX_SPEED,     AFFIX_DODGE,       AFFIX_ATK_SPEED},   AFFIX_DMG_PCT,   -0.22f },
+    /* 3 Vampirique */ { {AFFIX_LIFESTEAL, AFFIX_REGEN,       AFFIX_DMG_PCT},     AFFIX_HP,        -35.f  },
+    /* 4 Frenetique */ { {AFFIX_ATK_SPEED, AFFIX_RANGE_MUL,   AFFIX_FLAT_DMG},    AFFIX_ARMOR,     -3.f   },
+};
+static const char *ARCHETYPE_NAMES[5] = {
+    "Offensif", "Defensif", "Mobilite", "Vampirique", "Frenetique"
+};
+
+const char *archetype_name(int base_kind) {
+    return ARCHETYPE_NAMES[base_kind % 5];
+}
+
+/* nombre d'affixes positifs selon la rarete : 0/1/2/3.
+ * Plus 1 affixe negatif a partir de R_MAGIC. R_LEGENDARY reste 3 + 1
+ * (= 4 affixes au total, MAX_AFFIXES). */
+static int affix_pos_count_for_rarity(Rarity r) {
     switch (r) {
         case R_COMMON:    return 0;
         case R_MAGIC:     return 1;
         case R_RARE:      return 2;
         case R_EPIC:      return 3;
-        case R_LEGENDARY: return 4;
+        case R_LEGENDARY: return 3;
         default:          return 0;
     }
 }
 
-/* roule N affixes distincts (sans doublon) sur l'item. */
+/* roule N affixes positifs depuis le profil (pris dans l ordre) +
+ * 1 affixe negatif fixe (sauf Commun). Severite du malus croit avec la rarete. */
 static void roll_affixes(Item *it) {
-    int n = affix_count_for_rarity(it->rarity);
-    if (n > MAX_AFFIXES) n = MAX_AFFIXES;
-    /* pool : tous les affixes sauf AFFIX_NONE */
-    Affix pool[AFFIX_COUNT - 1];
-    int pn = 0;
-    for (int a = 1; a < AFFIX_COUNT; a++) pool[pn++] = (Affix)a;
-    /* Fisher-Yates partiel */
-    for (int i = 0; i < n && i < pn; i++) {
-        int j = i + rand() % (pn - i);
-        Affix tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
-    }
+    int n_pos = affix_pos_count_for_rarity(it->rarity);
     it->affix_count = 0;
-    float rmul = rarity_mul(it->rarity);  /* aussi applique aux affixes */
-    for (int i = 0; i < n; i++) {
-        const AffixDef *d = &AFFIX_DEFS[pool[i]];
+    if (n_pos == 0) return;
+
+    const ArchetypeProfile *prof = &PROFILES[it->base_kind % 5];
+    float rmul = rarity_mul(it->rarity);
+
+    /* affixes positifs : ordre fixe (primary -> secondary -> tertiary) */
+    for (int i = 0; i < n_pos && i < MAX_AFFIXES - 1; i++) {
+        const AffixDef *d = &AFFIX_DEFS[prof->pos[i]];
         float vmin = d->base_min + (float)it->base_kind * d->step;
         float vmax = d->base_max + (float)it->base_kind * d->step;
         float roll = vmin + (vmax - vmin) * ((float)rand() / (float)RAND_MAX);
         roll *= rmul;
-        it->affixes[i].kind  = pool[i];
-        it->affixes[i].value = roll;
+        it->affixes[it->affix_count].kind  = prof->pos[i];
+        it->affixes[it->affix_count].value = roll;
         it->affix_count++;
     }
+    /* malus : severite croissante par rarete. neg_scale est la magnitude
+     * MAX du malus (epic atteint 100% de neg_scale). */
+    static const float SEVERITY[] = { 0.f, 0.50f, 0.75f, 1.00f, 1.00f };
+    float sev = SEVERITY[(int)it->rarity];
+    it->affixes[it->affix_count].kind  = prof->neg_kind;
+    it->affixes[it->affix_count].value = prof->neg_scale * sev;
+    it->affix_count++;
 }
 
 /* Pools pour les noms procedurals (Diablo-like).

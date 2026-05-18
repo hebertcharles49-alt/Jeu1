@@ -149,6 +149,8 @@ typedef enum {
     AFFIX_REGEN,        /* +X regen / s */
     AFFIX_ATK_SPEED,    /* +X% vitesse d'attaque (fraction, additive) */
     AFFIX_DODGE,        /* +X% esquive (fraction) */
+    AFFIX_RANGE_MUL,    /* +X% portee (fraction) -- archetypes Frenetique */
+    AFFIX_FLAT_DMG,     /* +X dmg flat (entier-ish) -- archetypes Frenetique */
     AFFIX_COUNT
 } Affix;
 
@@ -215,6 +217,10 @@ typedef struct {
     int   split_left;
     bool  is_boss;
     float telegraph_t;
+    /* u_expose_weakness : timer 5s pose par un crit du joueur. Pendant
+     * ce temps, une attaque elementaire SUPER-effective vs e->element
+     * inflige x1.5 degats. */
+    float expose_t;
     /* anim de mort : tant que >0, le corps est rendu et fond, sans IA */
     float dying_t;
     float dying_max;
@@ -399,9 +405,30 @@ typedef struct {
     bool  u_corpse_mines;        /* 30% des morts laissent une mine */
     bool  u_free_dash;           /* dash sans cooldown */
     int   u_drone_count;         /* 0..3 fees-drones qui orbitent */
-    /* hitbox de base recuperee depuis crit_shrink : restaure progressivement
-     * quand on subit des degats. */
-    float r_base;
+    /* nouveaux flags rework v2 */
+    bool  u_berserk_cd;          /* cooldowns *0.5 sous 50% HP */
+    bool  u_element_absorb;      /* hit elementaire -> +30% affinite 8s */
+    bool  u_hazard_immune;       /* immunite hazards sol */
+    bool  u_hazard_stacks;       /* +5% dmg par tile hazard (max +50%) */
+    bool  u_phoenix_revive;      /* revie a 30% HP, 1 charge / salle */
+    bool  u_kill_wave;           /* vague de repulsion + dmg sur chaque kill */
+    bool  u_frontal_immune;      /* immunite proj de face (-40% vitesse) */
+    bool  u_dodge_attack;        /* esquive -> attaque arme gratuite */
+    bool  u_crowd_regen;         /* regen += alive_count * 0.1 */
+    bool  u_stun_on_melee;       /* 20% stun 1s sur melee, x2 dmg pendant */
+    bool  u_void_trail;          /* dash laisse champ vide 3s */
+    bool  u_kill_stack_dmg;      /* +2 flat_dmg / kill, max +40 */
+    bool  u_heavy_armor;         /* armure *2 mais -3 vitesse / point */
+    bool  u_expose_weakness;     /* crit revele faiblesse 5s, exploit *1.5 */
+    bool  u_last_stand;          /* mort -> 1 HP + stats *2 pendant 10s */
+    /* state runtime des flags : timers / charges qui changent par salle. */
+    float r_base;                /* hitbox de base (u_crit_shrink) */
+    bool  phoenix_charge;        /* charge disponible (u_phoenix_revive) */
+    bool  last_stand_charge;     /* charge disponible (u_last_stand) */
+    float last_stand_t;          /* timer du buff x2 actif */
+    int   kill_stack_count;      /* stacks de u_kill_stack_dmg (0..20) */
+    float element_absorb_t[EL_COUNT]; /* timers d affinite absorbee */
+    int   hazard_stacks;         /* 0..10 (par tile traversee) */
 
     /* ---- Triple feedback loop ----
      * Etat persistant pour chaque triple combo definissant un loop. */
@@ -883,6 +910,22 @@ typedef struct {
     bool  u_corpse_mines;
     bool  u_free_dash;
     int   u_drone_count;
+    /* rework v2 -- 14 flags supplementaires (cf Player) */
+    bool  u_berserk_cd;
+    bool  u_element_absorb;
+    bool  u_hazard_immune;
+    bool  u_hazard_stacks;
+    bool  u_phoenix_revive;
+    bool  u_kill_wave;
+    bool  u_frontal_immune;
+    bool  u_dodge_attack;
+    bool  u_crowd_regen;
+    bool  u_stun_on_melee;
+    bool  u_void_trail;
+    bool  u_kill_stack_dmg;
+    bool  u_heavy_armor;
+    bool  u_expose_weakness;
+    bool  u_last_stand;
 } StatBlock;
 
 /* shop (Brotato-like) */
@@ -919,6 +962,8 @@ void        affix_label(const ItemAffix *af, char *buf, int bufsz);
 /* genere un nom procedural pour un item normal (non-unique). Deterministe
  * sur (slot, rarity, base_kind, affixes) pour rester stable. */
 void        item_generate_name(Item *it);
+/* nom de l archetype d un item (Offensif / Defensif / ...). base_kind 0..4. */
+const char *archetype_name    (int base_kind);
 /* detruit un item du sac (libere le slot, no-op si vide). */
 bool        inventory_destroy(Game *g, int inv_index);
 /* valeur de revente en coins (rarity-based). */

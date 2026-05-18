@@ -173,6 +173,8 @@ void game_recompute_player_stats(Game *g) {
                  * sb.atk_speed (donc cooldown plus court). */
                 case AFFIX_ATK_SPEED:   sb.atk_speed   *= (1.f - af->value); break;
                 case AFFIX_DODGE:       sb.dodge       += af->value; break;
+                case AFFIX_RANGE_MUL:   sb.range_mul   *= (1.f + af->value); break;
+                case AFFIX_FLAT_DMG:    sb.flat_dmg    += af->value; break;
                 default: break;
             }
         }
@@ -234,6 +236,30 @@ void game_recompute_player_stats(Game *g) {
     p->u_corpse_mines       = sb.u_corpse_mines;
     p->u_free_dash          = sb.u_free_dash;
     p->u_drone_count        = sb.u_drone_count;
+    p->u_berserk_cd         = sb.u_berserk_cd;
+    p->u_element_absorb     = sb.u_element_absorb;
+    p->u_hazard_immune      = sb.u_hazard_immune;
+    p->u_hazard_stacks      = sb.u_hazard_stacks;
+    p->u_phoenix_revive     = sb.u_phoenix_revive;
+    p->u_kill_wave          = sb.u_kill_wave;
+    p->u_frontal_immune     = sb.u_frontal_immune;
+    p->u_dodge_attack       = sb.u_dodge_attack;
+    p->u_crowd_regen        = sb.u_crowd_regen;
+    p->u_stun_on_melee      = sb.u_stun_on_melee;
+    p->u_void_trail         = sb.u_void_trail;
+    p->u_kill_stack_dmg     = sb.u_kill_stack_dmg;
+    p->u_heavy_armor        = sb.u_heavy_armor;
+    p->u_expose_weakness    = sb.u_expose_weakness;
+    p->u_last_stand         = sb.u_last_stand;
+    /* HEAVY ARMOR : armure x2, mais -3 vitesse / point d armure. */
+    if (sb.u_heavy_armor) {
+        float speed_malus = sb.armor * 3.f;
+        p->armor *= 2.f;
+        p->speed -= speed_malus;
+        if (p->speed < 30.f) p->speed = 30.f;
+    }
+    /* FRONTAL_IMMUNE : -40% vitesse en echange de l immunite frontale. */
+    if (sb.u_frontal_immune) p->speed *= 0.60f;
     if (p->hp <= 0.f || ratio > 1.f) p->hp = p->maxhp;
     else                              p->hp = ratio * p->maxhp;
 }
@@ -322,6 +348,10 @@ void game_start_new_run(Game *g) {
     g->run_best_combo_size = 0;
     g->run_legendary_drops = 0;
     g->killstreak_count = 0; g->killstreak_t = 0.f; g->overdrive_t = 0.f;
+    /* unique-flag state : reset au demarrage (les charges seront
+     * activees au premier point_in_room avec first_visit=true). */
+    /* le player vient d etre memset a 0, donc phoenix_charge / last_stand
+     * / kill_stack_count / hazard_stacks / last_stand_t sont deja a 0. */
     g->floor_index = 1;
     g->shake_t = 0.f;
     g->portal_spawned = false;

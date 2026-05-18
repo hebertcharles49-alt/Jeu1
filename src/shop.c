@@ -178,7 +178,9 @@ void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
     sb->melee     += r->d_melee;
     sb->range     += r->d_range;
     sb->elem      += r->d_elem;
-    sb->atk_speed += r->d_atk_speed;
+    /* Convention unifiee : atk_speed est multiplicatif (cd arme * x).
+     * d_atk_speed est une FRACTION : 0.10 = +10% rate, donc sb *= 0.90. */
+    if (r->d_atk_speed != 0.f) sb->atk_speed *= (1.f - r->d_atk_speed);
     sb->crit_chance += r->d_crit_chance;
     sb->crit_dmg    += r->d_crit_dmg;
     sb->range_mul   += r->d_range_mul;

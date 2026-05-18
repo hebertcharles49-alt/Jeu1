@@ -46,7 +46,16 @@ void update_room_logic(Game *g) {
     for (int i = 0; i < g->dungeon.room_count; i++) {
         Room *r = &g->dungeon.rooms[i];
         if (!point_in_room(r, p->x, p->y)) continue;
+        bool first_visit = !r->visited;
         r->visited = true;     /* la salle apparait sur la minimap */
+        if (first_visit) {
+            /* reset per-salle des charges uniques */
+            p->phoenix_charge    = true;
+            p->last_stand_charge = true;
+            p->hazard_stacks     = 0;
+            /* kill_stack_count : reset SEULEMENT en entrant chez le boss */
+            if (r->is_boss_room) p->kill_stack_count = 0;
+        }
 
         if (r->is_boss_room) {
             if (!r->boss_spawned) {

@@ -230,6 +230,11 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
         float dot = (dx * ax + dy * ay) / (d + 0.001f);
         if (dot < 0.5f) continue;
         world_enemy_damage(g, i, dmg, fx.status, ax * 200.f, ay * 200.f);
+        /* u_stun_on_melee : 20% stun 1s. enemy_take_damage applique x2
+         * dmg si la cible est stun (cf enemies.c). */
+        if (p->u_stun_on_melee && (rand() % 100) < 20) {
+            g->enemies[i].stun_t = 1.0f;
+        }
         if (fx.lifesteal) {
             p->hp += dmg * 0.05f;
             if (p->hp > p->maxhp) p->hp = p->maxhp;
@@ -259,6 +264,9 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
         float dot = (dx * ax + dy * ay) / (d + 0.001f);
         if (dot < 0.4f) continue;
         world_enemy_damage(g, i, dmg, fx.status, ax * 220.f, ay * 220.f);
+        if (p->u_stun_on_melee && (rand() % 100) < 20) {
+            g->enemies[i].stun_t = 1.0f;
+        }
         if (fx.chain) chain_hit(g, i, dmg * 0.6f, fx.status, 2, fx.color);
         if (fx.aoe_explode) do_aoe_at(g, e->x, e->y, 30.f, dmg * 0.5f, fx.status, fx.color);
         if (fx.lifesteal) {
@@ -369,6 +377,16 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
     float radius = w->base_range * fx.range_mul + 12.f;
     float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     do_aoe_at(g, p->x, p->y, radius, dmg, fx.status, fx.color);
+    /* u_stun_on_melee : 20% stun sur chaque ennemi touche par l AOE */
+    if (p->u_stun_on_melee) {
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy *e = &g->enemies[i];
+            if (!e->alive || e->dying_t > 0.f) continue;
+            float dx = e->x - p->x, dy = e->y - p->y;
+            if (dx*dx + dy*dy > radius * radius) continue;
+            if ((rand() % 100) < 20) e->stun_t = 1.0f;
+        }
+    }
     if (fx.chain) {
         int best = nearest_enemy(g, p->x, p->y, radius, NULL);
         if (best >= 0) chain_hit(g, best, dmg * 0.5f, fx.status, 3, fx.color);
@@ -421,6 +439,22 @@ void update_weapons(Game *g) {
         if (g->overdrive_t > 0.f) {
             pmul *= 1.30f;
             fx.cd_mul *= 0.67f;       /* atk speed +50% (cd ~0.67x) */
+        }
+        /* u_last_stand actif : x2 multiplicateur de degats. */
+        if (p->last_stand_t > 0.f) pmul *= 2.f;
+        /* u_hazard_stacks : +5% dmg / stack (max 10 -> +50%). */
+        if (p->u_hazard_stacks && p->hazard_stacks > 0) {
+            pmul *= 1.f + (float)p->hazard_stacks * 0.05f;
+        }
+        /* u_kill_stack_dmg : +2 flat_dmg / kill (cap 20 stacks = +40 flat) */
+        if (p->u_kill_stack_dmg && p->kill_stack_count > 0) {
+            int stacks = p->kill_stack_count;
+            if (stacks > 20) stacks = 20;
+            /* on transmet via flat_dmg lu plus tard par les fire_* via
+             * (w->base_dmg + p->flat_dmg) -- on additionne ici en local
+             * a fx.dmg_mul pour pas muter p->flat_dmg. */
+            float extra = (float)stacks * 2.f;
+            fx.dmg_mul *= 1.f + extra / (w->base_dmg + 1.f);
         }
         fx.dmg_mul *= pmul;
         fx.range_mul *= p->range_mul;
@@ -527,6 +561,11 @@ void update_weapons(Game *g) {
             default: break;
         }
         g->current_attack_crit = false;
-        w->cooldown = w->base_cd * fx.cd_mul * p->atk_speed_mul;
+        /* u_berserk_cd : sous 50% HP, le cooldown est divise par 2. */
+        float cd_final = w->base_cd * fx.cd_mul * p->atk_speed_mul;
+        if (p->u_berserk_cd && p->hp < p->maxhp * 0.5f) cd_final *= 0.5f;
+        /* u_last_stand actif : cd /2 (cumul si berserk). */
+        if (p->last_stand_t > 0.f) cd_final *= 0.5f;
+        w->cooldown = cd_final;
     }
 }

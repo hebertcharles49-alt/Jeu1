@@ -32,75 +32,81 @@ typedef struct {
     Element d_aff_el;
     float   d_aff_val;
     /* ---- Flags build-defining (rule-changing) ---- */
-    bool  u_explosions_attract; /* AOE tirent les ennemis vers le centre */
-    bool  u_crit_shrink;        /* chaque crit reduit player.r */
-    bool  u_corpse_mines;       /* 30% des morts laissent une mine */
-    bool  u_free_dash;          /* dash sans cooldown */
-    int   u_drone_count;        /* 0..3 fees-drones */
+    bool  u_explosions_attract;
+    bool  u_crit_shrink;
+    bool  u_corpse_mines;
+    bool  u_free_dash;
+    int   u_drone_count;
+    /* rework v2 */
+    bool  u_berserk_cd, u_element_absorb;
+    bool  u_hazard_immune, u_hazard_stacks;
+    bool  u_phoenix_revive, u_kill_wave, u_frontal_immune;
+    bool  u_dodge_attack, u_crowd_regen, u_stun_on_melee;
+    bool  u_void_trail, u_kill_stack_dmg, u_heavy_armor;
+    bool  u_expose_weakness, u_last_stand;
 } UniqueDef;
 
-/* 20 uniques = 2 par triple combo (Tempete, Volcan, Dechirure, Phenix,
- * Tsunami, Marais, Brume Mortelle, Effondrement, Forge Solaire, Jugement). */
+/* 20 uniques = 2 par triple combo. Repartition slots equilibree :
+ * Helm x4 / Chest x5 / Belt x3 / Boots x2 / Gloves x3 / Legs x3.
+ * 6 items "gardes" + 14 reworkes avec flags rule-changing. */
 static const UniqueDef UNIQUE_DEFS[] = {
     /* === Tempete (Feu+Eau+Foudre) === */
-    { "Anneau de Tempete",       "+20% atk speed, -10% PV max",
-      SLOT_BELT,    .d_maxhp=-10.f, .d_atk_speed_red=0.20f },
-    { "Cuirasse de Foudre",      "+3 armure, foudre +30%",
-      SLOT_CHEST,   .d_armor=3.f, .d_aff_el=EL_LIGHTNING, .d_aff_val=0.30f },
+    { "Oeil du Cyclone",         "Sous 50% HP : cooldowns x0.5",
+      SLOT_HELM,    .d_dmg_mul=0.10f,
+      .d_aff_el=EL_LIGHTNING, .d_aff_val=0.20f, .u_berserk_cd=true },
+    { "Cuirasse Orageuse",       "Hit elementaire : +30% affinite 8s",
+      SLOT_CHEST,   .d_armor=2.f, .u_element_absorb=true },
     /* === Volcan (Feu+Terre+Air) === */
-    /* BUILD-DEF : tes AOE attirent les ennemis vers le centre. */
     { "Pendentif Volcanique",    "Tes AOE attirent les ennemis",
       SLOT_BELT,    .d_dmg_mul=0.10f, .u_explosions_attract=true },
-    { "Bottes Volcaniques",      "+30 vitesse, feu +25%",
-      SLOT_BOOTS,   .d_speed=30.f, .d_aff_el=EL_FIRE, .d_aff_val=0.25f },
+    { "Semelles de Lave",        "Immune aux hazards. Stacks +5% dmg",
+      SLOT_BOOTS,   .d_aff_el=EL_FIRE, .d_aff_val=0.15f,
+      .u_hazard_immune=true, .u_hazard_stacks=true },
     /* === Dechirure (Vide+Fee+Foudre) === */
-    /* BUILD-DEF : 2 drones-fees orbitent et tirent. Pas de stat -- le
-     * gameplay est lui-meme l effet. */
     { "Voile du Vide",           "2 drones spectraux orbitent et tirent",
       SLOT_CHEST,   .u_drone_count=2 },
-    /* BUILD-DEF : chaque crit te reduit (hitbox plus petite). Ramene a
-     * pleine taille en prenant des degats. "Devenir insaisissable". */
     { "Couronne Spectrale",      "Chaque crit te reduit. Crit +15%",
       SLOT_HELM,    .d_crit_chance=0.15f, .u_crit_shrink=true },
     /* === Phenix (Feu+Air+Fee) === */
-    /* BUILD-DEF : dash sans cooldown. Mobilite infinie -- change tout. */
     { "Plume du Phenix",         "Dash sans cooldown",
       SLOT_BELT,    .u_free_dash=true },
-    { "Manteau Solaire",         "+30% degats elementaires",
-      SLOT_CHEST,   .d_dmg_mul=0.30f, .d_aff_el=EL_FIRE, .d_aff_val=0.20f },
+    { "Cape Solaire",            "A 0 HP : revis a 30% (1 / salle)",
+      SLOT_LEGS,    .d_aff_el=EL_FIRE, .d_aff_val=0.25f,
+      .u_phoenix_revive=true },
     /* === Tsunami (Eau+Terre+Foudre) === */
-    { "Bouclier Maremoteur",     "+5 armure, eau +25%",
-      SLOT_CHEST,   .d_armor=5.f, .d_aff_el=EL_WATER, .d_aff_val=0.25f },
-    { "Laniere Tsunami",         "+10% atk speed, eau +20%",
-      SLOT_BELT,    .d_atk_speed_red=0.10f, .d_aff_el=EL_WATER, .d_aff_val=0.20f },
+    { "Ceinture des Marees",     "Chaque kill : vague de repulsion + dmg",
+      SLOT_BELT,    .d_aff_el=EL_WATER, .d_aff_val=0.20f,
+      .u_kill_wave=true },
+    { "Jambieres Abyssales",     "-40% vitesse, immune proj de face",
+      SLOT_LEGS,    .d_armor=4.f, .u_frontal_immune=true },
     /* === Marais (Eau+Air+Terre) === */
-    { "Bottes Marecage",         "+30% esquive, +15 vitesse",
-      SLOT_BOOTS,   .d_dodge=0.30f, .d_speed=15.f },
-    { "Talisman Brumeux",        "+25% PV max",
-      SLOT_HELM,    .d_maxhp=25.f },
+    { "Dague du Serpent",        "Esquive declenche une attaque gratuite",
+      SLOT_GLOVES,  .d_dodge=0.10f, .u_dodge_attack=true },
+    { "Veste de Roseaux",        "Regen += 0.1 / ennemi vivant en salle",
+      SLOT_CHEST,   .d_maxhp=15.f, .u_crowd_regen=true },
     /* === Brume Mortelle (Vide+Eau+Air) === */
-    /* BUILD-DEF : 1 drone supplementaire + esquive. Stack avec Voile du
-     * Vide pour 3 drones au total -- archetype "summoner". */
     { "Voile de Brume",          "+15% esquive, 1 drone supplementaire",
       SLOT_CHEST,   .d_dodge=0.15f, .u_drone_count=1 },
-    /* BUILD-DEF : 30% des morts laissent une mine qui explose au passage. */
     { "Couronne Empoisonneuse",  "Les morts laissent des mines",
       SLOT_HELM,    .d_dmg_mul=0.10f, .u_corpse_mines=true },
     /* === Effondrement (Terre+Air+Vide) === */
-    { "Ceinture Effondrement",   "+30 PV max, +2 armure",
-      SLOT_BELT,    .d_maxhp=30.f, .d_armor=2.f },
-    { "Pendentif Tellurique",    "+25% degats melee, terre +25%",
-      SLOT_GLOVES,  .d_dmg_mul=0.25f, .d_aff_el=EL_EARTH, .d_aff_val=0.25f },
+    { "Gants du Seisme",         "Melee : 20% stun 1s (dmg recus x2)",
+      SLOT_GLOVES,  .d_dmg_mul=0.20f, .u_stun_on_melee=true },
+    { "Bottes du Vide",          "Le dash laisse un champ de Vide 3s",
+      SLOT_BOOTS,   .d_aff_el=EL_VOID, .d_aff_val=0.20f,
+      .u_void_trail=true },
     /* === Forge Solaire (Acier+Feu+Foudre) === */
-    { "Gantelets de Forge",      "+40% degats melee",
-      SLOT_GLOVES,  .d_dmg_mul=0.40f, .d_aff_el=EL_STEEL, .d_aff_val=0.25f },
-    { "Bottes du Marteau",       "+20% atk speed",
-      SLOT_BOOTS,   .d_atk_speed_red=0.20f },
+    { "Marteau de Forge",        "Chaque kill : +2 dmg flat (max +40)",
+      SLOT_GLOVES,  .d_aff_el=EL_STEEL, .d_aff_val=0.20f,
+      .u_kill_stack_dmg=true },
+    { "Jambieres de Mithril",    "Armure x2 mais -3 vitesse / point",
+      SLOT_LEGS,    .d_armor=5.f, .u_heavy_armor=true },
     /* === Jugement (Tenebres+Sacre+Foudre) === */
-    { "Couronne du Jugement",    "+25% crit, +1 crit dmg",
-      SLOT_HELM,    .d_crit_chance=0.25f, .d_crit_dmg=1.f },
-    { "Pendentif Sanctifie",     "+30% degats, sacre +25%",
-      SLOT_BELT,    .d_dmg_mul=0.30f, .d_aff_el=EL_HOLY, .d_aff_val=0.25f },
+    { "Oeil du Juge",            "Crit revele la faiblesse 5s. Exploit x1.5",
+      SLOT_HELM,    .d_crit_chance=0.15f, .u_expose_weakness=true },
+    { "Suaire de Penitence",     "Mort -> 1 HP + stats x2 pendant 10s",
+      SLOT_CHEST,   .d_aff_el=EL_HOLY, .d_aff_val=0.20f,
+      .u_last_stand=true },
 };
 #define N_UNIQUES ((int)(sizeof(UNIQUE_DEFS)/sizeof(UNIQUE_DEFS[0])))
 _Static_assert(N_UNIQUES <= 32,
@@ -156,14 +162,30 @@ void unique_apply_to_block(int id, StatBlock *sb) {
     if (u->d_aff_el > EL_NONE && u->d_aff_el < EL_COUNT) {
         sb->aff[u->d_aff_el] += u->d_aff_val;
     }
-    /* propagation des flags rule-changing. Plusieurs uniques peuvent
-     * additionner u_drone_count, mais les bool s aggregent en OR. */
+    /* propagation des flags rule-changing en OR (sauf u_drone_count
+     * additif avec cap 4 = MAX_FAIRIES/8). */
     if (u->u_explosions_attract) sb->u_explosions_attract = true;
     if (u->u_crit_shrink)        sb->u_crit_shrink        = true;
     if (u->u_corpse_mines)       sb->u_corpse_mines       = true;
     if (u->u_free_dash)          sb->u_free_dash          = true;
     sb->u_drone_count += u->u_drone_count;
-    if (sb->u_drone_count > 4) sb->u_drone_count = 4;  /* cap MAX_FAIRIES/8 */
+    if (sb->u_drone_count > 4) sb->u_drone_count = 4;
+    /* rework v2 */
+    if (u->u_berserk_cd)      sb->u_berserk_cd      = true;
+    if (u->u_element_absorb)  sb->u_element_absorb  = true;
+    if (u->u_hazard_immune)   sb->u_hazard_immune   = true;
+    if (u->u_hazard_stacks)   sb->u_hazard_stacks   = true;
+    if (u->u_phoenix_revive)  sb->u_phoenix_revive  = true;
+    if (u->u_kill_wave)       sb->u_kill_wave       = true;
+    if (u->u_frontal_immune)  sb->u_frontal_immune  = true;
+    if (u->u_dodge_attack)    sb->u_dodge_attack    = true;
+    if (u->u_crowd_regen)     sb->u_crowd_regen     = true;
+    if (u->u_stun_on_melee)   sb->u_stun_on_melee   = true;
+    if (u->u_void_trail)      sb->u_void_trail      = true;
+    if (u->u_kill_stack_dmg)  sb->u_kill_stack_dmg  = true;
+    if (u->u_heavy_armor)     sb->u_heavy_armor     = true;
+    if (u->u_expose_weakness) sb->u_expose_weakness = true;
+    if (u->u_last_stand)      sb->u_last_stand      = true;
 }
 
 /* Tire un id d'unique au hasard avec une probabilite croissante. */

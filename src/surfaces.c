@@ -263,9 +263,17 @@ static float surface_apply_to_pos(Game *g, float x, float y, float r,
         } else if (sp->dmg_ps > 0.f) {
             float dmg = sp->dmg_ps * dt;
             if (is_player) {
-                if (g->player.invuln_t <= 0.f && g->player.dash_t <= 0.f) {
-                    /* on accumule -- on n applique vraiment que quand on
-                     * passe le seuil 1 PV pour eviter le spam de hits. */
+                /* u_hazard_immune : le joueur ne prend pas de dmg de
+                 * cette surface. u_hazard_stacks : chaque tile traversee
+                 * ajoute 1 stack (cap 10 = +50% dmg). On declenche
+                 * l increment au passage (frame-based). */
+                if (g->player.u_hazard_immune) {
+                    if (g->player.u_hazard_stacks &&
+                        g->player.hazard_stacks < 10 &&
+                        (rand() % 100) < 1) {
+                        g->player.hazard_stacks++;
+                    }
+                } else if (g->player.invuln_t <= 0.f && g->player.dash_t <= 0.f) {
                     static float acc_p = 0.f;
                     acc_p += dmg;
                     if (acc_p >= 1.f) {

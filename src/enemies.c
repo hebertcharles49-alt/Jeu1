@@ -119,6 +119,20 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
                                float kx, float ky)
 {
     float eff = elem_effectiveness(el, e->element);
+    /* u_expose_weakness : si la cible a expose_t > 0 ET l attaque est
+     * super-effective (eff > 1), x1.5 bonus. */
+    if (g->player.u_expose_weakness && e->expose_t > 0.f && eff > 1.f) {
+        dmg *= 1.5f;
+    }
+    /* u_stun_on_melee : x2 dmg si la cible est actuellement stun
+     * (les melee posent le stun via stun_t, cf combat.c fire_fists). */
+    if (g->player.u_stun_on_melee && e->stun_t > 0.f) {
+        dmg *= 2.f;
+    }
+    /* u_expose_weakness : un crit POSE le timer 5s sur la cible. */
+    if (g->player.u_expose_weakness && g->current_attack_crit) {
+        e->expose_t = 5.0f;
+    }
     dmg *= eff;
     e->hp -= dmg;
     e->hit_flash = (eff >= 2.f) ? 0.18f : 0.10f;
@@ -299,6 +313,31 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     loop_on_hit(g);
     if (e->hp <= 0.f && !already_dead) {
         loop_on_kill(g);
+        /* === Build-defining effects on kill === */
+        /* u_kill_wave : vague de repulsion + dmg autour du joueur */
+        if (g->player.u_kill_wave) {
+            float diff = powf(1.15f, (float)(g->floor_index - 1));
+            float wave_dmg = 6.f * diff;
+            for (int j = 0; j < MAX_ENEMIES; j++) {
+                Enemy *o = &g->enemies[j];
+                if (j == idx || !o->alive || o->dying_t > 0.f) continue;
+                float dx = o->x - g->player.x, dy = o->y - g->player.y;
+                if (dx*dx + dy*dy < 60.f * 60.f) {
+                    world_enemy_damage(g, j, wave_dmg, EL_WATER,
+                                       dx * 3.f, dy * 3.f);
+                }
+            }
+            for (int k = 0; k < 18; k++) {
+                float a = (k / 18.f) * 6.2831f;
+                particle_spawn_kind(g, g->player.x, g->player.y,
+                                    cosf(a) * 90.f, sinf(a) * 90.f,
+                                    0.40f, 0x80B0FFFF, 2.4f, 0);
+            }
+        }
+        /* u_kill_stack_dmg : +1 stack par kill (cap 20). */
+        if (g->player.u_kill_stack_dmg && g->player.kill_stack_count < 20) {
+            g->player.kill_stack_count++;
+        }
         /* killstreak : reset le timer + increment ; trigger overdrive
          * a 5 kills consecutifs (fenetre 3s par kill). */
         g->killstreak_count++;
@@ -1469,6 +1508,7 @@ void update_enemies(Game *g) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;
         if (e->hit_flash > 0.f) e->hit_flash -= dt;
+        if (e->expose_t > 0.f)  e->expose_t  -= dt;
         if (e->dying_t > 0.f) {
             e->dying_t -= dt;
             if (e->dying_t <= 0.f) e->alive = false;

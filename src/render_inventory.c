@@ -269,7 +269,15 @@ void render_inventory(Game *g) {
                        it->is_unique ? "UNIQUE " : "",
                        rarity_name(it->rarity),
                        is_equip ? " (equipe)" : "");
-            int ay = dpy + 26;
+            /* archetype : visible des R_MAGIC pour les items non-uniques. */
+            int ay = dpy + 24;
+            if (!it->is_unique && it->rarity > R_COMMON) {
+                text_drawf(g->renderer, dpx + 4, ay, 0x808080FF,
+                           "Archetype : %s", archetype_name(it->base_kind));
+                ay += 10;
+            } else {
+                ay = dpy + 26;
+            }
             if (it->is_unique) {
                 /* description fixe du unique au lieu de la stat de base. */
                 text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF, "%s",
@@ -467,6 +475,11 @@ void render_inventory(Game *g) {
                        is_unique ? "UNIQUE " : "",
                        rarity_name(it->rarity));
             ly += 9;
+            if (!is_unique && it->rarity > R_COMMON) {
+                text_drawf(g->renderer, tx + 6, ly, 0x808080FF,
+                           "Archetype : %s", archetype_name(it->base_kind));
+                ly += 9;
+            }
             if (is_unique) {
                 text_drawf(g->renderer, tx + 6, ly, 0x80FFC0FF,
                            "%s", unique_def_desc(it->unique_id));

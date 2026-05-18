@@ -23,14 +23,50 @@ void player_take_damage(Game *g, float dmg) {
             particle_spawn_kind(g, p->x, p->y, cosf(a) * 80, sinf(a) * 80,
                                 0.3f, 0xFFFFFFFF, 1.5f, 0);
         }
+        /* u_dodge_attack : une esquive reussie declenche une attaque
+         * gratuite de l arme active (reset le cooldown). */
+        if (p->u_dodge_attack) {
+            p->weapons[p->active_weapon].cooldown = 0.f;
+        }
         return;
     }
     float real = dmg - p->armor;
     if (real < 1.f) real = 1.f;
+    /* u_last_stand : si le coup serait letal, on s arrete a 1 HP et on
+     * declenche le buff x2 stats pendant 10s. 1 charge / salle. */
+    if (p->u_last_stand && p->last_stand_charge && p->hp - real <= 0.f) {
+        p->last_stand_charge = false;
+        p->last_stand_t = 10.0f;
+        p->hp = 1.f;
+        /* burst dore */
+        for (int k = 0; k < 26; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, p->x, p->y, cosf(a) * 120, sinf(a) * 120,
+                                0.65f, 0xFFE890FF, 3.0f, 2);
+        }
+        g->shake_t = 0.30f; g->shake_mag = 6.f; g->hitstop_t = 0.20f;
+        sfx_play(g, SFX_BOSS);
+        toast_push(g, "DERNIER REPLI", 0xFFE890FF, 4.0f);
+        return;
+    }
+    /* u_phoenix_revive : si letal, revis a 30% HP. 1 charge / salle. */
+    if (p->u_phoenix_revive && p->phoenix_charge && p->hp - real <= 0.f) {
+        p->phoenix_charge = false;
+        p->hp = p->maxhp * 0.30f;
+        p->invuln_t = 1.5f;
+        for (int k = 0; k < 30; k++) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, p->x, p->y, cosf(a) * 140, sinf(a) * 140,
+                                0.70f, 0xFF8040FF, 3.0f, 2);
+        }
+        g->shake_t = 0.45f; g->shake_mag = 7.f; g->hitstop_t = 0.30f;
+        sfx_play(g, SFX_BOSS);
+        toast_push(g, "RENAISSANCE", 0xFF8040FF, 4.0f);
+        return;
+    }
     p->hp -= real;
     p->invuln_t = 0.6f;
-    /* BUILD-DEF crit_shrink : on remonte par paliers de 1.5 px a chaque hit
-     * jusqu a la taille de base. Recompense le jeu propre. */
+    /* BUILD-DEF crit_shrink */
     if (p->u_crit_shrink && p->r_base > 0.f && p->r < p->r_base) {
         p->r += 1.5f;
         if (p->r > p->r_base) p->r = p->r_base;
@@ -236,6 +272,11 @@ void update_player(Game *g) {
             p->dash_cd <= 0.f && len > 0.01f) {
             p->dash_cd = p->u_free_dash ? 0.f : 0.7f;
             p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
+            /* u_void_trail : depose un champ de Vide a la position de
+             * depart du dash. 3s de slow + dmg DARK. */
+            if (p->u_void_trail) {
+                surface_spawn(g, SURF_SHADOW, p->x, p->y, 20.f, 3.0f);
+            }
         }
     }
 
@@ -283,8 +324,21 @@ void update_player(Game *g) {
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
 
     /* regen */
-    if (p->regen_per_sec > 0.f && p->hp < p->maxhp) {
-        p->regen_acc += p->regen_per_sec * dt;
+    /* u_last_stand : tick le buff x2 (visible via shake + particules) */
+    if (p->last_stand_t > 0.f) {
+        p->last_stand_t -= dt;
+        if ((rand() % 100) < 30) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, p->x, p->y,
+                                cosf(a) * 50.f, sinf(a) * 50.f,
+                                0.30f, 0xFFE890FF, 1.8f, 0);
+        }
+    }
+    /* u_crowd_regen : regen bonus = 0.1 / ennemi vivant en salle. */
+    float regen_rate = p->regen_per_sec;
+    if (p->u_crowd_regen) regen_rate += g->enemy_alive_count * 0.1f;
+    if (regen_rate > 0.f && p->hp < p->maxhp) {
+        p->regen_acc += regen_rate * dt;
         while (p->regen_acc >= 1.f) { p->hp += 1.f; p->regen_acc -= 1.f; }
         if (p->hp > p->maxhp) p->hp = p->maxhp;
     }

@@ -109,7 +109,29 @@ void update_projectiles(Game *g) {
             float dx = p->x - pr->x, dy = p->y - pr->y;
             float rr = p->r + pr->r;
             if (dx * dx + dy * dy < rr * rr) {
-                if (p->invuln_t <= 0.f && p->dash_t <= 0.f) {
+                /* u_frontal_immune : si le projectile vient de la
+                 * direction du regard (aim), on l ignore. dot positif =
+                 * proj face au joueur. */
+                bool blocked = false;
+                if (p->u_frontal_immune) {
+                    float ax = p->aim_x - p->x, ay = p->aim_y - p->y;
+                    float al = sqrtf(ax*ax + ay*ay) + 0.001f;
+                    ax /= al; ay /= al;
+                    float ipx = -pr->vx, ipy = -pr->vy;
+                    float il = sqrtf(ipx*ipx + ipy*ipy) + 0.001f;
+                    ipx /= il; ipy /= il;
+                    float dot = ax * ipx + ay * ipy;
+                    if (dot > 0.5f) blocked = true;     /* cone ~60deg */
+                }
+                if (blocked) {
+                    /* sparks bleus pour signaler le block */
+                    for (int k = 0; k < 8; k++) {
+                        float a = (rand() % 360) * 0.01745f;
+                        particle_spawn_kind(g, p->x, p->y,
+                                            cosf(a) * 70.f, sinf(a) * 70.f,
+                                            0.3f, 0xC0E0FFFF, 1.6f, 0);
+                    }
+                } else if (p->invuln_t <= 0.f && p->dash_t <= 0.f) {
                     player_take_damage(g, pr->dmg);
                 }
                 pr->alive = false;
