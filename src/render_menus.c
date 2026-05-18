@@ -13,165 +13,270 @@
 extern int  hub_perm_cost(int kind);
 
 /* ---------- HUB ---------- */
-/* petite barre de progression : fill colore + outline. */
-static void hub_progress_bar(Game *g, int x, int y, int w, int seen, int total,
-                              uint32_t fill_col, const char *label)
-{
-    fill_rect(g->renderer, x, y, w, 6, 0x201824FF);
-    if (total > 0) {
-        int fw = (seen * w) / total;
-        fill_rect(g->renderer, x, y, fw, 6, fill_col);
+
+/* ============================================================
+ *  HUB : "Cimetiere" pre-run avec 5 zones interactives.
+ *  TEMPLE / FORGE / LICHE / TAVERNE + Porte du Donjon.
+ *  Cf game.h hub_sub_open pour les sous-panneaux.
+ * ============================================================ */
+
+/* coordonnees des batiments. Centrees pour la composition. */
+typedef struct { int x, y, w, h; const char *name; const char *sub; int sub_id; } HubBldg;
+
+static HubBldg HUB_BLDGS[5] = {
+    /* TEMPLE (sub 1)   : haut-gauche  */
+    {  50,  74, 110, 78, "TEMPLE",  "Renforcement",         1 },
+    /* PORTE DU DONJON  : centre haut. sub_id = 0 -> start run */
+    { 270,  60, 100, 96, "DONJON",  "Lancer la course",     0 },
+    /* TAVERNE (heros)  : haut-droite */
+    { 480,  74, 110, 78, "TAVERNE", "Recruter un heros",   -1 },
+    /* FORGE (sub 2)    : bas-gauche  */
+    {  50, 178, 110, 78, "FORGE",   "Armer le heros",       2 },
+    /* LICHE (sub 3)    : bas-droite  */
+    { 480, 178, 110, 78, "LICHE",   "Modificateurs",        3 },
+};
+
+static void draw_building(Game *g, const HubBldg *b, bool hover, bool locked) {
+    GfxCtx *gc = g->renderer;
+    /* base : box plus sombre en bas (sol), corps clair au-dessus */
+    uint32_t body = locked ? 0x303038FF : 0x402820FF;
+    uint32_t roof = locked ? 0x202028FF : 0x301818FF;
+    uint32_t door = 0x181014FF;
+    uint32_t outl = hover ? 0xFFE080FF : 0x60504AFF;
+    if (locked) outl = 0x505058FF;
+    /* corps */
+    fill_rect(gc, b->x, b->y + 20, b->w, b->h - 20, body);
+    /* toit (rect plus haut + plus etroit) */
+    fill_rect(gc, b->x + 8, b->y, b->w - 16, 22, roof);
+    fill_rect(gc, b->x + 14, b->y - 6, b->w - 28, 8, roof);
+    /* porte */
+    int dx = b->x + b->w / 2 - 8;
+    int dy = b->y + b->h - 26;
+    fill_rect(gc, dx, dy, 16, 24, door);
+    /* fenetres */
+    fill_rect(gc, b->x + 14, b->y + 36, 12, 10, 0xFFC060A0);
+    fill_rect(gc, b->x + b->w - 26, b->y + 36, 12, 10, 0xFFC060A0);
+    /* outline */
+    rect_outline(gc, b->x, b->y - 6, b->w, b->h + 6, outl);
+    /* enseigne : nom centre au-dessus de la porte */
+    int tw = text_width(b->name);
+    text_draw(gc, b->x + b->w / 2 - tw / 2 + 1,
+              b->y + b->h - 39 + 1, b->name, 0x000000FF);
+    text_draw(gc, b->x + b->w / 2 - tw / 2,
+              b->y + b->h - 39, b->name, hover ? 0xFFFF80FF : 0xFFE0A0FF);
+    /* sous-titre sous le batiment */
+    if (b->sub) {
+        int sw = text_width(b->sub);
+        text_draw(gc, b->x + b->w / 2 - sw / 2, b->y + b->h + 2,
+                  b->sub, locked ? 0x606060FF : 0x80C0FFFF);
     }
-    rect_outline(g->renderer, x, y, w, 6, 0x40404AFF);
-    text_drawf(g->renderer, x + w + 6, y - 1, 0xCCCCCCFF,
-               "%s %d/%d", label, seen, total);
+    if (locked) {
+        text_draw(gc, b->x + b->w / 2 - text_width("(bientot)") / 2,
+                  b->y + b->h + 12, "(bientot)", 0x808080FF);
+    }
 }
 
-void render_hub(Game *g) {
-    /* fond degrade ambre */
-    for (int yy = 0; yy < INTERNAL_H; yy++) {
-        int v = 6 + (INTERNAL_H - yy) / 36;
-        fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
-                  (uint32_t)((v << 24) | ((v / 2) << 16) | ((v) << 8) | 0xFF));
-    }
-    /* embers ambient */
-    for (int i = 0; i < 70; i++) {
-        int x = (i * 73 + (int)(g->time * 12)) % INTERNAL_W;
-        int y = ((i * 37) + (int)(g->time * (i % 5 + 2) * 5)) % INTERNAL_H;
-        fill_rect(g->renderer, x, y, 1, 1, (i & 3) ? 0x301820FF : 0xFFA060FF);
-    }
+/* sub-panneau commun : fond translucide + cadre. Renvoie l origine x/y. */
+static void sub_panel_bg(Game *g, int *out_x, int *out_y, int *out_w, int *out_h,
+                          const char *title)
+{
+    int w = 280, h = 220;
+    int x = INTERNAL_W / 2 - w / 2;
+    int y = INTERNAL_H / 2 - h / 2;
+    gfx_set_blend(g->renderer, true);
+    fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x000000C0);
+    gfx_set_blend(g->renderer, false);
+    fill_rect(g->renderer, x, y, w, h, 0x14101AFF);
+    rect_outline(g->renderer, x, y, w, h, 0xFFE080FF);
+    text_draw(g->renderer, x + w / 2 - text_width(title) / 2, y + 8,
+              title, 0xFFE080FF);
+    text_drawf(g->renderer, x + w - 80, y + 8, 0xFFD040FF,
+               "* %d", g->meta.shards);
+    *out_x = x; *out_y = y; *out_w = w; *out_h = h;
+}
 
-    /* titre + sous-titre */
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE SANCTUAIRE")/2, 6,
-              "LE SANCTUAIRE", 0xFFE080FF);
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("Renforce-toi entre les courses")/2,
-              16, "Renforce-toi entre les courses", 0x80FFC0FF);
-
-    /* === HEADER : eclats + counters + lifetime === */
-    /* gauche : eclats + 3 counters de run */
-    text_drawf(g->renderer, 8, 28, 0xFFD040FF, "* %d ECLATS", g->meta.shards);
-    fill_rect(g->renderer, 8, 28, 1, 0, 0);  /* anchor */
-    text_drawf(g->renderer, 8, 38, 0xCCCCCCFF,
-               "Courses %d   Meilleur %d/%d   Victoires %d",
-               g->meta.total_runs, g->meta.best_floor, MAX_FLOORS,
-               g->meta.victories);
-    /* droite : lifetime */
-    int rx = INTERNAL_W - 180;
-    text_draw(g->renderer, rx, 28, "LIFETIME", 0xFFE080FF);
-    text_drawf(g->renderer, rx, 38, 0xCCCCCCFF,
-               "%d kills  %d dmg  %d legendaires",
-               g->meta.lifetime_kills, g->meta.lifetime_damage,
-               g->meta.lifetime_legendaries);
-
-    /* === 4 cartes d achat permanent === */
-    int boxw = 118, boxh = 56, gap = 6;
-    int total_w = 4 * boxw + 3 * gap;
-    int sx0 = (INTERNAL_W - total_w) / 2;
-    int sy = 54;
+/* sous-panneau TEMPLE : les 4 stats permanentes (l ancien systeme). */
+static void render_hub_temple(Game *g) {
+    int x, y, w, h;
+    sub_panel_bg(g, &x, &y, &w, &h, "TEMPLE");
+    text_draw(g->renderer, x + 10, y + 22,
+              "Augmente tes capacites physiques.", 0xCCCCCCFF);
+    int boxw = 124, boxh = 56, gap = 6;
+    int sx0 = x + (w - 2 * boxw - gap) / 2;
+    int sy0 = y + 40;
     for (int i = 0; i < 4; i++) {
-        int sx = sx0 + i * (boxw + gap);
-        bool sel = (g->hub_cursor == i);
+        int sx = sx0 + (i % 2) * (boxw + gap);
+        int sy = sy0 + (i / 2) * (boxh + gap);
+        bool sel = (g->hub_sub_cursor == i);
         int level = perm_stat_level(&g->meta, i);
         int cost  = perm_stat_cost (&g->meta, i);
         bool maxed = (level >= PERM_MAX_LEVEL);
         bool ok    = (!maxed && g->meta.shards >= cost);
-
-        uint32_t bg = sel ? 0x281828FF : 0x14101AFF;
-        uint32_t bd = sel ? 0xFFFF40FF
-                          : (maxed ? 0x40A040FF : (ok ? 0x404048FF : 0x60303AFF));
-        fill_rect(g->renderer, sx, sy, boxw, boxh, bg);
-        rect_outline(g->renderer, sx, sy, boxw, boxh, bd);
-
-        /* titre + step en couleur claire */
-        text_drawf(g->renderer, sx + 8, sy + 6,
+        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x281828FF : 0x18141EFF);
+        rect_outline(g->renderer, sx, sy, boxw, boxh,
+                     sel ? 0xFFFF40FF : (maxed ? 0x40A040FF : (ok ? 0x404048FF : 0x603030FF)));
+        text_drawf(g->renderer, sx + 6, sy + 4,
                    sel ? 0xFFFF40FF : 0xFFFFFFFF,
                    "+%d %s", perm_stat_step(i), perm_stat_label(i));
-        /* niveau actuel + barre de progression sur 10 */
-        text_drawf(g->renderer, sx + 8, sy + 18, 0x80C0FFFF,
-                   "NIVEAU %d / %d", level, PERM_MAX_LEVEL);
-        int bw = boxw - 16;
-        fill_rect(g->renderer, sx + 8, sy + 28, bw, 4, 0x201824FF);
+        text_drawf(g->renderer, sx + 6, sy + 14, 0x80C0FFFF,
+                   "Niv %d / %d", level, PERM_MAX_LEVEL);
+        int bw = boxw - 12;
+        fill_rect(g->renderer, sx + 6, sy + 24, bw, 4, 0x201824FF);
         int filled = (level * bw) / PERM_MAX_LEVEL;
-        fill_rect(g->renderer, sx + 8, sy + 28, filled, 4, 0x80FFC0FF);
-        rect_outline(g->renderer, sx + 8, sy + 28, bw, 4, 0x40404AFF);
-        /* cout / max */
+        fill_rect(g->renderer, sx + 6, sy + 24, filled, 4, 0x80FFC0FF);
+        rect_outline(g->renderer, sx + 6, sy + 24, bw, 4, 0x40404AFF);
         if (maxed) {
-            text_draw(g->renderer, sx + 8, sy + 38, "MAXIMUM", 0x80FF80FF);
+            text_draw(g->renderer, sx + 6, sy + 34, "MAXIMUM", 0x80FF80FF);
         } else {
-            text_drawf(g->renderer, sx + 8, sy + 38,
-                       ok ? 0xFFD040FF : 0xC07070FF,
-                       "%d eclats", cost);
-            fill_rect(g->renderer, sx + 8 + 6 * (cost < 10 ? 1 :
-                                                 cost < 100 ? 2 :
-                                                 cost < 1000 ? 3 : 4) + 4,
-                      sy + 39, 4, 4,
-                      ok ? 0xFFD040FF : 0xC07070FF);
+            text_drawf(g->renderer, sx + 6, sy + 34,
+                       ok ? 0xFFD040FF : 0xC07070FF, "%d eclats", cost);
         }
-        /* total actuel */
-        int cur = 0;
-        switch (i) {
-            case 0: cur = g->meta.perm_hp; break;
-            case 1: cur = g->meta.perm_armor; break;
-            case 2: cur = g->meta.perm_speed; break;
-            case 3: cur = g->meta.perm_dmg_pct; break;
+    }
+    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
+              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+}
+
+/* sous-panneau FORGE : 6 armes (W_FISTS..W_AXE) avec upgrade +dmg. */
+static void render_hub_forge(Game *g) {
+    int x, y, w, h;
+    sub_panel_bg(g, &x, &y, &w, &h, "FORGE");
+    text_draw(g->renderer, x + 10, y + 22,
+              "Ameliore le degat de base de chaque arme.", 0xCCCCCCFF);
+    int rowh = 22;
+    for (int k = 0; k < W_COUNT; k++) {
+        int sy = y + 38 + k * rowh;
+        bool sel = (g->hub_sub_cursor == k);
+        bool seen = (k == W_FISTS) || g->meta.weapon_discovered[k];
+        int lvl = forge_level(&g->meta, (WeaponKind)k);
+        int cost = forge_cost(&g->meta, (WeaponKind)k);
+        bool maxed = (lvl >= FORGE_MAX_LEVEL);
+        bool ok    = seen && !maxed && g->meta.shards >= cost;
+        uint32_t bg = sel ? 0x281828FF : 0x18141EFF;
+        uint32_t bd = sel ? 0xFFFF40FF :
+                      (!seen ? 0x404048FF :
+                      (maxed ? 0x40A040FF : (ok ? 0x504048FF : 0x603030FF)));
+        fill_rect(g->renderer, x + 10, sy, w - 20, rowh - 2, bg);
+        rect_outline(g->renderer, x + 10, sy, w - 20, rowh - 2, bd);
+        if (!seen) {
+            text_draw(g->renderer, x + 16, sy + 6, "??????", 0x606060FF);
+        } else {
+            text_drawf(g->renderer, x + 16, sy + 6,
+                       sel ? 0xFFFF40FF : 0xFFFFFFFF,
+                       "%s  +%d dmg", weapon_name((WeaponKind)k), lvl * 5);
+            /* mini progress bar */
+            int bw = 50;
+            fill_rect(g->renderer, x + 130, sy + 8, bw, 4, 0x201824FF);
+            int fw = (lvl * bw) / FORGE_MAX_LEVEL;
+            fill_rect(g->renderer, x + 130, sy + 8, fw, 4, 0x80FFC0FF);
+            rect_outline(g->renderer, x + 130, sy + 8, bw, 4, 0x40404AFF);
+            if (maxed) {
+                text_draw(g->renderer, x + w - 80, sy + 6, "MAXIMUM", 0x80FF80FF);
+            } else {
+                text_drawf(g->renderer, x + w - 80, sy + 6,
+                           ok ? 0xFFD040FF : 0xC07070FF,
+                           "%d eclats", cost);
+            }
         }
-        const char *unit = (i == 3) ? "%" : "";
-        text_drawf(g->renderer, sx + 8, sy + 48, 0xC0E0FFFF,
-                   "total +%d%s", cur, unit);
+    }
+    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
+              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+}
+
+/* sous-panneau LICHE : stub (modificateurs de run a venir). */
+static void render_hub_liche(Game *g) {
+    int x, y, w, h;
+    sub_panel_bg(g, &x, &y, &w, &h, "LICHE");
+    text_draw(g->renderer, x + w / 2 - text_width("Modificateurs de run") / 2,
+              y + 60, "Modificateurs de run", 0xFFE080FF);
+    text_draw(g->renderer, x + w / 2 - text_width("Disponible prochainement.") / 2,
+              y + 80, "Disponible prochainement.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 -
+              text_width("La Liche tissera des anomalies sur ta course :") / 2,
+              y + 110, "La Liche tissera des anomalies sur ta course :", 0x808080FF);
+    text_draw(g->renderer, x + 30, y + 124,
+              "- ennemis empoisonnes pour +bounty", 0x606060FF);
+    text_draw(g->renderer, x + 30, y + 134,
+              "- portes a sens unique", 0x606060FF);
+    text_draw(g->renderer, x + 30, y + 144,
+              "- malediction de tempete", 0x606060FF);
+    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
+              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+}
+
+void render_hub(Game *g) {
+    /* fond degrade sombre type cimetiere : violet sombre en haut,
+     * brun terre en bas. Plus oppressant qu un degrade ambre. */
+    for (int yy = 0; yy < INTERNAL_H; yy++) {
+        float t = (float)yy / (float)INTERNAL_H;
+        int r = (int)(0x10 + t * 0x20);
+        int gr = (int)(0x0A + t * 0x14);
+        int b = (int)(0x18 + (1.f - t) * 0x10);
+        fill_rect(g->renderer, 0, yy, INTERNAL_W, 1,
+                  (uint32_t)((r << 24) | (gr << 16) | (b << 8) | 0xFF));
+    }
+    /* etoiles + brouillard en bas */
+    for (int i = 0; i < 50; i++) {
+        int x = (i * 91 + (int)(g->time * 6)) % INTERNAL_W;
+        int y = (i * 37) % 80;
+        fill_rect(g->renderer, x, y, 1, 1, 0xC0C0FF80);
+    }
+    for (int i = 0; i < 40; i++) {
+        int x = (i * 73 + (int)(g->time * 18)) % INTERNAL_W;
+        int y = INTERNAL_H - 30 + (i % 20);
+        fill_rect(g->renderer, x, y, 2, 1, 0x40304060);
+    }
+    /* sol */
+    fill_rect(g->renderer, 0, INTERNAL_H - 40, INTERNAL_W, 40, 0x180A14FF);
+    /* tombes (silhouettes derriere les batiments) */
+    for (int i = 0; i < 8; i++) {
+        int gx = 30 + i * 80;
+        int gy = INTERNAL_H - 56;
+        fill_rect(g->renderer, gx, gy, 14, 18, 0x251820FF);
+        fill_rect(g->renderer, gx + 2, gy - 4, 10, 6, 0x251820FF);
     }
 
-    /* === PROGRES DE DECOUVERTE (barres) === */
-    int py = 120;
-    text_draw(g->renderer, 8, py, "DECOUVERTES", 0xFFFF80FF);
-    py += 12;
-    /* compte les seen */
-    int n_w = 0, n_e = 0, n_c = 0, n_h = 0, n_u = 0, n_i = 0;
-    for (int i = 1; i < W_COUNT;    i++) if (g->meta.weapon_discovered[i])  n_w++;
-    for (int i = 1; i < EL_COUNT;   i++) if (g->meta.element_discovered[i]) n_e++;
-    for (int i = 0; i < HERO_COUNT; i++) if (g->meta.hero_discovered[i])    n_h++;
-    n_c = g->meta.combo_seen_count;
-    for (int i = 0; i < 32; i++) if (g->meta.unique_seen[i]) n_u++;
-    for (int s = 0; s < EQUIP_SLOTS; s++)
-        for (int k = 0; k < 5; k++)
-            if (g->meta.item_seen_rarity[s][k] >= 0) n_i++;
-    int bar_x = 8, bar_w = 110;
-    int line_h = 12;
-    hub_progress_bar(g, bar_x, py, bar_w, n_w, W_COUNT - 1,
-                     0xC0C0FFFF, "Armes");      py += line_h;
-    hub_progress_bar(g, bar_x, py, bar_w, n_e, EL_COUNT - 1,
-                     0xF080F0FF, "Elements");   py += line_h;
-    hub_progress_bar(g, bar_x, py, bar_w, n_h, HERO_COUNT,
-                     0xFFE080FF, "Heros");      py += line_h;
-    /* deuxieme colonne : codex collections */
-    int c2_x = INTERNAL_W / 2 + 20;
-    int c2_y = 132;
-    int combos_total = combo_table_count();
-    int uniq_total   = unique_def_count();
-    int items_total  = EQUIP_SLOTS * 5;
-    hub_progress_bar(g, c2_x, c2_y, bar_w, n_c, combos_total,
-                     0x80C0FFFF, "Combos");    c2_y += line_h;
-    hub_progress_bar(g, c2_x, c2_y, bar_w, n_u, uniq_total,
-                     0xFF8030FF, "Uniques");   c2_y += line_h;
-    hub_progress_bar(g, c2_x, c2_y, bar_w, n_i, items_total,
-                     0x80FFC0FF, "Items");     c2_y += line_h;
+    /* titre */
+    text_draw(g->renderer, INTERNAL_W/2 - text_width("LE CIMETIERE")/2, 6,
+              "LE CIMETIERE", 0xFFE080FF);
+    /* header : eclats + counters */
+    text_drawf(g->renderer, 8, 22, 0xFFD040FF, "* %d ECLATS", g->meta.shards);
+    text_drawf(g->renderer, INTERNAL_W - 220, 22, 0xCCCCCCFF,
+               "Courses %d   Meilleur %d/%d   Victoires %d",
+               g->meta.total_runs, g->meta.best_floor, MAX_FLOORS,
+               g->meta.victories);
 
-    /* 4 boutons bas : DEBUTER / OPTIONS / CODEX / AIDE */
-    int by = INTERNAL_H - 30;
-    int bw = 96, bh = 16;
-    int gx = INTERNAL_W/2 - (bw * 4 + 18) / 2;
-    const char *labels[4] = { "[R] DEBUTER", "[O] OPTIONS", "[K] CODEX", "[H] AIDE" };
-    uint32_t col_active[4] = { 0x80FF80FF, 0xCCCCCCFF, 0xC0E0FFFF, 0xCCCCCCFF };
-    for (int i = 0; i < 4; i++) {
-        int x = gx + i * (bw + 6);
-        bool hov = mouse_in_rect(g, x, by, bw, bh);
-        fill_rect(g->renderer, x, by, bw, bh, hov ? 0x303060FF : 0x18181EFF);
-        rect_outline(g->renderer, x, by, bw, bh, hov ? 0xFFFF80FF : 0x404048FF);
-        const char *l = labels[i];
-        text_draw(g->renderer, x + (bw - text_width(l)) / 2, by + 5, l,
-                  hov ? 0xFFFF80FF : col_active[i]);
+    /* 5 batiments */
+    int mx = g->mouse_x, my = g->mouse_y;
+    for (int i = 0; i < 5; i++) {
+        const HubBldg *b = &HUB_BLDGS[i];
+        bool hover = (mx >= b->x && mx < b->x + b->w &&
+                      my >= b->y - 6 && my < b->y + b->h + 6);
+        bool locked = (b->sub_id == 3);   /* LICHE stub */
+        draw_building(g, b, hover, locked);
     }
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP : QUITTER")/2,
-              INTERNAL_H - 10, "ECHAP : QUITTER", 0x808080FF);
+
+    /* hint sous la porte du donjon */
+    text_draw(g->renderer, INTERNAL_W / 2 - text_width("[R] PARTIR EN COURSE") / 2,
+              156, "[R] PARTIR EN COURSE", 0x80FF80FF);
+
+    /* 3 boutons bas : OPTIONS / CODEX / AIDE (DEBUTER passe par la porte) */
+    int by = INTERNAL_H - 22;
+    int bw = 88, bh = 14;
+    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
+    const char *labels[3] = { "[O] OPTIONS", "[K] CODEX", "[H] AIDE" };
+    for (int i = 0; i < 3; i++) {
+        int bx = gx + i * (bw + 6);
+        bool hov = mouse_in_rect(g, bx, by, bw, bh);
+        fill_rect(g->renderer, bx, by, bw, bh, hov ? 0x303060FF : 0x18181EFF);
+        rect_outline(g->renderer, bx, by, bw, bh, hov ? 0xFFFF80FF : 0x404048FF);
+        text_draw(g->renderer, bx + (bw - text_width(labels[i])) / 2, by + 4,
+                  labels[i], hov ? 0xFFFF80FF : 0xCCCCCCFF);
+    }
+
+    /* sous-panneau actif par-dessus */
+    if (g->hub_sub_open == 1) render_hub_temple(g);
+    if (g->hub_sub_open == 2) render_hub_forge(g);
+    if (g->hub_sub_open == 3) render_hub_liche(g);
 }
 
 /* ---------- OPTIONS ---------- */

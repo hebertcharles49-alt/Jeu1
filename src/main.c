@@ -37,8 +37,13 @@ static void poll_input(Game *g, bool *quit) {
             }
             if (sc == SDL_SCANCODE_ESCAPE) {
                 switch (g->state) {
-                    case GS_RUN:        g->state = GS_HUB; break;
-                    case GS_HUB:        *quit = true; break;
+                    case GS_RUN:        g->state = GS_HUB; g->hub_sub_open = 0; break;
+                    case GS_HUB:
+                        /* ESC dans un sous-panneau : ferme le panneau,
+                         * sinon retour au titre. */
+                        if (g->hub_sub_open != 0) g->hub_sub_open = 0;
+                        else g->state = GS_TITLE;
+                        break;
                     case GS_TITLE:      *quit = true; break;
                     case GS_HELP:       g->state = GS_TITLE; break;
                     case GS_LORE:       g->state = GS_TITLE; break;
@@ -46,8 +51,8 @@ static void poll_input(Game *g, bool *quit) {
                         settings_write(&g->settings);
                         g->state = g->opt_return ? g->opt_return : GS_TITLE;
                         break;
-                    case GS_CHOOSE_HERO:g->state = GS_HUB; break;
-                    case GS_CODEX:      g->state = GS_HUB; break;
+                    case GS_CHOOSE_HERO:g->state = GS_HUB; g->hub_sub_open = 0; break;
+                    case GS_CODEX:      g->state = GS_HUB; g->hub_sub_open = 0; break;
                     case GS_INVENTORY:  g->state = g->state_prev; break;
                     case GS_LEVELUP:    /* pas d'echap */ break;
                     case GS_SHOP:       game_next_floor(g); break;
@@ -402,6 +407,14 @@ void game_start_new_run(Game *g) {
     /* poings sur les 2 slots */
     weapon_init_defaults(&p->weapons[0], W_FISTS); p->weapons[0].owned = true;
     weapon_init_defaults(&p->weapons[1], W_FISTS); p->weapons[1].owned = true;
+    /* FORGE bonus : meta.weapon_dmg_bonus[kind] x5 ajoute a base_dmg
+     * pour chaque arme detenue au demarrage. (Pour le moment seul
+     * W_FISTS est equippe, mais on l applique aussi quand un drop
+     * d arme arrive -- cf player.c PU_WEAPON.) */
+    for (int s = 0; s < WEAPON_SLOTS; s++) {
+        int b = g->meta.weapon_dmg_bonus[p->weapons[s].kind];
+        if (b > 0) p->weapons[s].base_dmg += b * 5.f;
+    }
 
     game_recompute_player_stats(g);
     p->hp = p->maxhp;
@@ -535,51 +548,150 @@ static void hub_perm_apply(Game *g, int kind) {
     sfx_play(g, SFX_COIN);
 }
 
-static void update_hub(Game *g) {
-    /* navigation curseur 0..3 sur les 4 boutons stats */
-    if (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
-        g->hub_cursor = (g->hub_cursor + 3) % 4;
-    if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
-        g->hub_cursor = (g->hub_cursor + 1) % 4;
-    if (g->keys[SDL_SCANCODE_A] && !g->keys_prev[SDL_SCANCODE_A])
-        g->hub_cursor = (g->hub_cursor + 3) % 4;
-    if (g->keys[SDL_SCANCODE_D] && !g->keys_prev[SDL_SCANCODE_D])
-        g->hub_cursor = (g->hub_cursor + 1) % 4;
+int forge_level(const MetaSave *m, WeaponKind k) {
+    if (k < 0 || k >= W_COUNT) return 0;
+    return m->weapon_dmg_bonus[k];
+}
 
-    /* mouse hover sur les boutons (memes coords que render_hub) */
-    int boxw = 118, boxh = 50, gap = 6;
-    int total_w = 4 * boxw + 3 * gap;
-    int sx0 = (INTERNAL_W - total_w) / 2;
-    int sy  = 60;
-    for (int i = 0; i < 4; i++) {
-        int sx = sx0 + i * (boxw + gap);
-        if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
-            g->hub_cursor = i;
-            if (mouse_clicked(g)) hub_perm_apply(g, i);
+int forge_cost(const MetaSave *m, WeaponKind k) {
+    int lvl = forge_level(m, k);
+    if (lvl >= FORGE_MAX_LEVEL) return 0;     /* max */
+    return (lvl + 1) * 40;
+}
+
+bool forge_buy(Game *g, WeaponKind k) {
+    int cost = forge_cost(&g->meta, k);
+    if (cost <= 0 || g->meta.shards < cost) return false;
+    /* on n autorise l upgrade que sur les armes deja decouvertes. */
+    if (k != W_FISTS && !g->meta.weapon_discovered[k]) return false;
+    g->meta.shards -= cost;
+    g->meta.weapon_dmg_bonus[k]++;
+    save_write(&g->meta);
+    sfx_play(g, SFX_COIN);
+    return true;
+}
+
+/* Coords des batiments du hub. Doivent matcher render_menus.c HUB_BLDGS. */
+static const int HUB_BLDG_RECTS[5][5] = {
+    /* x, y, w, h, sub_id */
+    {  50,  74, 110, 78,  1 },   /* TEMPLE */
+    { 270,  60, 100, 96,  0 },   /* PORTE DU DONJON */
+    { 480,  74, 110, 78, -1 },   /* TAVERNE */
+    {  50, 178, 110, 78,  2 },   /* FORGE */
+    { 480, 178, 110, 78,  3 },   /* LICHE */
+};
+
+static void hub_enter_state_for_bldg(Game *g, int sub_id) {
+    switch (sub_id) {
+        case  0:  /* PORTE : direct sur choose_hero */
+            g->state = GS_CHOOSE_HERO;
+            break;
+        case -1:  /* TAVERNE : meme cible que la porte mais thematique */
+            g->state = GS_CHOOSE_HERO;
+            break;
+        case  1:  /* TEMPLE */
+            g->hub_sub_open = 1;
+            g->hub_sub_cursor = 0;
+            break;
+        case  2:  /* FORGE */
+            g->hub_sub_open = 2;
+            g->hub_sub_cursor = 0;
+            break;
+        case  3:  /* LICHE -- stub */
+            g->hub_sub_open = 3;
+            g->hub_sub_cursor = 0;
+            break;
+    }
+}
+
+static void update_hub(Game *g) {
+    /* sous-panneau ouvert : gere son input + ESC bascule au hub. */
+    if (g->hub_sub_open != 0) {
+        if (g->keys[SDL_SCANCODE_ESCAPE] && !g->keys_prev[SDL_SCANCODE_ESCAPE]) {
+            g->hub_sub_open = 0;
+            return;
+        }
+        /* TEMPLE : 4 stats grille 2x2 */
+        if (g->hub_sub_open == 1) {
+            if (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
+                g->hub_sub_cursor = (g->hub_sub_cursor + 3) % 4;
+            if (g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
+                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % 4;
+            /* hover souris : recalcule la grille 2x2 alignee sur render */
+            int w = 280, h = 220;
+            int x = INTERNAL_W / 2 - w / 2;
+            int y = INTERNAL_H / 2 - h / 2;
+            int boxw = 124, boxh = 56, gap = 6;
+            int sx0 = x + (w - 2 * boxw - gap) / 2;
+            int sy0 = y + 40;
+            for (int i = 0; i < 4; i++) {
+                int sx = sx0 + (i % 2) * (boxw + gap);
+                int sy = sy0 + (i / 2) * (boxh + gap);
+                if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
+                    g->hub_sub_cursor = i;
+                    if (mouse_clicked(g)) hub_perm_apply(g, i);
+                }
+            }
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+                hub_perm_apply(g, g->hub_sub_cursor);
+            }
+        }
+        /* FORGE : liste de 6 armes (W_FISTS..W_AXE) */
+        else if (g->hub_sub_open == 2) {
+            if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
+                g->hub_sub_cursor = (g->hub_sub_cursor + W_COUNT - 1) % W_COUNT;
+            if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
+                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % W_COUNT;
+            int w = 280, h = 220;
+            int x = INTERNAL_W / 2 - w / 2;
+            int y = INTERNAL_H / 2 - h / 2;
+            int rowh = 22;
+            for (int k = 0; k < W_COUNT; k++) {
+                int sy = y + 38 + k * rowh;
+                if (mouse_in_rect(g, x + 10, sy, w - 20, rowh - 2)) {
+                    g->hub_sub_cursor = k;
+                    if (mouse_clicked(g)) forge_buy(g, (WeaponKind)k);
+                }
+            }
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
+                forge_buy(g, (WeaponKind)g->hub_sub_cursor);
+            }
+        }
+        /* LICHE : stub, ESC pour fermer */
+        return;
+    }
+
+    /* Hub principal : navigation par souris sur les 5 batiments. */
+    int mx = g->mouse_x, my = g->mouse_y;
+    if (mouse_clicked(g)) {
+        for (int i = 0; i < 5; i++) {
+            const int *r = HUB_BLDG_RECTS[i];
+            if (mx >= r[0] && mx < r[0] + r[2] &&
+                my >= r[1] - 6 && my < r[1] + r[3] + 6) {
+                hub_enter_state_for_bldg(g, r[4]);
+                break;
+            }
         }
     }
-    if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-        (g->keys[SDL_SCANCODE_E]      && !g->keys_prev[SDL_SCANCODE_E])) {
-        hub_perm_apply(g, g->hub_cursor);
-    }
 
-    /* zones bas d'ecran : DEBUTER / OPTIONS / CODEX / AIDE */
-    int by = INTERNAL_H - 30;
-    int bw = 96, bh = 16;
-    int gx = INTERNAL_W/2 - (bw * 4 + 18) / 2;
-    if (mouse_in_rect(g, gx, by, bw, bh) && mouse_clicked(g))
-        g->state = GS_CHOOSE_HERO;
-    if (mouse_in_rect(g, gx + bw + 6, by, bw, bh) && mouse_clicked(g)) {
+    /* 3 boutons bas */
+    int by = INTERNAL_H - 22;
+    int bw = 88, bh = 14;
+    int gx = INTERNAL_W/2 - (bw * 3 + 12) / 2;
+    if (mouse_in_rect(g, gx, by, bw, bh) && mouse_clicked(g)) {
         g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
         g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
     }
-    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g)) {
+    if (mouse_in_rect(g, gx + bw + 6, by, bw, bh) && mouse_clicked(g)) {
         g->state = GS_CODEX;
         g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
     }
-    if (mouse_in_rect(g, gx + (bw + 6) * 3, by, bw, bh) && mouse_clicked(g))
+    if (mouse_in_rect(g, gx + (bw + 6) * 2, by, bw, bh) && mouse_clicked(g))
         g->state = GS_HELP;
 
+    /* raccourcis clavier */
     if (g->keys[SDL_SCANCODE_R] && !g->keys_prev[SDL_SCANCODE_R])
         g->state = GS_CHOOSE_HERO;
     if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H])

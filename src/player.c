@@ -122,6 +122,10 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                 if (p->weapons[s].kind == W_FISTS) { slot = s; break; }
             if (slot < 0) slot = p->active_weapon;
             weapon_init_defaults(&p->weapons[slot], (WeaponKind)kind);
+            /* FORGE bonus persistent (meta progress). */
+            if (kind > 0 && kind < W_COUNT) {
+                p->weapons[slot].base_dmg += g->meta.weapon_dmg_bonus[kind] * 5.f;
+            }
             p->weapons[slot].rarity = (Rarity)rarity;
             p->weapons[slot].owned = true;
             p->active_weapon = slot;

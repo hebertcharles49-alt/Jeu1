@@ -507,7 +507,11 @@ typedef struct {
     int  lifetime_kills;
     int  lifetime_damage;
     int  lifetime_legendaries;
+    /* FORGE : bonus de dmg permanent par arme (0..FORGE_MAX_LEVEL). Cout
+     * croissant. Lu par weapon_init_defaults pour ajuster base_dmg. */
+    int  weapon_dmg_bonus[W_COUNT];
 } MetaSave;
+#define FORGE_MAX_LEVEL 5
 
 /* ---------- SHOP (Brotato-like) ---------- */
 typedef struct {
@@ -591,6 +595,11 @@ typedef struct {
     int           levelup_choice_rarity[3];   /* R_COMMON..R_LEGENDARY par choix */
     int           hero_cursor;
     int           hub_cursor;
+    /* sous-panneau du hub : 0 = aucun, 1 = TEMPLE (stat upgrades),
+     * 2 = FORGE (weapon upgrades), 3 = LICHE (stub). TAVERNE bascule
+     * vers GS_CHOOSE_HERO ; DOOR bascule vers game_start_new_run. */
+    int           hub_sub_open;
+    int           hub_sub_cursor;
     int           title_cursor;
 
     int           run_kills;
@@ -850,6 +859,12 @@ int         perm_stat_level (const MetaSave *m, int kind);
 int         perm_stat_cost  (const MetaSave *m, int kind);   /* cout du prochain achat */
 const char *perm_stat_label (int kind);
 int         perm_stat_step  (int kind);                       /* delta par niveau */
+
+/* FORGE : ameliore le base_dmg d une arme +5 par niveau, cap 5.
+ * kind dans [W_FISTS..W_AXE]. cost = (level + 1) * 40 ; 0 = max. */
+int         forge_level (const MetaSave *m, WeaponKind k);
+int         forge_cost  (const MetaSave *m, WeaponKind k);
+bool        forge_buy   (Game *g, WeaponKind k);    /* renvoie true si paye */
 /* couleurs (cape + tunique) du heros, partagees entre render_choose_hero
  * et la paper-doll inventaire. Cf heroes.c. */
 void        hero_palette(HeroClass h, uint32_t *cape, uint32_t *tunic);
