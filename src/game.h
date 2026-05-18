@@ -45,6 +45,10 @@ typedef struct GfxCtx GfxCtx;
 
 #define MAX_FLOORS 10
 
+/* Caps par run (anti-deadlock + force des decisions). */
+#define RUN_TALISMAN_MAX  7
+#define RUN_UNIQUE_MAX    3
+
 /* ---------- Elements ---------- */
 typedef enum {
     EL_NONE = 0,
@@ -653,6 +657,14 @@ typedef struct {
      * update_enemies. Utilise par loop_decay : la jauge ne decroit que
      * quand la salle est vide. */
     int           enemy_alive_count;
+
+    /* seed de la run : capture au demarrage, utilise pour la generation
+     * du donjon. Affiche pour permettre de rejouer la meme seed. */
+    unsigned      run_seed;
+    /* cap par run : empeche le mass-stacking de talismans (deadlock
+     * du systeme actuel ou le joueur peut pickup en boucle). */
+    int           run_talisman_count;     /* 0..RUN_TALISMAN_MAX */
+    int           run_unique_count;       /* 0..RUN_UNIQUE_MAX */
 
     /* OVERDRIVE killstreak : "moment de rupture".
      *   - chaque kill incremente killstreak_count + reset killstreak_t = 3s.

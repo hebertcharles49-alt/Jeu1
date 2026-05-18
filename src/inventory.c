@@ -329,10 +329,15 @@ Rarity rarity_for_floor_boss(int floor_index) {
 }
 
 Item item_drop_for_floor(Game *g, int floor_index, bool elite, bool boss) {
-    /* roll unique en premier : si proc, on retourne directement le unique. */
-    int uid = unique_roll_drop(floor_index, elite, boss);
+    /* roll unique en premier : si proc, on retourne directement le unique.
+     * Cap par run : RUN_UNIQUE_MAX = 3. Au-dela, on bloque le roll. */
+    int uid = -1;
+    if (!g || g->run_unique_count < RUN_UNIQUE_MAX) {
+        uid = unique_roll_drop(floor_index, elite, boss);
+    }
     if (uid >= 0) {
         Item u = unique_make(uid);
+        if (g) g->run_unique_count++;
         if (g && uid >= 0 && uid < 32) {
             bool already = g->meta.unique_seen[uid];
             g->meta.unique_seen[uid] = true;

@@ -280,6 +280,24 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
             sfx_play(g, SFX_BOSS);
             sfx_play(g, SFX_EXPLODE);
             g->portal_spawned = true;
+            /* Boss drop : un element AU CHOIX (priorite : non-decouvert
+             * sinon random). Donne un element nouveau a chaque boss,
+             * pour structurer la progression de la run. */
+            {
+                int undiscovered[EL_COUNT]; int n_und = 0;
+                int all[EL_COUNT]; int n_all = 0;
+                for (int el = 1; el < EL_COUNT; el++) {
+                    all[n_all++] = el;
+                    if (!g->meta.element_discovered[el])
+                        undiscovered[n_und++] = el;
+                }
+                int el_pick;
+                if (n_und > 0) el_pick = undiscovered[rand() % n_und];
+                else if (n_all > 0) el_pick = all[rand() % n_all];
+                else el_pick = EL_FIRE;
+                pickup_spawn(g, PU_ELEMENT, el_pick,
+                             e->x + 18.f, e->y - 12.f);
+            }
             for (int h = 0; h < HERO_COUNT; h++) {
                 if (!g->meta.hero_discovered[h]) {
                     g->meta.hero_discovered[h] = true;

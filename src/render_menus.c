@@ -442,6 +442,7 @@ void render_dead(Game *g) {
     }
     ROW("Drops legendaires", "%d", 0xFFD030FF, g->run_legendary_drops);
     ROW("Ames recoltees", "%d",    0xC0FFC0FF, g->player.souls);
+    ROW("Seed",          "%u",     0x808080FF, g->run_seed);
     #undef ROW
 
     /* gain permanent en bas */

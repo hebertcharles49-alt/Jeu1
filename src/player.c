@@ -91,8 +91,19 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                        sfx_play(g, SFX_COIN); break;
         case PU_ELEMENT: {
             Element e = (Element)pk->value;
+            /* cap par run : RUN_TALISMAN_MAX = 7 talismans equippes.
+             * Au-dela on refuse le pickup (force la curation, pas le
+             * mass-stack). */
+            if (g->run_talisman_count >= RUN_TALISMAN_MAX) {
+                toast_push(g, "Limite de talismans atteinte (7/run)",
+                           0xFF8080FF, 3.0f);
+                /* on laisse le pickup vivant pour qu il puisse etre
+                 * recupere apres avoir libere un slot. */
+                return;
+            }
             Weapon *w = &p->weapons[p->active_weapon];
             weapon_attach_element(w, e);
+            g->run_talisman_count++;
             sfx_play(g, SFX_LEVELUP);
             if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
                 g->meta.element_discovered[e] = true;

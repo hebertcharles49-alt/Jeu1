@@ -347,6 +347,13 @@ void game_start_new_run(Game *g) {
     g->run_damage_dealt = 0;
     g->run_best_combo_size = 0;
     g->run_legendary_drops = 0;
+    /* seed de run : nouvelle a chaque debut. La rand de l OS sert de
+     * source d entropie. La seed est affichee a l ecran pour permettre
+     * de partager une run. */
+    g->run_seed = (unsigned)time(NULL) ^ (unsigned)rand();
+    srand(g->run_seed);
+    g->run_talisman_count = 0;
+    g->run_unique_count   = 0;
     g->killstreak_count = 0; g->killstreak_t = 0.f; g->overdrive_t = 0.f;
     /* unique-flag state : reset au demarrage (les charges seront
      * activees au premier point_in_room avec first_visit=true). */
@@ -382,7 +389,10 @@ void game_start_new_run(Game *g) {
     game_recompute_player_stats(g);
     p->hp = p->maxhp;
 
-    dungeon_generate(&g->dungeon, g->floor_index, (unsigned)rand());
+    /* seed du donjon : derivee du run_seed + floor pour que chaque etage
+     * d une meme seed soit reproductible et different. */
+    dungeon_generate(&g->dungeon, g->floor_index,
+                     g->run_seed * 2654435761u + (unsigned)g->floor_index);
     p->x = g->dungeon.spawn_x * TILE + TILE / 2;
     p->y = g->dungeon.spawn_y * TILE + TILE / 2;
     world_assets_reset(g);
@@ -414,7 +424,10 @@ void game_next_floor(Game *g) {
         g->state = GS_VICTORY;
         return;
     }
-    dungeon_generate(&g->dungeon, g->floor_index, (unsigned)rand());
+    /* seed du donjon : derivee du run_seed + floor pour que chaque etage
+     * d une meme seed soit reproductible et different. */
+    dungeon_generate(&g->dungeon, g->floor_index,
+                     g->run_seed * 2654435761u + (unsigned)g->floor_index);
     g->player.x = g->dungeon.spawn_x * TILE + TILE / 2;
     g->player.y = g->dungeon.spawn_y * TILE + TILE / 2;
     memset(g->enemies, 0, sizeof(g->enemies));
