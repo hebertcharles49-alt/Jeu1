@@ -551,9 +551,13 @@ void render_victory(Game *g) {
 
 /* ---------- TITLE ---------- */
 
-/* 7 elements originels disponibles comme orbes interactifs. */
-static const Element TITLE_ORBIT_ELEMS[7] = {
-    EL_FIRE, EL_WATER, EL_EARTH, EL_LIGHTNING, EL_AIR, EL_VOID, EL_FAE
+/* 10 elements disponibles comme orbes interactifs sur le titre.
+ * Reflete les talismans potentiels : a chaque run, 7 sont tires au
+ * sort, les 3 autres restent en reserve. Ici on les montre tous
+ * pour que le joueur visualise l'univers d'options. */
+static const Element TITLE_ORBIT_ELEMS[10] = {
+    EL_FIRE, EL_WATER, EL_EARTH, EL_LIGHTNING, EL_AIR,
+    EL_VOID, EL_FAE, EL_STEEL, EL_DARK, EL_HOLY
 };
 
 /* Orbe : position + velocite + element + respawn_t. Drag-and-drop pour
@@ -566,7 +570,7 @@ typedef struct {
     float respawn_t;       /* >0 = invisible, decompte avant respawn */
 } TitleOrb;
 
-#define N_TITLE_ORBS 7
+#define N_TITLE_ORBS 10
 static TitleOrb g_orbs[N_TITLE_ORBS];
 static int g_orbs_init = 0;
 static int g_drag_idx  = -1;        /* index orbe attrape, -1 sinon */
@@ -873,11 +877,11 @@ void render_title(Game *g) {
     text_drawf(gc, px, py + 10, 0xCCCCCCFF, "Courses     %d", g->meta.total_runs);
     text_drawf(gc, px, py + 20, 0xCCCCCCFF, "Meilleur    %d/%d",
                g->meta.best_floor, MAX_FLOORS);
-    /* elements decouverts parmi les 7 originels jouables en run */
+    /* elements decouverts parmi les 10 jouables (FIRE..HOLY) */
     int discov = 0;
-    for (int i = (int)EL_FIRE; i <= (int)EL_FAE; i++)
+    for (int i = (int)EL_FIRE; i <= (int)EL_HOLY; i++)
         if (g->meta.element_discovered[i]) discov++;
-    text_drawf(gc, px, py + 30, 0x80C0FFFF, "Elements    %d/7", discov);
+    text_drawf(gc, px, py + 30, 0x80C0FFFF, "Elements    %d/10", discov);
 
     /* === TIP rotation en bas centre === */
     static const char *TIPS[] = {

@@ -389,6 +389,19 @@ void game_start_new_run(Game *g) {
         g->talisman_drops[i] = 5 + i * band_t + rand() % (band_t - 5);
     }
     g->talisman_drops_idx = 0;
+    /* Pool d'elements de la run : 7 elements distincts parmi les 10
+     * (FIRE..HOLY), tires par Fisher-Yates seede. Les 3 non tires
+     * sont "en reserve" sur cette run. */
+    {
+        int all[10];
+        int n_all = 0;
+        for (int e = (int)EL_FIRE; e <= (int)EL_HOLY; e++) all[n_all++] = e;
+        for (int i = n_all - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            int t = all[i]; all[i] = all[j]; all[j] = t;
+        }
+        for (int i = 0; i < RUN_TALISMAN_MAX; i++) g->run_element_pool[i] = all[i];
+    }
     int band_u = EST_MAX / RUN_UNIQUE_MAX;
     for (int i = 0; i < RUN_UNIQUE_MAX; i++) {
         g->unique_drops[i] = 20 + i * band_u + rand() % (band_u - 10);

@@ -697,9 +697,15 @@ typedef struct {
      * talismans (7) et d uniques (3), DISPATCHES sur les kills via
      * milestones tries. Quand run_kills atteint un milestone, on
      * spawne le drop. Invisible cote joueur -- seule la seed dicte
-     * l ordre des spawns. */
+     * l ordre des spawns.
+     *
+     * run_element_pool : tirage seed-deterministe de 7 elements
+     * distincts parmi les 10 (FIRE..HOLY). Les 3 autres restent
+     * "en reserve" sur cette run. Talisman[i] -> pool[i] : pas de
+     * doublon. */
     int           talisman_drops[RUN_TALISMAN_MAX];
     int           talisman_drops_idx;
+    int           run_element_pool[RUN_TALISMAN_MAX];
     int           unique_drops  [RUN_UNIQUE_MAX];
     int           unique_drops_idx;
 

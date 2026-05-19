@@ -199,14 +199,18 @@ LES 6 ARMES  (max 2 equipees, seule l'active attaque)
      Bouclier bash + ring de lumiere, reflete les projectiles
      Poings   jab rapide
 
-LES 11 ELEMENTS (7 jouables en run)
-   Jouables en course (drop comme talismans) :
-     Feu, Eau, Terre, Foudre, Air, Vide, Fee
-   Non jouables (reserves codex / boss / unlocks meta) :
-     Neutre (sans element), Acier, Tenebres, Sacre
-   Greffe jusqu'a 3 par arme. Les combos donnent ~30 noms uniques
-   (Vapeur, Plasma, Choc, Lave, Volcan, Tempete, Phenix...) +
-   fallback hybride.
+LES 10 ELEMENTS + NEUTRE (7 tires au sort par run)
+   Tous jouables en jeu : Feu, Eau, Terre, Foudre, Air, Vide, Fee,
+   Acier, Tenebres, Sacre. + Neutre (sans element) pour les slots
+   vides.
+   A chaque run, la seed tire 7 elements distincts parmi les 10 :
+   ce sont les SEULS talismans qui dropperont sur cette course.
+   Les 3 autres sont en reserve (apparaitront sur une autre run
+   avec une autre seed). Pas de doublons : chaque talisman drop
+   est un element different.
+   Greffe jusqu'a 3 par arme. Les combos donnent ~50 noms uniques
+   (Vapeur, Plasma, Choc, Lave, Volcan, Tempete, Phenix, Forge
+   Solaire, Jugement, Excalibur...) + fallback hybride.
 
 SENSIBILITES  (table 11x11)
    EAU > FEU         FEU > FEE

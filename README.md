@@ -23,7 +23,7 @@ Tu apparais dans le cimetière (HUB walkable) avec 5 bâtiments interactifs : **
 
 ## Éléments
 
-**11 éléments dans le jeu, 7 jouables en run.** Les 7 originels (Feu, Eau, Terre, Foudre, Air, Vide, Fée) drop comme talismans pendant la course ; les 4 autres (Acier, Ténèbres, Sacré + Neutre) sont réservés à d'autres contextes (codex, boss). Jusqu'à **3 éléments greffés par arme**, ~30 combos nommés uniques (Vapeur, Plasma, Lave, Tempête, Phénix, …). Sensibilités x2 / x0.5 (table 11×11).
+**10 éléments jouables + 1 neutre** (Feu, Eau, Terre, Foudre, Air, Vide, Fée, Acier, Ténèbres, Sacré ; plus Neutre pour les slots vides). À chaque run, **7 éléments distincts sont tirés au sort de la seed** comme talismans potentiels — les 3 autres restent en réserve pour cette course. Pas de doublons. Jusqu'à **3 éléments greffés par arme**, ~50 combos nommés uniques (Vapeur, Plasma, Lave, Tempête, Phénix, Forge Solaire, Jugement, …). Sensibilités x2 / x0.5 (table 11×11).
 
 Triples combos déclenchent une **boucle de feedback** persistante (aura + buff de stats) et peuvent passer en **overload** sur kill streak.
 
