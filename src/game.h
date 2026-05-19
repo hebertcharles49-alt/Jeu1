@@ -537,7 +537,7 @@ typedef struct {
 } ShopItem;
 #define SHOP_SLOTS 4
 
-/* ---------- Settings (rebind / son / DLSS) ---------- */
+/* ---------- Settings (rebind / son / video) ---------- */
 typedef enum {
     BIND_DASH = 0,
     BIND_INVENTORY,
@@ -553,7 +553,6 @@ typedef struct {
     SDL_Scancode keys[BIND_COUNT];
     int          sfx_volume;        /* 0..4 */
     int          sfx_mute;
-    int          dlss_on;           /* 0 = nearest, 1 = linear upscale */
     int          debug_room;        /* 1 = salle bac-a-sable a cote de l'entree
                                        avec un exemplaire de chaque arme,
                                        element et equipement legendaire. */
@@ -970,7 +969,6 @@ const char *bind_action_name(BindAction a);
 const char *scancode_label(SDL_Scancode sc);
 void  render_options(Game *g);
 void  update_options(Game *g);
-void  apply_render_filter(Game *g);    /* recree g->target avec le filtre courant */
 
 void  render_lore(Game *g);
 

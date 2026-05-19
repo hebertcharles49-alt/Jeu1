@@ -51,7 +51,7 @@ Triples combos déclenchent une **boucle de feedback** persistante (aura + buff 
 
 ## Options
 
-Touches rebindables, mute / volume SFX (mixer software 24-voix avec pitch jitter), filtrage de sortie, salle debug bac-à-sable, **barres de vie flottantes** (toggle).
+Touches rebindables, mute / volume SFX (mixer software 24-voix avec pitch jitter), salle debug bac-à-sable, **barres de vie flottantes** (toggle).
 
 ## Stack technique
 

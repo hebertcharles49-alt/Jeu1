@@ -1,5 +1,5 @@
 /*
- * options.c - menu Options : touches / son / DLSS, plus persistance
+ * options.c - menu Options : touches / son / video, plus persistance
  */
 #include "game.h"
 #include <stdio.h>
@@ -8,7 +8,7 @@
 
 #define SETTINGS_PATH    "crucible_settings.dat"
 #define SETTINGS_MAGIC   0x53455453u  /* 'SETS' */
-#define SETTINGS_VERSION 3
+#define SETTINGS_VERSION 4
 
 void settings_defaults(Settings *s) {
     memset(s, 0, sizeof(*s));
@@ -21,7 +21,6 @@ void settings_defaults(Settings *s) {
     s->keys[BIND_INTERACT]    = SDL_SCANCODE_E;
     s->sfx_volume = 4;     /* 0..4 */
     s->sfx_mute   = 0;
-    s->dlss_on    = 0;     /* off par defaut : pixel art net */
     s->debug_room = 0;     /* off par defaut : pas de salle bac-a-sable */
     s->mob_healthbars = 1; /* on par defaut : barres flottantes visibles */
 }
@@ -72,23 +71,17 @@ const char *scancode_label(SDL_Scancode sc) {
     return n;
 }
 
-void apply_render_filter(Game *g) {
-    /* DLSS toggle : la config est lue par gfx_frame_end pour piloter le
-       filtrage du blit FBO -> backbuffer. Rien a creer ici (FBO unique). */
-    (void)g;
-}
-
 /* ---------- update ---------- */
 /* layout :
  *   section 0 (Controles) : 0..BIND_COUNT-1 = touches
  *   section 1 (Audio) : 0 = mute, 1 = volume
- *   section 2 (Video) : 0 = DLSS
+ *   section 2 (Video) : 0 = Debug room, 1 = barres de vie
  */
 static int section_row_count(int section) {
     switch (section) {
         case 0: return BIND_COUNT;
         case 1: return 2;
-        case 2: return 3;       /* DLSS + Debug room + barres de vies */
+        case 2: return 2;       /* Debug room + barres de vies */
         default: return 0;
     }
 }
@@ -209,16 +202,6 @@ void update_options(Game *g) {
     } else if (g->opt_section == 2) {
         if (g->opt_cursor == 0) {
             if (press_enter || press_left || press_right) {
-                s->dlss_on = !s->dlss_on;
-                apply_render_filter(g);
-                settings_write(s);
-                snprintf(g->opt_msg, sizeof(g->opt_msg),
-                         s->dlss_on ? "DLSS Generatif : ON  (lisse)" :
-                                      "DLSS Generatif : OFF  (pixel art net)");
-                g->opt_msg_t = 2.f;
-            }
-        } else if (g->opt_cursor == 1) {
-            if (press_enter || press_left || press_right) {
                 s->debug_room = !s->debug_room;
                 settings_write(s);
                 snprintf(g->opt_msg, sizeof(g->opt_msg),
@@ -227,7 +210,7 @@ void update_options(Game *g) {
                             : "Debug : OFF");
                 g->opt_msg_t = 2.5f;
             }
-        } else if (g->opt_cursor == 2) {
+        } else if (g->opt_cursor == 1) {
             if (press_enter || press_left || press_right) {
                 s->mob_healthbars = !s->mob_healthbars;
                 settings_write(s);

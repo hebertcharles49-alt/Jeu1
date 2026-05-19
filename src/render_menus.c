@@ -5,6 +5,7 @@
  */
 #include "ui_common.h"
 #include "gfx.h"
+#include "combat_internal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -304,17 +305,15 @@ void render_options(Game *g) {
         y += 6;
         text_draw(g->renderer, 30, y, "ENTREE bascule mute.   GAUCHE/DROITE ajuste le volume.", 0x808080FF);
     } else if (g->opt_section == 2) {
-        const char *labels[3] = {
-            "DLSS Generatif",
+        const char *labels[2] = {
             "Debug : salle bac-a-sable",
             "Barres de vie flottantes"
         };
-        const char *vals[3]   = {
-            g->settings.dlss_on        ? "ON  (lisse)"  : "OFF (pixel art net)",
+        const char *vals[2]   = {
             g->settings.debug_room     ? "ON"           : "OFF",
             g->settings.mob_healthbars ? "ON"           : "OFF"
         };
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             bool sel = (g->opt_cursor == i);
             uint32_t col = sel ? 0xFFFF40FF : 0xFFFFFFFF;
             text_drawf(g->renderer, sel ? 22 : 30, y, col, "%s%s",
@@ -323,7 +322,6 @@ void render_options(Game *g) {
             y += 11;
         }
         y += 6;
-        text_draw(g->renderer, 30, y, "DLSS : filtrage lineaire AI-like sur la sortie finale.", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "Debug : ajoute une salle a cote de l'entree, peuplee", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "d'un exemplaire de chaque arme / element / equipement", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "legendaire (effet a la prochaine run / etage).", 0x808080FF); y += 9;
@@ -553,11 +551,55 @@ void render_victory(Game *g) {
 
 /* ---------- TITLE ---------- */
 
-/* 7 elements originels qui orbitent autour du titre. Reutilise les
- * couleurs canoniques d'element_color() pour la coherence. */
+/* 7 elements originels disponibles comme orbes interactifs. */
 static const Element TITLE_ORBIT_ELEMS[7] = {
     EL_FIRE, EL_WATER, EL_EARTH, EL_LIGHTNING, EL_AIR, EL_VOID, EL_FAE
 };
+
+/* Orbe : position + velocite + element + respawn_t. Drag-and-drop pour
+ * fusionner deux orbes en explosion d'element pre-conceptualise (Vapeur,
+ * Plasma, etc.) via combo_compute(). */
+typedef struct {
+    float x, y;            /* position ecran */
+    float vx, vy;          /* derive lente */
+    Element elem;
+    float respawn_t;       /* >0 = invisible, decompte avant respawn */
+} TitleOrb;
+
+#define N_TITLE_ORBS 7
+static TitleOrb g_orbs[N_TITLE_ORBS];
+static int g_orbs_init = 0;
+static int g_drag_idx  = -1;        /* index orbe attrape, -1 sinon */
+
+/* effet de fusion (bref) : centre + element resultant + timer. */
+static float g_fuse_t   = 0.f;
+static float g_fuse_x   = 0.f;
+static float g_fuse_y   = 0.f;
+static int   g_fuse_mask = 0;
+static uint32_t g_fuse_col = 0xFFFFFFFF;
+static const char *g_fuse_label = NULL;
+
+static void title_orb_reset(int i) {
+    TitleOrb *o = &g_orbs[i];
+    o->elem = TITLE_ORBIT_ELEMS[i];
+    /* positions de depart : cercle large autour du titre, points
+     * equidistants pour ne pas se chevaucher */
+    float angle = (i / (float)N_TITLE_ORBS) * 6.2831f;
+    float radius_x = 160.f, radius_y = 70.f;
+    o->x = INTERNAL_W / 2.f + cosf(angle) * radius_x;
+    o->y = INTERNAL_H / 2.f - 50.f + sinf(angle) * radius_y;
+    /* derive lente, direction tangentielle */
+    o->vx = -sinf(angle) * 10.f;
+    o->vy =  cosf(angle) * 6.f;
+    o->respawn_t = 0.f;
+}
+
+static void title_orbs_init_all(void) {
+    for (int i = 0; i < N_TITLE_ORBS; i++) title_orb_reset(i);
+    g_orbs_init = 1;
+    g_drag_idx = -1;
+    g_fuse_t = 0.f;
+}
 
 void render_title(Game *g) {
     GfxCtx *gc = g->renderer;
@@ -598,32 +640,165 @@ void render_title(Game *g) {
         fill_rect(gc, x, y, 1, 1, col);
     }
 
-    /* === ORBES ELEMENTAIRES qui tournent autour du titre === */
-    {
-        float center_y = INTERNAL_H / 2 - 48;
-        float radius_x = 130.f;
-        float radius_y = 20.f;
-        for (int i = 0; i < 7; i++) {
-            float a = g->time * 0.6f + (i / 7.f) * 6.2831f;
-            float ox = cosf(a) * radius_x;
-            float oy = sinf(a) * radius_y;
-            int px = CX + (int)ox;
-            int py = (int)(center_y + oy);
-            /* element devant le titre (oy < 0) = plus grand & opaque */
-            int front = oy < 0.f ? 1 : 0;
-            int sz = front ? 4 : 2;
-            uint32_t col = element_color(TITLE_ORBIT_ELEMS[i]);
-            /* alpha selon profondeur (faux Z) */
-            uint8_t a8 = front ? 0xFF : 0x70;
-            col = (col & 0xFFFFFF00u) | a8;
-            gfx_set_blend(gc, true);
-            fill_rect(gc, px - sz/2, py - sz/2, sz, sz, col);
-            /* halo */
-            uint32_t halo = (col & 0xFFFFFF00u) | (uint8_t)(a8 / 3);
-            fill_rect(gc, px - sz, py - sz/2, sz * 2, sz, halo);
-            fill_rect(gc, px - sz/2, py - sz, sz, sz * 2, halo);
-            gfx_set_blend(gc, false);
+    /* === ORBES ELEMENTAIRES INTERACTIFS ===
+     * 7 orbes flottent dans le titre. Drag-and-drop pour les fusionner :
+     * 2 orbes superposes -> combo_compute() declenche une explosion qui
+     * affiche le nom du combo pre-conceptualise (Vapeur, Plasma, Lave..).
+     */
+    if (!g_orbs_init) title_orbs_init_all();
+
+    float dt = g->dt > 0.f ? g->dt : 1.f / 60.f;
+    if (dt > 0.05f) dt = 0.05f;
+    float mx = (float)g->mouse_x;
+    float my = (float)g->mouse_y;
+    bool mouse_down = (g->mouse_btn != 0);
+    bool mouse_pressed = mouse_down && !g->mouse_btn_prev;
+    bool mouse_released = !mouse_down && g->mouse_btn_prev;
+    float orb_r = 7.f;
+
+    /* tick respawn + decay des orbes "absorbees" */
+    for (int i = 0; i < N_TITLE_ORBS; i++) {
+        TitleOrb *o = &g_orbs[i];
+        if (o->respawn_t > 0.f) {
+            o->respawn_t -= dt;
+            if (o->respawn_t <= 0.f) title_orb_reset(i);
         }
+    }
+
+    /* selection au press : trouve l'orbe survolee */
+    if (mouse_pressed && g_drag_idx < 0) {
+        /* on n'attrape pas dans la zone du menu (laisse le clic faire son
+         * activate). Zone menu = bandeau central. */
+        bool in_menu = (mx > CX - 110 && mx < CX + 110 &&
+                        my > INTERNAL_H/2 + 12 && my < INTERNAL_H/2 + 90);
+        if (!in_menu) {
+            float best_d2 = 1e9f;
+            int best = -1;
+            for (int i = 0; i < N_TITLE_ORBS; i++) {
+                TitleOrb *o = &g_orbs[i];
+                if (o->respawn_t > 0.f) continue;
+                float dx = o->x - mx, dy = o->y - my;
+                float d2 = dx * dx + dy * dy;
+                if (d2 < orb_r * orb_r * 4.f && d2 < best_d2) {
+                    best = i; best_d2 = d2;
+                }
+            }
+            if (best >= 0) g_drag_idx = best;
+        }
+    }
+
+    /* drag : suit la souris */
+    if (g_drag_idx >= 0 && mouse_down) {
+        TitleOrb *o = &g_orbs[g_drag_idx];
+        o->x = mx;
+        o->y = my;
+        o->vx = 0.f; o->vy = 0.f;
+    }
+
+    /* relache : check fusion target */
+    if (g_drag_idx >= 0 && mouse_released) {
+        TitleOrb *src = &g_orbs[g_drag_idx];
+        int target = -1;
+        float best_d2 = 1e9f;
+        for (int i = 0; i < N_TITLE_ORBS; i++) {
+            if (i == g_drag_idx) continue;
+            TitleOrb *o = &g_orbs[i];
+            if (o->respawn_t > 0.f) continue;
+            float dx = o->x - src->x, dy = o->y - src->y;
+            float d2 = dx * dx + dy * dy;
+            float rr = orb_r * 2.5f;
+            if (d2 < rr * rr && d2 < best_d2) {
+                target = i; best_d2 = d2;
+            }
+        }
+        if (target >= 0) {
+            /* fusion : combo_compute sur le mask des 2 elements */
+            TitleOrb *dst = &g_orbs[target];
+            int mask = (1 << (int)src->elem) | (1 << (int)dst->elem);
+            ComboFx fx = combo_compute(mask);
+            g_fuse_x = (src->x + dst->x) * 0.5f;
+            g_fuse_y = (src->y + dst->y) * 0.5f;
+            g_fuse_mask = mask;
+            g_fuse_col = fx.color ? fx.color : element_color(src->elem);
+            g_fuse_label = fx.tag;
+            if (!g_fuse_label || !g_fuse_label[0]) g_fuse_label = combo_name(mask);
+            g_fuse_t = 1.5f;
+            sfx_play(g, SFX_FUSE);
+            /* despawn les 2 orbes ; respawn dans 4s aux positions de depart */
+            src->respawn_t = 4.f;
+            dst->respawn_t = 4.f;
+        }
+        g_drag_idx = -1;
+    }
+    /* relache hors fusion : l'orbe garde sa derniere derive (vx=vy=0) */
+    if (g_drag_idx >= 0 && !mouse_down) g_drag_idx = -1;
+
+    /* derive idle + rebond sur les bords */
+    for (int i = 0; i < N_TITLE_ORBS; i++) {
+        TitleOrb *o = &g_orbs[i];
+        if (o->respawn_t > 0.f) continue;
+        if (g_drag_idx == i) continue;
+        o->x += o->vx * dt;
+        o->y += o->vy * dt;
+        /* bornes */
+        float margin = 12.f;
+        if (o->x < margin)              { o->x = margin; o->vx = fabsf(o->vx); }
+        if (o->x > INTERNAL_W - margin) { o->x = INTERNAL_W - margin; o->vx = -fabsf(o->vx); }
+        if (o->y < margin)              { o->y = margin; o->vy = fabsf(o->vy); }
+        if (o->y > INTERNAL_H - margin) { o->y = INTERNAL_H - margin; o->vy = -fabsf(o->vy); }
+        /* leger sinus pour donner vie */
+        o->vy += sinf(g->time * 0.7f + i) * 0.4f * dt;
+    }
+
+    /* === dessin des orbes === */
+    for (int i = 0; i < N_TITLE_ORBS; i++) {
+        TitleOrb *o = &g_orbs[i];
+        if (o->respawn_t > 0.f) continue;
+        uint32_t col = element_color(o->elem);
+        int px = (int)o->x;
+        int py = (int)o->y;
+        bool hover = (g_drag_idx == i) || ((mx - o->x)*(mx - o->x) +
+                                           (my - o->y)*(my - o->y) < orb_r * orb_r * 4.f);
+        int sz = hover ? 7 : 5;
+        gfx_set_blend(gc, true);
+        /* halo */
+        uint32_t halo = (col & 0xFFFFFF00u) | 0x40;
+        fill_rect(gc, px - sz - 2, py - sz/2, (sz + 2) * 2, sz, halo);
+        fill_rect(gc, px - sz/2, py - sz - 2, sz, (sz + 2) * 2, halo);
+        /* corps */
+        fill_rect(gc, px - sz/2, py - sz/2, sz, sz, col);
+        /* highlight */
+        fill_rect(gc, px - 1, py - 1, 1, 1, 0xFFFFFFFF);
+        gfx_set_blend(gc, false);
+    }
+
+    /* fusion : explosion de particules + texte du combo */
+    if (g_fuse_t > 0.f) {
+        g_fuse_t -= dt;
+        float k = g_fuse_t / 1.5f; if (k < 0.f) k = 0.f;
+        /* anneau qui s'expand */
+        int n_ring = 28;
+        float ring_r = (1.f - k) * 60.f;
+        gfx_set_blend(gc, true);
+        for (int s = 0; s < n_ring; s++) {
+            float a = (s / (float)n_ring) * 6.2831f;
+            int px = (int)(g_fuse_x + cosf(a) * ring_r);
+            int py = (int)(g_fuse_y + sinf(a) * ring_r);
+            uint8_t alpha = (uint8_t)(255.f * k);
+            uint32_t col = (g_fuse_col & 0xFFFFFF00u) | alpha;
+            fill_rect(gc, px - 1, py - 1, 3, 3, col);
+        }
+        /* texte du combo (Vapeur, Plasma, etc.) */
+        if (g_fuse_label && g_fuse_label[0]) {
+            int tw = text_width(g_fuse_label);
+            uint8_t a = (uint8_t)(255.f * (k > 0.7f ? 1.f : k / 0.7f));
+            uint32_t lcol = (g_fuse_col & 0xFFFFFF00u) | a;
+            int tx2 = (int)g_fuse_x - tw / 2;
+            int ty2 = (int)g_fuse_y - 4 - (int)((1.f - k) * 12.f);
+            text_draw(gc, tx2 + 1, ty2 + 1, g_fuse_label, 0x000000C0);
+            text_draw(gc, tx2,     ty2,     g_fuse_label, lcol);
+        }
+        gfx_set_blend(gc, false);
     }
 
     /* === TITRE : ombre + glow + scale-pulse subtil === */

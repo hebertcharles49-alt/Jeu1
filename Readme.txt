@@ -154,7 +154,7 @@ INVENTAIRE
 OPTIONS  (touche O)
    CONTROLES : remappe les touches (WASD/fleches reserves)
    AUDIO     : mute on/off, volume 0..4
-   VIDEO     : DLSS Generatif, Debug room bac-a-sable,
+   VIDEO     : Debug room bac-a-sable,
                Barres de vie flottantes (toggle)
    Reglages persistants dans crucible_settings.dat.
 

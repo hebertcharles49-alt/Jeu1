@@ -1679,9 +1679,118 @@ void render_world(Game *g) {
     }
     draw_particles_3d(g);
 
-    /* HUB walkable : dessine les 5 batiments en 3D (boxes) lorsque le
-     * joueur deambule dans le cimetiere. */
+    /* HUB walkable : dessine les 5 batiments en 3D + decoration
+     * (tombstones, arbres morts, lanternes, runes au sol). */
     if (g->state == GS_HUB) {
+        /* === DECORATION DU CIMETIERE === */
+        float t = g->time;
+        /* tombstones le long du mur du fond (cote nord). Positions
+         * scriptees pour rester coherentes a chaque frame. */
+        static const float TOMB_POS[][2] = {
+            {22.f, 22.5f}, {25.f, 22.0f}, {27.5f, 22.5f},
+            {30.5f, 22.0f}, {33.f, 22.5f},
+            /* avant des batiments en bas */
+            {23.f, 30.5f}, {26.f, 30.0f}, {30.f, 30.0f}, {33.f, 30.5f},
+        };
+        int n_tomb = (int)(sizeof(TOMB_POS)/sizeof(TOMB_POS[0]));
+        for (int i = 0; i < n_tomb; i++) {
+            float tx = TOMB_POS[i][0];
+            float tz = TOMB_POS[i][1];
+            /* pierre tombale : socle + corps arrondi */
+            gfx_box_draw(gc, v3_make(tx, 0.10f, tz),
+                         v3_make(0.40f, 0.06f, 0.40f),
+                         0.30f, 0.28f, 0.32f);
+            gfx_box_draw(gc, v3_make(tx, 0.35f, tz),
+                         v3_make(0.30f, 0.40f, 0.12f),
+                         0.45f, 0.42f, 0.45f);
+            /* arrondi du dessus */
+            gfx_box_draw(gc, v3_make(tx, 0.58f, tz),
+                         v3_make(0.22f, 0.08f, 0.12f),
+                         0.40f, 0.38f, 0.42f);
+        }
+        /* arbres morts dans les coins. 4 troncs noirs + branches. */
+        static const float TREE_POS[4][2] = {
+            {17.5f, 22.5f}, {38.5f, 22.5f},
+            {17.5f, 33.5f}, {38.5f, 33.5f},
+        };
+        for (int i = 0; i < 4; i++) {
+            float tx = TREE_POS[i][0];
+            float tz = TREE_POS[i][1];
+            /* tronc principal */
+            gfx_box_draw(gc, v3_make(tx, 0.70f, tz),
+                         v3_make(0.20f, 1.40f, 0.20f),
+                         0.22f, 0.16f, 0.10f);
+            /* branche gauche */
+            gfx_box_draw(gc, v3_make(tx - 0.30f, 1.30f, tz),
+                         v3_make(0.30f, 0.10f, 0.10f),
+                         0.20f, 0.14f, 0.08f);
+            /* branche droite plus haute */
+            gfx_box_draw(gc, v3_make(tx + 0.25f, 1.55f, tz),
+                         v3_make(0.30f, 0.10f, 0.10f),
+                         0.20f, 0.14f, 0.08f);
+            /* fourche haute */
+            gfx_box_draw(gc, v3_make(tx, 1.85f, tz),
+                         v3_make(0.10f, 0.30f, 0.10f),
+                         0.18f, 0.12f, 0.08f);
+        }
+        /* lanternes au sol (pulse orange) dispersees */
+        static const float LAMP_POS[6][2] = {
+            {24.f, 26.f}, {32.f, 26.f},
+            {24.f, 31.f}, {32.f, 31.f},
+            {21.f, 28.f}, {35.f, 28.f},
+        };
+        for (int i = 0; i < 6; i++) {
+            float lx = LAMP_POS[i][0];
+            float lz = LAMP_POS[i][1];
+            /* pied */
+            gfx_box_draw(gc, v3_make(lx, 0.20f, lz),
+                         v3_make(0.08f, 0.40f, 0.08f),
+                         0.18f, 0.14f, 0.10f);
+            /* lampe qui flicker (pulse subtile sur time + offset) */
+            float flick = 0.85f + sinf(t * 4.f + i * 1.7f) * 0.15f;
+            gfx_box_draw(gc, v3_make(lx, 0.55f, lz),
+                         v3_make(0.15f, 0.15f, 0.15f),
+                         1.00f * flick, 0.75f * flick, 0.30f * flick);
+        }
+        /* chemin pave devant la porte du donjon : 3 dalles claires
+         * entre le spawn et la porte centrale. */
+        for (int i = 0; i < 4; i++) {
+            float pz = 30.f - i * 1.5f;
+            gfx_box_draw(gc, v3_make(28.f, 0.02f, pz),
+                         v3_make(0.8f, 0.04f, 0.8f),
+                         0.35f, 0.32f, 0.28f);
+        }
+        /* runes pulsantes au sol devant les batiments (un cercle de 4
+         * petits cubes violets qui battent). */
+        {
+            float pulse = 0.5f + 0.5f * sinf(t * 2.5f);
+            float ry = 0.04f;
+            float rad = 0.45f;
+            float runes_cx[5] = { 19.f, 28.f, 37.f, 20.f, 36.f };
+            float runes_cz[5] = { 23.5f, 23.f, 23.5f, 32.5f, 32.5f };
+            for (int b = 0; b < 5; b++) {
+                for (int k = 0; k < 4; k++) {
+                    float a = (k / 4.f) * 6.2831f;
+                    float rx = runes_cx[b] + cosf(a) * rad;
+                    float rz = runes_cz[b] + sinf(a) * rad;
+                    gfx_box_draw(gc, v3_make(rx, ry, rz),
+                                 v3_make(0.06f, 0.03f, 0.06f),
+                                 0.40f + 0.30f * pulse,
+                                 0.20f + 0.15f * pulse,
+                                 0.80f);
+                }
+            }
+        }
+        /* particules ambient : poussiere lente qui tombe (un par frame
+         * a position aleatoire dans la salle). */
+        if ((rand() % 100) < 25) {
+            float dx = 17.f + (rand() % 100) / 100.f * 22.f;
+            float dz = 22.f + (rand() % 100) / 100.f * 12.f;
+            particle_spawn_kind(g,
+                dx * TILE, dz * TILE,
+                0, -8.f,
+                1.5f, 0x504050A0, 1.4f, 0);
+        }
         int n = hub_building_count();
         for (int i = 0; i < n; i++) {
             const HubBuilding *b = hub_building_get(i);

@@ -313,7 +313,6 @@ void game_init(Game *g) {
     if (!gfx_init(g->renderer, g->window, INTERNAL_W, INTERNAL_H, WINDOW_W, WINDOW_H)) {
         fprintf(stderr, "echec init OpenGL\n"); exit(1);
     }
-    apply_render_filter(g);
 
     save_load(&g->meta);
     /* decouvertes de depart : un heros, deux armes, un element */
