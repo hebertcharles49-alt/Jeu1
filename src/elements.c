@@ -119,6 +119,13 @@ typedef enum {
      * par WET, sa propriete secondaire DOT survie ; combinee au contexte
      * froid (AIRY), elle devient une brulure-de-froid (slow + DOT cold). */
     TAG_ENGELURE    = 1u << 22,
+    /* TAG_VERDICT : derive de DIVINE+CURSED cancellation. Les deux tags
+     * primaires s'annulent mais leur opposition produit un "jugement" :
+     * dmg massif + aoe. */
+    TAG_VERDICT     = 1u << 23,
+    /* TAG_RESONANCE : derive de STABLE+VOLATILE cancellation. Le chaos
+     * stabilise produit une oscillation amplifiee : chain + extra_proj. */
+    TAG_RESONANCE   = 1u << 24,
 } BehaviorTag;
 
 #define HAS_TAGS(t, req) (((t) & (req)) == (req))
@@ -175,13 +182,15 @@ typedef struct {
 } TagInteraction;
 
 static const TagInteraction TAG_INTERACTIONS[] = {
-    /* === CANCELs (pass 1) === */
-    /* sacre + maudit -> mutuelle purification */
-    { TAG_DIVINE | TAG_CURSED,         TAG_DIVINE | TAG_CURSED,         0, true  },
-    /* stable + volatile -> annulation ordre/chaos */
-    { TAG_STABLE | TAG_VOLATILE,       TAG_STABLE | TAG_VOLATILE,       0, true  },
-    /* feu fond la glace : burning + frozen mutuellement effaces */
-    { TAG_BURNING | TAG_FROZEN,        TAG_BURNING | TAG_FROZEN,        0, true  },
+    /* === CANCELs (pass 1) ===
+     * Chaque annulation produit un tag DERIVE qui capture l'essence
+     * de l'opposition. Les tags secondaires des elements sources sont
+     * preserves (ils etaient deja appliques en Couche 1 dans ComboFx).
+     */
+    /* sacre + maudit -> jugement (judgment cleansing burst) */
+    { TAG_DIVINE | TAG_CURSED,         TAG_DIVINE | TAG_CURSED,         TAG_VERDICT,  true  },
+    /* stable + volatile -> resonance (oscillation balanced) */
+    { TAG_STABLE | TAG_VOLATILE,       TAG_STABLE | TAG_VOLATILE,       TAG_RESONANCE, true },
 
     /* === CONVERTs (pass 2) === */
     /* feu + eau + air -> engelure. Prioritaire sur burning+wet->steam :
@@ -261,6 +270,10 @@ static const EmergentRule EMERGENT_RULES[] = {
     /* TAG_ENGELURE (issu de BURNING+WET+AIRY) : DOT cold + slow appliques
      * via ComboFx.engelure ; dmg bonus modere ici. */
     { TAG_ENGELURE,                  .dmg_add= 0.15f                                       },
+    /* TAG_VERDICT (issu de DIVINE+CURSED) : jugement = dmg massif + aoe. */
+    { TAG_VERDICT,                   .dmg_add= 0.25f, .aoe_explode=true                    },
+    /* TAG_RESONANCE (issu de STABLE+VOLATILE) : oscillation = chain + proj. */
+    { TAG_RESONANCE,                 .dmg_add= 0.15f, .chain=true,     .extra_proj=1       },
     /* === regles classiques (inchangees) === */
     { TAG_CONDUCTIVE|TAG_UNSTABLE,   .dmg_add= 0.20f, .chain=true                          },
     { TAG_HEAVY|TAG_HOT,             .dmg_add= 0.25f, .cd_mul=1.20f                        },
