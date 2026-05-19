@@ -207,13 +207,24 @@ void chain_hit(Game *g, int from_idx, float dmg, Element status, int hops, uint3
 
 /* swing animation cue on player. dur = duree de l'anim en secondes :
  * permet a chaque arme d'avoir son timing propre (sword rapide,
- * axe lent, bow draw long, etc.). render normalise via anim_t/anim_dur. */
+ * axe lent, bow draw long, etc.). render normalise via anim_t/anim_dur.
+ *
+ * alternance combo : sword/fists/axe alternent le sens (gauche-droite)
+ * a chaque coup quand l'anim precedente est presque finie. anim_flip
+ * = +1 ou -1, lu par render_world.c pour basculer l'amplitude du side. */
 static void cue_swing(Player *p, int kind, float ax, float ay, float dur) {
+    if (kind == 0 || kind == 1 || kind == 5) {
+        p->anim_flip = -p->anim_flip;
+        if (p->anim_flip == 0) p->anim_flip = 1;
+    }
     p->anim_t = dur;
     p->anim_dur = dur;
     p->anim_kind = kind;
     p->anim_dir_x = ax;
     p->anim_dir_y = ay;
+    /* reset trail au demarrage : evite la trainee qui vient du dernier swing */
+    p->trail_count = 0;
+    p->trail_head = 0;
 }
 
 /* ---------- FIRE_<KIND> ---------- */
@@ -246,8 +257,12 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
         hits++;
     }
     cue_swing(p, 5, ax, ay, 0.12f);
-    sfx_play(g, hits > 0 ? SFX_PUNCH : SFX_SWING);
-    if (hits > 0) { g->shake_t = 0.10f; g->shake_mag = 2.f; g->hitstop_t = 0.04f; }
+    if (hits > 0) {
+        sfx_play_ex(g, SFX_PUNCH, 1.05f, 1.f);    /* punch sec et brillant */
+        g->shake_t = 0.10f; g->shake_mag = 2.f; g->hitstop_t = 0.04f;
+    } else {
+        sfx_play_ex(g, SFX_SWING, 1.20f, 0.7f);   /* whiff plus aigu, plus discret */
+    }
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 
@@ -289,8 +304,14 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
     cue_swing(p, 0, ax, ay, 0.18f);
     sfx_play(g, SFX_SWORD_SLASH);
     if (hits > 0) {
-        sfx_play(g, SFX_HIT);
-        g->shake_t = 0.16f; g->shake_mag = 3.5f; g->hitstop_t = 0.05f;
+        /* impact metallique brillant. Pitch leg. up pour la perception
+         * "tranchant", volume scale au nb de cibles touches. */
+        float vol = 0.8f + (hits > 3 ? 0.4f : hits * 0.13f);
+        sfx_play_ex(g, SFX_HIT, 1.12f, vol);
+        float k = (hits > 3) ? 1.f : (hits / 3.f);
+        g->shake_t   = 0.14f + 0.06f * k;
+        g->shake_mag = 3.0f  + 2.0f  * k;
+        g->hitstop_t = 0.05f + 0.04f * k;
     }
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
@@ -319,9 +340,13 @@ static void fire_shield(Game *g, Weapon *w, ComboFx fx) {
                             cosf(a) * 100, sinf(a) * 100, 0.40f, fx.color, 2.f, 0);
     }
     cue_swing(p, 2, 0, 0, 0.16f);
-    sfx_play(g, SFX_HEAVY_HIT);
+    /* bash : thump bas + metal si on reflect (clang ferreux brillant) */
+    sfx_play_ex(g, SFX_HEAVY_HIT, 0.85f, 1.f);
+    if (reflected > 0) {
+        sfx_play_ex(g, SFX_HIT, 1.40f, 0.9f);
+        g->hitstop_t = 0.06f;
+    }
     g->shake_t = 0.18f; g->shake_mag = 3.5f;
-    if (reflected > 0) g->hitstop_t = 0.04f;
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 
@@ -414,9 +439,9 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
     aax /= aal; aay /= aal;
     cue_swing(p, 1, aax, aay, 0.30f);
     sfx_play(g, SFX_AXE_SWING);
-    sfx_play(g, SFX_HEAVY_HIT);     /* impact bas a la chute */
-    g->shake_t = 0.25f; g->shake_mag = 5.f;
-    g->hitstop_t = 0.07f;
+    sfx_play_ex(g, SFX_HEAVY_HIT, 0.78f, 1.15f);   /* impact bas a la chute */
+    g->shake_t = 0.32f; g->shake_mag = 8.f;        /* hache = lourde */
+    g->hitstop_t = 0.12f;                          /* commit visible */
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 

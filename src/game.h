@@ -403,6 +403,16 @@ typedef struct {
                                     normalises pour le render. */
     float anim_dir_x, anim_dir_y;
     int   anim_kind;
+    /* combo alternance : sword/fists alternent gauche-droite a chaque
+     * swing. anim_flip = +1 ou -1, multiplie l'amplitude du side dans
+     * l'arc pour donner un effet de "1-2" en chaine de coups. */
+    int   anim_flip;
+    /* trail buffer : positions historiques de la pointe d'arme pour le
+     * trail visuel (slash de l epee / hache, swirl de la baguette).
+     * Anneau circulaire de N positions, ecrit dans render_world.c. */
+    float trail_x[8], trail_y[8], trail_z[8];
+    int   trail_head;             /* indice prochaine ecriture */
+    int   trail_count;            /* nb d'entrees valides (sature a 8) */
 
     /* inventaire */
     Item  inventory[INVENTORY_SLOTS];
