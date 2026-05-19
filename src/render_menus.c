@@ -873,11 +873,11 @@ void render_title(Game *g) {
     text_drawf(gc, px, py + 10, 0xCCCCCCFF, "Courses     %d", g->meta.total_runs);
     text_drawf(gc, px, py + 20, 0xCCCCCCFF, "Meilleur    %d/%d",
                g->meta.best_floor, MAX_FLOORS);
-    /* nb d elements decouverts (sur 7 originels) */
+    /* elements decouverts parmi les 7 originels jouables en run */
     int discov = 0;
-    for (int i = 1; i < EL_COUNT; i++)
+    for (int i = (int)EL_FIRE; i <= (int)EL_FAE; i++)
         if (g->meta.element_discovered[i]) discov++;
-    text_drawf(gc, px, py + 30, 0x80C0FFFF, "Elements    %d", discov);
+    text_drawf(gc, px, py + 30, 0x80C0FFFF, "Elements    %d/7", discov);
 
     /* === TIP rotation en bas centre === */
     static const char *TIPS[] = {

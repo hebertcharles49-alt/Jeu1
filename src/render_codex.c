@@ -10,7 +10,8 @@
  * Bestiaire / encyclopedie des decouvertes. 4 onglets :
  *   0 COMBOS       : tous les combos definis (paires + triples) avec leur
  *                    couleur ; "?" en couleur de rarete pour les non-vus.
- *   1 TALISMANS    : 10 elements, "?" en couleur de l element pour les non-vus.
+ *   1 TALISMANS    : 10 elements (7 originels jouables + 3 neutres),
+ *                    "?" en couleur de l element pour les non-vus.
  *   2 EQUIPEMENT   : 6 slots x 5 sub_kinds = 30 cases, montre la meilleure
  *                    rarete vue (item_seen_rarity[s][k]).
  *   3 ARMES        : 6 types, marques decouverts via weapon_discovered.

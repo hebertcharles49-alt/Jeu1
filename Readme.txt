@@ -199,9 +199,11 @@ LES 6 ARMES  (max 2 equipees, seule l'active attaque)
      Bouclier bash + ring de lumiere, reflete les projectiles
      Poings   jab rapide
 
-LES 10 ELEMENTS
-   Originels : Feu, Eau, Terre, Foudre, Air, Vide, Fee
-   Neutres   : Acier, Tenebres, Sacre
+LES 11 ELEMENTS (7 jouables en run)
+   Jouables en course (drop comme talismans) :
+     Feu, Eau, Terre, Foudre, Air, Vide, Fee
+   Non jouables (reserves codex / boss / unlocks meta) :
+     Neutre (sans element), Acier, Tenebres, Sacre
    Greffe jusqu'a 3 par arme. Les combos donnent ~30 noms uniques
    (Vapeur, Plasma, Choc, Lave, Volcan, Tempete, Phenix...) +
    fallback hybride.

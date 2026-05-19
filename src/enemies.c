@@ -325,9 +325,12 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
          * non-decouvert). Uniques = pick aleatoire dans la table. */
         if (g->talisman_drops_idx < RUN_TALISMAN_MAX &&
             g->run_kills >= g->talisman_drops[g->talisman_drops_idx]) {
+            /* Seuls les 7 originels (FIRE..FAE) sont jouables en run.
+             * STEEL/DARK/HOLY sont reserves a d'autres contextes (boss /
+             * codex / unlock meta). */
             int undisc[EL_COUNT]; int n_und = 0;
             int all[EL_COUNT]; int n_all = 0;
-            for (int el = 1; el < EL_COUNT; el++) {
+            for (int el = EL_FIRE; el <= EL_FAE; el++) {
                 all[n_all++] = el;
                 if (!g->meta.element_discovered[el]) undisc[n_und++] = el;
             }
