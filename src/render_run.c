@@ -61,7 +61,7 @@ void render_levelup(Game *g) {
 }
 
 
-/* ---------- SHOP (Brotato-like) ---------- */
+/* ---------- SHOP ---------- */
 void render_shop(Game *g) {
     /* fond degrade ambiance taverne */
     for (int y = 0; y < INTERNAL_H; y++) {

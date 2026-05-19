@@ -208,7 +208,7 @@ static void roll_affixes(Item *it) {
     it->affix_count++;
 }
 
-/* Pools pour les noms procedurals (Diablo-like).
+/* Pools pour les noms procedurals.
  * Le nom prend la forme : "<Noun_slot> <Adjective>" pour les
  * communs/magiques, et "<Noun_slot> <Adjective> de <Subject>" pour
  * les rares et au-dessus. */
@@ -704,7 +704,7 @@ nav_done:;
         }
     }
     /* V = vendre l'item du sac contre des coins (no shop UI requis :
-     * Brotato-like, gain immediat). */
+     * gain immediat). */
     if (g->keys[SDL_SCANCODE_V] && !g->keys_prev[SDL_SCANCODE_V]) {
         if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
             int gain = shop_sell_item(g, g->inv_cursor);

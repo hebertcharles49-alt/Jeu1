@@ -1,5 +1,5 @@
 /*
- * game.h - types et constantes du doom-hybride "Crucible"
+ * game.h - types et constantes principaux du jeu
  */
 #ifndef GAME_H
 #define GAME_H
@@ -139,7 +139,7 @@ typedef enum {
 
 /* (Rarity declaree plus haut) */
 
-/* Affixes Diablo-like : un item peut porter de 0 a 4 affixes additionnels,
+/* Affixes : un item peut porter de 0 a 4 affixes additionnels,
  * selon sa rarete (commun=0, magique=1, rare=2, epique=3, legendaire=4).
  * Chaque affixe roule sa valeur dans une plage min/max au moment du drop. */
 typedef enum {
@@ -169,7 +169,7 @@ typedef struct {
     float     stat_value;    /* effective scaled stat */
     ItemAffix affixes[MAX_AFFIXES];
     int       affix_count;
-    /* Nom procedural (Diablo-like). Genere via item_generate_name() au
+    /* Nom procedural. Genere via item_generate_name() au
      * drop. Pour les uniques, c'est le nom fixe de l'entree UNIQUE_DEFS. */
     char      name[40];
     /* Items uniques : si is_unique = true, unique_id pointe vers
@@ -278,7 +278,7 @@ typedef enum {
     PU_COIN,
     PU_PORTAL,
     PU_ITEM,        /* equipement */
-    PU_SCROLL,      /* parchemin de lore (Darkest-Dungeon-like) */
+    PU_SCROLL,      /* parchemin de lore */
     PU_FOOD,        /* nourriture (poulet/legume) - regen PV */
     PU_SHRINE,      /* pacte : bonus + malus permanent pour la run */
 } PickupKind;
@@ -363,7 +363,7 @@ typedef struct {
     float dmg_mul;            /* multiplicateur global */
     float lifesteal;
     float regen_per_sec;
-    /* ---- stats avancees (style Brotato) ---- */
+    /* ---- stats avancees ---- */
     float flat_dmg;           /* +flat ajoute aux dmg arme */
     float melee_dmg_mul;      /* multiplicateur arme melee */
     float range_dmg_mul;      /* multiplicateur arme distance */
@@ -529,7 +529,7 @@ typedef struct {
 } MetaSave;
 #define FORGE_MAX_LEVEL 5
 
-/* ---------- SHOP (Brotato-like) ---------- */
+/* ---------- SHOP ---------- */
 typedef struct {
     int   recipe_id;        /* index dans la table de recettes shop */
     int   cost;
@@ -557,6 +557,9 @@ typedef struct {
     int          debug_room;        /* 1 = salle bac-a-sable a cote de l'entree
                                        avec un exemplaire de chaque arme,
                                        element et equipement legendaire. */
+    int          mob_healthbars;    /* 1 = barres de vies flottantes au-dessus
+                                       des ennemis (toujours visibles, pas
+                                       juste quand HP < max). */
 } Settings;
 
 /* ---------- Game state ---------- */
@@ -1010,7 +1013,7 @@ typedef struct {
     bool  u_last_stand;
 } StatBlock;
 
-/* shop (Brotato-like) */
+/* shop */
 void  shop_generate(Game *g);
 void  shop_buy(Game *g, int idx);
 void  shop_reroll(Game *g);

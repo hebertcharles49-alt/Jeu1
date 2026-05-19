@@ -271,7 +271,7 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             break;
         }
         case PU_SCROLL: {
-            /* parchemin de lore : affiche un extrait 6s (Darkest-D-like). */
+            /* parchemin de lore : affiche un extrait 6s. */
             static const char *SNIPPETS[] = {
                 "Sept eclats sont tombes du Cristal. Sept couleurs.",
                 "Le Donjon respire. Il sait que tu es la.",

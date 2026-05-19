@@ -153,7 +153,7 @@ void game_recompute_player_stats(Game *g) {
     sb.speed += g->meta.perm_speed;
     sb.dmg_mul *= 1.f + g->meta.perm_dmg_pct / 100.f;
 
-    /* equipement : stat de base + affixes (Diablo-like) ; les uniques
+    /* equipement : stat de base + affixes ; les uniques
      * shortent par unique_apply_to_block (effets pre-definis). */
     for (int s = 0; s < EQUIP_SLOTS; s++) {
         if (!p->equipped[s].occupied) continue;
@@ -579,7 +579,7 @@ bool forge_buy(Game *g, WeaponKind k) {
     return true;
 }
 
-/* === HUB walkable (style Hades) ============================
+/* === HUB walkable ============================
  * GS_HUB rend la meme world-pipeline que GS_RUN mais avec :
  *   - un donjon special : 1 grande salle vide, pas d ennemis
  *   - 5 NPC-batiments fixes

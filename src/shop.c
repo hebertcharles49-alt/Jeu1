@@ -1,5 +1,5 @@
 /*
- * shop.c - boutique style Brotato : recettes data-driven, double-edged
+ * shop.c - boutique : recettes data-driven, double-edged
  */
 #include "game.h"
 #include <stdio.h>

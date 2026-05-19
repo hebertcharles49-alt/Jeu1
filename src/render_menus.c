@@ -291,12 +291,17 @@ void render_options(Game *g) {
         y += 6;
         text_draw(g->renderer, 30, y, "ENTREE bascule mute.   GAUCHE/DROITE ajuste le volume.", 0x808080FF);
     } else if (g->opt_section == 2) {
-        const char *labels[2] = { "DLSS Generatif", "Debug : salle bac-a-sable" };
-        const char *vals[2]   = {
-            g->settings.dlss_on    ? "ON  (lisse)"  : "OFF (pixel art net)",
-            g->settings.debug_room ? "ON"           : "OFF"
+        const char *labels[3] = {
+            "DLSS Generatif",
+            "Debug : salle bac-a-sable",
+            "Barres de vie flottantes"
         };
-        for (int i = 0; i < 2; i++) {
+        const char *vals[3]   = {
+            g->settings.dlss_on        ? "ON  (lisse)"  : "OFF (pixel art net)",
+            g->settings.debug_room     ? "ON"           : "OFF",
+            g->settings.mob_healthbars ? "ON"           : "OFF"
+        };
+        for (int i = 0; i < 3; i++) {
             bool sel = (g->opt_cursor == i);
             uint32_t col = sel ? 0xFFFF40FF : 0xFFFFFFFF;
             text_drawf(g->renderer, sel ? 22 : 30, y, col, "%s%s",
@@ -309,6 +314,7 @@ void render_options(Game *g) {
         text_draw(g->renderer, 30, y, "Debug : ajoute une salle a cote de l'entree, peuplee", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "d'un exemplaire de chaque arme / element / equipement", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "legendaire (effet a la prochaine run / etage).", 0x808080FF); y += 9;
+        text_draw(g->renderer, 30, y, "Barres : visibles meme a pleine vie pour lire le combat.", 0x808080FF); y += 9;
         text_draw(g->renderer, 30, y, "ENTREE bascule.", 0x808080FF);
     }
 
@@ -560,8 +566,9 @@ void render_title(Game *g) {
     text_draw(g->renderer, tx, ty + 1, t, 0x000000FF);
     text_draw(g->renderer, tx, ty, t, 0xFFD060FF);
 
-    text_draw(g->renderer, INTERNAL_W/2 - text_width("DOOM x HADES x ISAAC x DIABLO")/2,
-              INTERNAL_H/2 - 38, "DOOM x HADES x ISAAC x DIABLO", 0xC0A080FF);
+    const char *tagline = "ROGUELITE ELEMENTAIRE";
+    text_draw(g->renderer, INTERNAL_W/2 - text_width(tagline)/2,
+              INTERNAL_H/2 - 38, tagline, 0xC0A080FF);
 
     /* menu vertical (lore retire : distille en jeu via parchemins) */
     const char *items[4] = { "JOUER", "OPTIONS", "AIDE", "QUITTER" };
@@ -632,7 +639,8 @@ void render_help(Game *g) {
     text_draw(g->renderer, 8, 6, "AIDE", 0xFFE080FF);
     int y = 18;
     text_draw(g->renderer, 8, y, "WASD / FLECHES   DEPLACEMENT", 0xFFFFFFFF); y += 9;
-    text_draw(g->renderer, 8, y, "SOURIS           VISER + naviguer/cliquer dans les menus", 0xFFFFFFFF); y += 9;
+    text_draw(g->renderer, 8, y, "SOURIS           VISER", 0xFFFFFFFF); y += 9;
+    text_draw(g->renderer, 8, y, "CLIC GAUCHE      ATTAQUER (maintenir pour enchainer)", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "ESPACE           DASH", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "1 / 2 / TAB      ARME ACTIVE", 0xFFFFFFFF); y += 9;
     text_draw(g->renderer, 8, y, "I                INVENTAIRE", 0xFFFFFFFF); y += 9;

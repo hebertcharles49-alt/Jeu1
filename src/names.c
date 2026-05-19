@@ -1,5 +1,5 @@
 /*
- * names.c - generation procedural de noms style Diablo
+ * names.c - generation procedural de noms
  *
  * Format generique : <Prefix> <Base> <Suffix>
  *  - elite : "<Prefix> <suffix lie a l'element>"

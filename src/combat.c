@@ -449,10 +449,16 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
 void update_weapons(Game *g) {
     Player *p = &g->player;
     float dt = g->dt;
+    /* attack-on-click : on n'attaque que tant que le bouton souris est
+     * tenu, et UNIQUEMENT avec l'arme active (plus d'auto-fire de la
+     * 2eme arme). Le cooldown continue de descendre meme sans clic. */
+    bool fire_held = g->mouse_btn != 0;
     for (int i = 0; i < WEAPON_SLOTS; i++) {
         Weapon *w = &p->weapons[i];
         if (!w->owned) continue;
         w->cooldown -= dt;
+        if (i != p->active_weapon) continue;
+        if (!fire_held) continue;
         if (w->cooldown > 0.f) continue;
         int mask = weapon_combo_id(w);
         ComboFx fx = combo_compute(mask);
@@ -572,21 +578,8 @@ void update_weapons(Game *g) {
             sfx_play(g, is_triple ? SFX_EXPLODE : SFX_ZAP);
         }
 
-        /* Gating : armes "actives" gatees sur la presence d'un ennemi en
-         * portee (sauf bouclier qui est defensif). */
-        bool fire = true;
-        if (w->kind != W_SHIELD) {
-            float scan;
-            switch (w->kind) {
-                case W_AXE:    scan = w->base_range * fx.range_mul + 18.f; break;
-                case W_BOW:    scan = 320.f * fx.range_mul; break;
-                case W_WAND:   scan = w->base_range * fx.range_mul + 30.f; break;
-                default:       scan = w->base_range * fx.range_mul + 10.f; break;
-            }
-            int t = nearest_enemy(g, p->x, p->y, scan, NULL);
-            if (t < 0) fire = false;
-        }
-        if (!fire) continue;
+        /* Plus de gating sur la presence d'ennemi : avec attack-on-click,
+         * le joueur peut volontairement frapper dans le vide (whiff). */
 
         /* Triple feedback loop : sync + overload modifiers. */
         if (w->element_count == 3) combo_refresh_active_loop(g, mask);

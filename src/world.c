@@ -123,7 +123,7 @@ void update_room_logic(Game *g) {
                                  (r->x + r->w / 2) * TILE,
                                  (r->y + r->h / 2) * TILE);
                 }
-                /* Loot contextuel "petit objet flottant" (Isaac).
+                /* Loot contextuel "petit objet flottant".
                  * 35% : un PU_FOOD pose entre coffre et entree.
                  * 12% supp : un parchemin de lore (rare).
                  * Position : un coin du milieu de la piece (pas pile sur

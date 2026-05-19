@@ -8,7 +8,7 @@
 
 #define SETTINGS_PATH    "crucible_settings.dat"
 #define SETTINGS_MAGIC   0x53455453u  /* 'SETS' */
-#define SETTINGS_VERSION 2
+#define SETTINGS_VERSION 3
 
 void settings_defaults(Settings *s) {
     memset(s, 0, sizeof(*s));
@@ -23,6 +23,7 @@ void settings_defaults(Settings *s) {
     s->sfx_mute   = 0;
     s->dlss_on    = 0;     /* off par defaut : pixel art net */
     s->debug_room = 0;     /* off par defaut : pas de salle bac-a-sable */
+    s->mob_healthbars = 1; /* on par defaut : barres flottantes visibles */
 }
 
 void settings_load(Settings *s) {
@@ -87,7 +88,7 @@ static int section_row_count(int section) {
     switch (section) {
         case 0: return BIND_COUNT;
         case 1: return 2;
-        case 2: return 2;       /* DLSS + Debug room */
+        case 2: return 3;       /* DLSS + Debug room + barres de vies */
         default: return 0;
     }
 }
@@ -225,6 +226,16 @@ void update_options(Game *g) {
                             ? "Debug : salle bac-a-sable a la prochaine run"
                             : "Debug : OFF");
                 g->opt_msg_t = 2.5f;
+            }
+        } else if (g->opt_cursor == 2) {
+            if (press_enter || press_left || press_right) {
+                s->mob_healthbars = !s->mob_healthbars;
+                settings_write(s);
+                snprintf(g->opt_msg, sizeof(g->opt_msg),
+                         s->mob_healthbars
+                            ? "Barres de vie : visibles"
+                            : "Barres de vie : caches");
+                g->opt_msg_t = 2.f;
             }
         }
     }

@@ -1819,20 +1819,36 @@ void render_world_overlay_ui(Game *g) {
             text_draw(gc, sx - tw/2,     sy - 18,     m, 0xFF3030FF);
         }
     }
-    /* HP bars + noms au-dessus des ennemis */
+    /* HP bars + noms au-dessus des ennemis. Setting mob_healthbars =
+     * affiche meme a pleine vie (bool). Les boss sont toujours visibles
+     * (gameplay critical). */
+    bool show_full = g->settings.mob_healthbars != 0;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->alive) continue;
+        if (e->dying_t > 0.f) continue;
         v3 head = v3_make(e->x / TILE, (e->is_boss ? 2.0f : 1.4f),
                           e->y / TILE);
         int sx, sy;
         if (!world_to_screen(gc, head, &sx, &sy)) continue;
-        if (e->hp < e->maxhp) {
+        bool show_bar = e->is_boss || show_full || (e->hp < e->maxhp);
+        if (show_bar && e->maxhp > 0.f) {
             int bw = e->is_boss ? 80 : 24;
+            int bh = e->is_boss ? 4 : 2;
             int bx = sx - bw / 2, by = sy;
-            fill_rect(gc, bx, by, bw, e->is_boss ? 4 : 2, 0x402020FF);
-            int hf = (int)(bw * (e->hp / e->maxhp));
-            fill_rect(gc, bx, by, hf, e->is_boss ? 4 : 2, 0xFF4040FF);
+            /* fond noir cadre pour la lisibilite */
+            fill_rect(gc, bx - 1, by - 1, bw + 2, bh + 2, 0x000000C0);
+            fill_rect(gc, bx, by, bw, bh, 0x402020FF);
+            float frac = e->hp / e->maxhp;
+            if (frac < 0.f) frac = 0.f;
+            if (frac > 1.f) frac = 1.f;
+            int hf = (int)(bw * frac);
+            /* couleur : vert > 60%, jaune 30-60%, rouge < 30% */
+            uint32_t hpcol;
+            if      (frac > 0.6f) hpcol = 0x60D040FF;
+            else if (frac > 0.3f) hpcol = 0xFFC040FF;
+            else                  hpcol = 0xFF4040FF;
+            fill_rect(gc, bx, by, hf, bh, hpcol);
         }
         if ((e->is_elite || e->is_boss) && e->name[0]) {
             int nw = text_width(e->name);

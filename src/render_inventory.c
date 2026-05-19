@@ -1,5 +1,5 @@
 /*
- * render_inventory.c - inventaire paper-doll Diablo : personnage central
+ * render_inventory.c - inventaire paper-doll : personnage central
  * + 6 cases equipement + 2 armes + jusqu a 3 talismans / arme + sac 4x3.
  * Cf game.h pour le mapping INV_CURSOR_*.
  */
@@ -10,7 +10,7 @@
 #include <string.h>
 
 /* ---------- INVENTORY ---------- */
-/* Layout Diablo paper-doll :
+/* Layout paper-doll :
  *   - colonne gauche  : panneau STATS
  *   - colonne centre  : personnage + 6 slots equipement disposes autour +
  *                       2 slots arme en bas + 1 a 3 slots talisman sous chaque
