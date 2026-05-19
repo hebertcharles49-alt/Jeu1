@@ -52,7 +52,14 @@ static void poll_input(Game *g, bool *quit) {
                         g->state = g->opt_return ? g->opt_return : GS_TITLE;
                         break;
                     case GS_CHOOSE_HERO:g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
-                    case GS_CODEX:      g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
+                    case GS_CODEX:
+                        if (g->codex_return == GS_TITLE) {
+                            g->state = GS_TITLE;
+                        } else {
+                            g->state = GS_HUB; g->hub_sub_open = 0;
+                            hub_init(g);
+                        }
+                        break;
                     case GS_INVENTORY:  g->state = g->state_prev; break;
                     case GS_LEVELUP:    /* pas d'echap */ break;
                     case GS_SHOP:       game_next_floor(g); break;
@@ -764,6 +771,7 @@ static void update_hub(Game *g) {
     if (g->keys[SDL_SCANCODE_K] && !g->keys_prev[SDL_SCANCODE_K]) {
         g->state = GS_CODEX;
         g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
+        g->codex_return = GS_HUB;
     }
     if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
         g->opt_return = GS_HUB; g->opt_section = 0; g->opt_cursor = 0;
@@ -984,30 +992,63 @@ void game_run(Game *g) {
         poll_input(g, &quit);
 
         if (g->state == GS_TITLE) {
-            bool start = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                         (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]);
-            /* mouse zones (alignees sur render_title : 4 lignes desormais) */
-            int yA = INTERNAL_H/2 + 20;   /* JOUER */
-            int yB = INTERNAL_H/2 + 36;   /* OPTIONS */
-            int yC = INTERNAL_H/2 + 52;   /* AIDE */
-            int yD = INTERNAL_H/2 + 68;   /* QUITTER */
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yA, 200, 12) && mouse_clicked(g)) start = true;
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yB, 200, 12) && mouse_clicked(g)) {
-                g->opt_return = GS_TITLE; g->opt_section = 0; g->opt_cursor = 0;
-                g->opt_waiting_rebind = false; g->state = GS_OPTIONS;
+            /* menu : 5 entrees (JOUER / CODEX / OPTIONS / AIDE / QUITTER).
+             * Render maj du title_cursor au survol souris. Ici : nav clavier
+             * + activation (ENTER / SPACE / clic). */
+            const int N_MENU = 5;
+            if ((g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])  ||
+                (g->keys[SDL_SCANCODE_W]    && !g->keys_prev[SDL_SCANCODE_W]))
+                g->title_cursor = (g->title_cursor + N_MENU - 1) % N_MENU;
+            if ((g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN]) ||
+                (g->keys[SDL_SCANCODE_S]    && !g->keys_prev[SDL_SCANCODE_S]))
+                g->title_cursor = (g->title_cursor + 1) % N_MENU;
+
+            bool activate =
+                (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]);
+            /* clic sur la ligne focused = activate */
+            int yA = INTERNAL_H/2 + 14;
+            int rowh = 14;
+            int yi = yA + g->title_cursor * rowh;
+            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yi, 200, 12) && mouse_clicked(g))
+                activate = true;
+
+            if (activate) {
+                switch (g->title_cursor) {
+                    case 0: /* JOUER */
+                        g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g);
+                        break;
+                    case 1: /* CODEX */
+                        g->state = GS_CODEX;
+                        g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
+                        g->codex_return = GS_TITLE;
+                        break;
+                    case 2: /* OPTIONS */
+                        g->opt_return = GS_TITLE;
+                        g->opt_section = 0; g->opt_cursor = 0;
+                        g->opt_waiting_rebind = false;
+                        g->state = GS_OPTIONS;
+                        break;
+                    case 3: /* AIDE */
+                        g->state = GS_HELP;
+                        break;
+                    case 4: /* QUITTER */
+                        quit = true;
+                        break;
+                }
             }
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yC, 200, 12) && mouse_clicked(g))
-                g->state = GS_HELP;
-            if (mouse_in_rect(g, INTERNAL_W/2 - 100, yD, 200, 12) && mouse_clicked(g))
-                quit = true;
-            if (start) { g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); }
+            /* raccourcis directs (touches dediees) */
             if (g->keys[SDL_SCANCODE_H] && !g->keys_prev[SDL_SCANCODE_H]) g->state = GS_HELP;
             if (g->keys[SDL_SCANCODE_O] && !g->keys_prev[SDL_SCANCODE_O]) {
                 g->opt_return = GS_TITLE;
-                g->opt_section = 0;
-                g->opt_cursor = 0;
+                g->opt_section = 0; g->opt_cursor = 0;
                 g->opt_waiting_rebind = false;
                 g->state = GS_OPTIONS;
+            }
+            if (g->keys[SDL_SCANCODE_K] && !g->keys_prev[SDL_SCANCODE_K]) {
+                g->state = GS_CODEX;
+                g->codex_tab = 0; g->codex_cursor = 0; g->codex_scroll = 0;
+                g->codex_return = GS_TITLE;
             }
         } else if (g->state == GS_LORE) {
             if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||

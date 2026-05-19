@@ -539,55 +539,178 @@ void render_victory(Game *g) {
 }
 
 /* ---------- TITLE ---------- */
+
+/* 7 elements originels qui orbitent autour du titre. Reutilise les
+ * couleurs canoniques d'element_color() pour la coherence. */
+static const Element TITLE_ORBIT_ELEMS[7] = {
+    EL_FIRE, EL_WATER, EL_EARTH, EL_LIGHTNING, EL_AIR, EL_VOID, EL_FAE
+};
+
 void render_title(Game *g) {
-    /* fond degrade vertical sombre */
+    GfxCtx *gc = g->renderer;
+    int CX = INTERNAL_W / 2;
+
+    /* === FOND : degrade vertical + halo radial subtil === */
     for (int y = 0; y < INTERNAL_H; y++) {
-        int v = 8 + (INTERNAL_H - y) / 24;
-        fill_rect(g->renderer, 0, y, INTERNAL_W, 1, (uint32_t)((v << 24) | (v / 2 << 16) | (v << 8) | 0xFF));
+        int v = 6 + (INTERNAL_H - y) / 28;
+        uint32_t col = (uint32_t)((v << 24) | ((v / 2) << 16) | (v << 8) | 0xFF);
+        fill_rect(gc, 0, y, INTERNAL_W, 1, col);
     }
-    /* particules embers / cendres animees */
-    for (int i = 0; i < 100; i++) {
-        int x = (i * 73 + (int)(g->time * 14)) % INTERNAL_W;
-        int y = ((i * 37) + (int)(g->time * (i % 7 + 2) * 6)) % INTERNAL_H;
-        uint32_t col = (i & 3) ? 0x402030FF : 0xFFB060FF;
-        fill_rect(g->renderer, x, y, 1, 1, col);
+    /* halo central : 6 anneaux concentriques attenues */
+    for (int k = 0; k < 6; k++) {
+        int rr = 60 + k * 30;
+        int alpha = 18 - k * 2;
+        if (alpha < 0) continue;
+        uint32_t col = (uint32_t)((0xFF << 24) | (0xA0 << 16) | (0x40 << 8) | (uint32_t)alpha);
+        gfx_set_blend(gc, true);
+        fill_rect(gc, CX - rr, INTERNAL_H/2 - 64 - 2, rr * 2, 1, col);
+        fill_rect(gc, CX - rr, INTERNAL_H/2 - 64 + 2, rr * 2, 1, col);
+        gfx_set_blend(gc, false);
     }
 
-    /* titre chevele : ombre + coeur + glow */
-    const char *t = "ELEMENT DUNGEON";
-    int tw = text_width(t);
-    int tx = INTERNAL_W/2 - tw/2;
-    int ty = INTERNAL_H/2 - 60;
-    /* glow */
-    for (int dx = -2; dx <= 2; dx++) for (int dy = -2; dy <= 2; dy++) {
-        if (!dx && !dy) continue;
-        text_draw(g->renderer, tx + dx, ty + dy, t, 0x402010FF);
+    /* === PARTICULES : cendres lentes + braises rapides === */
+    for (int i = 0; i < 70; i++) {
+        int x = (i * 73 + (int)(g->time * 8)) % INTERNAL_W;
+        int y = ((i * 37) + (int)(g->time * (i % 5 + 1) * 4)) % INTERNAL_H;
+        uint32_t col = (i & 3) ? 0x30202060 : 0x80604080;
+        gfx_set_blend(gc, true);
+        fill_rect(gc, x, y, 1, 1, col);
+        gfx_set_blend(gc, false);
     }
-    text_draw(g->renderer, tx, ty + 1, t, 0x000000FF);
-    text_draw(g->renderer, tx, ty, t, 0xFFD060FF);
+    /* braises rapides plus rares, plus chaudes */
+    for (int i = 0; i < 18; i++) {
+        int x = (i * 127 + (int)(g->time * 26)) % INTERNAL_W;
+        int y = INTERNAL_H - (((int)(g->time * (12 + i * 3)) + i * 53) % (INTERNAL_H - 20));
+        uint32_t col = (i & 1) ? 0xFFB060FF : 0xFFE090FF;
+        fill_rect(gc, x, y, 1, 1, col);
+    }
 
-    const char *tagline = "ROGUELITE ELEMENTAIRE";
-    text_draw(g->renderer, INTERNAL_W/2 - text_width(tagline)/2,
-              INTERNAL_H/2 - 38, tagline, 0xC0A080FF);
-
-    /* menu vertical (lore retire : distille en jeu via parchemins) */
-    const char *items[4] = { "JOUER", "OPTIONS", "AIDE", "QUITTER" };
-    int yA = INTERNAL_H/2 + 20;
-    int rowh = 16;
-    for (int i = 0; i < 4; i++) {
-        int yi = yA + i * rowh;
-        bool hov = mouse_in_rect(g, INTERNAL_W/2 - 100, yi, 200, 12);
-        uint32_t col = hov ? 0xFFFF80FF : (i == 0 ? 0x80FFA0FF : 0xCCCCCCFF);
-        int w = text_width(items[i]);
-        text_draw(g->renderer, INTERNAL_W/2 - w/2, yi + 2, items[i], col);
-        if (hov) {
-            /* fleches */
-            text_draw(g->renderer, INTERNAL_W/2 - w/2 - 16, yi + 2, ">", col);
-            text_draw(g->renderer, INTERNAL_W/2 + w/2 + 10, yi + 2, "<", col);
+    /* === ORBES ELEMENTAIRES qui tournent autour du titre === */
+    {
+        float center_y = INTERNAL_H / 2 - 48;
+        float radius_x = 130.f;
+        float radius_y = 20.f;
+        for (int i = 0; i < 7; i++) {
+            float a = g->time * 0.6f + (i / 7.f) * 6.2831f;
+            float ox = cosf(a) * radius_x;
+            float oy = sinf(a) * radius_y;
+            int px = CX + (int)ox;
+            int py = (int)(center_y + oy);
+            /* element devant le titre (oy < 0) = plus grand & opaque */
+            int front = oy < 0.f ? 1 : 0;
+            int sz = front ? 4 : 2;
+            uint32_t col = element_color(TITLE_ORBIT_ELEMS[i]);
+            /* alpha selon profondeur (faux Z) */
+            uint8_t a8 = front ? 0xFF : 0x70;
+            col = (col & 0xFFFFFF00u) | a8;
+            gfx_set_blend(gc, true);
+            fill_rect(gc, px - sz/2, py - sz/2, sz, sz, col);
+            /* halo */
+            uint32_t halo = (col & 0xFFFFFF00u) | (uint8_t)(a8 / 3);
+            fill_rect(gc, px - sz, py - sz/2, sz * 2, sz, halo);
+            fill_rect(gc, px - sz/2, py - sz, sz, sz * 2, halo);
+            gfx_set_blend(gc, false);
         }
     }
 
-    text_draw(g->renderer, 8, INTERNAL_H - 14, "v1 -- C + SDL2", 0x606080FF);
+    /* === TITRE : ombre + glow + scale-pulse subtil === */
+    const char *t = "ELEMENT DUNGEON";
+    int tw = text_width(t);
+    int tx = CX - tw / 2;
+    int ty = INTERNAL_H / 2 - 60;
+    /* glow lent : 9 offsets en croix */
+    for (int dx = -2; dx <= 2; dx++) {
+        for (int dy = -2; dy <= 2; dy++) {
+            if (!dx && !dy) continue;
+            int dist = (dx * dx + dy * dy);
+            uint8_t a = (uint8_t)(50 - dist * 6);
+            if (a == 0) continue;
+            uint32_t col = (uint32_t)((0xFF << 24) | (0x80 << 16) | (0x30 << 8) | a);
+            gfx_set_blend(gc, true);
+            text_draw(gc, tx + dx, ty + dy, t, col);
+            gfx_set_blend(gc, false);
+        }
+    }
+    text_draw(gc, tx + 1, ty + 2, t, 0x000000FF);
+    text_draw(gc, tx,     ty,     t, 0xFFD060FF);
+
+    const char *tagline = "ROGUELITE ELEMENTAIRE";
+    int gw = text_width(tagline);
+    text_draw(gc, CX - gw / 2, INTERNAL_H / 2 - 38, tagline, 0xC0A080FF);
+
+    /* === MENU avec curseur clavier === */
+    const char *items[5] = { "JOUER", "CODEX", "OPTIONS", "AIDE", "QUITTER" };
+    int n_items = 5;
+    int yA = INTERNAL_H / 2 + 14;
+    int rowh = 14;
+    /* clamp cursor (safety) */
+    if (g->title_cursor < 0)         g->title_cursor = 0;
+    if (g->title_cursor >= n_items)  g->title_cursor = n_items - 1;
+    /* survol souris : met a jour le cursor */
+    for (int i = 0; i < n_items; i++) {
+        int yi = yA + i * rowh;
+        if (mouse_in_rect(g, CX - 100, yi, 200, 12)) {
+            g->title_cursor = i;
+        }
+    }
+    for (int i = 0; i < n_items; i++) {
+        int yi = yA + i * rowh;
+        bool sel = (g->title_cursor == i);
+        uint32_t col;
+        if (sel) col = 0xFFFF80FF;
+        else if (i == 0) col = 0x80FFA0FF;     /* JOUER reste vert */
+        else col = 0xAAAAAAFF;
+        int w = text_width(items[i]);
+        if (sel) {
+            /* fond translucide sur la ligne focused */
+            gfx_set_blend(gc, true);
+            fill_rect(gc, CX - 110, yi - 1, 220, 13, 0x402020A0);
+            gfx_set_blend(gc, false);
+        }
+        text_draw(gc, CX - w / 2, yi + 2, items[i], col);
+        if (sel) {
+            /* fleches qui battent doucement */
+            int pulse = (int)((sinf(g->time * 6.f) * 0.5f + 0.5f) * 4.f);
+            text_draw(gc, CX - w / 2 - 14 - pulse, yi + 2, ">", col);
+            text_draw(gc, CX + w / 2 + 8  + pulse, yi + 2, "<", col);
+        }
+    }
+
+    /* === PANNEAU META en bas a gauche === */
+    int px = 8;
+    int py = INTERNAL_H - 58;
+    fill_rect(gc, px - 2, py - 2, 130, 50, 0x00000080);
+    rect_outline(gc, px - 2, py - 2, 130, 50, 0x60504AFF);
+    text_drawf(gc, px, py,      0xFFD040FF, "* %d eclats", g->meta.shards);
+    text_drawf(gc, px, py + 10, 0xCCCCCCFF, "Courses     %d", g->meta.total_runs);
+    text_drawf(gc, px, py + 20, 0xCCCCCCFF, "Meilleur    %d/%d",
+               g->meta.best_floor, MAX_FLOORS);
+    /* nb d elements decouverts (sur 7 originels) */
+    int discov = 0;
+    for (int i = 1; i < EL_COUNT; i++)
+        if (g->meta.element_discovered[i]) discov++;
+    text_drawf(gc, px, py + 30, 0x80C0FFFF, "Elements    %d", discov);
+
+    /* === TIP rotation en bas centre === */
+    static const char *TIPS[] = {
+        "Astuce : maintiens CLIC pour enchainer les attaques.",
+        "Astuce : ESPACE = dash invincible.",
+        "Astuce : 3 elements greffes = boucle de combo + aura.",
+        "Astuce : I ouvre l'inventaire ; F fusionne 3 items identiques.",
+        "Astuce : chaque element a une faiblesse. Frappe la bonne couleur.",
+        "Astuce : ESQUIVER reduit les degats encaisses.",
+        "Astuce : 1 / 2 / TAB switche d'arme. Le swap est strategique.",
+    };
+    int n_tips = (int)(sizeof(TIPS) / sizeof(TIPS[0]));
+    int tip_idx = ((int)(g->time / 4.f)) % n_tips;
+    if (tip_idx < 0) tip_idx = 0;
+    const char *tip = TIPS[tip_idx];
+    int twi = text_width(tip);
+    text_draw(gc, CX - twi / 2, INTERNAL_H - 22, tip, 0x90A0B0FF);
+
+    /* === version en bas a droite === */
+    const char *ver = "v1.0 - C99 + SDL2 + GL3.3";
+    text_draw(gc, INTERNAL_W - text_width(ver) - 8, INTERNAL_H - 12, ver, 0x606080FF);
 }
 
 /* ---------- LORE ---------- */

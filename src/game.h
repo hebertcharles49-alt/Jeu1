@@ -619,6 +619,7 @@ typedef struct {
      * vers GS_CHOOSE_HERO ; DOOR bascule vers game_start_new_run. */
     int           hub_sub_open;
     int           hub_sub_cursor;
+    int           title_cursor;     /* index focused menu sur l ecran titre */
 
     int           run_kills;
     float         run_time;
@@ -716,6 +717,7 @@ typedef struct {
     int           codex_tab;       /* 0=combos 1=talismans 2=equip 3=armes */
     int           codex_cursor;    /* row in current tab */
     int           codex_scroll;    /* premier item visible (defilement) */
+    GameStateKind codex_return;    /* etat de retour quand on quitte le codex */
 
     /* TOASTS : 4 slots circulaires. Une notification affichee bas-droite
      * sous le HUD pour signaler les decouvertes meta (combo, element,
