@@ -766,22 +766,24 @@ static void update_hub(Game *g) {
     /* Pas de sous-panneau : on joue le hub walkable. */
     update_player(g);
     /* Cherche un batiment dans le rayon. On stocke le sub_id sur
-     * un static local (utilise par render_world pour le prompt). */
-    int near = -1;
+     * un static local (utilise par render_world pour le prompt).
+     * Note : on evite l'identifiant `near` (macro heritee de windows.h
+     * dans certains toolchains). */
+    int near_idx = -1;
     for (int i = 0; i < 5; i++) {
         const HubBuilding *b = &HUB_BUILDINGS[i];
         float dx = b->x - g->player.x;
         float dy = b->y - g->player.y;
-        if (dx * dx + dy * dy < b->r * b->r) { near = i; break; }
+        if (dx * dx + dy * dy < b->r * b->r) { near_idx = i; break; }
     }
     /* expose au rendu via un champ Game pour le prompt overlay. */
-    g->hub_cursor = near;
+    g->hub_cursor = near_idx;
     /* E ou interact : ouvre le panneau ou demarre la run. */
     SDL_Scancode kinter = g->settings.keys[BIND_INTERACT];
     if (kinter == SDL_SCANCODE_UNKNOWN) kinter = SDL_SCANCODE_E;
     bool press_e = (g->keys[kinter] && !g->keys_prev[kinter]);
-    if (press_e && near >= 0) {
-        int sid = HUB_BUILDINGS[near].sub_id;
+    if (press_e && near_idx >= 0) {
+        int sid = HUB_BUILDINGS[near_idx].sub_id;
         switch (sid) {
             case  0: /* DONJON : verrouille tant que weapon/hero pas choisis */
                 if (g->hub_weapon_chosen && g->hub_hero_chosen) {

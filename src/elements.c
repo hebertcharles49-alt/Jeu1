@@ -292,6 +292,23 @@ static const EmergentRule EMERGENT_RULES[] = {
     { TAG_DIVINE|TAG_CORROSIVE,      .aoe_explode=true, .homing=true                       },
     { TAG_METALLIC|TAG_LIGHT,        .pierces=true,   .range_mul=1.25f                     },
     { TAG_HOMING_TAG|TAG_HOT,        .extra_proj=1,   .homing=true,     .dmg_add= 0.10f    },
+    /* === regles pour combler les paires "no rule" (audit) === */
+    /* Grace (Fae+Holy)     : DIVINE+HOMING -> grace protectrice, aoe + spawn_fairy */
+    { TAG_DIVINE|TAG_HOMING_TAG,     .dmg_add= 0.20f, .aoe_explode=true, .spawn_fairy=true,  .homing=true   },
+    /* Murmure (Dark+Air)   : SHADOW+AIRY -> chuchotement homing multi-proj */
+    { TAG_SHADOW|TAG_AIRY,           .dmg_add= 0.15f, .extra_proj=1,   .homing=true                        },
+    /* Source (Fae+Water)   : HOMING+FLUID -> source vivante, range + spawn_fairy */
+    { TAG_HOMING_TAG|TAG_FLUID,      .dmg_add= 0.10f, .range_mul=1.30f, .spawn_fairy=true                  },
+    /* Verger (Fae+Earth)+Mithril : HOMING+HEAVY -> sol benit, pierces + aoe */
+    { TAG_HOMING_TAG|TAG_HEAVY,      .dmg_add= 0.20f, .pierces=true,   .aoe_explode=true                   },
+    /* Etincelle (Fae+L)    : HOMING+VOLATILE -> etincelle bondissante, chain + proj */
+    { TAG_HOMING_TAG|TAG_VOLATILE,   .dmg_add= 0.15f, .chain=true,     .extra_proj=2                       },
+    /* Spectre (Dark+Fae)   : SHADOW+HOMING -> spectre passe-muraille pierces+homing */
+    { TAG_SHADOW|TAG_HOMING_TAG,     .dmg_add= 0.20f, .pierces=true,   .homing=true                        },
+    /* Excalibur (Steel+Holy) : METALLIC+DIVINE -> lame sacree, pierces + aoe + proj */
+    { TAG_METALLIC|TAG_DIVINE,       .dmg_add= 0.30f, .pierces=true,   .aoe_explode=true, .extra_proj=1    },
+    /* Eclipse (Void+Air)   : CORROSIVE+AIRY -> eclipse stellaire, range etendue + extra proj */
+    { TAG_CORROSIVE|TAG_AIRY,        .dmg_add= 0.15f, .range_mul=1.30f, .extra_proj=1                      },
 };
 static const int N_EMERGENT = (int)(sizeof(EMERGENT_RULES)/sizeof(EMERGENT_RULES[0]));
 
