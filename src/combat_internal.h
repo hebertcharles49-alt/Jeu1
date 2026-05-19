@@ -22,11 +22,16 @@ typedef struct {
     bool  spawn_fairy;
     bool  reflect_proj;
     bool  lifesteal;
+    bool  engelure;          /* applique slow + cold-DOT sur l'ennemi touche */
     int   extra_proj;
     Element status;
     uint32_t color;
     const char *tag;
 } ComboFx;
+
+/* Applique l'etat engelure (slow + cold-DOT) sur un ennemi. Helper
+ * partage par fire_* (melee) et projectiles.c (range). */
+void enemy_apply_engelure(Game *g, int enemy_idx, float dmg);
 
 /* calcule un ComboFx complet (couches 1 a 3) pour un mask d'elements. */
 ComboFx combo_compute(int mask);

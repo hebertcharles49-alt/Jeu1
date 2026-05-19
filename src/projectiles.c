@@ -91,6 +91,7 @@ void update_projectiles(Game *g) {
                 float rr = en->r + pr->r;
                 if (dx * dx + dy * dy < rr * rr) {
                     world_enemy_damage(g, e, pr->dmg, pr->primary, pr->vx * 0.3f, pr->vy * 0.3f);
+                    if (pr->engelure) enemy_apply_engelure(g, e, pr->dmg);
                     if (pr->aoe > 0.f) {
                         do_aoe_at(g, en->x, en->y, pr->aoe, pr->dmg * 0.6f,
                                   pr->primary, element_color(pr->primary));

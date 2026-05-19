@@ -255,6 +255,7 @@ typedef struct {
     float homing;
     float aoe;
     bool  reflectable;
+    bool  engelure;          /* applique slow + cold-DOT a l'impact */
 } Projectile;
 
 typedef struct {

@@ -304,6 +304,19 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
     }
 }
 
+/* Engelure : slow 2.5s + DOT cold 3s. Le DOT reuse fire_dot pour la
+ * mecanique tick mais sera affiche en couleur froide (cf rendu). */
+void enemy_apply_engelure(Game *g, int idx, float dmg) {
+    if (idx < 0 || idx >= MAX_ENEMIES) return;
+    Enemy *e = &g->enemies[idx];
+    if (!e->alive || e->dying_t > 0.f) return;
+    if (e->slow_t  < 2.5f) e->slow_t  = 2.5f;
+    if (e->fire_dot < 3.f) {
+        e->fire_dot = 3.f;
+        e->fire_dps = 3.f + dmg * 0.15f;
+    }
+}
+
 void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float ky) {
     if (idx < 0 || idx >= MAX_ENEMIES) return;
     Enemy *e = &g->enemies[idx];

@@ -245,6 +245,7 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
         float dot = (dx * ax + dy * ay) / (d + 0.001f);
         if (dot < 0.5f) continue;
         world_enemy_damage(g, i, dmg, fx.status, ax * 200.f, ay * 200.f);
+        if (fx.engelure) enemy_apply_engelure(g, i, dmg);
         /* u_stun_on_melee : 20% stun 1s. enemy_take_damage applique x2
          * dmg si la cible est stun (cf enemies.c). */
         if (p->u_stun_on_melee && (rand() % 100) < 20) {
@@ -283,6 +284,7 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
         float dot = (dx * ax + dy * ay) / (d + 0.001f);
         if (dot < 0.4f) continue;
         world_enemy_damage(g, i, dmg, fx.status, ax * 220.f, ay * 220.f);
+        if (fx.engelure) enemy_apply_engelure(g, i, dmg);
         if (p->u_stun_on_melee && (rand() % 100) < 20) {
             g->enemies[i].stun_t = 1.0f;
         }
@@ -377,6 +379,7 @@ static void fire_bow(Game *g, Weapon *w, ComboFx fx) {
         pr.aoe = fx.aoe_explode ? 26.f : 0.f;
         pr.primary = fx.status; pr.homing = fx.homing ? 2.5f : 0.f;
         pr.target_idx = -1; pr.sprite = 1;
+        pr.engelure = fx.engelure;
         projectile_spawn(g, pr);
     }
     cue_swing(p, 4, ax, ay, 0.32f);
@@ -402,6 +405,7 @@ static void fire_wand(Game *g, Weapon *w, ComboFx fx) {
     pr.homing = fx.homing ? 3.0f : 0.6f;
     pr.target_idx = -1;
     pr.sprite = 2;
+    pr.engelure = fx.engelure;
     projectile_spawn(g, pr);
     cue_swing(p, 3, ax, ay, 0.22f);
     sfx_play(g, SFX_WAND_CAST);
@@ -413,14 +417,15 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
     float radius = w->base_range * fx.range_mul + 12.f;
     float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     do_aoe_at(g, p->x, p->y, radius, dmg, fx.status, fx.color);
-    /* u_stun_on_melee : 20% stun sur chaque ennemi touche par l AOE */
-    if (p->u_stun_on_melee) {
+    /* effets post-AOE : engelure / stun. Sweep une seule fois. */
+    if (fx.engelure || p->u_stun_on_melee) {
         for (int i = 0; i < MAX_ENEMIES; i++) {
             Enemy *e = &g->enemies[i];
             if (!e->alive || e->dying_t > 0.f) continue;
             float dx = e->x - p->x, dy = e->y - p->y;
             if (dx*dx + dy*dy > radius * radius) continue;
-            if ((rand() % 100) < 20) e->stun_t = 1.0f;
+            if (fx.engelure) enemy_apply_engelure(g, i, dmg);
+            if (p->u_stun_on_melee && (rand() % 100) < 20) e->stun_t = 1.0f;
         }
     }
     if (fx.chain) {

@@ -115,6 +115,10 @@ typedef enum {
     /* TAG_AIRY exclusivement sur EL_AIR (pas EL_FAE qui partage LIGHT).
      * Permet la regle WET + AIRY -> FROZEN sans toucher Water+Fae. */
     TAG_AIRY        = 1u << 21,
+    /* TAG_ENGELURE : derive de BURNING+WET+AIRY. Quand BURNING est annule
+     * par WET, sa propriete secondaire DOT survie ; combinee au contexte
+     * froid (AIRY), elle devient une brulure-de-froid (slow + DOT cold). */
+    TAG_ENGELURE    = 1u << 22,
 } BehaviorTag;
 
 #define HAS_TAGS(t, req) (((t) & (req)) == (req))
@@ -180,6 +184,12 @@ static const TagInteraction TAG_INTERACTIONS[] = {
     { TAG_BURNING | TAG_FROZEN,        TAG_BURNING | TAG_FROZEN,        0, true  },
 
     /* === CONVERTs (pass 2) === */
+    /* feu + eau + air -> engelure. Prioritaire sur burning+wet->steam :
+     * quand AIRY est present, la DOT de feu se "fige" en engelure
+     * (cold-DOT + slow) au lieu de se dissiper en vapeur. */
+    { TAG_BURNING | TAG_WET | TAG_AIRY,
+      TAG_BURNING | TAG_WET | TAG_AIRY | TAG_HOT,
+      TAG_ENGELURE, false },
     /* feu + eau -> vapeur (le tag steam pilote l ancienne rule HOT|FLUID) */
     { TAG_BURNING | TAG_WET,           TAG_BURNING | TAG_WET | TAG_HOT | TAG_FLUID,
       TAG_STEAM, false },
@@ -248,6 +258,9 @@ static const EmergentRule EMERGENT_RULES[] = {
     { TAG_DETONATE,                  .dmg_add= 0.40f, .extra_proj=2,    .aoe_explode=true  },
     /* TAG_FROZEN (issu de WET+STABLE) : pierce + dmg supplementaire. */
     { TAG_FROZEN,                    .dmg_add= 0.20f, .pierces=true                        },
+    /* TAG_ENGELURE (issu de BURNING+WET+AIRY) : DOT cold + slow appliques
+     * via ComboFx.engelure ; dmg bonus modere ici. */
+    { TAG_ENGELURE,                  .dmg_add= 0.15f                                       },
     /* === regles classiques (inchangees) === */
     { TAG_CONDUCTIVE|TAG_UNSTABLE,   .dmg_add= 0.20f, .chain=true                          },
     { TAG_HEAVY|TAG_HOT,             .dmg_add= 0.25f, .cd_mul=1.20f                        },
@@ -283,7 +296,7 @@ static const ComboName COMBO_NAMES[] = {
     { (1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),         "Givre Maudit",   0x6080A0FF },
     { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_LIGHTNING),    "Blizzard",       0x80C0FFFF },
     { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_FAE),          "Esprit du Givre",0xC0E0FFFF },
-    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_FIRE),         "Mousson",        0xC0D0E0FF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_FIRE),         "Engelure",       0xA0E0FFFF },
     { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_STEEL),        "Acier Glace",    0x90B0D0FF },
     { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_DARK),         "Hiver Noir",     0x405070FF },
     { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_HOLY),         "Aube Glaciale",  0xE0E8FFFF },
@@ -547,6 +560,9 @@ ComboFx combo_compute(int mask) {
     /* Couche 1.5 : tag interactions (annulation / conversion / amplif).
      * Mutent active_tags : les regles emergentes voient le bitmask final. */
     active_tags = apply_tag_interactions(active_tags);
+    /* Engelure : detecte via TAG_ENGELURE pour appliquer slow + cold-DOT
+     * en plus du dmg bonus de l'EmergentRule. */
+    if (active_tags & TAG_ENGELURE) c.engelure = true;
     /* Couche 2 */
     for (int i = 0; i < N_EMERGENT; i++) {
         const EmergentRule *r = &EMERGENT_RULES[i];
