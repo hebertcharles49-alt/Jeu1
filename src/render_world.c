@@ -339,23 +339,29 @@ static void draw_player_3d(Game *g) {
             ((c>>24)&0xFF)/255.f, ((c>>16)&0xFF)/255.f, ((c>>8)&0xFF)/255.f);
     }
 
-    /* arme tenue dans la main droite (cote +side).
-     * Anim de combat : pendant anim_t (0..0.18s), on pousse l'arme vers
-     * l'avant en arc (sin bell). anim_kind dispatch le visuel par arme. */
+    /* === ARME DANS LA MAIN DROITE ===
+     * Chaque kind a son timing (anim_dur) et son geste propre :
+     *   sword : arc rapide + motion-blur (ghost copies)
+     *   axe   : chop overhead (haut -> bas), trail epais
+     *   bow   : bow visible avec corde tendue + fleche puis snap release
+     *   wand  : pointe trace une ellipse, sparkles
+     *   shield: bash avance courte + ring de lumiere
+     *   fists : jab (anim_kind 5)
+     */
     {
         Weapon *w = &p->weapons[p->active_weapon];
-        /* progress = 0 (debut anim) -> 1 (fin) */
-        float ap = 0.f;
-        if (p->anim_t > 0.f) ap = 1.f - (p->anim_t / 0.18f);
+        float dur = (p->anim_dur > 0.001f) ? p->anim_dur : 0.18f;
+        float ap = (p->anim_t > 0.f) ? (1.f - p->anim_t / dur) : 0.f;
         if (ap < 0.f) ap = 0.f;
         if (ap > 1.f) ap = 1.f;
-        /* courbe bell : pic a ap=0.5, retour a 0 a ap=0/1 */
-        float arc = sinf(ap * 3.1416f);
-        /* dans quelle direction frapper : anim_dir si dispo, sinon facing */
+        float arc = sinf(ap * 3.1416f);    /* bell : pic a 0.5 */
+
         float ax = p->anim_dir_x, az = p->anim_dir_y;
         if (ax * ax + az * az < 0.001f) { ax = face_x; az = face_z; }
         float al = sqrtf(ax * ax + az * az);
         if (al > 0.001f) { ax /= al; az /= al; }
+        /* perpendiculaire a l'aim (utile pour les sparkles wand) */
+        float perp_x = -az;
 
         if (w->kind != W_FISTS) {
             float wr = 0.9f, wg = 0.9f, wb = 0.95f;
@@ -363,7 +369,7 @@ static void draw_player_3d(Game *g) {
             switch (w->kind) {
                 case W_SWORD:  wr=0.92f; wg=0.92f; wb=0.96f; wlen=0.55f; break;
                 case W_AXE:    wr=0.65f; wg=0.65f; wb=0.70f; wlen=0.50f; wsize=0.14f; break;
-                case W_BOW:    wr=0.55f; wg=0.35f; wb=0.18f; wlen=0.55f; break;
+                case W_BOW:    wr=0.55f; wg=0.35f; wb=0.18f; wlen=0.10f; wsize=0.06f; break;
                 case W_WAND:   wr=0.62f; wg=0.32f; wb=0.95f; wlen=0.45f; break;
                 case W_SHIELD: wr=0.72f; wg=0.62f; wb=0.32f; wlen=0.45f; wsize=0.20f; break;
                 default: break;
@@ -372,45 +378,198 @@ static void draw_player_3d(Game *g) {
             float hx = pos.x + side_x * 0.42f + face_x * 0.10f;
             float hz = pos.z + side_z * 0.42f + face_z * 0.10f;
             float hy = 0.62f + bob - swing * 0.5f;
-            /* Decalage selon anim_kind */
+            bool drew_main = true;
+
             switch (p->anim_kind) {
-                case 0: { /* sword swing : pousse l'arme dans l'arc */
+                case 0: { /* SWORD : arc rapide gauche -> droite */
                     hx += ax * 0.35f * arc;
                     hz += az * 0.35f * arc;
-                    /* leger angle en hauteur (haut->bas) */
                     hy += 0.10f * sinf(ap * 3.1416f * 2.f);
+                    /* motion blur : 2 ghosts derriere la lame, alpha implicite
+                     * via couleur attenuee. Echelle decroissante. */
+                    if (arc > 0.15f) {
+                        for (int gi = 1; gi <= 2; gi++) {
+                            float gap = ap - 0.06f * gi;
+                            if (gap < 0.f) continue;
+                            float garc = sinf(gap * 3.1416f);
+                            float gx = pos.x + side_x * 0.42f + face_x * 0.10f
+                                       + ax * 0.35f * garc;
+                            float gz = pos.z + side_z * 0.42f + face_z * 0.10f
+                                       + az * 0.35f * garc;
+                            float gy = 0.62f + bob - swing * 0.5f
+                                       + 0.10f * sinf(gap * 3.1416f * 2.f);
+                            float fade = 1.f - gi * 0.30f;
+                            gfx_box_draw(g->renderer,
+                                v3_make(gx, gy, gz),
+                                v3_make(wsize * (1.f - gi*0.20f), wlen * fade, wsize * (1.f - gi*0.20f)),
+                                wr * fade, wg * fade, wb * fade);
+                        }
+                    }
                     break;
                 }
-                case 1: { /* axe : trajectoire circulaire devant le perso */
-                    float ang = ap * 3.1416f * 1.4f;
-                    float ofx = cosf(ang) * 0.35f;
-                    float ofz = sinf(ang) * 0.35f;
-                    hx = pos.x + face_x * 0.10f + side_x * (0.42f + ofx);
-                    hz = pos.z + face_z * 0.10f + side_z * (0.42f + ofz);
+                case 1: { /* AXE : chop overhead. Phase 1 (0..0.5) lever
+                           * en haut/arriere, phase 2 (0.5..1) chute vers
+                           * l'avant a hauteur basse. */
+                    float p1 = ap < 0.5f ? ap * 2.f : 1.f;       /* 0..1 raise */
+                    float p2 = ap > 0.5f ? (ap - 0.5f) * 2.f : 0.f; /* 0..1 chop */
+                    /* lever : retrait derriere, lift y */
+                    hx = pos.x + face_x * (-0.05f * p1) + side_x * 0.28f;
+                    hz = pos.z + face_z * (-0.05f * p1) + side_z * 0.28f;
+                    hy = 0.62f + bob + 0.85f * p1;       /* haut sur les epaules */
+                    /* chop : pousse en avant + descend vite */
+                    hx += ax * (0.55f * p2);
+                    hz += az * (0.55f * p2);
+                    hy -= 0.85f * p2;                    /* retourne en bas */
+                    /* trail epais : multiple positions le long de la trajectoire */
+                    if (p2 > 0.1f) {
+                        for (int gi = 1; gi <= 4; gi++) {
+                            float t = p2 - 0.10f * gi;
+                            if (t < 0.f) continue;
+                            float ghx = pos.x + side_x * 0.28f + ax * (0.55f * t);
+                            float ghz = pos.z + side_z * 0.28f + az * (0.55f * t);
+                            float ghy = 0.62f + bob + 0.85f * (1.f - t);
+                            float fade = 1.f - gi * 0.18f;
+                            gfx_box_draw(g->renderer,
+                                v3_make(ghx, ghy, ghz),
+                                v3_make(0.10f, 0.05f * fade, 0.10f),
+                                0.95f * fade, 0.85f * fade, 0.50f * fade);
+                        }
+                    }
                     break;
                 }
-                case 2: { /* shield bash : avance brefe */
+                case 2: { /* SHIELD : bash avance + ring de lumiere bref */
                     hx += ax * 0.30f * arc;
                     hz += az * 0.30f * arc;
+                    if (arc > 0.4f) {
+                        int n_ring = 12;
+                        for (int ri = 0; ri < n_ring; ri++) {
+                            float ang = (ri / (float)n_ring) * 6.2831f;
+                            float rad = 0.50f + arc * 0.20f;
+                            gfx_box_draw(g->renderer,
+                                v3_make(pos.x + cosf(ang) * rad + ax * 0.35f,
+                                        0.55f + bob,
+                                        pos.z + sinf(ang) * rad + az * 0.35f),
+                                v3_make(0.06f, 0.03f, 0.06f),
+                                1.f, 0.85f, 0.40f);
+                        }
+                    }
                     break;
                 }
-                case 3: { /* wand : reste mais pulse */
-                    /* poignet recule d'un cheveu, eclair geant en bout */
-                    hy += 0.05f * arc;
+                case 3: { /* WAND : la pointe trace une ellipse */
+                    float angle = ap * 6.2831f;            /* tour complet sur l'anim */
+                    float orb_x = cosf(angle) * 0.22f;
+                    float orb_y = sinf(angle) * 0.12f;
+                    hx = pos.x + face_x * 0.18f + side_x * 0.28f + ax * orb_x;
+                    hz = pos.z + face_z * 0.18f + side_z * 0.28f + az * orb_x
+                         + perp_x * orb_x * 0.5f;
+                    hy = 0.62f + bob + orb_y;
+                    /* sparkles a la pointe : un par frame */
+                    {
+                        float tipx = hx;
+                        float tipy = 0.92f + bob + orb_y;
+                        float tipz = hz;
+                        particle_spawn_kind(g,
+                            tipx * TILE, tipz * TILE,
+                            (rand()/(float)RAND_MAX - 0.5f) * 30.f,
+                            (rand()/(float)RAND_MAX - 0.5f) * 30.f,
+                            0.35f,
+                            (rand()%2) ? 0xC0A0FFFF : 0xFFC0F0FF,
+                            1.8f, 0);
+                        (void)tipy;
+                    }
                     break;
                 }
-                case 4: { /* bow : recule puis revient (pull-back/release) */
-                    hx -= ax * 0.10f * (1.f - arc);
-                    hz -= az * 0.10f * (1.f - arc);
+                case 4: { /* BOW : visuel complet (limbes + corde + fleche)
+                           * Phase 1 (0..0.6) : draw (corde tirees vers
+                           * l'arriere, fleche tendue) ; phase 2 (>=0.6) :
+                           * release (snap forward, fleche partie). */
+                    drew_main = false;     /* on dessine custom plus bas */
+                    /* main + bras tendu en avant */
+                    float bow_x = pos.x + face_x * 0.35f + side_x * 0.10f;
+                    float bow_z = pos.z + face_z * 0.35f + side_z * 0.10f;
+                    float bow_y = 0.65f + bob;
+                    /* recul du bras d'arc pendant le draw */
+                    if (ap < 0.6f) {
+                        float draw = ap / 0.6f;
+                        bow_x -= ax * 0.05f * draw;
+                        bow_z -= az * 0.05f * draw;
+                    }
+                    /* 2 limbes : haut et bas du bois, perpendiculaire a l'aim */
+                    float limb_y_top = bow_y + 0.30f;
+                    float limb_y_bot = bow_y - 0.30f;
+                    gfx_box_draw(g->renderer,
+                        v3_make(bow_x, limb_y_top, bow_z),
+                        v3_make(0.08f, 0.22f, 0.08f),
+                        wr, wg, wb);
+                    gfx_box_draw(g->renderer,
+                        v3_make(bow_x, limb_y_bot, bow_z),
+                        v3_make(0.08f, 0.22f, 0.08f),
+                        wr, wg, wb);
+                    /* poignee centrale */
+                    gfx_box_draw(g->renderer,
+                        v3_make(bow_x, bow_y, bow_z),
+                        v3_make(0.06f, 0.20f, 0.06f),
+                        wr * 0.7f, wg * 0.7f, wb * 0.7f);
+                    /* corde : 2 segments diagonaux vers le point d ancrage
+                     * (la main qui tire). En draw, ce point recule vers le
+                     * joueur. En release, il revient au plat. */
+                    float pull;
+                    if (ap < 0.6f) pull = 0.05f + (ap / 0.6f) * 0.30f;
+                    else           pull = 0.35f * (1.f - (ap - 0.6f) / 0.4f);
+                    if (pull < 0.f) pull = 0.f;
+                    float anchor_x = bow_x - ax * pull;
+                    float anchor_z = bow_z - az * pull;
+                    /* corde haut */
+                    for (int si = 0; si < 4; si++) {
+                        float t = si / 4.f;
+                        float sx = bow_x * (1.f - t) + anchor_x * t;
+                        float sz = bow_z * (1.f - t) + anchor_z * t;
+                        float sy = limb_y_top * (1.f - t) + bow_y * t;
+                        gfx_box_draw(g->renderer,
+                            v3_make(sx, sy, sz),
+                            v3_make(0.02f, 0.02f, 0.02f),
+                            0.95f, 0.95f, 0.85f);
+                        sy = limb_y_bot * (1.f - t) + bow_y * t;
+                        gfx_box_draw(g->renderer,
+                            v3_make(sx, sy, sz),
+                            v3_make(0.02f, 0.02f, 0.02f),
+                            0.95f, 0.95f, 0.85f);
+                    }
+                    /* fleche : visible pendant le draw, disparait au release */
+                    if (ap < 0.65f) {
+                        float arrow_back = ap < 0.6f ? (ap / 0.6f) * 0.30f : 0.30f;
+                        /* tige */
+                        for (int ai = 0; ai < 5; ai++) {
+                            float t = ai / 4.f;          /* 0 = pointe, 1 = arriere */
+                            float seg_x = bow_x + ax * (0.10f - t * 0.40f) - ax * arrow_back;
+                            float seg_z = bow_z + az * (0.10f - t * 0.40f) - az * arrow_back;
+                            gfx_box_draw(g->renderer,
+                                v3_make(seg_x, bow_y, seg_z),
+                                v3_make(0.03f, 0.03f, 0.03f),
+                                0.85f, 0.65f, 0.40f);
+                        }
+                    } else {
+                        /* flash de release au point d'ancrage */
+                        float flash_k = 1.f - (ap - 0.65f) / 0.35f;
+                        if (flash_k > 0.f) {
+                            gfx_box_draw(g->renderer,
+                                v3_make(bow_x, bow_y, bow_z),
+                                v3_make(0.12f * flash_k, 0.12f * flash_k, 0.12f * flash_k),
+                                1.f, 0.95f, 0.6f);
+                        }
+                    }
                     break;
                 }
                 default: break;
             }
-            gfx_box_draw(g->renderer,
-                v3_make(hx, hy, hz),
-                v3_make(wsize, wlen, wsize),
-                wr, wg, wb);
-            /* eclat magique au bout du baton (boost pendant l'anim wand) */
+
+            if (drew_main) {
+                gfx_box_draw(g->renderer,
+                    v3_make(hx, hy, hz),
+                    v3_make(wsize, wlen, wsize),
+                    wr, wg, wb);
+            }
+            /* eclat magique au bout du baton */
             if (w->kind == W_WAND) {
                 float gw = 0.16f + 0.10f * arc;
                 gfx_box_draw(g->renderer,
@@ -418,8 +577,8 @@ static void draw_player_3d(Game *g) {
                     v3_make(gw, gw, gw),
                     0.95f, 0.65f, 1.0f);
             }
-            /* trail visuel pour epee / hache pendant l'anim */
-            if ((w->kind == W_SWORD || w->kind == W_AXE) && arc > 0.2f) {
+            /* trail sword classique (l'axe a deja son trail epais) */
+            if (w->kind == W_SWORD && arc > 0.2f) {
                 float tx = pos.x + ax * (0.30f + arc * 0.40f);
                 float tz = pos.z + az * (0.30f + arc * 0.40f);
                 gfx_box_draw(g->renderer,

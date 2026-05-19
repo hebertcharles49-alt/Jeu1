@@ -205,9 +205,12 @@ void chain_hit(Game *g, int from_idx, float dmg, Element status, int hops, uint3
     chain_hit(g, best, dmg * 0.7f, status, hops - 1, color);
 }
 
-/* swing animation cue on player */
-static void cue_swing(Player *p, int kind, float ax, float ay) {
-    p->anim_t = 0.18f;
+/* swing animation cue on player. dur = duree de l'anim en secondes :
+ * permet a chaque arme d'avoir son timing propre (sword rapide,
+ * axe lent, bow draw long, etc.). render normalise via anim_t/anim_dur. */
+static void cue_swing(Player *p, int kind, float ax, float ay, float dur) {
+    p->anim_t = dur;
+    p->anim_dur = dur;
     p->anim_kind = kind;
     p->anim_dir_x = ax;
     p->anim_dir_y = ay;
@@ -242,7 +245,7 @@ static void fire_fists(Game *g, Weapon *w, ComboFx fx) {
         }
         hits++;
     }
-    cue_swing(p, 5, ax, ay);
+    cue_swing(p, 5, ax, ay, 0.12f);
     sfx_play(g, hits > 0 ? SFX_PUNCH : SFX_SWING);
     if (hits > 0) { g->shake_t = 0.10f; g->shake_mag = 2.f; g->hitstop_t = 0.04f; }
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
@@ -283,9 +286,12 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
         particle_spawn_kind(g, p->x + cosf(a) * s, p->y + sinf(a) * s,
                             cosf(a) * 60, sinf(a) * 60, 0.22f, fx.color, 2.f, 2);
     }
-    cue_swing(p, 0, ax, ay);
-    sfx_play(g, hits > 0 ? SFX_HIT : SFX_SWING);
-    if (hits > 0) { g->shake_t = 0.16f; g->shake_mag = 3.5f; g->hitstop_t = 0.05f; }
+    cue_swing(p, 0, ax, ay, 0.18f);
+    sfx_play(g, SFX_SWORD_SLASH);
+    if (hits > 0) {
+        sfx_play(g, SFX_HIT);
+        g->shake_t = 0.16f; g->shake_mag = 3.5f; g->hitstop_t = 0.05f;
+    }
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 
@@ -312,7 +318,7 @@ static void fire_shield(Game *g, Weapon *w, ComboFx fx) {
         particle_spawn_kind(g, p->x + cosf(a) * radius * 0.6f, p->y + sinf(a) * radius * 0.6f,
                             cosf(a) * 100, sinf(a) * 100, 0.40f, fx.color, 2.f, 0);
     }
-    cue_swing(p, 2, 0, 0);
+    cue_swing(p, 2, 0, 0, 0.16f);
     sfx_play(g, SFX_HEAVY_HIT);
     g->shake_t = 0.18f; g->shake_mag = 3.5f;
     if (reflected > 0) g->hitstop_t = 0.04f;
@@ -327,13 +333,17 @@ static void fire_bow(Game *g, Weapon *w, ComboFx fx) {
     ax /= al; ay /= al;
     float dmg = (w->base_dmg + p->flat_dmg) * fx.dmg_mul;
     float speed = 320.f * fx.range_mul;
+    /* spawn depuis la pointe de la fleche (devant le perso) pour matcher
+     * le visuel de l'arc -- pas du centre du corps. */
+    float bow_offset = 6.f;     /* px monde, ~0.4 unite */
     for (int s = 0; s < nshots; s++) {
         float spread = (nshots > 1) ? ((s - (nshots - 1) / 2.f) * 0.16f) : 0.f;
         float ca = cosf(spread), sa = sinf(spread);
         float vx = ax * ca - ay * sa;
         float vy = ax * sa + ay * ca;
         Projectile pr = {0};
-        pr.x = p->x; pr.y = p->y;
+        pr.x = p->x + ax * bow_offset;
+        pr.y = p->y + ay * bow_offset;
         pr.vx = vx * speed; pr.vy = vy * speed;
         pr.life = 1.0f * fx.range_mul; pr.r = 3.f;
         pr.dmg = dmg; pr.owner = 0;
@@ -344,8 +354,8 @@ static void fire_bow(Game *g, Weapon *w, ComboFx fx) {
         pr.target_idx = -1; pr.sprite = 1;
         projectile_spawn(g, pr);
     }
-    cue_swing(p, 4, ax, ay);
-    sfx_play(g, SFX_SHOOT);
+    cue_swing(p, 4, ax, ay, 0.32f);
+    sfx_play(g, SFX_BOW_FIRE);
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 
@@ -368,8 +378,8 @@ static void fire_wand(Game *g, Weapon *w, ComboFx fx) {
     pr.target_idx = -1;
     pr.sprite = 2;
     projectile_spawn(g, pr);
-    cue_swing(p, 3, ax, ay);
-    sfx_play(g, SFX_ZAP);
+    cue_swing(p, 3, ax, ay, 0.22f);
+    sfx_play(g, SFX_WAND_CAST);
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);
 }
 
@@ -398,8 +408,13 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
         particle_spawn_kind(g, p->x + cosf(a) * s, p->y + sinf(a) * s,
                             cosf(a) * 80, sinf(a) * 80, 0.45f, fx.color, 3.f, 2);
     }
-    cue_swing(p, 1, 0, 0);
-    sfx_play(g, SFX_HEAVY_HIT);
+    /* axe : direction-aware (vise vers le curseur) pour le chop overhead */
+    float aax = p->aim_x - p->x, aay = p->aim_y - p->y;
+    float aal = sqrtf(aax * aax + aay * aay) + 0.001f;
+    aax /= aal; aay /= aal;
+    cue_swing(p, 1, aax, aay, 0.30f);
+    sfx_play(g, SFX_AXE_SWING);
+    sfx_play(g, SFX_HEAVY_HIT);     /* impact bas a la chute */
     g->shake_t = 0.25f; g->shake_mag = 5.f;
     g->hitstop_t = 0.07f;
     if (fx.spawn_fairy) fairy_spawn(g, p->x, p->y, fx.status);

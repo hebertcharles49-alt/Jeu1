@@ -397,6 +397,10 @@ typedef struct {
     float dash_t;
     float regen_acc;
     float anim_t;
+    float anim_dur;              /* duree de l anim courante. Permet aux
+                                    armes (axe lent, sword rapide) d avoir
+                                    des timings differents tout en restant
+                                    normalises pour le render. */
     float anim_dir_x, anim_dir_y;
     int   anim_kind;
 
@@ -922,6 +926,12 @@ typedef enum {
     SFX_PICKUP, SFX_COIN, SFX_LEVELUP, SFX_PLAYER_HURT, SFX_DEATH,
     SFX_BOSS, SFX_PORTAL, SFX_SHOOT, SFX_ZAP, SFX_FUSE,
     SFX_HEARTBEAT,
+    /* signatures par arme : chaque weapon kind a son swing dedie.
+     * Les SFX_*_HIT/PUNCH/HEAVY_HIT restent pour l impact. */
+    SFX_SWORD_SLASH,
+    SFX_AXE_SWING,
+    SFX_BOW_FIRE,
+    SFX_WAND_CAST,
     SFX_COUNT
 } SfxId;
 void  audio_init(Game *g);

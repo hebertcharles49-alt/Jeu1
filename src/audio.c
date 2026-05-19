@@ -264,6 +264,114 @@ static void make_shoot(int idx) {
     g_sfx_data[idx] = b; g_sfx_len[idx] = n;
 }
 
+/* === SIGNATURES PAR ARME ===
+ * Chaque weapon kind a un swing sonore dedie. L'impact reste sur
+ * SFX_HIT/HEAVY_HIT/PUNCH (variations de pitch via sfx_play).
+ */
+
+/* sword slash : metal "shink" tranchant. Haute frequence avec descente
+ * rapide pour la coupe nette. */
+static void make_sword_slash(int idx) {
+    int n = (int)(0.13f * SR);
+    int16_t *b = alloc_buf(n);
+    /* sweep haut->bas (~1.6kHz vers 600Hz) = sifflement de lame */
+    for (int i = 0; i < n; i++) {
+        float t = i / (float)SR;
+        float f = 1600.f * expf(-8.f * t);
+        if (f < 400.f) f = 400.f;
+        float s = sinf(t * f * 6.2831f);
+        s += 0.20f * sinf(t * f * 2.0f * 6.2831f);
+        b[i] = (int16_t)(s * 9500);
+    }
+    add_noise(b, n, 0.18f);
+    low_pass(b, n, 0.42f);     /* adoucit le crissement */
+    envelope(b, n, 0.003f, 18.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* axe swing : whoosh lourd sourd. Beaucoup de bruit grave, peu de
+ * tonal. Le poids se sent dans la duree (0.30s). */
+static void make_axe_swing(int idx) {
+    int n = (int)(0.30f * SR);
+    int16_t *b = alloc_buf(n);
+    add_noise(b, n, 0.55f);
+    /* peak bas 110 -> 70Hz pour "weight shift" */
+    for (int i = 0; i < n; i++) {
+        float t = i / (float)SR;
+        float f = 110.f * expf(-1.8f * t);
+        if (f < 50.f) f = 50.f;
+        float s = sinf(t * f * 6.2831f);
+        int v = b[i] + (int)(s * 12000);
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        b[i] = (int16_t)v;
+    }
+    low_pass(b, n, 0.08f);     /* lourd : passe-bas serre */
+    envelope(b, n, 0.020f, 5.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* bow fire : creak de corde + twang + sifflement de fleche.
+ * Trois phases empilees temporellement dans le meme buffer. */
+static void make_bow_fire(int idx) {
+    int n = (int)(0.32f * SR);
+    int16_t *b = alloc_buf(n);
+    int p1 = (int)(0.10f * SR);     /* creak fin a 0.10s */
+    int p2 = (int)(0.18f * SR);     /* twang debut */
+    int p3 = (int)(0.22f * SR);     /* fleche debut */
+    /* phase 1 : creak de corde tendue (bruit aigu module) */
+    for (int i = 0; i < p1; i++) {
+        float t = i / (float)SR;
+        float f = 200.f + sinf(t * 18.f) * 30.f;
+        float s = sinf(t * f * 6.2831f) * 0.25f + frand() * 0.30f;
+        b[i] = (int16_t)(s * 4500);
+    }
+    /* phase 2 : twang (pluck a ~350Hz, decay rapide) */
+    for (int i = p2; i < n; i++) {
+        float t = (i - p2) / (float)SR;
+        float f = 350.f * expf(-6.f * t);
+        if (f < 90.f) f = 90.f;
+        float s = sinf(t * f * 6.2831f);
+        s += 0.40f * sinf(t * f * 2.f * 6.2831f);
+        int v = b[i] + (int)(s * expf(-12.f * t) * 11000);
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        b[i] = (int16_t)v;
+    }
+    /* phase 3 : whoosh fleche (noise haut filtre) */
+    for (int i = p3; i < n; i++) {
+        int v = b[i] + (int)(frand() * 0.35f * 9000);
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        b[i] = (int16_t)v;
+    }
+    /* enveloppe globale : attaque douce pour ne pas couper le creak */
+    envelope(b, n, 0.005f, 4.5f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
+/* wand cast : swoosh magique avec montee de frequence + harmoniques
+ * non-entieres pour le feel "magique". */
+static void make_wand_cast(int idx) {
+    int n = (int)(0.22f * SR);
+    int16_t *b = alloc_buf(n);
+    /* glissando montant 300 -> 1400 Hz */
+    for (int i = 0; i < n; i++) {
+        float t = i / (float)SR;
+        float prog = t / 0.22f;
+        float f = 300.f + prog * 1100.f;
+        float s = sinf(t * f * 6.2831f);
+        /* harmonique non-entiere (quinte juste 1.5x) -> sonne "magique" */
+        s += 0.25f * sinf(t * f * 1.5f * 6.2831f);
+        s += 0.15f * sinf(t * f * 2.5f * 6.2831f);
+        b[i] = (int16_t)(s * 7500);
+    }
+    /* leger noise pour la texture */
+    add_noise(b, n, 0.04f);
+    envelope(b, n, 0.015f, 6.f);
+    g_sfx_data[idx] = b; g_sfx_len[idx] = n;
+}
+
 /* zap : eclair haut, harmonique courte */
 static void make_zap(int idx) {
     int n = (int)(0.10f * SR);
@@ -353,6 +461,10 @@ void audio_init(Game *g) {
     make_zap(SFX_ZAP);
     make_fuse(SFX_FUSE);
     make_heartbeat(SFX_HEARTBEAT);
+    make_sword_slash(SFX_SWORD_SLASH);
+    make_axe_swing  (SFX_AXE_SWING);
+    make_bow_fire   (SFX_BOW_FIRE);
+    make_wand_cast  (SFX_WAND_CAST);
 }
 
 void audio_shutdown(Game *g) {
@@ -445,6 +557,10 @@ void sfx_play(Game *g, SfxId id) {
         case SFX_SHOOT:
         case SFX_ZAP:
         case SFX_EXPLODE:
+        case SFX_SWORD_SLASH:
+        case SFX_AXE_SWING:
+        case SFX_BOW_FIRE:
+        case SFX_WAND_CAST:
             pitch = 1.f + ((rand() / (float)RAND_MAX) - 0.5f) * 0.16f;
             break;
         default: break;
