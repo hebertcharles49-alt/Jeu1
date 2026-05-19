@@ -277,9 +277,16 @@ static const ComboName COMBO_NAMES[] = {
     { (1<<EL_FIRE)|(1<<EL_EARTH)|(1<<EL_AIR),         "Volcan",         0xFF8040FF },
     { (1<<EL_VOID)|(1<<EL_FAE)|(1<<EL_LIGHTNING),     "Dechirure",      0xC080FFFF },
     { (1<<EL_WATER)|(1<<EL_EARTH)|(1<<EL_LIGHTNING),  "Tsunami",        0x60A0FFFF },
-    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),        "Marais",         0x80A8A0FF },
+    /* === triples derives de Water+Air (rework "Froid") === */
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),        "Banquise",       0xA0D8F0FF },
     { (1<<EL_FIRE)|(1<<EL_AIR)|(1<<EL_FAE),           "Phenix",         0xFFB0F0FF },
-    { (1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),         "Brume Mortelle", 0x9090C0FF },
+    { (1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),         "Givre Maudit",   0x6080A0FF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_LIGHTNING),    "Blizzard",       0x80C0FFFF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_FAE),          "Esprit du Givre",0xC0E0FFFF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_FIRE),         "Mousson",        0xC0D0E0FF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_STEEL),        "Acier Glace",    0x90B0D0FF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_DARK),         "Hiver Noir",     0x405070FF },
+    { (1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_HOLY),         "Aube Glaciale",  0xE0E8FFFF },
     { (1<<EL_EARTH)|(1<<EL_AIR)|(1<<EL_VOID),         "Effondrement",   0x806040FF },
     { (1<<EL_STEEL)|(1<<EL_FIRE)|(1<<EL_LIGHTNING),   "Forge Solaire",  0xFFB060FF },
     { (1<<EL_DARK)|(1<<EL_HOLY)|(1<<EL_LIGHTNING),    "Jugement",       0xFFE890FF },
@@ -385,14 +392,18 @@ static const TripleLoopDef TRIPLE_LOOPS[] = {
       .gain_on_hit=0.07f, .gain_on_kill=0.12f, .decay_rate=0.06f,
       .overload_threshold=1.0f, .aura_color=0x60A0FFFF,
       .ov_dmg_mul=0.30f, .ov_explode_on_spawn=true, .ov_chain_add=2.0f },
-    { .mask=(1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),       /* Marais    */
+    { .mask=(1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_EARTH),       /* Banquise  */
       .gain_on_hit=0.06f, .gain_on_kill=0.10f, .decay_rate=0.04f,
-      .overload_threshold=1.0f, .aura_color=0x80A8A0FF,
-      .ov_dmg_mul=0.20f, .ov_explode_on_spawn=true },
-    { .mask=(1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),        /* Brume Mortelle */
+      .overload_threshold=1.0f, .aura_color=0xA0D8F0FF,
+      .ov_dmg_mul=0.25f, .ov_chain_add=1.0f },
+    { .mask=(1<<EL_VOID)|(1<<EL_WATER)|(1<<EL_AIR),        /* Givre Maudit */
       .gain_on_hit=0.10f, .gain_on_kill=0.08f, .decay_rate=0.04f,
-      .overload_threshold=1.0f, .aura_color=0x9090C0FF,
-      .ov_dmg_mul=0.25f, .ov_lifesteal_mul=1.0f, .ov_self_dmg=0.4f },
+      .overload_threshold=1.0f, .aura_color=0x6080A0FF,
+      .ov_dmg_mul=0.30f, .ov_lifesteal_mul=1.5f, .ov_self_dmg=0.3f },
+    { .mask=(1<<EL_WATER)|(1<<EL_AIR)|(1<<EL_LIGHTNING),   /* Blizzard  */
+      .gain_on_hit=0.08f, .gain_on_kill=0.12f, .decay_rate=0.05f,
+      .overload_threshold=1.0f, .aura_color=0x80C0FFFF,
+      .ov_dmg_mul=0.35f, .ov_chain_add=3.0f, .ov_explode_on_spawn=true },
     { .mask=(1<<EL_EARTH)|(1<<EL_AIR)|(1<<EL_VOID),        /* Effondrement */
       .gain_on_hit=0.07f, .gain_on_kill=0.15f, .decay_rate=0.06f,
       .overload_threshold=1.0f, .aura_color=0x806040FF,
