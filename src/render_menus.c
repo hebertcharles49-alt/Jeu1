@@ -10,8 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int  hub_perm_cost(int kind);
-
 /* ---------- HUB ---------- */
 
 /* ============================================================

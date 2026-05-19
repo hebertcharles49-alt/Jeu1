@@ -340,10 +340,6 @@ void game_to_hub(Game *g) {
     g->meta.shards += gained;
     g->meta.total_runs++;
     if (g->floor_index > g->meta.best_floor) g->meta.best_floor = g->floor_index;
-    /* cumul lifetime pour les stats du sanctuaire */
-    g->meta.lifetime_kills       += g->run_kills;
-    g->meta.lifetime_damage      += g->run_damage_dealt;
-    g->meta.lifetime_legendaries += g->run_legendary_drops;
     save_write(&g->meta);
     g->state = GS_HUB;
     g->hub_sub_open = 0;

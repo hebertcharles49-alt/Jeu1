@@ -91,6 +91,7 @@ void weapon_describe(const Weapon *w, char *buf, int bufsz) {
 
 /* ---------- HELPERS DE COMBAT (partages avec projectiles.c) ---------- */
 int nearest_enemy(Game *g, float x, float y, float range, float *out_d) {
+    if (g->enemy_alive_count <= 0) { if (out_d) *out_d = range; return -1; }
     int best = -1; float bestd = range * range;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!g->enemies[i].alive) continue;

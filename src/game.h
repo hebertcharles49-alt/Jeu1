@@ -438,7 +438,6 @@ typedef struct {
     bool  last_stand_charge;     /* charge disponible (u_last_stand) */
     float last_stand_t;          /* timer du buff x2 actif */
     int   kill_stack_count;      /* stacks de u_kill_stack_dmg (0..20) */
-    float element_absorb_t[EL_COUNT]; /* timers d affinite absorbee */
     int   hazard_stacks;         /* 0..10 (par tile traversee) */
 
     /* ---- Triple feedback loop ----
@@ -510,10 +509,6 @@ typedef struct {
     int  item_seen_rarity[EQUIP_SLOTS][5];
     /* uniques decouverts (par id). Cf uniques.c. */
     bool unique_seen[32];
-    /* lifetime stats : cumul de toutes les courses. Affiche au sanctuaire. */
-    int  lifetime_kills;
-    int  lifetime_damage;
-    int  lifetime_legendaries;
     /* FORGE : bonus de dmg permanent par arme (0..FORGE_MAX_LEVEL). Cout
      * croissant. Lu par weapon_init_defaults pour ajuster base_dmg. */
     int  weapon_dmg_bonus[W_COUNT];
@@ -607,7 +602,6 @@ typedef struct {
      * vers GS_CHOOSE_HERO ; DOOR bascule vers game_start_new_run. */
     int           hub_sub_open;
     int           hub_sub_cursor;
-    int           title_cursor;
 
     int           run_kills;
     float         run_time;
