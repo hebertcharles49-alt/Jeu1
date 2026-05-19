@@ -160,10 +160,10 @@ void render_hub(Game *g) {
 
     /* prompt [E] interaction : le nom du batiment proche + action.
      * DONJON est verrouille tant que arme + classe ne sont pas choisies. */
-    int near = g->hub_cursor;
+    int near_idx = g->hub_cursor;
     int n = hub_building_count();
-    if (g->hub_sub_open == 0 && near >= 0 && near < n) {
-        const HubBuilding *b = hub_building_get(near);
+    if (g->hub_sub_open == 0 && near_idx >= 0 && near_idx < n) {
+        const HubBuilding *b = hub_building_get(near_idx);
         if (b) {
             const char *act;
             int sid = hub_building_sub_id(b);
