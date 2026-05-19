@@ -112,6 +112,9 @@ typedef enum {
     TAG_STEAM       = 1u << 18,   /* BURNING + WET   */
     TAG_ELECTROCUTE = 1u << 19,   /* CONDUCTIVE + WET */
     TAG_DETONATE    = 1u << 20,   /* VOLATILE + BURNING */
+    /* TAG_AIRY exclusivement sur EL_AIR (pas EL_FAE qui partage LIGHT).
+     * Permet la regle WET + AIRY -> FROZEN sans toucher Water+Fae. */
+    TAG_AIRY        = 1u << 21,
 } BehaviorTag;
 
 #define HAS_TAGS(t, req) (((t) & (req)) == (req))
@@ -139,7 +142,7 @@ static const ElemBase ELEM_BASE[EL_COUNT] = {
     [EL_WATER]     = { TAG_FLUID|TAG_CONDUCTIVE|TAG_WET,                              .cd_mul=0.90f,                  .status=EL_WATER,     .color_tint=0x80B0FFFF },
     [EL_EARTH]     = { TAG_HEAVY|TAG_STABLE,                          .dmg_add= 0.20f,               .pierces=true,                          .color_tint=0xA08060FF },
     [EL_LIGHTNING] = { TAG_CONDUCTIVE|TAG_UNSTABLE|TAG_VOLATILE,      .dmg_add= 0.15f,               .chain=true,      .status=EL_LIGHTNING, .color_tint=0xFFEC60FF },
-    [EL_AIR]       = { TAG_LIGHT,                                                     .cd_mul=0.80f, .range_mul=1.20f,                       .color_tint=0xC0E0FFFF },
+    [EL_AIR]       = { TAG_LIGHT|TAG_AIRY,                                            .cd_mul=0.80f, .range_mul=1.20f,                       .color_tint=0xC0E0FFFF },
     [EL_VOID]      = { TAG_CORROSIVE|TAG_UNSTABLE|TAG_CURSED,         .dmg_add= 0.25f,               .pierces=true,    .lifesteal=true,      .color_tint=0x8030B0FF },
     [EL_FAE]       = { TAG_HOMING_TAG|TAG_LIGHT,                                                     .homing=true,     .spawn_fairy=true,    .status=EL_FAE, .color_tint=0xF080F0FF },
     [EL_STEEL]     = { TAG_METALLIC|TAG_HEAVY|TAG_STABLE,             .dmg_add= 0.15f,               .pierces=true,                          .color_tint=0xC0C8D0FF },
@@ -182,6 +185,9 @@ static const TagInteraction TAG_INTERACTIONS[] = {
       TAG_STEAM, false },
     /* eau + structure stable -> glace (creation de TAG_FROZEN) */
     { TAG_WET | TAG_STABLE,            TAG_WET,
+      TAG_FROZEN, false },
+    /* eau + air -> froid (Air a TAG_AIRY exclusif, Fae ne l'a pas). */
+    { TAG_WET | TAG_AIRY,              TAG_WET | TAG_AIRY,
       TAG_FROZEN, false },
 
     /* === AMPLIFYs (pass 2) === */
@@ -287,7 +293,7 @@ static const ComboName COMBO_NAMES[] = {
     { (1<<EL_EARTH)|(1<<EL_AIR),        "Sable",      0xD0B080FF },
     { (1<<EL_AIR)|(1<<EL_LIGHTNING),    "Orage",      0xFFFF80FF },
     { (1<<EL_AIR)|(1<<EL_FIRE),         "Brasier",    0xFFA040FF },
-    { (1<<EL_AIR)|(1<<EL_WATER),        "Brume",      0xC0D8E8FF },
+    { (1<<EL_AIR)|(1<<EL_WATER),        "Froid",      0xA0D0FFFF },
     { (1<<EL_VOID)|(1<<EL_FIRE),        "Feu noir",   0x802040FF },
     { (1<<EL_VOID)|(1<<EL_WATER),       "Acide",      0x80B040FF },
     { (1<<EL_VOID)|(1<<EL_EARTH),       "Tombeau",    0x402030FF },
