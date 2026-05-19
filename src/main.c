@@ -354,6 +354,11 @@ void game_to_hub(Game *g) {
 }
 
 void game_start_new_run(Game *g) {
+    /* Sauvegarde du choix de heros + arme fait dans le HUB. game_start_new_run
+     * memset le player a 0, donc on les remet apres. */
+    HeroClass chosen_hero = g->player.hero;
+    WeaponKind chosen_weapon = g->player.weapons[0].kind;
+    Rarity chosen_rarity = g->player.weapons[0].rarity;
     memset(&g->player, 0, sizeof(g->player));
     memset(g->enemies, 0, sizeof(g->enemies));
     memset(g->projectiles, 0, sizeof(g->projectiles));
@@ -409,19 +414,27 @@ void game_start_new_run(Game *g) {
     g->current_attack_crit = false;
 
     Player *p = &g->player;
-    p->hero = (HeroClass)g->hero_cursor;
+    /* Garde le heros choisi au HUB ; fallback hero_cursor pour anciens flots. */
+    p->hero = (chosen_hero >= 0 && chosen_hero < HERO_COUNT)
+              ? chosen_hero : (HeroClass)g->hero_cursor;
     p->r = 6.f;
     p->level = 1; p->xp = 0; p->xp_to_next = 6;
     p->souls = 0; p->coins = 0;
     p->active_weapon = 0;
-    /* triple feedback loop : aucune jauge active au depart */
     p->active_loop_idx  = -1;
     p->active_loop_mask = 0;
     g->enemy_alive_count = 0;
 
-    /* poings sur les 2 slots */
-    weapon_init_defaults(&p->weapons[0], W_FISTS); p->weapons[0].owned = true;
-    weapon_init_defaults(&p->weapons[1], W_FISTS); p->weapons[1].owned = true;
+    /* Arme choisie au HUB sur slot 0 ; slot 1 = poings (deuxieme arme a
+     * trouver dans la run). */
+    WeaponKind wk = (chosen_weapon > W_FISTS && chosen_weapon < W_COUNT)
+                    ? chosen_weapon : W_FISTS;
+    weapon_init_defaults(&p->weapons[0], wk);
+    p->weapons[0].owned = true;
+    p->weapons[0].rarity = (chosen_rarity >= 0 && chosen_rarity < R_COUNT)
+                            ? chosen_rarity : R_COMMON;
+    weapon_init_defaults(&p->weapons[1], W_FISTS);
+    p->weapons[1].owned = true;
     /* FORGE bonus : meta.weapon_dmg_bonus[kind] x5 ajoute a base_dmg
      * pour chaque arme detenue au demarrage. (Pour le moment seul
      * W_FISTS est equippe, mais on l applique aussi quand un drop
@@ -549,20 +562,6 @@ int perm_stat_cost(const MetaSave *m, int kind) {
     return base * (1 + level);
 }
 
-static void hub_perm_apply(Game *g, int kind) {
-    int cost = perm_stat_cost(&g->meta, kind);
-    if (cost <= 0 || g->meta.shards < cost) return;
-    g->meta.shards -= cost;
-    switch (kind) {
-        case 0: g->meta.perm_hp     += 10; break;
-        case 1: g->meta.perm_armor  += 1;  break;
-        case 2: g->meta.perm_speed  += 5;  break;
-        case 3: g->meta.perm_dmg_pct+= 5;  break;
-    }
-    save_write(&g->meta);
-    sfx_play(g, SFX_COIN);
-}
-
 int forge_level(const MetaSave *m, WeaponKind k) {
     if (k < 0 || k >= W_COUNT) return 0;
     return m->weapon_dmg_bonus[k];
@@ -677,7 +676,17 @@ void hub_init(Game *g) {
     g->player.dash_t = 0.f;
     g->player.invuln_t = 0.f;
     g->player.anim_t = 0.f;
-    /* heros par defaut si pas encore choisi */
+    /* "Paysan" : reset des slots d'arme aux poings, on ne peut pas
+     * attaquer ni entrer dans le donjon sans passer par FORGE + TAVERNE. */
+    g->hub_weapon_chosen = false;
+    g->hub_hero_chosen = false;
+    weapon_init_defaults(&g->player.weapons[0], W_FISTS);
+    g->player.weapons[0].owned = true;
+    g->player.weapons[1].kind = W_FISTS;
+    g->player.weapons[1].owned = false;
+    g->player.active_weapon = 0;
+    /* heros pre-rempli mais marque non-choisi tant que la TAVERNE n'a pas
+     * ete visitee : permet a draw_player_3d de rendre un paysan generique. */
     if (g->player.hero < 0 || g->player.hero >= HERO_COUNT)
         g->player.hero = HERO_GUERRIER;
     if (g->player.maxhp <= 0.f) {
@@ -690,52 +699,54 @@ void hub_init(Game *g) {
     g->dungeon.boss_dead = false;
 }
 
+/* FORGE : choisit l'arme de la run. 5 options (Epee, Bouclier, Arc,
+ * Baguette, Hache). Une seule selection : assigne le slot 0 et marque
+ * hub_weapon_chosen. */
+static void hub_forge_pick(Game *g, int idx) {
+    static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
+    if (idx < 0 || idx >= 5) return;
+    WeaponKind k = PICKS[idx];
+    weapon_init_defaults(&g->player.weapons[0], k);
+    g->player.weapons[0].owned = true;
+    /* applique le bonus FORGE meta */
+    int b = g->meta.weapon_dmg_bonus[k];
+    if (b > 0) g->player.weapons[0].base_dmg += b * 5.f;
+    g->hub_weapon_chosen = true;
+    g->hub_sub_open = 0;
+    sfx_play(g, SFX_LEVELUP);
+}
+
 static void update_hub(Game *g) {
     /* sous-panneau ouvert : input dedie + ESC ferme. */
     if (g->hub_sub_open != 0) {
-        if (g->hub_sub_open == 1) {
-            /* TEMPLE -- 4 stats grille 2x2 */
-            int w = 280, h = 220;
-            int x = INTERNAL_W / 2 - w / 2;
-            int y = INTERNAL_H / 2 - h / 2;
-            int boxw = 124, boxh = 56, gap = 6;
-            int sx0 = x + (w - 2 * boxw - gap) / 2;
-            int sy0 = y + 40;
-            for (int i = 0; i < 4; i++) {
-                int sx = sx0 + (i % 2) * (boxw + gap);
-                int sy = sy0 + (i / 2) * (boxh + gap);
-                if (mouse_in_rect(g, sx, sy, boxw, boxh)) {
-                    g->hub_sub_cursor = i;
-                    if (mouse_clicked(g)) hub_perm_apply(g, i);
-                }
+        if (g->hub_sub_open == 1 || g->hub_sub_open == 3) {
+            /* TEMPLE / LICHE : work in progress, juste un closer */
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])  ||
+                mouse_clicked(g)) {
+                g->hub_sub_open = 0;
             }
-            if ((g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT])
-             || (g->keys[SDL_SCANCODE_A]      && !g->keys_prev[SDL_SCANCODE_A]))
-                g->hub_sub_cursor = (g->hub_sub_cursor + 3) % 4;
-            if ((g->keys[SDL_SCANCODE_RIGHT] && !g->keys_prev[SDL_SCANCODE_RIGHT])
-             || (g->keys[SDL_SCANCODE_D]      && !g->keys_prev[SDL_SCANCODE_D]))
-                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % 4;
-            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]))
-                hub_perm_apply(g, g->hub_sub_cursor);
         } else if (g->hub_sub_open == 2) {
-            /* FORGE -- 6 armes */
-            int w = 280, h = 220;
+            /* FORGE : 5 armes (excl. fists). Sub_cursor 0..4. */
+            const int N = 5;
+            int w = 280;
             int x = INTERNAL_W / 2 - w / 2;
-            int y = INTERNAL_H / 2 - h / 2;
+            int y = INTERNAL_H / 2 - 110;
             int rowh = 22;
-            for (int k = 0; k < W_COUNT; k++) {
-                int sy = y + 38 + k * rowh;
+            for (int k = 0; k < N; k++) {
+                int sy = y + 50 + k * rowh;
                 if (mouse_in_rect(g, x + 10, sy, w - 20, rowh - 2)) {
                     g->hub_sub_cursor = k;
-                    if (mouse_clicked(g)) forge_buy(g, (WeaponKind)k);
+                    if (mouse_clicked(g)) hub_forge_pick(g, k);
                 }
             }
             if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
-                g->hub_sub_cursor = (g->hub_sub_cursor + W_COUNT - 1) % W_COUNT;
+                g->hub_sub_cursor = (g->hub_sub_cursor + N - 1) % N;
             if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
-                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % W_COUNT;
-            if (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN])
-                forge_buy(g, (WeaponKind)g->hub_sub_cursor);
+                g->hub_sub_cursor = (g->hub_sub_cursor + 1) % N;
+            if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
+                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]))
+                hub_forge_pick(g, g->hub_sub_cursor);
         }
         return;
     }
@@ -760,11 +771,19 @@ static void update_hub(Game *g) {
     if (press_e && near >= 0) {
         int sid = HUB_BUILDINGS[near].sub_id;
         switch (sid) {
-            case  0: g->state = GS_CHOOSE_HERO; break;          /* DONJON  */
-            case -1: g->state = GS_CHOOSE_HERO; break;          /* TAVERNE */
-            case  1: g->hub_sub_open = 1; g->hub_sub_cursor = 0; break;
-            case  2: g->hub_sub_open = 2; g->hub_sub_cursor = 0; break;
-            case  3: g->hub_sub_open = 3; g->hub_sub_cursor = 0; break;
+            case  0: /* DONJON : verrouille tant que weapon/hero pas choisis */
+                if (g->hub_weapon_chosen && g->hub_hero_chosen) {
+                    game_start_new_run(g);
+                } else {
+                    sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);   /* "non" */
+                }
+                break;
+            case -1: /* TAVERNE -> choisis ta classe */
+                g->state = GS_CHOOSE_HERO;
+                break;
+            case  1: g->hub_sub_open = 1; g->hub_sub_cursor = 0; break;   /* TEMPLE WIP */
+            case  2: g->hub_sub_open = 2; g->hub_sub_cursor = 0; break;   /* FORGE */
+            case  3: g->hub_sub_open = 3; g->hub_sub_cursor = 0; break;   /* LICHE WIP */
         }
     }
     /* raccourcis */
@@ -812,11 +831,19 @@ static void update_choose_hero(Game *g) {
                     mouse_clicked(g);
     if (activate) {
         if (!g->meta.hero_discovered[g->hero_cursor]) {
-            /* heros encore inconnu : pas selectionnable */
             return;
         }
         if (g->meta.hero_unlocked[g->hero_cursor]) {
-            game_start_new_run(g);
+            /* Selectionne la classe et revient au HUB (le run sera lance
+             * via la porte du DONJON apres avoir aussi choisi une arme). */
+            g->player.hero = (HeroClass)g->hero_cursor;
+            g->hub_hero_chosen = true;
+            /* applique les stats de heros immediatement pour que le PJ
+             * marche dans le hub avec le bon look / vitesse / PV. */
+            game_recompute_player_stats(g);
+            g->player.hp = g->player.maxhp;
+            sfx_play(g, SFX_LEVELUP);
+            g->state = GS_HUB;
         } else {
             int cost = 60 + g->hero_cursor * 25;
             if (g->meta.shards >= cost) {

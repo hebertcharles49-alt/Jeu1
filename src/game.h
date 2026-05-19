@@ -620,6 +620,11 @@ typedef struct {
     int           hub_sub_open;
     int           hub_sub_cursor;
     int           title_cursor;     /* index focused menu sur l ecran titre */
+    /* Etat "paysan" : le joueur entre dans le hub sans arme ni classe.
+     * Il doit visiter la FORGE pour choisir une arme et la TAVERNE pour
+     * choisir une classe avant de pouvoir entrer dans le DONJON. */
+    bool          hub_weapon_chosen;
+    bool          hub_hero_chosen;
 
     int           run_kills;
     float         run_time;

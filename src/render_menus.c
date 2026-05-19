@@ -37,112 +37,73 @@ static void sub_panel_bg(Game *g, int *out_x, int *out_y, int *out_w, int *out_h
     *out_x = x; *out_y = y; *out_w = w; *out_h = h;
 }
 
-/* sous-panneau TEMPLE : les 4 stats permanentes (l ancien systeme). */
+/* sous-panneau TEMPLE : work in progress placeholder. */
 static void render_hub_temple(Game *g) {
     int x, y, w, h;
     sub_panel_bg(g, &x, &y, &w, &h, "TEMPLE");
-    text_draw(g->renderer, x + 10, y + 22,
-              "Augmente tes capacites physiques.", 0xCCCCCCFF);
-    int boxw = 124, boxh = 56, gap = 6;
-    int sx0 = x + (w - 2 * boxw - gap) / 2;
-    int sy0 = y + 40;
-    for (int i = 0; i < 4; i++) {
-        int sx = sx0 + (i % 2) * (boxw + gap);
-        int sy = sy0 + (i / 2) * (boxh + gap);
-        bool sel = (g->hub_sub_cursor == i);
-        int level = perm_stat_level(&g->meta, i);
-        int cost  = perm_stat_cost (&g->meta, i);
-        bool maxed = (level >= PERM_MAX_LEVEL);
-        bool ok    = (!maxed && g->meta.shards >= cost);
-        fill_rect(g->renderer, sx, sy, boxw, boxh, sel ? 0x281828FF : 0x18141EFF);
-        rect_outline(g->renderer, sx, sy, boxw, boxh,
-                     sel ? 0xFFFF40FF : (maxed ? 0x40A040FF : (ok ? 0x404048FF : 0x603030FF)));
-        text_drawf(g->renderer, sx + 6, sy + 4,
-                   sel ? 0xFFFF40FF : 0xFFFFFFFF,
-                   "+%d %s", perm_stat_step(i), perm_stat_label(i));
-        text_drawf(g->renderer, sx + 6, sy + 14, 0x80C0FFFF,
-                   "Niv %d / %d", level, PERM_MAX_LEVEL);
-        int bw = boxw - 12;
-        fill_rect(g->renderer, sx + 6, sy + 24, bw, 4, 0x201824FF);
-        int filled = (level * bw) / PERM_MAX_LEVEL;
-        fill_rect(g->renderer, sx + 6, sy + 24, filled, 4, 0x80FFC0FF);
-        rect_outline(g->renderer, sx + 6, sy + 24, bw, 4, 0x40404AFF);
-        if (maxed) {
-            text_draw(g->renderer, sx + 6, sy + 34, "MAXIMUM", 0x80FF80FF);
-        } else {
-            text_drawf(g->renderer, sx + 6, sy + 34,
-                       ok ? 0xFFD040FF : 0xC07070FF, "%d eclats", cost);
-        }
-    }
-    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
-              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+    text_draw(g->renderer, x + w / 2 - text_width("[ WORK IN PROGRESS ]") / 2,
+              y + 50, "[ WORK IN PROGRESS ]", 0xFFA040FF);
+    text_draw(g->renderer, x + w / 2 - text_width("Le sanctuaire des stats permanentes") / 2,
+              y + 80, "Le sanctuaire des stats permanentes", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("sera disponible dans une future mise a jour.") / 2,
+              y + 92, "sera disponible dans une future mise a jour.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("(+ PV max / armure / vitesse / degats)") / 2,
+              y + 120, "(+ PV max / armure / vitesse / degats)", 0x707080FF);
+    text_draw(g->renderer, x + w / 2 - text_width("ENTREE OU ECHAP POUR FERMER") / 2,
+              y + h - 14, "ENTREE OU ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
-/* sous-panneau FORGE : 6 armes (W_FISTS..W_AXE) avec upgrade +dmg. */
+/* sous-panneau FORGE : choisis ton arme pour la run (5 options). */
 static void render_hub_forge(Game *g) {
     int x, y, w, h;
     sub_panel_bg(g, &x, &y, &w, &h, "FORGE");
-    text_draw(g->renderer, x + 10, y + 22,
-              "Ameliore le degat de base de chaque arme.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("Choisis ton arme pour la course.") / 2,
+              y + 22, "Choisis ton arme pour la course.", 0xCCCCCCFF);
+    static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
+    static const char *DESCR[5] = {
+        "Slash transversal rapide, motion blur.",
+        "Bash + reflet de projectiles, defensif.",
+        "Tir a distance, drag-back + release.",
+        "Projectile magique a tete chercheuse.",
+        "Chop overhead AOE lourd, lent."
+    };
     int rowh = 22;
-    for (int k = 0; k < W_COUNT; k++) {
-        int sy = y + 38 + k * rowh;
+    int N = 5;
+    for (int k = 0; k < N; k++) {
+        int sy = y + 50 + k * rowh;
         bool sel = (g->hub_sub_cursor == k);
-        bool seen = (k == W_FISTS) || g->meta.weapon_discovered[k];
-        int lvl = forge_level(&g->meta, (WeaponKind)k);
-        int cost = forge_cost(&g->meta, (WeaponKind)k);
-        bool maxed = (lvl >= FORGE_MAX_LEVEL);
-        bool ok    = seen && !maxed && g->meta.shards >= cost;
+        bool chosen = (g->player.weapons[0].kind == PICKS[k]);
         uint32_t bg = sel ? 0x281828FF : 0x18141EFF;
-        uint32_t bd = sel ? 0xFFFF40FF :
-                      (!seen ? 0x404048FF :
-                      (maxed ? 0x40A040FF : (ok ? 0x504048FF : 0x603030FF)));
+        uint32_t bd = sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0x504048FF);
         fill_rect(g->renderer, x + 10, sy, w - 20, rowh - 2, bg);
         rect_outline(g->renderer, x + 10, sy, w - 20, rowh - 2, bd);
-        if (!seen) {
-            text_draw(g->renderer, x + 16, sy + 6, "??????", 0x606060FF);
-        } else {
-            text_drawf(g->renderer, x + 16, sy + 6,
-                       sel ? 0xFFFF40FF : 0xFFFFFFFF,
-                       "%s  +%d dmg", weapon_name((WeaponKind)k), lvl * 5);
-            /* mini progress bar */
-            int bw = 50;
-            fill_rect(g->renderer, x + 130, sy + 8, bw, 4, 0x201824FF);
-            int fw = (lvl * bw) / FORGE_MAX_LEVEL;
-            fill_rect(g->renderer, x + 130, sy + 8, fw, 4, 0x80FFC0FF);
-            rect_outline(g->renderer, x + 130, sy + 8, bw, 4, 0x40404AFF);
-            if (maxed) {
-                text_draw(g->renderer, x + w - 80, sy + 6, "MAXIMUM", 0x80FF80FF);
-            } else {
-                text_drawf(g->renderer, x + w - 80, sy + 6,
-                           ok ? 0xFFD040FF : 0xC07070FF,
-                           "%d eclats", cost);
-            }
+        text_draw(g->renderer, x + 16, sy + 3,
+                  weapon_name(PICKS[k]),
+                  sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0xFFFFFFFF));
+        text_draw(g->renderer, x + 16, sy + 12,
+                  DESCR[k], 0x808890FF);
+        if (chosen) {
+            text_draw(g->renderer, x + w - 50, sy + 6, "EQUIPEE", 0x60D040FF);
         }
     }
-    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
-              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+    text_draw(g->renderer, x + w / 2 - text_width("ENTREE / CLIC POUR EQUIPER -- ECHAP POUR FERMER") / 2,
+              y + h - 14, "ENTREE / CLIC POUR EQUIPER -- ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
-/* sous-panneau LICHE : stub (modificateurs de run a venir). */
+/* sous-panneau LICHE : work in progress placeholder. */
 static void render_hub_liche(Game *g) {
     int x, y, w, h;
     sub_panel_bg(g, &x, &y, &w, &h, "LICHE");
-    text_draw(g->renderer, x + w / 2 - text_width("Modificateurs de run") / 2,
-              y + 60, "Modificateurs de run", 0xFFE080FF);
-    text_draw(g->renderer, x + w / 2 - text_width("Disponible prochainement.") / 2,
-              y + 80, "Disponible prochainement.", 0xCCCCCCFF);
-    text_draw(g->renderer, x + w / 2 -
-              text_width("La Liche tissera des anomalies sur ta course :") / 2,
-              y + 110, "La Liche tissera des anomalies sur ta course :", 0x808080FF);
-    text_draw(g->renderer, x + 30, y + 124,
-              "- ennemis empoisonnes pour +bounty", 0x606060FF);
-    text_draw(g->renderer, x + 30, y + 134,
-              "- portes a sens unique", 0x606060FF);
-    text_draw(g->renderer, x + 30, y + 144,
-              "- malediction de tempete", 0x606060FF);
-    text_draw(g->renderer, x + w / 2 - text_width("ECHAP POUR FERMER") / 2,
-              y + h - 14, "ECHAP POUR FERMER", 0xFFFF80FF);
+    text_draw(g->renderer, x + w / 2 - text_width("[ WORK IN PROGRESS ]") / 2,
+              y + 50, "[ WORK IN PROGRESS ]", 0xFFA040FF);
+    text_draw(g->renderer, x + w / 2 - text_width("Les modificateurs de course") / 2,
+              y + 80, "Les modificateurs de course", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("seront disponibles dans une future mise a jour.") / 2,
+              y + 92, "seront disponibles dans une future mise a jour.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("(ennemis empoisonnes, portes a sens unique...)") / 2,
+              y + 120, "(ennemis empoisonnes, portes a sens unique...)", 0x707080FF);
+    text_draw(g->renderer, x + w / 2 - text_width("ENTREE OU ECHAP POUR FERMER") / 2,
+              y + h - 14, "ENTREE OU ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
 /* HUB walkable : le 3D est rendu via render_world(), donc ici on ne
@@ -196,7 +157,8 @@ void render_hub(Game *g) {
         x += text_width(labels[i]) + 16;
     }
 
-    /* prompt [E] interaction : le nom du batiment proche + action */
+    /* prompt [E] interaction : le nom du batiment proche + action.
+     * DONJON est verrouille tant que arme + classe ne sont pas choisies. */
     int near = g->hub_cursor;
     int n = hub_building_count();
     if (g->hub_sub_open == 0 && near >= 0 && near < n) {
@@ -204,24 +166,75 @@ void render_hub(Game *g) {
         if (b) {
             const char *act;
             int sid = hub_building_sub_id(b);
+            bool locked = false;
             switch (sid) {
-                case  0: act = "ENTRER DANS LE DONJON"; break;
-                case -1: act = "RECRUTER UN HEROS";     break;
-                case  1: act = "AMELIORATIONS";         break;
-                case  2: act = "FORGER UNE ARME";       break;
-                case  3: act = "MODIFICATEURS";         break;
+                case  0:
+                    if (!g->hub_weapon_chosen && !g->hub_hero_chosen) {
+                        act = "VERROUILLE -- choisis une arme (Forge) + une classe (Taverne)";
+                        locked = true;
+                    } else if (!g->hub_weapon_chosen) {
+                        act = "VERROUILLE -- choisis une arme a la Forge";
+                        locked = true;
+                    } else if (!g->hub_hero_chosen) {
+                        act = "VERROUILLE -- choisis une classe a la Taverne";
+                        locked = true;
+                    } else {
+                        act = "ENTRER DANS LE DONJON";
+                    }
+                    break;
+                case -1:
+                    act = g->hub_hero_chosen ? "Changer de classe" : "RECRUTER UN HEROS";
+                    break;
+                case  1: act = "(WIP) Sanctuaire des stats"; locked = true; break;
+                case  2:
+                    act = g->hub_weapon_chosen ? "Changer d'arme" : "FORGER UNE ARME";
+                    break;
+                case  3: act = "(WIP) Modificateurs de course"; locked = true; break;
                 default: act = "INTERAGIR";             break;
             }
-            char buf[96];
-            snprintf(buf, sizeof(buf), "[E] %s -- %s",
-                     hub_building_name(b), act);
+            char buf[160];
+            if (locked) {
+                snprintf(buf, sizeof(buf), "%s -- %s",
+                         hub_building_name(b), act);
+            } else {
+                snprintf(buf, sizeof(buf), "[E] %s -- %s",
+                         hub_building_name(b), act);
+            }
             int tw = text_width(buf);
             int px = INTERNAL_W/2 - tw/2;
             int py = INTERNAL_H - 30;
-            fill_rect(gc, px - 4, py - 2, tw + 8, 11, 0x000000C0);
-            rect_outline(gc, px - 4, py - 2, tw + 8, 11, 0xFFE080FF);
-            text_draw(gc, px, py, buf, 0xFFFF80FF);
+            uint32_t bg_col = locked ? 0x301010C0 : 0x000000C0;
+            uint32_t bd_col = locked ? 0xFF6060FF : 0xFFE080FF;
+            uint32_t tx_col = locked ? 0xFF8080FF : 0xFFFF80FF;
+            fill_rect(gc, px - 4, py - 2, tw + 8, 11, bg_col);
+            rect_outline(gc, px - 4, py - 2, tw + 8, 11, bd_col);
+            text_draw(gc, px, py, buf, tx_col);
         }
+    }
+
+    /* banniere statique au-dessus de l'ecran : indique l'etat (sans arme /
+     * sans classe / pret). */
+    {
+        const char *banner = NULL;
+        uint32_t bcol = 0xFFFF80FF;
+        if (!g->hub_weapon_chosen && !g->hub_hero_chosen) {
+            banner = "PAYSAN -- Forge ton arme et choisis ta classe avant de descendre.";
+            bcol = 0xFFC080FF;
+        } else if (!g->hub_weapon_chosen) {
+            banner = "Il te manque une arme. Visite la FORGE.";
+            bcol = 0xFFC080FF;
+        } else if (!g->hub_hero_chosen) {
+            banner = "Il te manque une classe. Visite la TAVERNE.";
+            bcol = 0xFFC080FF;
+        } else {
+            banner = "Tu es pret. La porte du DONJON t'attend.";
+            bcol = 0x80FFA0FF;
+        }
+        int tw = text_width(banner);
+        int px = INTERNAL_W / 2 - tw / 2;
+        int py = 20;
+        fill_rect(gc, px - 4, py - 2, tw + 8, 11, 0x000000C0);
+        text_draw(gc, px, py, banner, bcol);
     }
 
     /* sous-panneau actif par-dessus */
