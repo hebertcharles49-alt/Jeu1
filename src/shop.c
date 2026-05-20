@@ -228,18 +228,37 @@ void shop_generate(Game *g) {
         si->cost = base_cost + g->floor_index * 2;
     }
     g->shop_cursor = 0;
-    g->shop_reroll_cost = 5 + g->shop_visits;
+    g->shop_reroll_idx = 0;
+    g->shop_reroll_cost = shop_reroll_cost_at(0);
+}
+
+/* Cout du reroll : suite Fibonacci a partir de 3,3, qui revient a 1
+ * apres quelques rolls puis recycle. Donne une fenetre "rolls bon marche"
+ * pour encourager l exploration sans casser l economie initiale.
+ * Sequence (cycle 14) :
+ *   3 3 6 9 15 24   1 1 2 3 5 8 13 21  -> revient a 3
+ */
+int shop_reroll_cost_at(int idx) {
+    static const int FIB[14] = {
+        3, 3, 6, 9, 15, 24,
+        1, 1, 2, 3, 5, 8, 13, 21
+    };
+    if (idx < 0) idx = 0;
+    return FIB[idx % 14];
 }
 
 void shop_reroll(Game *g) {
     if (g->player.coins < g->shop_reroll_cost) return;
     g->player.coins -= g->shop_reroll_cost;
     sfx_play(g, SFX_COIN);
-    /* ne pas reset shop_visits pour faire monter le cout du reroll */
+    int idx = g->shop_reroll_idx + 1;
     int prev_visits = g->shop_visits;
     shop_generate(g);
-    g->shop_visits = prev_visits + 1;
-    g->shop_reroll_cost = 5 + g->shop_visits;
+    /* shop_generate reset shop_reroll_idx ; on le repose pour preserver
+     * la progression du cycle au sein du shop courant. */
+    g->shop_reroll_idx = idx;
+    g->shop_visits = prev_visits;
+    g->shop_reroll_cost = shop_reroll_cost_at(idx);
 }
 
 void shop_buy(Game *g, int idx) {

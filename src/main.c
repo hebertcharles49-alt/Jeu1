@@ -420,7 +420,8 @@ void game_start_new_run(Game *g) {
     g->boss_intro_t = 0.f;
     g->boss_death_t = 0.f;
     g->shop_visits = 0;
-    g->shop_reroll_cost = 5;
+    g->shop_reroll_idx = 0;
+    g->shop_reroll_cost = shop_reroll_cost_at(0);
     g->combo_callout_t = 0.f;
     g->combo_callout_mask = 0;
     g->scroll_t = 0.f;

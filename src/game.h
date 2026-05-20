@@ -690,6 +690,9 @@ typedef struct {
     int           shop_cursor;
     int           shop_reroll_cost;
     int           shop_visits;
+    int           shop_reroll_idx;     /* index dans la sequence Fibonacci
+                                          des couts de reroll. Reset a 0
+                                          a chaque shop_generate. */
 
     /* inventory cursor: 0..11 inv, 12..17 equip */
     int           inv_cursor;
@@ -1073,6 +1076,7 @@ typedef struct {
 void  shop_generate(Game *g);
 void  shop_buy(Game *g, int idx);
 void  shop_reroll(Game *g);
+int shop_reroll_cost_at(int idx);
 const char *shop_recipe_name(int recipe_id);
 const char *shop_recipe_desc(int recipe_id);
 int   shop_recipe_count(void);

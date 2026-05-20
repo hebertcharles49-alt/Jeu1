@@ -567,6 +567,69 @@ void render_inventory(Game *g) {
                    "F = %s %s", rarity_name(base->rarity + 1), slot_name(base->slot));
     }
 
+    /* ---- TRINKETS DE SHOP : panel sous le paperdoll ----
+     * Liste les recettes achetees au shop, par ordre d'acquisition. Une
+     * cellule = un trinket. Couleur = couleur de rarete. */
+    {
+        int tx = 12, ty = 245, tw = 390, th = 60;
+        fill_rect(g->renderer, tx, ty, tw, th, 0x100C18FF);
+        rect_outline(g->renderer, tx, ty, tw, th, 0x303040FF);
+        char hdr[48];
+        snprintf(hdr, sizeof(hdr), "TRINKETS (%d)", p->shop_purchased_count);
+        text_draw(g->renderer, tx + 4, ty + 2, hdr, 0xCCCCFFFF);
+        int cell_sz = 14;
+        int cols = (tw - 8) / (cell_sz + 2);
+        int rows = (th - 14) / (cell_sz + 2);
+        int total_visible = cols * rows;
+        int n_show = p->shop_purchased_count > total_visible
+                      ? total_visible : p->shop_purchased_count;
+        for (int i = 0; i < n_show; i++) {
+            int rid = p->shop_purchased[i];
+            uint32_t col = shop_recipe_color(rid);
+            int row = i / cols;
+            int col_ = i % cols;
+            int sx = tx + 4 + col_ * (cell_sz + 2);
+            int sy = ty + 14 + row * (cell_sz + 2);
+            /* mouse hover : tooltip nom + desc */
+            bool hov = mouse_in_rect(g, sx, sy, cell_sz, cell_sz);
+            uint32_t border = hov ? 0xFFFF80FF : 0x000000FF;
+            fill_rect(g->renderer, sx, sy, cell_sz, cell_sz, col);
+            rect_outline(g->renderer, sx, sy, cell_sz, cell_sz, border);
+            /* lettre initiale de la recette pour mini-identite */
+            const char *nm = shop_recipe_name(rid);
+            if (nm && nm[0]) {
+                char ab[2] = { nm[0], 0 };
+                text_draw(g->renderer, sx + cell_sz/2 - 2, sy + cell_sz/2 - 3,
+                          ab, 0x000000FF);
+            }
+            if (hov) {
+                /* tooltip flottant : nom + desc */
+                const char *desc = shop_recipe_desc(rid);
+                int tw_n = text_width(nm);
+                int tw_d = desc ? text_width(desc) : 0;
+                int box_w = (tw_n > tw_d ? tw_n : tw_d) + 12;
+                int box_h = (desc && desc[0]) ? 24 : 14;
+                int bx = sx + cell_sz + 4;
+                int by = sy;
+                if (bx + box_w > INTERNAL_W - 4) bx = sx - box_w - 4;
+                if (by + box_h > INTERNAL_H - 12) by = INTERNAL_H - 12 - box_h;
+                gfx_set_blend(g->renderer, true);
+                fill_rect(g->renderer, bx, by, box_w, box_h, 0x000000E0);
+                gfx_set_blend(g->renderer, false);
+                rect_outline(g->renderer, bx, by, box_w, box_h, col);
+                text_draw(g->renderer, bx + 4, by + 3, nm, col);
+                if (desc && desc[0])
+                    text_draw(g->renderer, bx + 4, by + 13, desc, 0xCCCCCCFF);
+            }
+        }
+        if (p->shop_purchased_count > total_visible) {
+            char overflow[16];
+            snprintf(overflow, sizeof(overflow), "+%d",
+                     p->shop_purchased_count - total_visible);
+            text_draw(g->renderer, tx + tw - 24, ty + 2, overflow, 0xFFD040FF);
+        }
+    }
+
     /* ---- message + footer ---- */
     if (g->inv_msg_t > 0.f) {
         text_draw(g->renderer, INTERNAL_W/2 - text_width(g->inv_msg)/2,
