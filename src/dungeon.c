@@ -114,7 +114,8 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         d->rooms[0].x = cx - rad; d->rooms[0].y = cy - rad;
         d->rooms[0].w = rad * 2 + 1; d->rooms[0].h = rad * 2 + 1;
         d->rooms[0].cleared = true;
-        d->rooms[0].visited = true;
+        d->rooms[0].visited = false;     /* false pour que first_visit
+                                            spawne les portails */
         d->rooms[0].enemies_to_spawn = 0;
         d->rooms[0].is_boss_room = false;
         d->room_count = 1;
