@@ -86,12 +86,49 @@ void update_room_logic(Game *g) {
                 r->boss_spawned = true;
                 int sx = r->x + r->w / 2;
                 int sy = r->y + r->h / 2;
-                enemy_spawn(g, EK_BOSS, sx * TILE + TILE / 2, sy * TILE + TILE / 2);
-                /* nom thematique du boss : variant = biome courant. */
-                int bv = biome_for_floor(g->floor_index);
-                snprintf(g->boss_name, sizeof(g->boss_name),
-                         "%s (E%d)", boss_title_for_variant(bv), g->floor_index);
-                g->boss_intro_t = 2.5f;
+                int idx = enemy_spawn(g, EK_BOSS,
+                                      sx * TILE + TILE / 2,
+                                      sy * TILE + TILE / 2);
+                if (g->floor_index >= MAX_FLOORS) {
+                    /* Etage 11 : l'ARCHIMAGE. Boss final. */
+                    if (idx >= 0) {
+                        Enemy *e = &g->enemies[idx];
+                        e->is_archmage = true;
+                        e->maxhp = 3000.f;
+                        e->hp    = 3000.f;
+                        e->arch_grow = 0.f;
+                        e->dmg_flat  = 12.f;
+                        e->element   = EL_NONE;     /* tous les elements */
+                    }
+                    snprintf(g->boss_name, sizeof(g->boss_name),
+                             "Archimage des Onze");
+                    /* permutation des 10 elements pour l'ordre des attaques */
+                    int order[10];
+                    for (int i = 0; i < 10; i++) order[i] = i + EL_FIRE;
+                    for (int i = 9; i > 0; i--) {
+                        int j = rand() % (i + 1);
+                        int t = order[i]; order[i] = order[j]; order[j] = t;
+                    }
+                    for (int i = 0; i < 10; i++) g->arch_element_order[i] = order[i];
+                    g->arch_phase = 0;
+                    g->arch_phase_timer = 0.f;
+                    g->arch_stasis_t = 0.f;
+                    g->arch_attack_cd = 2.5f;     /* delay avant 1er coup */
+                    g->arch_attack_pattern = 0;
+                    g->arch_summoned[0] = g->arch_summoned[1] = g->arch_summoned[2] = -1;
+                    g->arch_intro_done = false;
+                    snprintf(g->arch_speech, sizeof(g->arch_speech),
+                             "...Tu oses encore te dresser ? Approche, mortel.");
+                    g->arch_speech_t = 5.0f;
+                    g->boss_intro_t = 3.0f;
+                    log_push(g, 0xFFA040FF, "L'Archimage des Onze t'attend...");
+                } else {
+                    /* nom thematique du boss : variant = biome courant. */
+                    int bv = biome_for_floor(g->floor_index);
+                    snprintf(g->boss_name, sizeof(g->boss_name),
+                             "%s (E%d)", boss_title_for_variant(bv), g->floor_index);
+                    g->boss_intro_t = 2.5f;
+                }
                 sfx_play(g, SFX_BOSS);
             }
             return;

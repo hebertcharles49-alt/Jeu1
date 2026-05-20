@@ -119,7 +119,8 @@ PROBLEMES COURANTS
 
 CONCEPT
    Roguelite elementaire. Voxel 3D, vue 3e personne fixe, donjon
-   procedural 10 etages + 1 boss par etage. Combat a la souris.
+   procedural 10 etages + 1 boss par etage, puis l'ARCHIMAGE
+   au 11e (boss final, 3000 PV, 3 phases, utilise les 10 elements).
    Greffe jusqu'a 3 elements par arme pour declencher des combos
    (Vapeur, Plasma, Lave, Tempete, Phenix...). Loot type ARPG :
    raretes, affixes, fusion 3-en-1, uniques build-defining.
@@ -128,6 +129,8 @@ LORE  (distille en jeu via parchemins ramasses, cf option LORE)
    Il y a sept mille ans, le Cristal Originel se brisa. Sept
    eclats tomberent dans l'abime -- les sept elements. Le Donjon
    des Elements vient de s'ouvrir. 10 etages, 10 Gardiens.
+   Au sommet attend l'ARCHIMAGE des Onze, qui canalise tous les
+   elements -- meme ceux que tu n'as pas trouves.
 
 CONTROLES (defauts, modifiables dans Options)
    WASD / FLECHES         deplacement

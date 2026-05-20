@@ -791,6 +791,12 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
     v3 pos = v3_make(e->x / TILE, 0.f, e->y / TILE);
     float h = 1.0f, w = 0.65f;
     if (e->is_boss) { h = 1.7f; w = 1.15f; }
+    if (e->is_archmage) {
+        float g_ = e->arch_grow;
+        if (g_ < 0.3f) g_ = 0.3f;
+        h = 1.8f + g_ * 1.6f;
+        w = 1.2f + g_ * 1.0f;
+    }
     if (e->kind == EK_SLIME) { h = 0.45f; w = 0.7f; }
 
     /* anim de mort : le corps fond dans le sol, retreci, et tinte rouge.
@@ -1133,6 +1139,84 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
             particle_spawn_kind(g, e->x, e->y - 4,
                                 (rand() % 20) - 10, -25.f,
                                 0.6f, 0x6020A0A0, 1.6f, 0);
+        }
+        return;
+    }
+
+    /* ARCHIMAGE : silhouette robe haute + hood + baton + aura multicolore.
+     * Cycle de couleur via arch_element_order pour donner une teinte qui
+     * change (Ganondorf-like puissance contenue). En stase, halo bleute
+     * + 3 marqueurs pour les bosses summons. */
+    if (e->is_archmage) {
+        float gscale = e->arch_grow < 0.3f ? 0.3f : e->arch_grow;
+        /* couleur principale : cycle des elements pour l'aura */
+        int el_idx = ((int)(g->time * 0.5f)) % 10;
+        uint32_t col = element_color((Element)g->arch_element_order[el_idx]);
+        float ar = ((col>>24)&0xFF)/255.f;
+        float ag = ((col>>16)&0xFF)/255.f;
+        float ab = ((col>>8)&0xFF)/255.f;
+        /* robe noir-violet de base */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.35f, pos.z),
+                     v3_make(w * 1.10f, h * 0.65f, w * 1.10f),
+                     0.15f, 0.10f, 0.25f);
+        gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.75f, pos.z),
+                     v3_make(w * 0.78f, h * 0.40f, w * 0.78f),
+                     0.20f, 0.14f, 0.32f);
+        /* hood pointu massif */
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.40f, pos.z),
+                     v3_make(0.65f * gscale, 0.50f * gscale, 0.65f * gscale),
+                     0.10f, 0.06f, 0.18f);
+        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.85f, pos.z),
+                     v3_make(0.35f * gscale, 0.25f * gscale, 0.35f * gscale),
+                     0.08f, 0.05f, 0.14f);
+        /* yeux ardents 4 (l'archimage est multi-element) */
+        float ep = 0.7f + 0.3f * sinf(g->time * 6.f);
+        gfx_box_draw(g->renderer, v3_make(pos.x - 0.18f, h + 0.35f, pos.z + 0.40f),
+                     v3_make(0.06f, 0.06f, 0.04f), ar * ep, ag * ep, ab * ep);
+        gfx_box_draw(g->renderer, v3_make(pos.x + 0.18f, h + 0.35f, pos.z + 0.40f),
+                     v3_make(0.06f, 0.06f, 0.04f), ar * ep, ag * ep, ab * ep);
+        /* baton sur le cote droit, hauteur = grow */
+        float staff_h = 1.5f * gscale;
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w / 2 + 0.30f), h * 0.55f, pos.z),
+                     v3_make(0.10f, staff_h, 0.10f),
+                     0.35f, 0.22f, 0.10f);
+        /* cristal en tete du baton (cycle de couleur element) */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + (w / 2 + 0.30f), h * 0.55f + staff_h * 0.5f + 0.10f, pos.z),
+                     v3_make(0.22f, 0.22f, 0.22f),
+                     ar, ag, ab);
+        /* halo au sol : grand cercle qui cycle 10 couleurs */
+        for (int k = 0; k < 10; k++) {
+            float a = (k / 10.f) * 6.2831f + g->time * 0.4f;
+            uint32_t hc = element_color((Element)g->arch_element_order[k]);
+            float hr_ = ((hc>>24)&0xFF)/255.f;
+            float hg_ = ((hc>>16)&0xFF)/255.f;
+            float hb_ = ((hc>>8)&0xFF)/255.f;
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x + cosf(a) * (1.5f * gscale),
+                        0.05f,
+                        pos.z + sinf(a) * (1.5f * gscale)),
+                v3_make(0.16f, 0.04f, 0.16f),
+                hr_, hg_, hb_);
+        }
+        /* aura stase : disque bleute pulsant */
+        if (g->arch_stasis_t > 0.f) {
+            float pulse = 0.5f + 0.5f * sinf(g->time * 8.f);
+            gfx_box_draw(g->renderer,
+                v3_make(pos.x, 0.10f, pos.z),
+                v3_make(w * 2.5f, 0.05f, w * 2.5f),
+                0.40f + 0.40f * pulse, 0.60f * pulse, 1.0f * pulse);
+            /* couronne d ame autour de la tete */
+            for (int k = 0; k < 12; k++) {
+                float a = (k / 12.f) * 6.2831f + g->time * 1.5f;
+                gfx_box_draw(g->renderer,
+                    v3_make(pos.x + cosf(a) * 0.7f,
+                            h + 0.60f + sinf(a * 2.f) * 0.10f,
+                            pos.z + sinf(a) * 0.7f),
+                    v3_make(0.08f, 0.08f, 0.08f),
+                    0.7f, 0.85f, 1.0f);
+            }
         }
         return;
     }
@@ -2645,7 +2729,32 @@ void render_world_overlay_ui(Game *g) {
                 text_draw(gc, bx + bw - text_width("ENRAGE"),
                           by + bh + 2, "ENRAGE", 0xFF4040FF);
             }
+            /* tag "STASE" pour l'archimage */
+            if (bb->is_archmage && g->arch_stasis_t > 0.f) {
+                text_draw(gc, bx + bw - text_width("STASE"),
+                          by + bh + 2, "STASE", 0x80C0FFFF);
+            }
         }
+    }
+
+    /* === SPEECH ARCHIMAGE === bandeau central avec son nom + sa phrase */
+    if (g->arch_speech_t > 0.f && g->arch_speech[0]) {
+        int tw = text_width(g->arch_speech);
+        int box_w = tw + 28;
+        if (box_w > INTERNAL_W - 20) box_w = INTERNAL_W - 20;
+        int box_h = 26;
+        int bx = INTERNAL_W/2 - box_w/2;
+        int by = INTERNAL_H/2 - 60;
+        float a01 = g->arch_speech_t / 5.f;
+        if (a01 > 1.f) a01 = 1.f;
+        uint8_t alpha = (uint8_t)(220 * (a01 > 0.2f ? 1.f : a01 / 0.2f));
+        gfx_set_blend(gc, true);
+        fill_rect(gc, bx, by, box_w, box_h,
+                  (uint32_t)((0x10u << 24) | (0x05u << 16) | (0x20u << 8) | (uint32_t)alpha));
+        gfx_set_blend(gc, false);
+        rect_outline(gc, bx, by, box_w, box_h, 0xFFA040FF);
+        text_draw(gc, bx + 14, by + 4, "ARCHIMAGE", 0xFFA040FF);
+        text_draw(gc, bx + 14, by + 14, g->arch_speech, 0xFFFFFFFF);
     }
 
     /* Signature Combo callout : nom du combo triple en grand au-dessus du

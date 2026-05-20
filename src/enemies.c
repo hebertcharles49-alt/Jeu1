@@ -140,6 +140,16 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
     if (cat >= 0 && cat < ENEMY_CAT_COUNT) {
         dmg *= 1.f + g->player.dmg_vs_cat[cat];
     }
+    /* Archimage en stase : invuln complet + sparks de feedback */
+    if (e->is_archmage && g->arch_stasis_t > 0.f) {
+        if ((rand() % 100) < 30) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 80.f, sinf(a) * 80.f, 0.4f,
+                                0xC0C0FFFF, 2.4f, 2);
+        }
+        return;
+    }
     e->hp -= dmg;
     e->hit_flash = (eff >= 2.f) ? 0.18f : 0.10f;
     if (el == EL_FIRE)      { e->fire_dot = 2.f; e->fire_dps = 4.f + dmg * 0.2f; }
@@ -970,6 +980,263 @@ static void boss_avatar(Game *g, Enemy *e, float dt, int phase,
     }
 }
 
+/* === ARCHIMAGE -- Boss final etage 11 ===
+ * 3 phases, 3000 PV, utilise les 10 elements dans un ordre aleatoire
+ * (g->arch_element_order). Speech entre les phases. Stase pendant le
+ * summon des 3 bosses correspondants aux elements "reserves" (ceux
+ * non choisis par le run_element_pool).
+ *
+ * Phase 0 (>66% HP) : intro pacifique 3s puis croissance + orbes
+ *                     elementaires + 1 beam toutes les 8s.
+ * Phase 1 (33-66%)  : grandit encore, orbes 2x plus rapides, beams
+ *                     diagonaux, summon de 2 zombies elites toutes
+ *                     les 10s.
+ * Phase 2 (<33%)    : SUMMON des 3 bosses-elements reserves a la run,
+ *                     stase invuln + regen tant qu'ils sont vivants.
+ *                     Puis : full power, tout en chaos.
+ */
+static int arch_reserved_elements(Game *g, int out[3]) {
+    /* renvoie les 3 elements de EL_FIRE..EL_HOLY qui ne sont PAS dans
+     * run_element_pool (qui en contient 7 sur 10). */
+    bool used[EL_COUNT] = { false };
+    for (int i = 0; i < RUN_TALISMAN_MAX; i++) {
+        int e = g->run_element_pool[i];
+        if (e > 0 && e < EL_COUNT) used[e] = true;
+    }
+    int n = 0;
+    for (int e = (int)EL_FIRE; e <= (int)EL_HOLY && n < 3; e++) {
+        if (!used[e]) out[n++] = e;
+    }
+    /* fallback : remplir avec FIRE si le pool n'est pas valide */
+    while (n < 3) out[n++] = EL_FIRE;
+    return n;
+}
+
+static void arch_say(Game *g, const char *line, float dur) {
+    snprintf(g->arch_speech, sizeof(g->arch_speech), "%s", line);
+    g->arch_speech_t = dur;
+    log_push(g, 0xFFA040FF, "%s", line);
+}
+
+static void arch_shoot_orb(Game *g, Enemy *e, Element el, float ang, float speed) {
+    Projectile pr = {0};
+    pr.x = e->x; pr.y = e->y - 14.f;
+    pr.vx = cosf(ang) * speed;
+    pr.vy = sinf(ang) * speed;
+    pr.r = 7.f;
+    pr.dmg = 12.f + g->floor_index * 1.5f;
+    pr.life = 3.5f;
+    pr.owner = 1;
+    pr.primary = el;
+    pr.aoe = 16.f;
+    pr.sprite = 2;
+    projectile_spawn(g, pr);
+}
+
+static void arch_beam(Game *g, Enemy *e, Element el, float ang, int width) {
+    /* faisceau : ligne de projectiles le long de la direction */
+    for (int k = 0; k < width; k++) {
+        Projectile pr = {0};
+        float t = (float)k / 4.f;
+        pr.x = e->x + cosf(ang) * (10.f + t * 16.f);
+        pr.y = e->y - 14.f + sinf(ang) * (10.f + t * 16.f);
+        pr.vx = cosf(ang) * 220.f;
+        pr.vy = sinf(ang) * 220.f;
+        pr.r = 5.f;
+        pr.dmg = 8.f + g->floor_index * 0.8f;
+        pr.life = 2.5f;
+        pr.owner = 1;
+        pr.primary = el;
+        pr.aoe = 0.f;
+        pr.sprite = 0;
+        projectile_spawn(g, pr);
+    }
+}
+
+static void boss_archmage(Game *g, Enemy *e, float dt, int phase,
+                          float dx, float dy, float dist) {
+    (void)dist;
+    Player *p = &g->player;
+
+    /* speech decay */
+    if (g->arch_speech_t > 0.f) g->arch_speech_t -= dt;
+
+    /* === ELEMENT LEAKS ===
+     * Pendant le combat, particules elementaires qui "leak" depuis les
+     * autres etages : viennent des 4 cotes de l'arene, drift vers le
+     * centre, fade. Cycle sur les 10 elements pour donner l'impression
+     * que l'archimage canalise toute la tour. */
+    if ((rand() % 100) < 25) {
+        int eli = rand() % 10;
+        Element le = (Element)g->arch_element_order[eli];
+        uint32_t col = element_color(le);
+        /* spawn sur un bord aleatoire d'un rect autour du boss */
+        float side = (float)(rand() % 4);
+        float ex_, ey_, vx, vy;
+        if (side < 1.f) { ex_ = e->x - 220.f; ey_ = e->y + (rand() % 200) - 100; vx = 30.f; vy = 0; }
+        else if (side < 2.f) { ex_ = e->x + 220.f; ey_ = e->y + (rand() % 200) - 100; vx = -30.f; vy = 0; }
+        else if (side < 3.f) { ex_ = e->x + (rand() % 200) - 100; ey_ = e->y - 220.f; vx = 0; vy = 30.f; }
+        else { ex_ = e->x + (rand() % 200) - 100; ey_ = e->y + 220.f; vx = 0; vy = -30.f; }
+        particle_spawn_kind(g, ex_, ey_, vx, vy, 2.0f, col, 1.6f, 0);
+    }
+
+    /* INTRO : 3s de pacifique au tout debut, l'archimage grandit. */
+    if (!g->arch_intro_done) {
+        e->arch_grow += dt * 0.3f;
+        if (e->arch_grow > 1.f) e->arch_grow = 1.f;
+        g->arch_attack_cd -= dt;
+        if (g->arch_attack_cd <= 0.f) {
+            g->arch_intro_done = true;
+            arch_say(g,
+                "Tu vas comprendre ce qu'est la puissance des ONZE !",
+                4.5f);
+            g->arch_attack_cd = 2.f;
+        }
+        return;
+    }
+
+    /* === STASE pendant le summon des 3 bosses (phase 2) === */
+    if (g->arch_stasis_t > 0.f) {
+        g->arch_stasis_t -= dt;
+        /* regen 1% PV / s pendant la stase */
+        e->hp += e->maxhp * 0.01f * dt;
+        if (e->hp > e->maxhp) e->hp = e->maxhp;
+        /* check : les 3 summons sont-ils morts ? */
+        int alive_n = 0;
+        for (int s = 0; s < 3; s++) {
+            int si = g->arch_summoned[s];
+            if (si >= 0 && si < MAX_ENEMIES && g->enemies[si].alive) alive_n++;
+        }
+        if (alive_n == 0) {
+            g->arch_stasis_t = 0.f;
+            arch_say(g, "Mes serviteurs ont peri ! ASSEZ !", 4.0f);
+            g->arch_attack_cd = 1.5f;
+        }
+        /* pulse invuln + sparks */
+        if ((rand() % 100) < 35) {
+            float a = (rand() % 360) * 0.01745f;
+            particle_spawn_kind(g, e->x, e->y,
+                                cosf(a) * 60.f, sinf(a) * 60.f, 0.5f,
+                                0xC080FFFF, 2.6f, 2);
+        }
+        return;
+    }
+
+    /* === PHASE TRANSITIONS === */
+    if (phase != g->arch_phase) {
+        g->arch_phase = phase;
+        if (phase == 1) {
+            arch_say(g,
+                "Tu m'amuses... voyons si tu survis aux ELITES.", 4.0f);
+            e->arch_grow = 1.3f;     /* grandit encore */
+            g->arch_attack_cd = 1.5f;
+            /* summon initial de 2 zombies elites */
+            for (int k = 0; k < 2; k++) {
+                int zi = enemy_spawn(g, EK_ZOMBIE,
+                                     e->x + (rand() % 60) - 30,
+                                     e->y + (rand() % 60) - 30);
+                if (zi >= 0) {
+                    g->enemies[zi].is_elite = true;
+                    g->enemies[zi].maxhp *= 3.f;
+                    g->enemies[zi].hp = g->enemies[zi].maxhp;
+                    g->enemies[zi].dmg_flat *= 1.5f;
+                }
+            }
+        } else if (phase == 2) {
+            arch_say(g,
+                "INVOQUEZ LES TROIS ! Vous serez ma renaissance.", 5.0f);
+            e->arch_grow = 1.7f;
+            /* SUMMON des 3 bosses-elements reserves -> stase */
+            int reserved[3];
+            arch_reserved_elements(g, reserved);
+            for (int s = 0; s < 3; s++) {
+                float ang = s * 2.094f + 0.5f;
+                int zi = enemy_spawn(g, EK_BOSS,
+                                     e->x + cosf(ang) * 60.f,
+                                     e->y + sinf(ang) * 60.f);
+                if (zi >= 0) {
+                    Enemy *b = &g->enemies[zi];
+                    b->element = (Element)reserved[s];
+                    b->variant = reserved[s] % 5;
+                    b->maxhp = 400.f;
+                    b->hp = 400.f;
+                    b->dmg_flat = 8.f;
+                    g->arch_summoned[s] = zi;
+                }
+            }
+            g->arch_stasis_t = 60.f;     /* max 60s, mais sortie auto si tous morts */
+            sfx_play(g, SFX_BOSS);
+        }
+    }
+
+    /* mouvement : drift lent vers le joueur (l'archimage flotte) */
+    float move = (phase == 0) ? 22.f : (phase == 1 ? 32.f : 18.f);
+    float vn = sqrtf(dx*dx + dy*dy) + 0.01f;
+    e->x += (dx / vn) * move * dt;
+    e->y += (dy / vn) * move * dt;
+
+    /* === ATTAQUES (cycle par g->arch_element_order) === */
+    g->arch_attack_cd -= dt;
+    if (g->arch_attack_cd > 0.f) return;
+
+    int el_idx = g->arch_attack_pattern % 10;
+    Element el = (Element)g->arch_element_order[el_idx];
+    g->arch_attack_pattern++;
+
+    if (phase == 0) {
+        /* orb simple vers le joueur */
+        float ang = atan2f(dy, dx);
+        arch_shoot_orb(g, e, el, ang, 130.f);
+        g->arch_attack_cd = 1.4f;
+    } else if (phase == 1) {
+        /* triple orbe en cone + beam diagonal occasionnel */
+        float ang = atan2f(dy, dx);
+        arch_shoot_orb(g, e, el, ang, 150.f);
+        arch_shoot_orb(g, e, el, ang + 0.25f, 150.f);
+        arch_shoot_orb(g, e, el, ang - 0.25f, 150.f);
+        if ((g->arch_attack_pattern & 3) == 0) {
+            arch_beam(g, e, el, ang, 5);
+        }
+        /* invoque un zombie elite a chaque 4 attaques */
+        if ((g->arch_attack_pattern % 4) == 0) {
+            int zi = enemy_spawn(g, EK_ZOMBIE,
+                                 e->x + (rand() % 80) - 40,
+                                 e->y + (rand() % 80) - 40);
+            if (zi >= 0) {
+                g->enemies[zi].is_elite = true;
+                g->enemies[zi].maxhp *= 2.5f;
+                g->enemies[zi].hp = g->enemies[zi].maxhp;
+            }
+        }
+        g->arch_attack_cd = 1.0f;
+    } else {
+        /* phase 2 sortie de stase : tempete totale */
+        float ang = atan2f(dy, dx) + ((rand() % 100) - 50) * 0.005f;
+        /* 5 orbes en eventail */
+        for (int s = -2; s <= 2; s++) {
+            arch_shoot_orb(g, e, el, ang + s * 0.20f, 170.f);
+        }
+        /* beam tous les 2 attaques */
+        if ((g->arch_attack_pattern & 1) == 0) {
+            arch_beam(g, e, el, ang, 7);
+        }
+        g->arch_attack_cd = 0.75f;
+    }
+
+    /* SURPRISE : sur multiple de 10 attaques, explosion d'orbes de TOUS
+     * les elements en cercle (final). */
+    if (phase >= 1 && (g->arch_attack_pattern % 10) == 0) {
+        for (int s = 0; s < 10; s++) {
+            float a = (s / 10.f) * 6.2831f;
+            Element ee = (Element)g->arch_element_order[s];
+            arch_shoot_orb(g, e, ee, a, 110.f);
+        }
+        log_push(g, 0xFFA040FF, "L'Archimage canalise les ONZE !");
+    }
+
+    (void)p;
+}
+
 static void boss_update(Game *g, Enemy *e, float dt) {
     Player *p = &g->player;
     if (e->telegraph_t > 0.f) { e->telegraph_t -= dt; return; }
@@ -1017,13 +1284,17 @@ static void boss_update(Game *g, Enemy *e, float dt) {
     float dist = sqrtf(dx * dx + dy * dy) + 0.01f;
     e->facing = atan2f(dy, dx);
 
-    switch (e->variant) {
-        case 0: boss_necropante(g, e, dt, phase, dx, dy, dist); break;
-        case 1: boss_geant     (g, e, dt, phase, dx, dy, dist); break;
-        case 2: boss_hydre     (g, e, dt, phase, dx, dy, dist); break;
-        case 3: boss_forgeron  (g, e, dt, phase, dx, dy, dist); break;
-        case 4: boss_avatar    (g, e, dt, phase, dx, dy, dist); break;
-        default: break;
+    if (e->is_archmage) {
+        boss_archmage(g, e, dt, phase, dx, dy, dist);
+    } else {
+        switch (e->variant) {
+            case 0: boss_necropante(g, e, dt, phase, dx, dy, dist); break;
+            case 1: boss_geant     (g, e, dt, phase, dx, dy, dist); break;
+            case 2: boss_hydre     (g, e, dt, phase, dx, dy, dist); break;
+            case 3: boss_forgeron  (g, e, dt, phase, dx, dy, dist); break;
+            case 4: boss_avatar    (g, e, dt, phase, dx, dy, dist); break;
+            default: break;
+        }
     }
     /* contact dmg de base, scale avec la phase pour eviter l etreinte
      * impossible en phase 2. */

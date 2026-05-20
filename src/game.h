@@ -47,7 +47,7 @@ typedef struct GfxCtx GfxCtx;
 #define INV_CURSOR_TALISMAN_BASE  32
 #define INV_CURSOR_MAX            38
 
-#define MAX_FLOORS 10
+#define MAX_FLOORS 11
 
 /* Caps par run (anti-deadlock + force des decisions). */
 #define RUN_TALISMAN_MAX  7
@@ -254,6 +254,8 @@ typedef struct {
     int   split_left;
     bool  is_boss;
     float telegraph_t;
+    bool  is_archmage;       /* boss final etage 11 */
+    float arch_grow;         /* 0..1 echelle de croissance (Ganondorf-like) */
     /* u_expose_weakness : timer 5s pose par un crit du joueur. Pendant
      * ce temps, une attaque elementaire SUPER-effective vs e->element
      * inflige x1.5 degats. */
@@ -739,6 +741,18 @@ typedef struct {
     float         boss_intro_t;
     float         boss_death_t;   /* >0 = animation de mort en cours */
     char          boss_name[32];
+    /* Archimage (Boss final etage 11) : ordre aleatoire des elements,
+     * 3 phases avec speech, stase pendant summon des bosses reserves. */
+    int           arch_element_order[10];   /* permutation 0..9 des elements */
+    int           arch_phase;               /* 0..2 (3 phases) */
+    float         arch_phase_timer;         /* speech / transition timer */
+    float         arch_stasis_t;            /* > 0 = invuln + regen, summon actif */
+    float         arch_attack_cd;
+    int           arch_attack_pattern;      /* cycle d'attaques */
+    int           arch_summoned[3];         /* enemy idx des 3 bosses summon */
+    char          arch_speech[128];
+    float         arch_speech_t;
+    bool          arch_intro_done;
 
     /* options / settings */
     Settings      settings;
