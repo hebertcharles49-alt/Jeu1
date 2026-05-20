@@ -483,6 +483,19 @@ bool inventory_equip(Game *g, int inv_index) {
     return false;
 }
 
+/* Element dominant d'un item : utilise par le rendu (player_3d /
+ * paperdoll / drops) pour teinter les pieces avec une affinite. */
+Element item_element(const Item *it) {
+    if (!it || !it->occupied) return EL_NONE;
+    if (it->kind == ITEM_KIND_ELEMENT) {
+        Element e = (Element)it->base_kind;
+        if (e > EL_NONE && e < EL_COUNT) return e;
+        return EL_NONE;
+    }
+    if (it->is_unique) return unique_def_element(it->unique_id);
+    return EL_NONE;
+}
+
 int item_sell_value(const Item *it) {
     if (!it || !it->occupied) return 0;
     /* base : 6 coins, x mul de rarete, +25% pour uniques. */

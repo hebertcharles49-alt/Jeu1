@@ -127,13 +127,17 @@ static void render_item_slot(Game *g, int sx, int sy, int sz, Item *it,
     }
 }
 
-/* helper : tint un slot d'equipement par sa couleur de rarete (ou unique).
- * Si non-equipe, retourne la couleur de defaut. */
+/* helper : tint un slot d'equipement par couleur d'element si l'item
+ * en a une, sinon par couleur de rarete (ou orange unique). */
 static uint32_t equip_tint_color(Item *it, uint32_t default_col) {
     if (!it || !it->occupied) return default_col;
     uint32_t cc = it->is_unique ? 0xFF8030FF : rarity_color(it->rarity);
+    /* priorite element si l'item en a un */
+    Element el = item_element(it);
+    if (el > EL_NONE && el < EL_COUNT) cc = element_color(el);
     /* blend 60% item + 40% defaut pour rester lisible */
     float mix = (it->rarity >= R_LEGENDARY || it->is_unique) ? 0.75f : 0.60f;
+    if (el > EL_NONE) mix = 0.80f;       /* element : tres marque */
     int dr = (default_col >> 24) & 0xFF;
     int dg = (default_col >> 16) & 0xFF;
     int db = (default_col >> 8) & 0xFF;
@@ -247,26 +251,47 @@ static void draw_paperdoll_figure(Game *g, int cx, int cy) {
         }
     }
 
-    /* aura legendaire si >= 1 piece R_LEGENDARY / unique */
+    /* aura : priorite a un element equipe, sinon legendaire / unique */
     int legcount = 0;
     Item *all_eq[6] = { &p->equipped[0], &p->equipped[1], &p->equipped[2],
                         &p->equipped[3], &p->equipped[4], &p->equipped[5] };
+    Element elem_seen[6]; int n_el = 0;
     for (int i = 0; i < 6; i++) {
-        if (all_eq[i]->occupied &&
-            (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique)) legcount++;
+        if (!all_eq[i]->occupied) continue;
+        if (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique) legcount++;
+        Element el = item_element(all_eq[i]);
+        if (el > EL_NONE && el < EL_COUNT) {
+            bool dup = false;
+            for (int j = 0; j < n_el; j++) if (elem_seen[j] == el) { dup = true; break; }
+            if (!dup) elem_seen[n_el++] = el;
+        }
     }
-    if (legcount > 0) {
+    if (n_el > 0 || legcount > 0) {
         float pulse = 0.5f + 0.5f * sinf(g->time * 3.f);
         uint8_t a = (uint8_t)(60 + pulse * 40);
-        uint32_t aura = legcount >= 3 ? 0xFF8030 : 0xFFD040;
-        aura = (aura << 8) | a;
-        gfx_set_blend(g->renderer, true);
-        /* anneaux concentriques autour du perso */
-        for (int s = 0; s < 4; s++) {
-            int sz = 50 + s * 4;
-            rect_outline(g->renderer, cx - sz/2, cy - sz/2, sz, sz + 12, aura);
+        uint32_t aura;
+        if (n_el > 0) {
+            /* anneau aux couleurs des elements actifs (cycle sur les 4
+             * anneaux si plusieurs elements). */
+            (void)aura;
+            gfx_set_blend(g->renderer, true);
+            for (int s = 0; s < 4; s++) {
+                int sz = 50 + s * 4;
+                uint32_t ac = element_color(elem_seen[s % n_el]);
+                ac = (ac & 0xFFFFFF00u) | a;
+                rect_outline(g->renderer, cx - sz/2, cy - sz/2, sz, sz + 12, ac);
+            }
+            gfx_set_blend(g->renderer, false);
+        } else {
+            aura = legcount >= 3 ? 0xFF8030 : 0xFFD040;
+            aura = (aura << 8) | a;
+            gfx_set_blend(g->renderer, true);
+            for (int s = 0; s < 4; s++) {
+                int sz = 50 + s * 4;
+                rect_outline(g->renderer, cx - sz/2, cy - sz/2, sz, sz + 12, aura);
+            }
+            gfx_set_blend(g->renderer, false);
         }
-        gfx_set_blend(g->renderer, false);
     }
 }
 

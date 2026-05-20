@@ -275,10 +275,15 @@ static void draw_player_3d(Game *g) {
     #define EQUIP_TINT(it, rOut, gOut, bOut) do { \
         if ((it)->occupied) { \
             uint32_t cc = (it)->is_unique ? 0xFF8030FF : rarity_color((it)->rarity); \
+            /* si l'item a un element dominant, on prend sa couleur a la \
+             * place du rarity-color : l'esthetique elementaire prime. */ \
+            Element el_ = item_element(it); \
+            if (el_ > EL_NONE && el_ < EL_COUNT) cc = element_color(el_); \
             float tr = ((cc>>24)&0xFF)/255.f; \
             float tg = ((cc>>16)&0xFF)/255.f; \
             float tb = ((cc>>8)&0xFF)/255.f; \
             float mx = ((it)->rarity >= R_LEGENDARY || (it)->is_unique) ? 0.60f : 0.40f; \
+            if (el_ > EL_NONE) mx = 0.70f;       /* element : tint plus marque */ \
             rOut = rOut * (1.f - mx) + tr * mx; \
             gOut = gOut * (1.f - mx) + tg * mx; \
             bOut = bOut * (1.f - mx) + tb * mx; \
@@ -379,15 +384,36 @@ static void draw_player_3d(Game *g) {
                      v3_make(0.30f, 0.06f, 0.06f),
                      0.10f, 0.08f, 0.12f);
     }
-    /* legendaire / unique : aura tres legere au-dessus du casque */
+    /* Aura particles :
+     *   - elements equipes : sparks de la couleur d'element qui montent
+     *     (priorite haute, plus dense)
+     *   - legendaire / unique : aura gold/orange (fallback)
+     */
     {
-        int legcount = 0;
         Item *all_eq[6] = { eq_helm, eq_chest, eq_legs, eq_boots, eq_belt, eq_gloves };
+        int legcount = 0;
+        Element elem_seen[6]; int n_el = 0;
         for (int i = 0; i < 6; i++) {
-            if (all_eq[i]->occupied &&
-                (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique)) legcount++;
+            if (!all_eq[i]->occupied) continue;
+            if (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique) legcount++;
+            Element el = item_element(all_eq[i]);
+            if (el > EL_NONE && el < EL_COUNT) {
+                /* eviter doublons */
+                bool dup = false;
+                for (int j = 0; j < n_el; j++) if (elem_seen[j] == el) { dup = true; break; }
+                if (!dup) elem_seen[n_el++] = el;
+            }
         }
-        if (legcount > 0 && (rand() % 100) < 8) {
+        /* sparks elementaires (priorite) */
+        if (n_el > 0 && (rand() % 100) < 18) {
+            Element pick = elem_seen[rand() % n_el];
+            uint32_t col = element_color(pick);
+            particle_spawn_kind(g, p->x + (rand()%18)-9, p->y - 14,
+                                (rand()%8)-4, -14.f,
+                                0.65f, col, 1.5f, 0);
+        }
+        /* fallback gold/orange si legendaire sans element */
+        if (n_el == 0 && legcount > 0 && (rand() % 100) < 8) {
             uint32_t col = legcount >= 3 ? 0xFF8030FF : 0xFFD040FF;
             particle_spawn_kind(g, p->x + (rand()%14)-7, p->y - 18,
                                 (rand()%10)-5, -12.f,
@@ -1591,7 +1617,12 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
         uint32_t bcol = 0xCCCCCCFF;
         if (pk->kind == PU_ITEM) {
             rar = pk->item.rarity;
-            bcol = pk->item.is_unique ? 0xFF8030FF : rarity_color(rar);
+            /* priorite a l'element s'il en a un, sinon orange unique
+             * sinon rarity color */
+            Element pel = item_element(&pk->item);
+            if (pel > EL_NONE && pel < EL_COUNT) bcol = element_color(pel);
+            else if (pk->item.is_unique) bcol = 0xFF8030FF;
+            else bcol = rarity_color(rar);
         } else if (pk->kind == PU_WEAPON) {
             int rb = (pk->value >> 8) & 0xFF;
             if (rb >= 0 && rb < R_COUNT) rar = (Rarity)rb;
@@ -1819,13 +1850,13 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
             return;
         }
         case PU_ITEM: {
-            /* socle / pedestal sous l'item, hauteur graduee par rarete. Donne
-             * un repere visuel "loot drop" facile a repérer. Les uniques ont
-             * un socle plus haut + une teinte chaude (orange). Le slot est
-             * rendu en forme reconnaissable (casque, plastron, etc.) au-dessus
-             * du socle pour lisibilite. */
-            uint32_t c = pk->item.is_unique ? 0xFF8030FF
-                                            : rarity_color(pk->item.rarity);
+            /* socle / pedestal sous l'item. Couleur priorite : element
+             * dominant > unique orange > rarity color. */
+            Element pel = item_element(&pk->item);
+            uint32_t c;
+            if (pel > EL_NONE && pel < EL_COUNT) c = element_color(pel);
+            else if (pk->item.is_unique) c = 0xFF8030FF;
+            else c = rarity_color(pk->item.rarity);
             float rr = ((c>>24)&0xFF)/255.f;
             float gg2 = ((c>>16)&0xFF)/255.f;
             float bb = ((c>>8)&0xFF)/255.f;

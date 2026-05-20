@@ -129,6 +129,14 @@ EquipSlot unique_def_slot(int id) {
     return UNIQUE_DEFS[id].slot;
 }
 
+/* Element dominant d'un unique : utilise par le rendu pour teinter
+ * les pieces equipees avec une affinite elementaire. EL_NONE si
+ * l'unique n'a pas de d_aff_el. */
+Element unique_def_element(int id) {
+    if (id < 0 || id >= N_UNIQUES) return EL_NONE;
+    return UNIQUE_DEFS[id].d_aff_el;
+}
+
 Item unique_make(int id) {
     Item it = {0};
     if (id < 0 || id >= N_UNIQUES) return it;

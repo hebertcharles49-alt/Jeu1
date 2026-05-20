@@ -1109,6 +1109,7 @@ const char *archetype_name    (int base_kind);
 bool        inventory_destroy(Game *g, int inv_index);
 /* valeur de revente en coins (rarity-based). */
 int         item_sell_value(const Item *it);
+Element     item_element(const Item *it);    /* element dominant ou EL_NONE */
 
 /* ---- UNIQUES ----
  * Items pre-definis avec un effet de gameplay specifique. Drop tres rare
@@ -1117,6 +1118,7 @@ int         unique_def_count(void);          /* nb d'entrees dans UNIQUE_DEFS */
 const char *unique_def_name(int id);
 const char *unique_def_desc(int id);
 EquipSlot   unique_def_slot(int id);
+Element     unique_def_element(int id);    /* EL_NONE si pas d'aff elem */
 /* construit un Item complet (occupied, slot, rarity=R_LEGENDARY, name,
  * is_unique=true, unique_id=id, affixes vides). Pour la table de loot. */
 Item        unique_make(int id);
