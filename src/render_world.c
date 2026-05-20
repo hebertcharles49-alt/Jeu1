@@ -1499,11 +1499,162 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
         case PU_SOUL:    r=0.55f; gg=0.95f; b=0.55f;  sz=0.40f; break;
         case PU_COIN:    r=1.0f;  gg=0.85f; b=0.25f;  sz=0.32f; break;
         case PU_ELEMENT: {
+            /* Orbe magique : noyau brillant + halo plus large + 3
+             * sparks qui orbitent. Beaucoup plus lisible qu'un simple
+             * cube en couleur d element. */
             uint32_t c = element_color((Element)pk->value);
-            r=((c>>24)&0xFF)/255.f; gg=((c>>16)&0xFF)/255.f; b=((c>>8)&0xFF)/255.f;
-            sz=0.50f; break;
+            float er = ((c>>24)&0xFF)/255.f;
+            float eg = ((c>>16)&0xFF)/255.f;
+            float eb = ((c>>8)&0xFF)/255.f;
+            float pulse = 0.7f + 0.3f * sinf(g->time * 6.f + pk->hover_t);
+            /* socle assorti */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.45f, 0.05f, 0.45f),
+                         er * 0.6f, eg * 0.6f, eb * 0.6f);
+            /* halo large translucide */
+            gfx_box_draw(g->renderer, pos,
+                         v3_make(0.55f, 0.55f, 0.55f),
+                         er * 0.45f, eg * 0.45f, eb * 0.45f);
+            /* noyau brillant pulse */
+            gfx_box_draw(g->renderer, pos,
+                         v3_make(0.32f * pulse, 0.32f * pulse, 0.32f * pulse),
+                         er, eg, eb);
+            /* highlight blanc au centre */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x - 0.04f, pos.y + 0.06f, pos.z - 0.04f),
+                         v3_make(0.08f, 0.08f, 0.08f),
+                         1.f, 1.f, 1.f);
+            /* 3 sparks orbitants */
+            for (int s = 0; s < 3; s++) {
+                float a = g->time * 2.f + s * 2.094f + pk->hover_t;
+                gfx_box_draw(g->renderer,
+                    v3_make(pos.x + cosf(a) * 0.40f,
+                            pos.y + sinf(a * 0.7f) * 0.10f,
+                            pos.z + sinf(a) * 0.40f),
+                    v3_make(0.06f, 0.06f, 0.06f),
+                    er, eg, eb);
+            }
+            /* pillar pour reperer dans le noir */
+            float pulse2 = 0.5f + 0.5f * sinf(g->time * 4.f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.30f, pos.z),
+                         v3_make(0.04f, 0.55f * pulse2, 0.04f),
+                         er, eg, eb);
+            return;
         }
-        case PU_WEAPON:  r=0.92f; gg=0.92f; b=1.0f;   sz=0.55f; break;
+        case PU_WEAPON: {
+            /* Forme mini-arme reconnaissable, couleur de rarete. */
+            int wk = pk->value & 0xFF;
+            int rar = (pk->value >> 8) & 0xFF;
+            uint32_t c = (rar >= 0 && rar < R_COUNT)
+                            ? rarity_color((Rarity)rar) : 0xC0C0C0FF;
+            float rr = ((c>>24)&0xFF)/255.f;
+            float gg2 = ((c>>16)&0xFF)/255.f;
+            float bb = ((c>>8)&0xFF)/255.f;
+            /* socle metallique sombre */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
+                         v3_make(0.55f, 0.08f, 0.55f),
+                         0.25f, 0.25f, 0.30f);
+            /* anneau rarete sous la lame */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.10f, pos.z),
+                         v3_make(0.42f, 0.04f, 0.42f),
+                         rr * 0.7f, gg2 * 0.7f, bb * 0.7f);
+            /* arme par kind */
+            float ty = 0.55f + hover * 0.3f;
+            switch (wk) {
+                case W_SWORD: {
+                    /* lame verticale + garde + grip */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty + 0.18f, pos.z),
+                                 v3_make(0.08f, 0.45f, 0.08f), 0.9f, 0.9f, 0.95f);
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty - 0.10f, pos.z),
+                                 v3_make(0.35f, 0.07f, 0.10f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty - 0.22f, pos.z),
+                                 v3_make(0.09f, 0.14f, 0.09f), 0.55f, 0.32f, 0.18f);
+                    /* pommeau */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty - 0.32f, pos.z),
+                                 v3_make(0.12f, 0.08f, 0.12f), rr, gg2, bb);
+                    break;
+                }
+                case W_AXE: {
+                    /* manche vertical + tete double */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.07f, 0.60f, 0.07f), 0.55f, 0.30f, 0.18f);
+                    /* tete : deux trapezoides aux cotes */
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x - 0.16f, ty + 0.18f, pos.z),
+                                 v3_make(0.18f, 0.20f, 0.10f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x + 0.16f, ty + 0.18f, pos.z),
+                                 v3_make(0.18f, 0.20f, 0.10f), rr, gg2, bb);
+                    /* axe spike sommet */
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x, ty + 0.32f, pos.z),
+                                 v3_make(0.06f, 0.10f, 0.06f), 0.9f, 0.9f, 0.95f);
+                    break;
+                }
+                case W_BOW: {
+                    /* 2 limbes verticaux courbe + corde diagonale + grip */
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x, ty + 0.22f, pos.z),
+                                 v3_make(0.10f, 0.28f, 0.08f), 0.55f, 0.32f, 0.18f);
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x, ty - 0.22f, pos.z),
+                                 v3_make(0.10f, 0.28f, 0.08f), 0.55f, 0.32f, 0.18f);
+                    /* poignee centrale */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.08f, 0.10f, 0.10f), rr, gg2, bb);
+                    /* corde : 2 petits segments diagonaux derriere */
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x - 0.06f, ty + 0.18f, pos.z),
+                                 v3_make(0.02f, 0.22f, 0.02f), 0.95f, 0.95f, 0.85f);
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x - 0.06f, ty - 0.18f, pos.z),
+                                 v3_make(0.02f, 0.22f, 0.02f), 0.95f, 0.95f, 0.85f);
+                    break;
+                }
+                case W_WAND: {
+                    /* baton long fin + tete brillante */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.05f, 0.55f, 0.05f), 0.40f, 0.22f, 0.10f);
+                    /* pommeau cristal */
+                    float pulse2 = 0.6f + 0.4f * sinf(g->time * 5.f);
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x, ty + 0.32f, pos.z),
+                                 v3_make(0.16f * pulse2, 0.16f * pulse2, 0.16f * pulse2),
+                                 rr, gg2, bb);
+                    gfx_box_draw(g->renderer,
+                                 v3_make(pos.x, ty + 0.32f, pos.z),
+                                 v3_make(0.06f, 0.06f, 0.06f),
+                                 1.f, 1.f, 1.f);
+                    break;
+                }
+                case W_SHIELD: {
+                    /* disque epais + clous + emblem rarete */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.45f, 0.55f, 0.10f), 0.55f, 0.42f, 0.25f);
+                    /* bordure metallique plus claire */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.50f, 0.10f, 0.12f), 0.78f, 0.72f, 0.55f);
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty - 0.20f, pos.z),
+                                 v3_make(0.10f, 0.20f, 0.10f), 0.78f, 0.72f, 0.55f);
+                    /* boss centre rarete */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z + 0.05f),
+                                 v3_make(0.16f, 0.16f, 0.06f), rr, gg2, bb);
+                    break;
+                }
+                default: {
+                    /* fallback : cube + barre */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.35f, 0.35f, 0.35f), rr, gg2, bb);
+                    break;
+                }
+            }
+            /* pillar de lumiere */
+            float pulse3 = 0.5f + 0.5f * sinf(g->time * 4.f + pk->hover_t * 2.f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.30f, pos.z),
+                         v3_make(0.04f, 0.45f * pulse3, 0.04f),
+                         rr, gg2, bb);
+            return;
+        }
         case PU_CHEST:   r=0.55f; gg=0.34f; b=0.20f;  sz=0.70f; draw_pillar = false; break;
         case PU_PORTAL: {
             /* gros disque + halo */
@@ -1532,7 +1683,9 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
         case PU_ITEM: {
             /* socle / pedestal sous l'item, hauteur graduee par rarete. Donne
              * un repere visuel "loot drop" facile a repérer. Les uniques ont
-             * un socle plus haut + une teinte chaude (orange). */
+             * un socle plus haut + une teinte chaude (orange). Le slot est
+             * rendu en forme reconnaissable (casque, plastron, etc.) au-dessus
+             * du socle pour lisibilite. */
             uint32_t c = pk->item.is_unique ? 0xFF8030FF
                                             : rarity_color(pk->item.rarity);
             float rr = ((c>>24)&0xFF)/255.f;
@@ -1542,22 +1695,96 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
             gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
                          v3_make(0.55f, 0.08f, 0.55f),
                          0.20f, 0.18f, 0.22f);
-            /* anneau coloré dessus pour signaler la rarete */
+            /* anneau colore dessus pour signaler la rarete */
             float ph = 0.10f + 0.05f * (int)pk->item.rarity;
             gfx_box_draw(g->renderer, v3_make(pos.x, 0.10f, pos.z),
                          v3_make(0.42f, ph, 0.42f),
                          rr * 0.5f, gg2 * 0.5f, bb * 0.5f);
-            /* item lui-meme (cube flottant) */
-            r = rr; gg = gg2; b = bb; sz = 0.50f;
+            /* forme de slot reconnaissable au-dessus */
+            float ty = 0.55f + hover * 0.3f;
+            switch (pk->item.slot) {
+                case SLOT_HELM:
+                    /* casque : dome arrondi avec visiere */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.40f, 0.20f, 0.40f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty + 0.15f, pos.z),
+                                 v3_make(0.30f, 0.10f, 0.30f), rr, gg2, bb);
+                    /* visiere sombre */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty - 0.04f, pos.z + 0.18f),
+                                 v3_make(0.28f, 0.06f, 0.04f), 0.10f, 0.08f, 0.12f);
+                    break;
+                case SLOT_CHEST:
+                    /* plastron : torse rectangulaire epais avec col */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.45f, 0.45f, 0.20f), rr, gg2, bb);
+                    /* col / epaulettes */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.20f, ty + 0.16f, pos.z),
+                                 v3_make(0.14f, 0.10f, 0.18f), rr * 1.1f, gg2 * 1.1f, bb * 1.1f);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.20f, ty + 0.16f, pos.z),
+                                 v3_make(0.14f, 0.10f, 0.18f), rr * 1.1f, gg2 * 1.1f, bb * 1.1f);
+                    break;
+                case SLOT_LEGS:
+                    /* jambieres : 2 pieces verticales rapprochees */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.10f, ty, pos.z),
+                                 v3_make(0.15f, 0.45f, 0.18f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.10f, ty, pos.z),
+                                 v3_make(0.15f, 0.45f, 0.18f), rr, gg2, bb);
+                    /* ceinture en haut */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty + 0.20f, pos.z),
+                                 v3_make(0.36f, 0.06f, 0.20f), rr * 0.8f, gg2 * 0.8f, bb * 0.8f);
+                    break;
+                case SLOT_BOOTS:
+                    /* bottes : 2 pieces basses + semelle elargie */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.12f, ty, pos.z),
+                                 v3_make(0.18f, 0.25f, 0.18f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.12f, ty, pos.z),
+                                 v3_make(0.18f, 0.25f, 0.18f), rr, gg2, bb);
+                    /* semelles plus larges */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.12f, ty - 0.10f, pos.z + 0.04f),
+                                 v3_make(0.22f, 0.05f, 0.26f), 0.20f, 0.16f, 0.12f);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.12f, ty - 0.10f, pos.z + 0.04f),
+                                 v3_make(0.22f, 0.05f, 0.26f), 0.20f, 0.16f, 0.12f);
+                    break;
+                case SLOT_BELT:
+                    /* ceinture : bande horizontale large avec boucle */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.50f, 0.16f, 0.20f), rr, gg2, bb);
+                    /* boucle dorée centre */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z + 0.08f),
+                                 v3_make(0.16f, 0.18f, 0.06f), 1.0f, 0.78f, 0.30f);
+                    break;
+                case SLOT_GLOVES:
+                    /* gants : 2 petits cubes a hauteur de poing */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.16f, ty, pos.z),
+                                 v3_make(0.20f, 0.25f, 0.18f), rr, gg2, bb);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.16f, ty, pos.z),
+                                 v3_make(0.20f, 0.25f, 0.18f), rr, gg2, bb);
+                    /* poignets */
+                    gfx_box_draw(g->renderer, v3_make(pos.x - 0.16f, ty - 0.12f, pos.z),
+                                 v3_make(0.16f, 0.06f, 0.16f), rr * 0.7f, gg2 * 0.7f, bb * 0.7f);
+                    gfx_box_draw(g->renderer, v3_make(pos.x + 0.16f, ty - 0.12f, pos.z),
+                                 v3_make(0.16f, 0.06f, 0.16f), rr * 0.7f, gg2 * 0.7f, bb * 0.7f);
+                    break;
+                default:
+                    /* fallback cube */
+                    gfx_box_draw(g->renderer, v3_make(pos.x, ty, pos.z),
+                                 v3_make(0.40f, 0.40f, 0.40f), rr, gg2, bb);
+                    break;
+            }
             /* uniques : aura clignotante au-dessus */
             if (pk->item.is_unique) {
                 float pulse = 0.5f + 0.5f * sinf(g->time * 4.f);
                 gfx_box_draw(g->renderer,
-                             v3_make(pos.x, pos.y + 0.6f, pos.z),
+                             v3_make(pos.x, ty + 0.45f, pos.z),
                              v3_make(0.20f, 0.20f, 0.20f),
                              rr * pulse, gg2 * pulse, bb * pulse);
             }
-            break;
+            /* pillar de lumiere */
+            float pulse3 = 0.5f + 0.5f * sinf(g->time * 4.f + pk->hover_t * 2.f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.30f, pos.z),
+                         v3_make(0.04f, 0.55f * pulse3, 0.04f),
+                         rr, gg2, bb);
+            return;
         }
         case PU_FOOD: {
             /* poulet : corps brun grossi + os blanc visible */
