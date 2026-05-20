@@ -132,6 +132,11 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         e->expose_t = 5.0f;
     }
     dmg *= eff;
+    /* modificateur trinket par categorie d'ennemi (additif a 1.0) */
+    EnemyCategory cat = e->is_boss ? ENEMY_CAT_BOSS : enemy_category((EnemyKind)e->kind);
+    if (cat >= 0 && cat < ENEMY_CAT_COUNT) {
+        dmg *= 1.f + g->player.dmg_vs_cat[cat];
+    }
     e->hp -= dmg;
     e->hit_flash = (eff >= 2.f) ? 0.18f : 0.10f;
     if (el == EL_FIRE)      { e->fire_dot = 2.f; e->fire_dps = 4.f + dmg * 0.2f; }

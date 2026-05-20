@@ -32,16 +32,20 @@ typedef struct GfxCtx GfxCtx;
 #define WEAPON_SLOTS 2
 #define MAX_ELEMENTS_PER_WEAPON 3
 
-#define INVENTORY_SLOTS 12
+#define INVENTORY_SLOTS 12          /* slots inventaire de base */
+#define INVENTORY_MAX_SLOTS 24      /* hardcap avec bonus de trinkets */
 #define EQUIP_SLOTS 6     /* helm, chest, legs, boots, belt, gloves */
 
 /* mapping inv_cursor : 0-11 sac, 12-17 equipement, 18-19 armes,
  * 20-22 talismans arme 0, 23-25 talismans arme 1. */
+/* mapping cursor : bag 0..(INVENTORY_MAX_SLOTS-1), puis equip / armes /
+ * talismans. INV_CURSOR_EQUIP_BASE doit etre >= INVENTORY_MAX_SLOTS pour
+ * que la capacite dynamique du sac n'empiete pas sur les slots equip. */
 #define INV_CURSOR_BAG_BASE       0
-#define INV_CURSOR_EQUIP_BASE     12
-#define INV_CURSOR_WEAPON_BASE    18
-#define INV_CURSOR_TALISMAN_BASE  20
-#define INV_CURSOR_MAX            26
+#define INV_CURSOR_EQUIP_BASE     24
+#define INV_CURSOR_WEAPON_BASE    30
+#define INV_CURSOR_TALISMAN_BASE  32
+#define INV_CURSOR_MAX            38
 
 #define MAX_FLOORS 10
 
@@ -211,6 +215,19 @@ typedef enum {
     EK_BOSS,
     EK_COUNT
 } EnemyKind;
+
+/* Categories d'ennemis pour les trinkets specifiques. Inspires des
+ * archetypes Diablo / Isaac. Chaque EnemyKind appartient a une categorie. */
+typedef enum {
+    ENEMY_CAT_BEAST = 0,    /* SLIME, RAT, CHARGER -- creatures animales */
+    ENEMY_CAT_DEMON,        /* DEMON, BUFFER (totem corrompu) */
+    ENEMY_CAT_UNDEAD,       /* ZOMBIE, GHOST */
+    ENEMY_CAT_HUMAN,        /* BANDIT, HEALER, MAGE, NECROMANCER */
+    ENEMY_CAT_BOSS,         /* tous les boss */
+    ENEMY_CAT_COUNT
+} EnemyCategory;
+EnemyCategory enemy_category(EnemyKind k);
+const char   *enemy_category_name(EnemyCategory c);
 
 typedef struct {
     bool  alive;
@@ -390,7 +407,10 @@ typedef struct {
     float crit_dmg;           /* multiplicateur sur coup critique (default 1.5) */
     float range_mul;          /* portee armes */
     float dodge;              /* 0..1 chance d'esquiver */
-    float shop_discount;      /* 0..1 reduction de prix au shop */
+    float shop_discount;      /* 0..1 reduction de prix au shop (cap 100% = gratuit) */
+    float reroll_discount;    /* 0..1 reduction specifique au reroll */
+    int   inv_capacity_bonus; /* +N slots au dessus de INVENTORY_SLOTS de base */
+    float dmg_vs_cat[ENEMY_CAT_COUNT]; /* multiplicateur dmg par categorie ennemi */
     /* affinites elementaires : multiplicateur de dmg par element (+/-) */
     float elem_affinity[EL_COUNT];
 
@@ -433,7 +453,7 @@ typedef struct {
     int   trail_count;            /* nb d'entrees valides (sature a 8) */
 
     /* inventaire */
-    Item  inventory[INVENTORY_SLOTS];
+    Item  inventory[INVENTORY_MAX_SLOTS];
     Item  equipped[EQUIP_SLOTS];
 
     /* shop items achetes durant la course (effets cumulatifs) */
@@ -1048,6 +1068,9 @@ typedef struct {
     float crit_chance, crit_dmg;
     float range_mul, dodge;
     float shop_discount;     /* 0..1 cumul des reductions de prix */
+    float reroll_discount;   /* 0..1 cumul des reductions de reroll */
+    int   inv_capacity_bonus; /* +N slots */
+    float dmg_vs_cat[ENEMY_CAT_COUNT];
     float aff[EL_COUNT];
     /* flags build-defining propages des uniques. Identiques aux champs
      * Player.u_* ; recopies a la fin du recompute. */

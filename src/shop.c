@@ -32,6 +32,9 @@ typedef struct {
     float d_aff_val2;
     int   shrine_only;     /* 1 = ne peut etre obtenu que via PU_SHRINE */
     float d_shop_discount; /* +X% reduction sur les prix du shop (0.10 = -10%) */
+    float d_reroll_discount;/* +X% reduction specifique au reroll */
+    int   d_inv_bonus;     /* +N slots inventaire */
+    float d_dmg_vs_cat[ENEMY_CAT_COUNT]; /* +X% dmg par categorie ennemi */
 } Recipe;
 
 static const Recipe RECIPES[] = {
@@ -117,7 +120,35 @@ static const Recipe RECIPES[] = {
     { "Bourse du marchand", "-15% prix shop",                    16, R_MAGIC,
       0,0,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0, 0, 0.15f },
     { "Couronne du brocanteur", "-30% prix shop, +5 dmg plats", 35, R_EPIC,
-      0,0,0, 0,0,0, 5.f,0,0, 0,0, 0,0,  0,0, 0,0, 0,0, 0, 0.30f },
+      0,0,0, 0,0,0, 5.f,0,0, 0,0, 0,0,  0,0, 0,0, 0,0, 0, 0.30f, 0.f, 0, {0} },
+
+    /* ---- TRINKETS REROLL (sequence Fibonacci en plein vol) ---- */
+    { "Des pipes",          "-25% prix reroll",                  12, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.25f, 0, {0} },
+    { "Boule de cristal",   "-50% prix reroll",                  24, R_RARE,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.50f, 0, {0} },
+    { "Cle des secrets",    "Reroll gratuit, +10g a l'achat",   40, R_EPIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 1.00f, 0, {0} },
+
+    /* ---- TRINKETS INVENTAIRE ---- */
+    { "Sac robuste",        "+2 slots inventaire",               14, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 2, {0} },
+    { "Sacoche du voleur",  "+4 slots inventaire",               22, R_RARE,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 4, {0} },
+    { "Bourse sans-fond",   "+8 slots inventaire",               40, R_EPIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 8, {0} },
+
+    /* ---- TRINKETS ANTI-CATEGORIE (par categorie d'ennemi) ---- */
+    { "Os de hyene",        "+30% dmg vs Betes",                 12, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0.30f, 0, 0, 0, 0} },
+    { "Sceau du Pacte",     "+30% dmg vs Demons",                14, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0.30f, 0, 0, 0} },
+    { "Crucifix",           "+30% dmg vs Mort-vivants",          14, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0.30f, 0, 0} },
+    { "Dague humaine",      "+30% dmg vs Humains",               12, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0.30f, 0} },
+    { "Glaive du chasseur", "+50% dmg vs Boss",                  30, R_EPIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0, 0.50f} },
 
     /* ---- EPIQUE / LEGENDAIRE (30+g) ---- */
     { "Coeur de geant",     "+40 PV max, -10% atk speed",        35, R_EPIC,
@@ -197,6 +228,10 @@ void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
     sb->range_mul   += r->d_range_mul;
     sb->dodge       += r->d_dodge;
     sb->shop_discount += r->d_shop_discount;
+    sb->reroll_discount += r->d_reroll_discount;
+    sb->inv_capacity_bonus += r->d_inv_bonus;
+    for (int ci = 0; ci < ENEMY_CAT_COUNT; ci++)
+        sb->dmg_vs_cat[ci] += r->d_dmg_vs_cat[ci];
     if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) sb->aff[r->d_aff_el]  += r->d_aff_val;
     if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) sb->aff[r->d_aff_el2] += r->d_aff_val2;
 }
@@ -235,17 +270,20 @@ void shop_generate(Game *g) {
         ShopItem *si = &g->shop_items[i];
         memset(si, 0, sizeof(*si));
         si->recipe_id = pick_recipe_for_floor(g->floor_index);
-        /* cost ajuste selon etage, puis reduction shop_discount du joueur */
+        /* cost ajuste selon etage, puis reduction shop_discount du joueur.
+         * Si discount >= 100% le cout passe a 0 (shop gratuit). */
         int base_cost = shop_recipe_cost(si->recipe_id);
         int raw = base_cost + g->floor_index * 2;
         si->cost = (int)(raw * (1.f - g->player.shop_discount));
-        if (si->cost < 1) si->cost = 1;
+        if (si->cost < 0) si->cost = 0;
     }
     g->shop_cursor = 0;
     g->shop_reroll_idx = 0;
     int rc = shop_reroll_cost_at(0);
-    rc = (int)(rc * (1.f - g->player.shop_discount));
-    if (rc < 1) rc = 1;
+    float disc = g->player.shop_discount + g->player.reroll_discount;
+    if (disc > 1.f) disc = 1.f;
+    rc = (int)(rc * (1.f - disc));
+    if (rc < 0) rc = 0;
     g->shop_reroll_cost = rc;
 }
 

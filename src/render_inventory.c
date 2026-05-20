@@ -396,12 +396,18 @@ void render_inventory(Game *g) {
                               INV_CURSOR_WEAPON_BASE + 1,
                               INV_CURSOR_TALISMAN_BASE + 3);
 
-    /* ---- SAC (droite, 4x3) ---- */
+    /* ---- SAC (droite, 4 cols x N rows, N depend de la capacite) ---- */
+    int inv_cap = INVENTORY_SLOTS + p->inv_capacity_bonus;
+    if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
     int bag_x = 410, bag_y = 22, cell = 26;
-    text_draw(g->renderer, bag_x, bag_y - 9, "SAC (12)", 0xCCCCFFFF);
+    int bag_rows = (inv_cap + 3) / 4;
+    if (bag_rows < 3) bag_rows = 3;
+    char bag_hdr[24];
+    snprintf(bag_hdr, sizeof(bag_hdr), "SAC (%d)", inv_cap);
+    text_draw(g->renderer, bag_x, bag_y - 9, bag_hdr, 0xCCCCFFFF);
     int fa = -1, fb = -1, fc = -1;
     bool has_auto_fuse = inventory_find_fusion_group(g, &fa, &fb, &fc);
-    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+    for (int i = 0; i < inv_cap; i++) {
         int row = i / 4, col = i % 4;
         int sx = bag_x + col * cell;
         int sy = bag_y + row * cell;
@@ -415,7 +421,7 @@ void render_inventory(Game *g) {
     }
 
     /* ---- DETAILS PANEL (sous le sac) ---- */
-    int dpx = bag_x, dpy = bag_y + 3 * cell + 12;
+    int dpx = bag_x, dpy = bag_y + bag_rows * cell + 12;
     int dpw = INTERNAL_W - dpx - 8, dph = INTERNAL_H - dpy - 26;
     fill_rect(g->renderer, dpx, dpy, dpw, dph, 0x14101AFF);
     rect_outline(g->renderer, dpx, dpy, dpw, dph, 0x404048FF);

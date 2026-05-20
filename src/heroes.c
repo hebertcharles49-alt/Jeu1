@@ -72,6 +72,36 @@ const char *enemy_name(EnemyKind k) {
     }
 }
 
+/* Classification thematique pour les trinkets specifiques. */
+EnemyCategory enemy_category(EnemyKind k) {
+    switch (k) {
+        case EK_SLIME:
+        case EK_RAT:
+        case EK_CHARGER:     return ENEMY_CAT_BEAST;
+        case EK_DEMON:
+        case EK_BUFFER:      return ENEMY_CAT_DEMON;
+        case EK_ZOMBIE:
+        case EK_GHOST:       return ENEMY_CAT_UNDEAD;
+        case EK_BANDIT:
+        case EK_HEALER:
+        case EK_MAGE:
+        case EK_NECROMANCER: return ENEMY_CAT_HUMAN;
+        case EK_BOSS:        return ENEMY_CAT_BOSS;
+        default:             return ENEMY_CAT_HUMAN;
+    }
+}
+
+const char *enemy_category_name(EnemyCategory c) {
+    switch (c) {
+        case ENEMY_CAT_BEAST:  return "Bete";
+        case ENEMY_CAT_DEMON:  return "Demon";
+        case ENEMY_CAT_UNDEAD: return "Mort-vivant";
+        case ENEMY_CAT_HUMAN:  return "Humain";
+        case ENEMY_CAT_BOSS:   return "Boss";
+        default:               return "?";
+    }
+}
+
 /* nom thematique du boss en fonction du biome / variant. variant est
  * tire de boss_for_floor (cf entities.c) et correspond 1:1 au biome. */
 const char *boss_title_for_variant(int variant) {

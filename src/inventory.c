@@ -377,7 +377,9 @@ void inventory_pickup(Game *g, Item it) {
     /* codex : on enregistre la decouverte (slot, sub_kind, rarete) */
     meta_item_mark(&g->meta, it.slot, it.base_kind, it.rarity);
     save_write(&g->meta);
-    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+    int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
+    for (int i = 0; i < inv_cap; i++) {
         if (!p->inventory[i].occupied) {
             p->inventory[i] = it;
             sfx_play(g, SFX_PICKUP);
@@ -541,7 +543,9 @@ bool inventory_unequip(Game *g, int equip_index) {
     Item *src = &p->equipped[equip_index];
     if (!src->occupied) return false;
     /* find free slot */
-    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+    int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
+    for (int i = 0; i < inv_cap; i++) {
         if (!p->inventory[i].occupied) {
             p->inventory[i] = *src;
             src->occupied = false;
@@ -560,14 +564,16 @@ bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
      * (base_kind) peut differer -- si les 3 sont du meme archetype,
      * le resultat est garanti dans ce type ; sinon, le type est tire
      * au sort (33% chance par archetype source). */
-    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+    int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
+    for (int i = 0; i < inv_cap; i++) {
         Item *ii = &p->inventory[i];
         if (!ii->occupied || ii->rarity >= R_LEGENDARY) continue;
         if (ii->kind != ITEM_KIND_EQUIP) continue;
         if (ii->is_unique) continue;
         int matches[3] = { i, -1, -1 };
         int cnt = 1;
-        for (int j = i + 1; j < INVENTORY_SLOTS && cnt < 3; j++) {
+        for (int j = i + 1; j < inv_cap && cnt < 3; j++) {
             Item *jj = &p->inventory[j];
             if (!jj->occupied) continue;
             if (jj->kind != ITEM_KIND_EQUIP) continue;
@@ -723,8 +729,12 @@ static void talisman_cycle(Game *g, int weapon_idx, int talisman_idx) {
 /* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
     /* mouse hover/click : on parcourt TOUS les slots possibles (sac,
-     * equipement, armes, talismans) en utilisant le layout commun. */
+     * equipement, armes, talismans) en utilisant le layout commun.
+     * Skip les slots bag au-dessus de la capacite actuelle. */
+    int inv_cap_mouse = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (inv_cap_mouse > INVENTORY_MAX_SLOTS) inv_cap_mouse = INVENTORY_MAX_SLOTS;
     for (int i = 0; i < INV_CURSOR_MAX; i++) {
+        if (i < INV_CURSOR_EQUIP_BASE && i >= inv_cap_mouse) continue;
         int x, y, w, h;
         if (!inv_layout_rect(i, &x, &y, &w, &h)) continue;
         if (mouse_in_rect(g, x, y, w, h)) {
@@ -757,13 +767,19 @@ void update_inventory_input(Game *g) {
     bool kl = (g->keys[SDL_SCANCODE_LEFT]  && !g->keys_prev[SDL_SCANCODE_LEFT]);
     bool kd = (g->keys[SDL_SCANCODE_DOWN]  && !g->keys_prev[SDL_SCANCODE_DOWN]);
     bool ku = (g->keys[SDL_SCANCODE_UP]    && !g->keys_prev[SDL_SCANCODE_UP]);
+    int inv_cap_local = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (inv_cap_local > INVENTORY_MAX_SLOTS) inv_cap_local = INVENTORY_MAX_SLOTS;
+    int n_rows_bag = (inv_cap_local + 3) / 4;
     if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
         int row = g->inv_cursor / 4, col = g->inv_cursor % 4;
         if (kr) col = (col + 1) % 4;
         if (kl) col = (col + 3) % 4;
-        if (kd) { row++; if (row >= 3) { g->inv_cursor = INV_CURSOR_EQUIP_BASE; goto nav_done; } }
+        if (kd) { row++; if (row >= n_rows_bag) { g->inv_cursor = INV_CURSOR_EQUIP_BASE; goto nav_done; } }
         if (ku) { row--; if (row < 0)  { row = 0; } }
-        g->inv_cursor = row * 4 + col;
+        int idx = row * 4 + col;
+        if (idx >= inv_cap_local) idx = inv_cap_local - 1;
+        if (idx < 0) idx = 0;
+        g->inv_cursor = idx;
     } else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
         int e = g->inv_cursor - INV_CURSOR_EQUIP_BASE;
         if (kr) e = (e + 1) % EQUIP_SLOTS;

@@ -254,7 +254,17 @@ void game_recompute_player_stats(Game *g) {
     p->dodge        = sb.dodge;
     p->shop_discount = sb.shop_discount;
     if (p->shop_discount < 0.f) p->shop_discount = 0.f;
-    if (p->shop_discount > 0.80f) p->shop_discount = 0.80f;     /* cap 80% */
+    if (p->shop_discount > 1.f) p->shop_discount = 1.f;     /* cap 100% = shop gratuit */
+    p->reroll_discount = sb.reroll_discount;
+    if (p->reroll_discount < 0.f) p->reroll_discount = 0.f;
+    if (p->reroll_discount > 1.f) p->reroll_discount = 1.f;
+    p->inv_capacity_bonus = sb.inv_capacity_bonus;
+    if (p->inv_capacity_bonus < 0) p->inv_capacity_bonus = 0;
+    int cap_max = INVENTORY_MAX_SLOTS - 12;
+    if (p->inv_capacity_bonus > cap_max) p->inv_capacity_bonus = cap_max;
+    for (int ci = 0; ci < ENEMY_CAT_COUNT; ci++) {
+        p->dmg_vs_cat[ci] = sb.dmg_vs_cat[ci];
+    }
     for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
     /* flags build-defining */
     p->u_explosions_attract = sb.u_explosions_attract;
