@@ -11,8 +11,8 @@
 /* type opaque du contexte graphique GL3.3 (defini dans gfx.h) */
 typedef struct GfxCtx GfxCtx;
 
-#define INTERNAL_W 640
-#define INTERNAL_H 360
+#define INTERNAL_W 800
+#define INTERNAL_H 450
 #define WINDOW_SCALE 2
 #define WINDOW_W (INTERNAL_W * WINDOW_SCALE)
 #define WINDOW_H (INTERNAL_H * WINDOW_SCALE)

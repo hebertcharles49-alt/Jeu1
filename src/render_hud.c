@@ -29,12 +29,15 @@ void render_hud(Game *g) {
 
     text_drawf(g->renderer, 4, 22, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f  ARMURE %.0f",
                g->floor_index, MAX_FLOORS, g->run_kills, g->run_time, p->armor);
-    /* badge biome : nom + couleur de l element du biome. */
+    /* badge biome : nom + couleur de l element du biome. Aligne a droite
+       pour ne pas chevaucher la ligne ETAGE/KILLS sur les longues valeurs. */
     {
         int bi = biome_for_floor(g->floor_index);
         Element be = biome_element(bi);
-        text_drawf(g->renderer, 230, 22, element_color(be),
-                   "* %s (%s)", biome_name(bi), element_name(be));
+        char bbuf[64];
+        snprintf(bbuf, sizeof(bbuf), "* %s (%s)", biome_name(bi), element_name(be));
+        int bw = text_width(bbuf);
+        text_draw(g->renderer, INTERNAL_W - bw - 6, 5, bbuf, element_color(be));
     }
 
     /* subclass */
