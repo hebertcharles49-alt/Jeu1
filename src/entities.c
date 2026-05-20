@@ -270,20 +270,28 @@ int pickup_spawn_item(Game *g, Item it, float x, float y) {
     return -1;
 }
 
+/* hardcap : 30 pixies alive max (MAX_FAIRIES=32 reste comme buffer).
+ * Au-dela on refuse les spawns -- evite les essaims abusifs et garantit
+ * que le scaling de dmg (en update_fairies) reste borne. */
+#define FAIRY_HARDCAP 30
+
 int fairy_spawn(Game *g, float x, float y, Element el) {
+    int alive_n = 0;
+    int free_slot = -1;
     for (int i = 0; i < MAX_FAIRIES; i++) {
-        if (!g->fairies[i].alive) {
-            Fairy *f = &g->fairies[i];
-            memset(f, 0, sizeof(*f));
-            f->alive = true;
-            f->x = x; f->y = y;
-            f->life = 14.f;
-            f->element = el;
-            f->target = -1;
-            return i;
-        }
+        if (g->fairies[i].alive) alive_n++;
+        else if (free_slot < 0) free_slot = i;
     }
-    return -1;
+    if (alive_n >= FAIRY_HARDCAP) return -1;
+    if (free_slot < 0) return -1;
+    Fairy *f = &g->fairies[free_slot];
+    memset(f, 0, sizeof(*f));
+    f->alive = true;
+    f->x = x; f->y = y;
+    f->life = 14.f;
+    f->element = el;
+    f->target = -1;
+    return free_slot;
 }
 
 int dmgnum_spawn(Game *g, float x, float y, int amount, uint32_t color, bool big) {

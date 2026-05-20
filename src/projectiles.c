@@ -144,6 +144,14 @@ void update_projectiles(Game *g) {
 void update_fairies(Game *g) {
     float dt = g->dt;
     Player *p = &g->player;
+    /* Compte des pixies vivantes une fois pour le scaling de dmg. Plus
+     * il y a de pixies, plus elles tapent fort (compense la dilution
+     * d'attention sur les cibles). Capped par FAIRY_HARDCAP=30. */
+    int alive_n = 0;
+    for (int i = 0; i < MAX_FAIRIES; i++) if (g->fairies[i].alive) alive_n++;
+    /* facteur d'essaim : +3% / pixie au-dela de la premiere. A 30 ->
+     * 1 + 29*0.03 = ~1.87x. */
+    float swarm = 1.f + 0.03f * (float)(alive_n > 1 ? alive_n - 1 : 0);
     for (int i = 0; i < MAX_FAIRIES; i++) {
         Fairy *f = &g->fairies[i];
         if (!f->alive) continue;
@@ -168,7 +176,16 @@ void update_fairies(Game *g) {
         f->x += f->vx * dt; f->y += f->vy * dt;
         if (f->target >= 0 && d < 14.f && f->cd <= 0.f) {
             f->cd = 0.45f;
-            world_enemy_damage(g, f->target, 7.f, f->element, dx * 0.2f, dy * 0.2f);
+            /* Scaling de dmg : base * elem_dmg_mul * (1 + aff[element])
+             * * swarm. Investir dans Fae/affinite elementaire booste
+             * directement les pixies. */
+            float base = 7.f;
+            float aff = 0.f;
+            if (f->element > 0 && f->element < EL_COUNT)
+                aff = p->elem_affinity[f->element];
+            float dmg = base * p->elem_dmg_mul * (1.f + aff) * swarm;
+            world_enemy_damage(g, f->target, dmg, f->element,
+                               dx * 0.2f, dy * 0.2f);
             particle_spawn_kind(g, f->x, f->y, 0, 0, 0.4f,
                                 element_color(f->element), 3.f, 0);
         }

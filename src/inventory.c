@@ -543,18 +543,23 @@ bool inventory_unequip(Game *g, int equip_index) {
  * Renvoie true si trouve et remplit out_a/b/c. Sinon false. */
 bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
     Player *p = &g->player;
+    /* Fusion : 3 items de MEME SLOT + MEME RARETE. L'archetype
+     * (base_kind) peut differer -- si les 3 sont du meme archetype,
+     * le resultat est garanti dans ce type ; sinon, le type est tire
+     * au sort (33% chance par archetype source). */
     for (int i = 0; i < INVENTORY_SLOTS; i++) {
         Item *ii = &p->inventory[i];
         if (!ii->occupied || ii->rarity >= R_LEGENDARY) continue;
-        if (ii->kind != ITEM_KIND_EQUIP) continue;     /* fusion : equipement seulement */
+        if (ii->kind != ITEM_KIND_EQUIP) continue;
+        if (ii->is_unique) continue;
         int matches[3] = { i, -1, -1 };
         int cnt = 1;
         for (int j = i + 1; j < INVENTORY_SLOTS && cnt < 3; j++) {
             Item *jj = &p->inventory[j];
             if (!jj->occupied) continue;
             if (jj->kind != ITEM_KIND_EQUIP) continue;
-            if (jj->slot == ii->slot && jj->rarity == ii->rarity &&
-                jj->base_kind == ii->base_kind) {
+            if (jj->is_unique) continue;
+            if (jj->slot == ii->slot && jj->rarity == ii->rarity) {
                 matches[cnt++] = j;
             }
         }
@@ -592,10 +597,27 @@ bool inventory_fuse(Game *g) {
         g->inv_msg_t = 2.f;
         return false;
     }
-    if (!(ia->slot == ib->slot && ib->slot == ic->slot &&
-          ia->rarity == ib->rarity && ib->rarity == ic->rarity &&
-          ia->base_kind == ib->base_kind && ib->base_kind == ic->base_kind)) {
-        snprintf(g->inv_msg, sizeof(g->inv_msg), "Items pas identiques");
+    /* Fusion : meme slot + meme rarete. Archetype peut differer. */
+    if (ia->kind != ITEM_KIND_EQUIP || ib->kind != ITEM_KIND_EQUIP ||
+        ic->kind != ITEM_KIND_EQUIP) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Fusion : equipement seulement");
+        g->inv_msg_t = 2.f;
+        return false;
+    }
+    if (ia->is_unique || ib->is_unique || ic->is_unique) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Impossible de fusionner un unique");
+        g->inv_msg_t = 2.f;
+        return false;
+    }
+    if (!(ia->slot == ib->slot && ib->slot == ic->slot)) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg), "Meme slot requis");
+        g->inv_msg_t = 2.f;
+        return false;
+    }
+    if (!(ia->rarity == ib->rarity && ib->rarity == ic->rarity)) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg), "Meme rarete requise");
         g->inv_msg_t = 2.f;
         return false;
     }
@@ -605,7 +627,18 @@ bool inventory_fuse(Game *g) {
         return false;
     }
     Rarity newr = (Rarity)(ia->rarity + 1);
-    Item fused = item_make(ia->slot, newr, ia->base_kind);
+    /* Selection de l'archetype : si les 3 partagent le meme, on garde.
+     * Sinon, tirage uniforme parmi les 3 (33% chacun). Ainsi fusionner
+     * 3 frenetiques garantit du frenetique ; fusionner front/vamp/agr
+     * donne du front, vamp ou agr avec 1/3 de chance. */
+    int chosen_archetype;
+    int sources[3] = { ia->base_kind, ib->base_kind, ic->base_kind };
+    if (sources[0] == sources[1] && sources[1] == sources[2]) {
+        chosen_archetype = sources[0];
+    } else {
+        chosen_archetype = sources[rand() % 3];
+    }
+    Item fused = item_make(ia->slot, newr, chosen_archetype);
     fused.stat_value *= 1.20f;
     ia->occupied = false;
     ib->occupied = false;
