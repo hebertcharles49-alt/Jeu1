@@ -2,7 +2,9 @@
 
 Roguelite élémentaire en C99 + SDL2 + OpenGL 3.3. Vue 3e personne voxel, donjon procédural sur 10 étages, combat à la souris, combos d'éléments greffés sur les armes, ARPG (loot, raretés, fusion 3-en-1) et méta-progression entre les runs.
 
-> Pour installer et lancer (Windows pas-à-pas) : voir [`Readme.txt`](Readme.txt).
+> **Windows joueur** : télécharge `ElementDungeon-Setup-*.exe` depuis la [page Releases](https://github.com/hebertcharles49-alt/jeu1/releases), double-clic, c'est installé.
+>
+> **Windows / Linux / macOS développeur** : voir [`Readme.txt`](Readme.txt) pour le pas-à-pas (MSYS2 + `make`).
 
 ## Boucle de jeu
 
@@ -90,6 +92,15 @@ make
 ./element_dungeon
 ```
 
-Windows : voir `Readme.txt` (MSYS2 MinGW + `make`).
+Windows développeur : voir `Readme.txt` (MSYS2 MinGW + `make`).
 
 Build flags : `-O2 -Wall -Wextra -std=c99`. Aucun warning.
+
+## Installer Windows (setup.exe)
+
+Pour produire un `ElementDungeon-Setup-1.0.exe` standard (Program Files + raccourci Démarrer + désinstaller) :
+
+- **Local** : depuis Windows avec [Inno Setup 6](https://jrsoftware.org/isdl.php) installé, lance `installer\build_installer.bat`. L'installer arrive dans `installer\out\`.
+- **CI** : pousse un tag `v*.*`, le workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) build le jeu sur GitHub-hosted Windows et publie l'installer en asset de Release. Aucune machine Windows locale requise.
+
+Détails : [`installer/README.md`](installer/README.md).
