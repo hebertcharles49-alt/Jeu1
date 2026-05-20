@@ -127,26 +127,147 @@ static void render_item_slot(Game *g, int sx, int sy, int sz, Item *it,
     }
 }
 
-/* personnage centre sur (cx, cy), reutilise la palette des heros. */
+/* helper : tint un slot d'equipement par sa couleur de rarete (ou unique).
+ * Si non-equipe, retourne la couleur de defaut. */
+static uint32_t equip_tint_color(Item *it, uint32_t default_col) {
+    if (!it || !it->occupied) return default_col;
+    uint32_t cc = it->is_unique ? 0xFF8030FF : rarity_color(it->rarity);
+    /* blend 60% item + 40% defaut pour rester lisible */
+    float mix = (it->rarity >= R_LEGENDARY || it->is_unique) ? 0.75f : 0.60f;
+    int dr = (default_col >> 24) & 0xFF;
+    int dg = (default_col >> 16) & 0xFF;
+    int db = (default_col >> 8) & 0xFF;
+    int tr = (cc >> 24) & 0xFF;
+    int tg = (cc >> 16) & 0xFF;
+    int tb = (cc >> 8) & 0xFF;
+    int r = (int)(dr * (1.f - mix) + tr * mix);
+    int g = (int)(dg * (1.f - mix) + tg * mix);
+    int b = (int)(db * (1.f - mix) + tb * mix);
+    return (uint32_t)((r << 24) | (g << 16) | (b << 8) | 0xFF);
+}
+
+/* personnage centre sur (cx, cy), reflet de la silhouette 3D + tints
+ * d'equipement. */
 static void draw_paperdoll_figure(Game *g, int cx, int cy) {
+    Player *p = &g->player;
     uint32_t cape, tunic;
-    hero_palette(g->player.hero, &cape, &tunic);
-    /* cape */
-    fill_rect(g->renderer, cx - 16, cy - 20, 32, 38, cape);
-    /* tunique */
-    fill_rect(g->renderer, cx - 14, cy - 10, 28, 26, tunic);
-    /* tete */
+    hero_palette(p->hero, &cape, &tunic);
+
+    /* couleurs effectives par slot equipe */
+    uint32_t chest_col  = equip_tint_color(&p->equipped[SLOT_CHEST],  tunic);
+    uint32_t legs_col   = equip_tint_color(&p->equipped[SLOT_LEGS],   0x303038FF);
+    uint32_t boots_col  = equip_tint_color(&p->equipped[SLOT_BOOTS],  0x202020FF);
+    uint32_t gloves_col = equip_tint_color(&p->equipped[SLOT_GLOVES], chest_col);
+    Item *eq_helm = &p->equipped[SLOT_HELM];
+    Item *eq_belt = &p->equipped[SLOT_BELT];
+
+    /* fond / piedestal sous le perso */
+    fill_rect(g->renderer, cx - 22, cy + 32, 44, 4, 0x18141EFF);
+    rect_outline(g->renderer, cx - 22, cy + 32, 44, 4, 0x402838FF);
+
+    /* cape : trapeze derriere */
+    fill_rect(g->renderer, cx - 18, cy - 18, 36, 42, cape);
+    fill_rect(g->renderer, cx - 20, cy + 16, 40, 10, cape);
+
+    /* tunique / plastron */
+    fill_rect(g->renderer, cx - 14, cy - 10, 28, 26, chest_col);
+    /* epaulettes plus claires si chest equipe (rarete >= legendaire) */
+    if (p->equipped[SLOT_CHEST].occupied &&
+        (p->equipped[SLOT_CHEST].rarity >= R_RARE ||
+         p->equipped[SLOT_CHEST].is_unique)) {
+        uint32_t hl = chest_col;
+        /* eclaircit de 30% */
+        int r = ((hl >> 24) & 0xFF), gr = ((hl >> 16) & 0xFF), b = ((hl >> 8) & 0xFF);
+        r = r + (255 - r) * 30 / 100;
+        gr = gr + (255 - gr) * 30 / 100;
+        b = b + (255 - b) * 30 / 100;
+        uint32_t bright = (uint32_t)((r << 24) | (gr << 16) | (b << 8) | 0xFF);
+        fill_rect(g->renderer, cx - 16, cy - 10, 6, 8, bright);
+        fill_rect(g->renderer, cx + 10, cy - 10, 6, 8, bright);
+    }
+    /* ceinture */
+    if (eq_belt->occupied) {
+        uint32_t bc = eq_belt->is_unique ? 0xFF8030FF : rarity_color(eq_belt->rarity);
+        fill_rect(g->renderer, cx - 15, cy + 13, 30, 4, bc);
+        /* boucle doree au centre */
+        fill_rect(g->renderer, cx - 2, cy + 12, 4, 6, 0xFFD040FF);
+    }
+
+    /* bras gauche + droit + gants */
+    fill_rect(g->renderer, cx - 19, cy - 8, 5, 22, chest_col);
+    fill_rect(g->renderer, cx + 14, cy - 8, 5, 22, chest_col);
+    /* gants */
+    if (p->equipped[SLOT_GLOVES].occupied) {
+        fill_rect(g->renderer, cx - 20, cy + 12, 7, 6, gloves_col);
+        fill_rect(g->renderer, cx + 13, cy + 12, 7, 6, gloves_col);
+    }
+
+    /* tete (peau) */
     fill_rect(g->renderer, cx - 8,  cy - 30, 16, 14, 0xE8C089FF);
+    /* cheveux */
     fill_rect(g->renderer, cx - 8,  cy - 32, 16, 4,  0x402010FF);
-    /* yeux */
-    fill_rect(g->renderer, cx - 5,  cy - 26, 3, 3, 0x000000FF);
-    fill_rect(g->renderer, cx + 2,  cy - 26, 3, 3, 0x000000FF);
+    /* casque */
+    if (eq_helm->occupied) {
+        uint32_t hc = eq_helm->is_unique ? 0xFF8030FF : rarity_color(eq_helm->rarity);
+        /* dome qui couvre tete + cheveux */
+        fill_rect(g->renderer, cx - 10, cy - 34, 20, 12, hc);
+        /* visiere sombre */
+        fill_rect(g->renderer, cx - 8,  cy - 24, 16, 4, 0x100810FF);
+        /* corne ou crete pour les legendaire / unique */
+        if (eq_helm->rarity >= R_LEGENDARY || eq_helm->is_unique) {
+            fill_rect(g->renderer, cx - 2, cy - 40, 4, 6, hc);
+            fill_rect(g->renderer, cx - 1, cy - 42, 2, 2, 0xFFFFFFFF);
+        }
+    } else {
+        /* yeux quand pas de casque */
+        fill_rect(g->renderer, cx - 5, cy - 26, 3, 3, 0x000000FF);
+        fill_rect(g->renderer, cx + 2, cy - 26, 3, 3, 0x000000FF);
+    }
+
     /* jambes */
-    fill_rect(g->renderer, cx - 10, cy + 16, 8,  14, 0x303038FF);
-    fill_rect(g->renderer, cx + 2,  cy + 16, 8,  14, 0x303038FF);
+    fill_rect(g->renderer, cx - 10, cy + 16, 8,  14, legs_col);
+    fill_rect(g->renderer, cx + 2,  cy + 16, 8,  14, legs_col);
     /* bottes */
-    fill_rect(g->renderer, cx - 11, cy + 28, 10, 4, 0x202020FF);
-    fill_rect(g->renderer, cx + 1,  cy + 28, 10, 4, 0x202020FF);
+    fill_rect(g->renderer, cx - 11, cy + 28, 10, 4, boots_col);
+    fill_rect(g->renderer, cx + 1,  cy + 28, 10, 4, boots_col);
+
+    /* arme tenue visible : petit cube sur le cote droit */
+    Weapon *aw = &p->weapons[p->active_weapon];
+    if (aw->owned && aw->kind != W_FISTS) {
+        uint32_t wc = rarity_color(aw->rarity);
+        /* tige verticale pour symboliser l'arme */
+        fill_rect(g->renderer, cx + 19, cy - 14, 3, 28, wc);
+        /* "garde" horizontale pour epee/hache */
+        if (aw->kind == W_SWORD || aw->kind == W_AXE) {
+            fill_rect(g->renderer, cx + 16, cy - 4, 9, 3, wc);
+        }
+        /* "cristal" en haut pour wand */
+        if (aw->kind == W_WAND) {
+            fill_rect(g->renderer, cx + 18, cy - 18, 5, 5, wc);
+        }
+    }
+
+    /* aura legendaire si >= 1 piece R_LEGENDARY / unique */
+    int legcount = 0;
+    Item *all_eq[6] = { &p->equipped[0], &p->equipped[1], &p->equipped[2],
+                        &p->equipped[3], &p->equipped[4], &p->equipped[5] };
+    for (int i = 0; i < 6; i++) {
+        if (all_eq[i]->occupied &&
+            (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique)) legcount++;
+    }
+    if (legcount > 0) {
+        float pulse = 0.5f + 0.5f * sinf(g->time * 3.f);
+        uint8_t a = (uint8_t)(60 + pulse * 40);
+        uint32_t aura = legcount >= 3 ? 0xFF8030 : 0xFFD040;
+        aura = (aura << 8) | a;
+        gfx_set_blend(g->renderer, true);
+        /* anneaux concentriques autour du perso */
+        for (int s = 0; s < 4; s++) {
+            int sz = 50 + s * 4;
+            rect_outline(g->renderer, cx - sz/2, cy - sz/2, sz, sz + 12, aura);
+        }
+        gfx_set_blend(g->renderer, false);
+    }
 }
 
 /* dessine un slot d'arme + ses talismans dessous (1 a 3 selon la qualite).

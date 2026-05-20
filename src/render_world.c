@@ -261,6 +261,40 @@ static void draw_player_3d(Game *g) {
     float br, bg, bb, hr, hg, hb;
     hero_color(p->hero, &br, &bg, &bb, &hr, &hg, &hb);
 
+    /* Influence esthetique de l'equipement : chaque slot occupe tinte
+     * sa partie du corps avec la couleur de rarete (ou orange unique).
+     * Mix : 60% couleur base + 40% couleur item, sauf legendaire/unique
+     * qui pousse a 60% (plus dramatique). */
+    Item *eq_helm   = &p->equipped[SLOT_HELM];
+    Item *eq_chest  = &p->equipped[SLOT_CHEST];
+    Item *eq_legs   = &p->equipped[SLOT_LEGS];
+    Item *eq_boots  = &p->equipped[SLOT_BOOTS];
+    Item *eq_belt   = &p->equipped[SLOT_BELT];
+    Item *eq_gloves = &p->equipped[SLOT_GLOVES];
+
+    #define EQUIP_TINT(it, rOut, gOut, bOut) do { \
+        if ((it)->occupied) { \
+            uint32_t cc = (it)->is_unique ? 0xFF8030FF : rarity_color((it)->rarity); \
+            float tr = ((cc>>24)&0xFF)/255.f; \
+            float tg = ((cc>>16)&0xFF)/255.f; \
+            float tb = ((cc>>8)&0xFF)/255.f; \
+            float mx = ((it)->rarity >= R_LEGENDARY || (it)->is_unique) ? 0.60f : 0.40f; \
+            rOut = rOut * (1.f - mx) + tr * mx; \
+            gOut = gOut * (1.f - mx) + tg * mx; \
+            bOut = bOut * (1.f - mx) + tb * mx; \
+        } \
+    } while (0)
+
+    /* Couleurs effectives des parties */
+    float chest_r = br, chest_g = bg, chest_b = bb;
+    EQUIP_TINT(eq_chest, chest_r, chest_g, chest_b);
+    float leg_r = hr * 0.55f, leg_g = hg * 0.55f, leg_b = hb * 0.55f;
+    EQUIP_TINT(eq_legs, leg_r, leg_g, leg_b);
+    float boots_r = leg_r * 0.7f, boots_g = leg_g * 0.7f, boots_b = leg_b * 0.7f;
+    EQUIP_TINT(eq_boots, boots_r, boots_g, boots_b);
+    float arm_r = chest_r * 1.05f, arm_g = chest_g * 1.05f, arm_b = chest_b * 1.05f;
+    EQUIP_TINT(eq_gloves, arm_r, arm_g, arm_b);
+
     /* ombre projetee */
     gfx_box_draw(g->renderer,
                  v3_make(pos.x, 0.005f, pos.z),
@@ -274,35 +308,92 @@ static void draw_player_3d(Game *g) {
     gfx_box_draw(g->renderer,
                  v3_make(pos.x + side_x * leg_off, 0.20f + leg_lift_l, pos.z + side_z * leg_off),
                  v3_make(0.18f, 0.40f, 0.20f),
-                 hr*0.55f, hg*0.55f, hb*0.55f);
+                 leg_r, leg_g, leg_b);
     gfx_box_draw(g->renderer,
                  v3_make(pos.x - side_x * leg_off, 0.20f + leg_lift_r, pos.z - side_z * leg_off),
                  v3_make(0.18f, 0.40f, 0.20f),
-                 hr*0.55f, hg*0.55f, hb*0.55f);
+                 leg_r, leg_g, leg_b);
+    /* bottes : petits cubes plus sombres aux pieds (visibles si equipees) */
+    if (eq_boots->occupied) {
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + side_x * leg_off, 0.04f + leg_lift_l,
+                             pos.z + side_z * leg_off),
+                     v3_make(0.22f, 0.08f, 0.24f),
+                     boots_r, boots_g, boots_b);
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x - side_x * leg_off, 0.04f + leg_lift_r,
+                             pos.z - side_z * leg_off),
+                     v3_make(0.22f, 0.08f, 0.24f),
+                     boots_r, boots_g, boots_b);
+    }
 
     /* corps (tunique) */
     gfx_box_draw(g->renderer,
                  v3_make(pos.x, 0.62f + bob, pos.z),
                  v3_make(0.50f, 0.46f, 0.40f),
-                 br, bg, bb);
+                 chest_r, chest_g, chest_b);
+    /* ceinture : fine bande sous le torse si equipee */
+    if (eq_belt->occupied) {
+        uint32_t cc = eq_belt->is_unique ? 0xFF8030FF : rarity_color(eq_belt->rarity);
+        float trr = ((cc>>24)&0xFF)/255.f;
+        float tgg = ((cc>>16)&0xFF)/255.f;
+        float tbb = ((cc>>8)&0xFF)/255.f;
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x, 0.40f + bob, pos.z),
+                     v3_make(0.52f, 0.08f, 0.42f),
+                     trr, tgg, tbb);
+    }
 
     /* bras : 2 cubes lateraux */
     gfx_box_draw(g->renderer,
                  v3_make(pos.x + side_x * 0.32f, 0.62f + bob - swing * 0.5f,
                          pos.z + side_z * 0.32f),
                  v3_make(0.14f, 0.34f, 0.14f),
-                 br * 1.05f, bg * 1.05f, bb * 1.05f);
+                 arm_r, arm_g, arm_b);
     gfx_box_draw(g->renderer,
                  v3_make(pos.x - side_x * 0.32f, 0.62f + bob + swing * 0.5f,
                          pos.z - side_z * 0.32f),
                  v3_make(0.14f, 0.34f, 0.14f),
-                 br * 1.05f, bg * 1.05f, bb * 1.05f);
+                 arm_r, arm_g, arm_b);
 
     /* tete (peau) */
     gfx_box_draw(g->renderer,
                  v3_make(pos.x + face_x * 0.02f, 1.05f + bob, pos.z + face_z * 0.02f),
                  v3_make(0.36f, 0.36f, 0.36f),
                  0.91f, 0.75f, 0.54f);
+    /* casque : surimpose la tete avec la couleur d'item rarete */
+    if (eq_helm->occupied) {
+        uint32_t cc = eq_helm->is_unique ? 0xFF8030FF : rarity_color(eq_helm->rarity);
+        float trr = ((cc>>24)&0xFF)/255.f;
+        float tgg = ((cc>>16)&0xFF)/255.f;
+        float tbb = ((cc>>8)&0xFF)/255.f;
+        /* dome */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + face_x * 0.02f, 1.20f + bob, pos.z + face_z * 0.02f),
+                     v3_make(0.40f, 0.20f, 0.40f),
+                     trr, tgg, tbb);
+        /* visiere sombre devant */
+        gfx_box_draw(g->renderer,
+                     v3_make(pos.x + face_x * 0.18f, 1.08f + bob,
+                             pos.z + face_z * 0.18f),
+                     v3_make(0.30f, 0.06f, 0.06f),
+                     0.10f, 0.08f, 0.12f);
+    }
+    /* legendaire / unique : aura tres legere au-dessus du casque */
+    {
+        int legcount = 0;
+        Item *all_eq[6] = { eq_helm, eq_chest, eq_legs, eq_boots, eq_belt, eq_gloves };
+        for (int i = 0; i < 6; i++) {
+            if (all_eq[i]->occupied &&
+                (all_eq[i]->rarity >= R_LEGENDARY || all_eq[i]->is_unique)) legcount++;
+        }
+        if (legcount > 0 && (rand() % 100) < 8) {
+            uint32_t col = legcount >= 3 ? 0xFF8030FF : 0xFFD040FF;
+            particle_spawn_kind(g, p->x + (rand()%14)-7, p->y - 18,
+                                (rand()%10)-5, -12.f,
+                                0.6f, col, 1.4f, 0);
+        }
+    }
     /* yeux : 2 minuscules cubes noirs devant la tete */
     {
         float ex = pos.x + face_x * 0.18f + side_x * 0.07f;
@@ -1493,6 +1584,53 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
     v3 pos = v3_make(pk->x / TILE, 0.55f + hover, pk->y / TILE);
     float r=0.7f, gg=0.7f, b=0.7f, sz=0.40f;
     bool draw_pillar = true;
+    /* === Beam Diablo-style : descendant depuis le ciel pour les loots
+     * de qualite. Calcule ici pour PU_ITEM / PU_WEAPON / PU_ELEMENT. */
+    if (pk->kind == PU_ITEM || pk->kind == PU_WEAPON || pk->kind == PU_ELEMENT) {
+        Rarity rar = R_COMMON;
+        uint32_t bcol = 0xCCCCCCFF;
+        if (pk->kind == PU_ITEM) {
+            rar = pk->item.rarity;
+            bcol = pk->item.is_unique ? 0xFF8030FF : rarity_color(rar);
+        } else if (pk->kind == PU_WEAPON) {
+            int rb = (pk->value >> 8) & 0xFF;
+            if (rb >= 0 && rb < R_COUNT) rar = (Rarity)rb;
+            bcol = rarity_color(rar);
+        } else {
+            bcol = element_color((Element)pk->value);
+            rar = R_RARE;     /* niveau de visibilite : trait moyen */
+        }
+        float br = ((bcol>>24)&0xFF)/255.f;
+        float bgg= ((bcol>>16)&0xFF)/255.f;
+        float bb_= ((bcol>>8)&0xFF)/255.f;
+        /* hauteur du beam scale par rarete + bonus unique */
+        float beam_h = 1.5f + 0.6f * (int)rar;
+        if (pk->kind == PU_ITEM && pk->item.is_unique) beam_h += 1.5f;
+        int n_seg = 6 + (int)rar;
+        if (n_seg > 12) n_seg = 12;
+        float pulse = 0.5f + 0.5f * sinf(g->time * 4.f + pk->hover_t * 2.f);
+        for (int s = 0; s < n_seg; s++) {
+            float t = (float)s / (float)n_seg;
+            float py = pos.y + 0.4f + t * beam_h;
+            float w = 0.22f * (1.f - t * 0.6f);
+            float fade = (1.f - t * 0.7f) * (0.5f + 0.5f * pulse);
+            gfx_box_draw(g->renderer, v3_make(pos.x, py, pos.z),
+                         v3_make(w, 0.08f, w),
+                         br * fade, bgg * fade, bb_ * fade);
+        }
+        /* ambient particles : etincelles montantes selon la rarete.
+         * Plus la rarete est haute, plus c'est dense. */
+        int chance = 5 + (int)rar * 12;     /* 5..65% / frame */
+        if (pk->kind == PU_ITEM && pk->item.is_unique) chance = 80;
+        if ((rand() % 100) < chance) {
+            float ox = pk->x + (rand() % 24) - 12;
+            float oy = pk->y + (rand() % 12) - 6;
+            float vy = -20.f - (rand() % 20);
+            particle_spawn_kind(g, ox, oy, 0, vy,
+                                0.8f + (rand() % 40) * 0.01f,
+                                bcol, 1.6f + (int)rar * 0.3f, 0);
+        }
+    }
     switch (pk->kind) {
         case PU_XP:      r=0.30f; gg=0.80f; b=1.0f;   sz=0.32f; break;
         case PU_HEART:   r=1.0f;  gg=0.25f; b=0.38f;  sz=0.40f; break;
