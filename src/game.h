@@ -390,6 +390,7 @@ typedef struct {
     float crit_dmg;           /* multiplicateur sur coup critique (default 1.5) */
     float range_mul;          /* portee armes */
     float dodge;              /* 0..1 chance d'esquiver */
+    float shop_discount;      /* 0..1 reduction de prix au shop */
     /* affinites elementaires : multiplicateur de dmg par element (+/-) */
     float elem_affinity[EL_COUNT];
 
@@ -1046,6 +1047,7 @@ typedef struct {
     float atk_speed;
     float crit_chance, crit_dmg;
     float range_mul, dodge;
+    float shop_discount;     /* 0..1 cumul des reductions de prix */
     float aff[EL_COUNT];
     /* flags build-defining propages des uniques. Identiques aux champs
      * Player.u_* ; recopies a la fin du recompute. */

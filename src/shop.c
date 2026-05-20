@@ -31,6 +31,7 @@ typedef struct {
     int   d_aff_el2;
     float d_aff_val2;
     int   shrine_only;     /* 1 = ne peut etre obtenu que via PU_SHRINE */
+    float d_shop_discount; /* +X% reduction sur les prix du shop (0.10 = -10%) */
 } Recipe;
 
 static const Recipe RECIPES[] = {
@@ -107,6 +108,16 @@ static const Recipe RECIPES[] = {
       0,0,0, 0,0,0.4f, 0,0,0, 0,0,  0,0,  0,0, EL_FAE,0.20f, 0,0 },
     { "Lentille folle",     "+5% crit, +25% crit dmg",           20, R_RARE,
       0,0,0, 0,0,0,    0,0,0, 0,0,  0.05f,0.25f, 0,0, 0,0, 0,0 },
+
+    /* ---- TRINKETS META (effets sur l'economie) ---- */
+    { "Pierre brute",       "+5 dmg plats",                       9, R_COMMON,
+      0,0,0, 0,0,0,    5.f,0,0, 0,0,  0,0,  0,0, 0,0, 0,0, 0, 0.f },
+    { "Marteau d'enclume",  "+12 dmg plats, -5 vitesse",         18, R_MAGIC,
+      0,-5.f,0, 0,0,0, 12.f,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f },
+    { "Bourse du marchand", "-15% prix shop",                    16, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0,  0,0,  0,0, 0,0, 0,0, 0, 0.15f },
+    { "Couronne du brocanteur", "-30% prix shop, +5 dmg plats", 35, R_EPIC,
+      0,0,0, 0,0,0, 5.f,0,0, 0,0, 0,0,  0,0, 0,0, 0,0, 0, 0.30f },
 
     /* ---- EPIQUE / LEGENDAIRE (30+g) ---- */
     { "Coeur de geant",     "+40 PV max, -10% atk speed",        35, R_EPIC,
@@ -185,6 +196,7 @@ void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
     sb->crit_dmg    += r->d_crit_dmg;
     sb->range_mul   += r->d_range_mul;
     sb->dodge       += r->d_dodge;
+    sb->shop_discount += r->d_shop_discount;
     if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) sb->aff[r->d_aff_el]  += r->d_aff_val;
     if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) sb->aff[r->d_aff_el2] += r->d_aff_val2;
 }
@@ -223,28 +235,35 @@ void shop_generate(Game *g) {
         ShopItem *si = &g->shop_items[i];
         memset(si, 0, sizeof(*si));
         si->recipe_id = pick_recipe_for_floor(g->floor_index);
-        /* cost ajuste selon etage */
+        /* cost ajuste selon etage, puis reduction shop_discount du joueur */
         int base_cost = shop_recipe_cost(si->recipe_id);
-        si->cost = base_cost + g->floor_index * 2;
+        int raw = base_cost + g->floor_index * 2;
+        si->cost = (int)(raw * (1.f - g->player.shop_discount));
+        if (si->cost < 1) si->cost = 1;
     }
     g->shop_cursor = 0;
     g->shop_reroll_idx = 0;
-    g->shop_reroll_cost = shop_reroll_cost_at(0);
+    int rc = shop_reroll_cost_at(0);
+    rc = (int)(rc * (1.f - g->player.shop_discount));
+    if (rc < 1) rc = 1;
+    g->shop_reroll_cost = rc;
 }
 
-/* Cout du reroll : suite Fibonacci a partir de 3,3, qui revient a 1
- * apres quelques rolls puis recycle. Donne une fenetre "rolls bon marche"
- * pour encourager l exploration sans casser l economie initiale.
- * Sequence (cycle 14) :
- *   3 3 6 9 15 24   1 1 2 3 5 8 13 21  -> revient a 3
- */
+/* Cout du reroll : Fibonacci pur a partir de 3, 3.
+ * Sequence : 3 3 6 9 15 24 39 63 102 165 267 432 ...
+ * Pas de cycle : la progression est exponentielle, l'economie
+ * naturelle limite l'usage. */
 int shop_reroll_cost_at(int idx) {
-    static const int FIB[14] = {
-        3, 3, 6, 9, 15, 24,
-        1, 1, 2, 3, 5, 8, 13, 21
-    };
     if (idx < 0) idx = 0;
-    return FIB[idx % 14];
+    int a = 3, b = 3;
+    for (int i = 0; i < idx; i++) {
+        int c = a + b;
+        a = b;
+        b = c;
+        /* cap a INT_MAX/2 pour rester safe : Fibonacci(45) ~ 2 Mds */
+        if (b > 1000000000) b = 1000000000;
+    }
+    return a;
 }
 
 void shop_reroll(Game *g) {
@@ -258,7 +277,10 @@ void shop_reroll(Game *g) {
      * la progression du cycle au sein du shop courant. */
     g->shop_reroll_idx = idx;
     g->shop_visits = prev_visits;
-    g->shop_reroll_cost = shop_reroll_cost_at(idx);
+    int rc = shop_reroll_cost_at(idx);
+    rc = (int)(rc * (1.f - g->player.shop_discount));
+    if (rc < 1) rc = 1;
+    g->shop_reroll_cost = rc;
 }
 
 void shop_buy(Game *g, int idx) {

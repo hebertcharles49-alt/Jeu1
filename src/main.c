@@ -252,6 +252,9 @@ void game_recompute_player_stats(Game *g) {
     p->crit_dmg     = sb.crit_dmg;
     p->range_mul    = sb.range_mul;
     p->dodge        = sb.dodge;
+    p->shop_discount = sb.shop_discount;
+    if (p->shop_discount < 0.f) p->shop_discount = 0.f;
+    if (p->shop_discount > 0.80f) p->shop_discount = 0.80f;     /* cap 80% */
     for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
     /* flags build-defining */
     p->u_explosions_attract = sb.u_explosions_attract;

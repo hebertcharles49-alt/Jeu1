@@ -155,6 +155,63 @@ void render_shop(Game *g) {
     fill_rect(g->renderer, rrx + 8 + text_width("REROLL  ") + 6, rry + 7, 5, 5,
               rrok ? 0xFFD040FF : 0x806020FF);
 
+    /* ---- TRINKETS visibles depuis le shop (sous le bouton REROLL) ---- */
+    {
+        int tx = 12, ty = rry + rrh + 8;
+        int tw = INTERNAL_W - 24, th = 56;
+        if (ty + th < INTERNAL_H - 38) {
+            fill_rect(g->renderer, tx, ty, tw, th, 0x100C18C0);
+            rect_outline(g->renderer, tx, ty, tw, th, 0x303040FF);
+            char hdr[48];
+            snprintf(hdr, sizeof(hdr), "TRINKETS (%d)",
+                     g->player.shop_purchased_count);
+            text_draw(g->renderer, tx + 4, ty + 2, hdr, 0xCCCCFFFF);
+            int cell_sz = 12;
+            int cols = (tw - 8) / (cell_sz + 2);
+            int rows = (th - 14) / (cell_sz + 2);
+            int total_visible = cols * rows;
+            int n_show = g->player.shop_purchased_count > total_visible
+                          ? total_visible : g->player.shop_purchased_count;
+            for (int i = 0; i < n_show; i++) {
+                int rid = g->player.shop_purchased[i];
+                uint32_t col = shop_recipe_color(rid);
+                int row = i / cols;
+                int col_ = i % cols;
+                int csx = tx + 4 + col_ * (cell_sz + 2);
+                int csy = ty + 14 + row * (cell_sz + 2);
+                bool hov = mouse_in_rect(g, csx, csy, cell_sz, cell_sz);
+                uint32_t border = hov ? 0xFFFF80FF : 0x000000FF;
+                fill_rect(g->renderer, csx, csy, cell_sz, cell_sz, col);
+                rect_outline(g->renderer, csx, csy, cell_sz, cell_sz, border);
+                if (hov) {
+                    const char *nm = shop_recipe_name(rid);
+                    const char *desc = shop_recipe_desc(rid);
+                    int tw_n = text_width(nm);
+                    int tw_d = desc ? text_width(desc) : 0;
+                    int box_w = (tw_n > tw_d ? tw_n : tw_d) + 12;
+                    int box_h = (desc && desc[0]) ? 24 : 14;
+                    int bx = csx + cell_sz + 4;
+                    int by = csy - box_h - 4;
+                    if (bx + box_w > INTERNAL_W - 4) bx = csx - box_w - 4;
+                    if (by < 4) by = csy + cell_sz + 4;
+                    gfx_set_blend(g->renderer, true);
+                    fill_rect(g->renderer, bx, by, box_w, box_h, 0x000000E0);
+                    gfx_set_blend(g->renderer, false);
+                    rect_outline(g->renderer, bx, by, box_w, box_h, col);
+                    text_draw(g->renderer, bx + 4, by + 3, nm, col);
+                    if (desc && desc[0])
+                        text_draw(g->renderer, bx + 4, by + 13, desc, 0xCCCCCCFF);
+                }
+            }
+            if (g->player.shop_purchased_count > total_visible) {
+                char overflow[16];
+                snprintf(overflow, sizeof(overflow), "+%d",
+                         g->player.shop_purchased_count - total_visible);
+                text_draw(g->renderer, tx + tw - 24, ty + 2, overflow, 0xFFD040FF);
+            }
+        }
+    }
+
     if (g->inv_msg_t > 0.f)
         text_draw(g->renderer, INTERNAL_W/2 - text_width(g->inv_msg)/2,
                   INTERNAL_H - 38, g->inv_msg, 0xFFFF40FF);
