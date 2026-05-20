@@ -161,11 +161,27 @@ typedef enum {
 typedef struct { Affix kind; float value; } ItemAffix;
 #define MAX_AFFIXES 4
 
+/* ItemKind : discrimine le type d'objet stocke dans l'inventaire.
+ * EQUIP = piece d'armure (slot + affixes). WEAPON = arme detenue en
+ * reserve (base_kind = WeaponKind, rarity = qualite). ELEMENT = orbe
+ * elementaire / talisman (base_kind = Element, rarity ignoree).
+ *
+ * Le bag accepte les 3 kinds : le joueur peut accumuler des armes /
+ * elements et les equiper manuellement. */
+typedef enum {
+    ITEM_KIND_EQUIP = 0,
+    ITEM_KIND_WEAPON,
+    ITEM_KIND_ELEMENT,
+} ItemKind;
+
 typedef struct {
     bool      occupied;
-    EquipSlot slot;
+    ItemKind  kind;          /* EQUIP / WEAPON / ELEMENT */
+    EquipSlot slot;          /* valide si kind == EQUIP */
     Rarity    rarity;
-    int       base_kind;     /* sub-kind, used as identity for fusion */
+    int       base_kind;     /* sub-kind, used as identity for fusion
+                                Pour WEAPON : cast en WeaponKind
+                                Pour ELEMENT : cast en Element */
     float     stat_value;    /* effective scaled stat */
     ItemAffix affixes[MAX_AFFIXES];
     int       affix_count;

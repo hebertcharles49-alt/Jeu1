@@ -164,59 +164,43 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                        sfx_play(g, SFX_COIN); break;
         case PU_ELEMENT: {
             Element e = (Element)pk->value;
-            Weapon *w = &p->weapons[p->active_weapon];
-            weapon_attach_element(w, e);
-            sfx_play(g, SFX_LEVELUP);
-            log_push(g, element_color(e), "Element greffe : %s",
+            /* Plus d'auto-greffe : depose en inventaire (ITEM_KIND_ELEMENT).
+             * Le joueur greffe manuellement via E dans l'inventaire.
+             * Discovery codex et combo signal sont aussi reportes a
+             * l'equip pour eviter les spoilers de combo sans avoir
+             * effectivement essaye le greffon. */
+            Item it = (Item){0};
+            it.occupied = true;
+            it.kind = ITEM_KIND_ELEMENT;
+            it.base_kind = (int)e;
+            it.rarity = R_COMMON;
+            snprintf(it.name, sizeof(it.name), "%s", element_name(e));
+            inventory_pickup(g, it);
+            sfx_play(g, SFX_PICKUP);
+            log_push(g, element_color(e), "+ Element : %s",
                      element_name(e));
-            if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
-                g->meta.element_discovered[e] = true;
-                save_write(&g->meta);
-                char buf[48];
-                snprintf(buf, sizeof(buf), "ELEMENT DECOUVERT : %s",
-                         element_name(e));
-                toast_push(g, buf, element_color(e), 4.0f);
-            }
-            int mask = weapon_combo_id(w);
-            if (mask != 0 && !meta_combo_is_seen(&g->meta, mask)) {
-                meta_combo_mark(&g->meta, mask);
-                save_write(&g->meta);
-                char buf[48];
-                snprintf(buf, sizeof(buf), "COMBO : %s", combo_name(mask));
-                toast_push(g, buf, combo_color(mask), 4.0f);
-            }
             break;
         }
         case PU_WEAPON: {
-            /* value packe : kind (8 bits bas) + rarity (8 bits suivants) */
+            /* value packe : kind (8 bits bas) + rarity (8 bits suivants).
+             * Depose en inventaire (ITEM_KIND_WEAPON). Le joueur equipe
+             * manuellement via E sur le slot inventaire. */
             int kind   = pk->value & 0xFF;
             int rarity = (pk->value >> 8) & 0xFF;
             if (rarity < 0 || rarity >= R_COUNT) rarity = R_COMMON;
-            int slot = -1;
-            for (int s = 0; s < WEAPON_SLOTS; s++)
-                if (p->weapons[s].kind == W_FISTS) { slot = s; break; }
-            if (slot < 0) slot = p->active_weapon;
-            weapon_init_defaults(&p->weapons[slot], (WeaponKind)kind);
-            /* FORGE bonus persistent (meta progress). */
-            if (kind > 0 && kind < W_COUNT) {
-                p->weapons[slot].base_dmg += g->meta.weapon_dmg_bonus[kind] * 5.f;
-            }
-            p->weapons[slot].rarity = (Rarity)rarity;
-            p->weapons[slot].owned = true;
-            p->active_weapon = slot;
-            sfx_play(g, SFX_LEVELUP);
+            Item it = (Item){0};
+            it.occupied = true;
+            it.kind = ITEM_KIND_WEAPON;
+            it.base_kind = kind;
+            it.rarity = (Rarity)rarity;
+            snprintf(it.name, sizeof(it.name), "%s",
+                     weapon_name((WeaponKind)kind));
+            inventory_pickup(g, it);
+            sfx_play(g, SFX_PICKUP);
             log_push(g, rarity_color((Rarity)rarity),
-                     "Arme : %s (%s)",
+                     "+ Arme : %s (%s)",
                      weapon_name((WeaponKind)kind),
                      rarity_name((Rarity)rarity));
-            if (kind > 0 && kind < W_COUNT && !g->meta.weapon_discovered[kind]) {
-                g->meta.weapon_discovered[kind] = true;
-                save_write(&g->meta);
-                char buf[48];
-                snprintf(buf, sizeof(buf), "ARME DECOUVERTE : %s",
-                         weapon_name((WeaponKind)kind));
-                toast_push(g, buf, 0xC0E0FFFF, 4.0f);
-            }
             break;
         }
         case PU_CHEST:

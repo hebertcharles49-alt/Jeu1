@@ -85,18 +85,39 @@ static void render_item_slot(Game *g, int sx, int sy, int sz, Item *it,
     rect_outline(g->renderer, sx, sy, sz, sz, border);
     if (it && it->occupied) {
         uint32_t col = rarity_color(it->rarity);
+        if (it->kind == ITEM_KIND_ELEMENT)
+            col = element_color((Element)it->base_kind);
         int pad = (sz >= 24) ? 4 : 2;
         fill_rect(g->renderer, sx + pad, sy + pad, sz - 2*pad, sz - 2*pad, col);
         rect_outline(g->renderer, sx + pad, sy + pad, sz - 2*pad, sz - 2*pad, 0x000000FF);
         const char *abbr = "?";
-        switch (it->slot) {
-            case SLOT_HELM:   abbr = "HE"; break;
-            case SLOT_CHEST:  abbr = "TO"; break;
-            case SLOT_LEGS:   abbr = "JA"; break;
-            case SLOT_BOOTS:  abbr = "BO"; break;
-            case SLOT_BELT:   abbr = "CE"; break;
-            case SLOT_GLOVES: abbr = "GA"; break;
-            default: break;
+        if (it->kind == ITEM_KIND_WEAPON) {
+            /* abbreviation par WeaponKind */
+            switch ((WeaponKind)it->base_kind) {
+                case W_SWORD:  abbr = "EP"; break;
+                case W_SHIELD: abbr = "BC"; break;
+                case W_BOW:    abbr = "AR"; break;
+                case W_WAND:   abbr = "BA"; break;
+                case W_AXE:    abbr = "HA"; break;
+                case W_FISTS:  abbr = "PG"; break;
+                default: break;
+            }
+        } else if (it->kind == ITEM_KIND_ELEMENT) {
+            /* premiere lettre de l element (en majuscule) */
+            const char *n = element_name((Element)it->base_kind);
+            static char one[3];
+            one[0] = n[0]; one[1] = (n[1] ? n[1] : 0); one[2] = 0;
+            abbr = one;
+        } else {
+            switch (it->slot) {
+                case SLOT_HELM:   abbr = "HE"; break;
+                case SLOT_CHEST:  abbr = "TO"; break;
+                case SLOT_LEGS:   abbr = "JA"; break;
+                case SLOT_BOOTS:  abbr = "BO"; break;
+                case SLOT_BELT:   abbr = "CE"; break;
+                case SLOT_GLOVES: abbr = "GA"; break;
+                default: break;
+            }
         }
         text_draw(g->renderer, sx + sz/2 - 6, sy + sz/2 - 3, abbr, 0x000000FF);
     } else if (empty_label) {
@@ -259,6 +280,34 @@ void render_inventory(Game *g) {
                      ? &p->equipped[g->inv_cursor - INV_CURSOR_EQUIP_BASE]
                      : &p->inventory[g->inv_cursor];
         if (it->occupied) {
+            /* dispatch d'affichage par kind */
+            if (it->kind == ITEM_KIND_WEAPON) {
+                uint32_t nc = rarity_color(it->rarity);
+                text_drawf(g->renderer, dpx + 4, dpy + 4, nc, "%s", it->name);
+                text_drawf(g->renderer, dpx + 4, dpy + 14, nc,
+                           "Arme %s", rarity_name(it->rarity));
+                text_draw(g->renderer, dpx + 4, dpy + 28,
+                          "E ou clic : equipe (remplace l'arme active).",
+                          0xCCCCCCFF);
+                text_draw(g->renderer, dpx + 4, dpy + 38,
+                          "L'arme actuelle revient en inventaire.",
+                          0x808080FF);
+                goto detail_done;
+            }
+            if (it->kind == ITEM_KIND_ELEMENT) {
+                Element el = (Element)it->base_kind;
+                uint32_t nc = element_color(el);
+                text_drawf(g->renderer, dpx + 4, dpy + 4, nc, "%s",
+                           element_name(el));
+                text_draw(g->renderer, dpx + 4, dpy + 14, "Element / Talisman", 0xCCCCCCFF);
+                text_draw(g->renderer, dpx + 4, dpy + 28,
+                          "E ou clic : greffe sur l'arme active.",
+                          0xCCCCCCFF);
+                text_draw(g->renderer, dpx + 4, dpy + 38,
+                          "Echoue si tous les slots talisman sont pris.",
+                          0x808080FF);
+                goto detail_done;
+            }
             /* nom procedural / unique en haut, en couleur de rarete (orange
              * pour les uniques pour les distinguer des autres legendaires). */
             uint32_t name_col = it->is_unique ? 0xFF8030FF : rarity_color(it->rarity);
@@ -304,6 +353,7 @@ void render_inventory(Game *g) {
             /* valeur de revente */
             text_drawf(g->renderer, dpx + 4, ay + 2, 0xFFD080FF,
                        "Vente : %d coins", item_sell_value(it));
+            detail_done: ;
         } else if (is_equip) {
             text_drawf(g->renderer, dpx + 4, dpy + 4, 0x808080FF, "Slot vide : %s",
                        slot_name((EquipSlot)(g->inv_cursor - INV_CURSOR_EQUIP_BASE)));

@@ -388,18 +388,99 @@ void inventory_pickup(Game *g, Item it) {
     pickup_spawn_item(g, it, p->x, p->y);
 }
 
-/* equip from inventory[idx]; swap with currently equipped of same slot */
+/* equip from inventory[idx] : comportement par kind.
+ *   EQUIP   : swap avec l'equipement du meme slot (comportement
+ *             historique).
+ *   WEAPON  : remplace l'arme active (l'ancienne va en inventaire
+ *             SI elle n'est pas les poings de base, sinon perdue).
+ *   ELEMENT : greffe sur l'arme active si un slot talisman est
+ *             libre ; consomme l'objet en inventaire. Sinon echec
+ *             (message).
+ */
 bool inventory_equip(Game *g, int inv_index) {
     Player *p = &g->player;
     if (inv_index < 0 || inv_index >= INVENTORY_SLOTS) return false;
     Item *src = &p->inventory[inv_index];
     if (!src->occupied) return false;
-    Item *dst = &p->equipped[src->slot];
-    Item tmp = *dst;
-    *dst = *src;
-    *src = tmp;
-    game_recompute_player_stats(g);
-    return true;
+    if (src->kind == ITEM_KIND_EQUIP) {
+        Item *dst = &p->equipped[src->slot];
+        Item tmp = *dst;
+        *dst = *src;
+        *src = tmp;
+        game_recompute_player_stats(g);
+        return true;
+    }
+    if (src->kind == ITEM_KIND_WEAPON) {
+        WeaponKind wk = (WeaponKind)src->base_kind;
+        Rarity     wr = src->rarity;
+        if (wk <= W_FISTS || wk >= W_COUNT) return false;
+        /* Remplace l'arme active. L'ancienne (si pas poings) revient
+         * en inventaire au meme slot. */
+        Weapon *w = &p->weapons[p->active_weapon];
+        Item old = (Item){0};
+        if (w->owned && w->kind != W_FISTS) {
+            old.occupied = true;
+            old.kind = ITEM_KIND_WEAPON;
+            old.base_kind = (int)w->kind;
+            old.rarity = w->rarity;
+            snprintf(old.name, sizeof(old.name), "%s", weapon_name(w->kind));
+        }
+        weapon_init_defaults(w, wk);
+        w->rarity = wr;
+        w->owned = true;
+        /* FORGE meta bonus */
+        if (wk > 0 && wk < W_COUNT) {
+            w->base_dmg += g->meta.weapon_dmg_bonus[wk] * 5.f;
+        }
+        /* discovery codex */
+        if (!g->meta.weapon_discovered[wk]) {
+            g->meta.weapon_discovered[wk] = true;
+            save_write(&g->meta);
+            char buf[48];
+            snprintf(buf, sizeof(buf), "ARME DECOUVERTE : %s", weapon_name(wk));
+            toast_push(g, buf, 0xC0E0FFFF, 4.0f);
+        }
+        *src = old;     /* slot inventaire recoit l'ancienne arme ou vide */
+        sfx_play(g, SFX_LEVELUP);
+        log_push(g, rarity_color(wr), "Equipe : %s", weapon_name(wk));
+        game_recompute_player_stats(g);
+        return true;
+    }
+    if (src->kind == ITEM_KIND_ELEMENT) {
+        Element e = (Element)src->base_kind;
+        if (e <= 0 || e >= EL_COUNT) return false;
+        Weapon *w = &p->weapons[p->active_weapon];
+        int cap = weapon_slot_count(w->rarity);
+        if (w->element_count >= cap) {
+            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                     "Plus de slot talisman libre sur l'arme active");
+            g->inv_msg_t = 2.5f;
+            return false;
+        }
+        weapon_attach_element(w, e);
+        /* discovery codex element */
+        if (!g->meta.element_discovered[e]) {
+            g->meta.element_discovered[e] = true;
+            save_write(&g->meta);
+            char buf[48];
+            snprintf(buf, sizeof(buf), "ELEMENT DECOUVERT : %s", element_name(e));
+            toast_push(g, buf, element_color(e), 4.0f);
+        }
+        int mask = weapon_combo_id(w);
+        if (mask != 0 && !meta_combo_is_seen(&g->meta, mask)) {
+            meta_combo_mark(&g->meta, mask);
+            save_write(&g->meta);
+            char buf[48];
+            snprintf(buf, sizeof(buf), "COMBO : %s", combo_name(mask));
+            toast_push(g, buf, combo_color(mask), 4.0f);
+        }
+        *src = (Item){0};       /* consomme l'orbe */
+        sfx_play(g, SFX_LEVELUP);
+        log_push(g, element_color(e), "Greffe : %s", element_name(e));
+        game_recompute_player_stats(g);
+        return true;
+    }
+    return false;
 }
 
 int item_sell_value(const Item *it) {
@@ -465,11 +546,13 @@ bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
     for (int i = 0; i < INVENTORY_SLOTS; i++) {
         Item *ii = &p->inventory[i];
         if (!ii->occupied || ii->rarity >= R_LEGENDARY) continue;
+        if (ii->kind != ITEM_KIND_EQUIP) continue;     /* fusion : equipement seulement */
         int matches[3] = { i, -1, -1 };
         int cnt = 1;
         for (int j = i + 1; j < INVENTORY_SLOTS && cnt < 3; j++) {
             Item *jj = &p->inventory[j];
             if (!jj->occupied) continue;
+            if (jj->kind != ITEM_KIND_EQUIP) continue;
             if (jj->slot == ii->slot && jj->rarity == ii->rarity &&
                 jj->base_kind == ii->base_kind) {
                 matches[cnt++] = j;
