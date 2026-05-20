@@ -411,6 +411,15 @@ typedef struct {
     float reroll_discount;    /* 0..1 reduction specifique au reroll */
     int   inv_capacity_bonus; /* +N slots au dessus de INVENTORY_SLOTS de base */
     float dmg_vs_cat[ENEMY_CAT_COUNT]; /* multiplicateur dmg par categorie ennemi */
+    /* === Trinkets utility -- effets economiques / runtime === */
+    float coin_drop_mul;      /* multiplicateur du value des PU_COIN ramasses */
+    float xp_mul;             /* multiplicateur de l'XP gagne */
+    int   reroll_coupons;     /* rerolls gratuits en stock */
+    int   next_buy_free;      /* > 0 : N prochains achats au shop sont gratuits */
+    int   next_buy_double;    /* > 0 : N prochains achats appliquent l effet x2 */
+    float free_hit_t;         /* timer d'un coup gratuit (anneau du gardien) */
+    int   pixie_on_kill_pct;  /* 0..100 chance de spawn une pixie par kill */
+    Element puddle_on_room;   /* spawn une flaque a chaque salle clear, EL_NONE = off */
     /* affinites elementaires : multiplicateur de dmg par element (+/-) */
     float elem_affinity[EL_COUNT];
 
@@ -480,6 +489,7 @@ typedef struct {
     bool  u_crowd_regen;         /* regen += alive_count * 0.1 */
     bool  u_stun_on_melee;       /* 20% stun 1s sur melee, x2 dmg pendant */
     bool  u_void_trail;          /* dash laisse champ vide 3s */
+    bool  u_dash_pull;           /* a l arrivee du dash, attire les ennemis */
     bool  u_kill_stack_dmg;      /* +2 flat_dmg / kill, max +40 */
     bool  u_heavy_armor;         /* armure *2 mais -3 vitesse / point */
     bool  u_expose_weakness;     /* crit revele faiblesse 5s, exploit *1.5 */
@@ -1071,6 +1081,11 @@ typedef struct {
     float reroll_discount;   /* 0..1 cumul des reductions de reroll */
     int   inv_capacity_bonus; /* +N slots */
     float dmg_vs_cat[ENEMY_CAT_COUNT];
+    /* utility trinkets */
+    float coin_drop_mul;
+    float xp_mul;
+    int   pixie_on_kill_pct;
+    Element puddle_on_room;
     float aff[EL_COUNT];
     /* flags build-defining propages des uniques. Identiques aux champs
      * Player.u_* ; recopies a la fin du recompute. */
@@ -1091,6 +1106,7 @@ typedef struct {
     bool  u_crowd_regen;
     bool  u_stun_on_melee;
     bool  u_void_trail;
+    bool  u_dash_pull;
     bool  u_kill_stack_dmg;
     bool  u_heavy_armor;
     bool  u_expose_weakness;

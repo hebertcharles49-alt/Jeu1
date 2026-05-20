@@ -35,6 +35,15 @@ typedef struct {
     float d_reroll_discount;/* +X% reduction specifique au reroll */
     int   d_inv_bonus;     /* +N slots inventaire */
     float d_dmg_vs_cat[ENEMY_CAT_COUNT]; /* +X% dmg par categorie ennemi */
+    /* utility / counter trinkets */
+    float d_coin_drop;     /* +X% drop coin (additif au mul) */
+    float d_xp_mul;        /* +X% XP */
+    int   d_pixie_on_kill_pct;/* +X% chance pixie / kill */
+    int   d_puddle_on_room;/* Element pose dans la salle clear (EL_NONE=off) */
+    int   d_reroll_coupons;/* +N coupons reroll instantanes */
+    int   d_next_buy_free; /* +N achats gratuits charges */
+    int   d_next_buy_double;/* +N achats double effet charges */
+    int   d_free_hit_chg;  /* +N coups gratuits charges (free_hit_t mis a 60s) */
 } Recipe;
 
 static const Recipe RECIPES[] = {
@@ -122,13 +131,17 @@ static const Recipe RECIPES[] = {
     { "Couronne du brocanteur", "-30% prix shop, +5 dmg plats", 35, R_EPIC,
       0,0,0, 0,0,0, 5.f,0,0, 0,0, 0,0,  0,0, 0,0, 0,0, 0, 0.30f, 0.f, 0, {0} },
 
-    /* ---- TRINKETS REROLL (sequence Fibonacci en plein vol) ---- */
-    { "Des pipes",          "-25% prix reroll",                  12, R_COMMON,
+    /* ---- TRINKETS REROLL (cumulatifs, -50% max chacun) ---- */
+    { "Des pipes",          "-15% prix reroll",                  10, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.15f, 0, {0} },
+    { "Boule de cristal",   "-25% prix reroll",                  18, R_RARE,
       0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.25f, 0, {0} },
-    { "Boule de cristal",   "-50% prix reroll",                  24, R_RARE,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.50f, 0, {0} },
-    { "Cle des secrets",    "Reroll gratuit, +10g a l'achat",   40, R_EPIC,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 1.00f, 0, {0} },
+    { "Coupon de marche",   "+1 reroll gratuit",                  6, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, 0, 1, 0, 0, 0 },
+    { "Liasse de coupons",  "+3 rerolls gratuits",               12, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, 0, 3, 0, 0, 0 },
 
     /* ---- TRINKETS INVENTAIRE ---- */
     { "Sac robuste",        "+2 slots inventaire",               14, R_MAGIC,
@@ -138,17 +151,43 @@ static const Recipe RECIPES[] = {
     { "Bourse sans-fond",   "+8 slots inventaire",               40, R_EPIC,
       0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 8, {0} },
 
-    /* ---- TRINKETS ANTI-CATEGORIE (par categorie d'ennemi) ---- */
-    { "Os de hyene",        "+30% dmg vs Betes",                 12, R_COMMON,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0.30f, 0, 0, 0, 0} },
-    { "Sceau du Pacte",     "+30% dmg vs Demons",                14, R_MAGIC,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0.30f, 0, 0, 0} },
-    { "Crucifix",           "+30% dmg vs Mort-vivants",          14, R_MAGIC,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0.30f, 0, 0} },
-    { "Dague humaine",      "+30% dmg vs Humains",               12, R_MAGIC,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0.30f, 0} },
-    { "Glaive du chasseur", "+50% dmg vs Boss",                  30, R_EPIC,
-      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0, 0.50f} },
+    /* ---- TRINKETS ANTI-CATEGORIE (cumulatifs, +15%/25% par item) ---- */
+    { "Os de hyene",        "+15% dmg vs Betes",                  9, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0.15f, 0, 0, 0, 0} },
+    { "Sceau du Pacte",     "+15% dmg vs Demons",                10, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0.15f, 0, 0, 0} },
+    { "Crucifix",           "+15% dmg vs Mort-vivants",          10, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0.15f, 0, 0} },
+    { "Dague humaine",      "+15% dmg vs Humains",                9, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0.15f, 0} },
+    { "Glaive du chasseur", "+25% dmg vs Boss",                  22, R_EPIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0, 0, 0, 0, 0.25f} },
+
+    /* ---- TRINKETS UTILITY (effets cumulatifs simples) ---- */
+    { "Bourse percee",      "+15% drop d'or",                     8, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.15f, 0.f, 0, 0, 0, 0, 0, 0 },
+    { "Cristal du savoir",  "+20% XP",                            10, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.20f, 0, 0, 0, 0, 0, 0 },
+    { "Patte de pixie",     "+8% chance de spawn pixie / kill",   12, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 8, 0, 0, 0, 0, 0 },
+    { "Carte VIP",          "Prochain achat shop GRATUIT",        14, R_RARE,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, 0, 0, 1, 0, 0 },
+    { "Bon de change",      "Prochain achat duplique (x2)",       18, R_RARE,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, 0, 0, 0, 1, 0 },
+    { "Anneau du gardien",  "Un coup gratuit toutes les 60s",     28, R_EPIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, 0, 0, 0, 0, 1 },
+    { "Flacon d'eau",       "Flaque d'eau a chaque salle",         8, R_COMMON,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, EL_WATER, 0, 0, 0, 0 },
+    { "Fiole d'huile",      "Flaque de feu a chaque salle",       12, R_MAGIC,
+      0,0,0, 0,0,0, 0,0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0, 0.f, 0.f, 0, {0},
+      0.f, 0.f, 0, EL_FIRE, 0, 0, 0, 0 },
 
     /* ---- EPIQUE / LEGENDAIRE (30+g) ---- */
     { "Coeur de geant",     "+40 PV max, -10% atk speed",        35, R_EPIC,
@@ -181,6 +220,11 @@ static const Recipe RECIPES[] = {
       0,0,-3.f, 0,0,0, 0,0,0, 0.40f,0, 0,0, 0,0, 0,0, 0,0, 1 },
 };
 #define NUM_RECIPES ((int)(sizeof(RECIPES) / sizeof(RECIPES[0])))
+
+int shop_recipe_grants_free_hit(int rid) {
+    if (rid < 0 || rid >= NUM_RECIPES) return 0;
+    return RECIPES[rid].d_free_hit_chg > 0 ? 1 : 0;
+}
 
 int shop_recipe_count(void) { return NUM_RECIPES; }
 
@@ -232,6 +276,11 @@ void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
     sb->inv_capacity_bonus += r->d_inv_bonus;
     for (int ci = 0; ci < ENEMY_CAT_COUNT; ci++)
         sb->dmg_vs_cat[ci] += r->d_dmg_vs_cat[ci];
+    sb->coin_drop_mul       += r->d_coin_drop;
+    sb->xp_mul              += r->d_xp_mul;
+    sb->pixie_on_kill_pct   += r->d_pixie_on_kill_pct;
+    if (r->d_puddle_on_room > EL_NONE && r->d_puddle_on_room < EL_COUNT)
+        sb->puddle_on_room = (Element)r->d_puddle_on_room;
     if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) sb->aff[r->d_aff_el]  += r->d_aff_val;
     if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) sb->aff[r->d_aff_el2] += r->d_aff_val2;
 }
@@ -305,6 +354,17 @@ int shop_reroll_cost_at(int idx) {
 }
 
 void shop_reroll(Game *g) {
+    /* coupon prioritaire : consomme et ne touche pas le cycle Fibonacci */
+    if (g->player.reroll_coupons > 0) {
+        g->player.reroll_coupons--;
+        sfx_play(g, SFX_COIN);
+        int idx = g->shop_reroll_idx;
+        int prev_visits = g->shop_visits;
+        shop_generate(g);
+        g->shop_reroll_idx = idx;
+        g->shop_visits = prev_visits;
+        return;
+    }
     if (g->player.coins < g->shop_reroll_cost) return;
     g->player.coins -= g->shop_reroll_cost;
     sfx_play(g, SFX_COIN);
@@ -325,13 +385,34 @@ void shop_buy(Game *g, int idx) {
     if (idx < 0 || idx >= SHOP_SLOTS) return;
     ShopItem *si = &g->shop_items[idx];
     if (si->bought) return;
-    if (g->player.coins < si->cost) return;
-    g->player.coins -= si->cost;
+    /* charge "next_buy_free" : ce slot devient gratuit, consume la charge. */
+    int real_cost = si->cost;
+    if (g->player.next_buy_free > 0) { real_cost = 0; g->player.next_buy_free--; }
+    if (g->player.coins < real_cost) return;
+    g->player.coins -= real_cost;
     si->bought = true;
     sfx_play(g, SFX_COIN);
-    /* enregistre l'achat sur le joueur (effet cumulatif) */
-    if (g->player.shop_purchased_count < 64) {
-        g->player.shop_purchased[g->player.shop_purchased_count++] = si->recipe_id;
+
+    /* counters one-shot : on les applique direct sur le joueur. La
+     * recette est aussi enregistree dans shop_purchased pour que les
+     * effets STAT (route via StatBlock) cumulent. */
+    const Recipe *r = (si->recipe_id >= 0 && si->recipe_id < NUM_RECIPES)
+                       ? &RECIPES[si->recipe_id] : NULL;
+    int times = (g->player.next_buy_double > 0) ? 2 : 1;
+    if (g->player.next_buy_double > 0) g->player.next_buy_double--;
+    for (int rep = 0; rep < times; rep++) {
+        if (g->player.shop_purchased_count < 64) {
+            g->player.shop_purchased[g->player.shop_purchased_count++] = si->recipe_id;
+        }
+        if (r) {
+            g->player.reroll_coupons   += r->d_reroll_coupons;
+            g->player.next_buy_free    += r->d_next_buy_free;
+            g->player.next_buy_double  += r->d_next_buy_double;
+            if (r->d_free_hit_chg > 0) {
+                /* met le timer a 0 : eligible des le prochain coup */
+                if (g->player.free_hit_t > 0.f) g->player.free_hit_t = 0.f;
+            }
+        }
     }
     game_recompute_player_stats(g);
 }

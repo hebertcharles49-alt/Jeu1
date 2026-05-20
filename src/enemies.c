@@ -107,7 +107,10 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
                              e->x - 12, e->y - 12);
             }
         }
-    } else if (d.item_chance > 0 && (rand() % 100) < d.item_chance) {
+    } else if (d.item_chance > 0 && (rand() % 300) < d.item_chance) {
+        /* equipment drop rate divise par 3 (rand() % 300 vs item_chance
+         * en /100). Force le joueur a survivre plus longtemps avant de
+         * combo des items, et donne plus de poids au shop / boss. */
         Item it = item_drop_for_floor(g, g->floor_index, e->is_elite, false);
         pickup_spawn_item(g, it, e->x, e->y);
     }
@@ -337,6 +340,13 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     loop_on_hit(g);
     if (e->hp <= 0.f && !already_dead) {
         loop_on_kill(g);
+        /* trinket : pixie_on_kill_pct chance de spawn une pixie sur kill */
+        if (g->player.pixie_on_kill_pct > 0 &&
+            (rand() % 100) < g->player.pixie_on_kill_pct) {
+            Element pel = (e->element > EL_NONE && e->element < EL_COUNT)
+                            ? e->element : EL_FAE;
+            fairy_spawn(g, e->x, e->y, pel);
+        }
         /* run_kills a deja ete incremente par enemy_take_damage. */
         /* === Drops pre-rolles (talismans + uniques) ===
          * Si run_kills atteint le prochain milestone, on spawn a la

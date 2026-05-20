@@ -16,6 +16,35 @@
 void player_take_damage_from(Game *g, float dmg, float srcx, float srcy) {
     Player *p = &g->player;
     if (p->invuln_t > 0.f || p->dash_t > 0.f) return;
+    /* trinket "Anneau du gardien" : un coup gratuit par minute. Quand
+     * free_hit_t <= 0, le prochain coup est absorbe et le timer remonte
+     * a 60s. Visuel : invuln + sparks doree. */
+    if (p->free_hit_t <= 0.f) {
+        /* note : si jamais charge, p->free_hit_t reste a 0 ; le ring
+         * activera quand un trinket l a charge en mettant le timer
+         * proche de 0. Reset systematique a 60s ici. */
+        bool charged = false;
+        /* on detecte la presence du trinket en regardant si shop_purchased
+         * inclut Anneau du gardien -- simple : flag persistant via
+         * d_free_hit_chg. Le shop_buy met free_hit_t a 0 quand achete. */
+        for (int i = 0; i < p->shop_purchased_count && !charged; i++) {
+            int rid = p->shop_purchased[i];
+            extern int shop_recipe_grants_free_hit(int rid);
+            if (shop_recipe_grants_free_hit(rid)) charged = true;
+        }
+        if (charged) {
+            p->free_hit_t = 60.f;     /* prochaine charge dans 60s */
+            p->invuln_t = 0.6f;
+            for (int k = 0; k < 14; k++) {
+                float a = (rand() % 360) * 0.01745f;
+                particle_spawn_kind(g, p->x, p->y,
+                                    cosf(a) * 110, sinf(a) * 110, 0.5f,
+                                    0xFFD040FF, 2.4f, 2);
+            }
+            sfx_play(g, SFX_LEVELUP);
+            return;
+        }
+    }
 
     /* direction d impact : depuis la source vers le joueur. Si la source
      * est sur le joueur (DoT), on garde la direction precedente. */
@@ -171,13 +200,25 @@ void player_take_damage(Game *g, float dmg) {
 static void on_pickup_collect(Game *g, Pickup *pk) {
     Player *p = &g->player;
     switch (pk->kind) {
-        case PU_XP:    p->xp += 1; sfx_play(g, SFX_PICKUP); break;
+        case PU_XP: {
+            int gain = 1;
+            if (p->xp_mul > 1.f && (rand() / (float)RAND_MAX) < (p->xp_mul - 1.f)) gain++;
+            p->xp += gain;
+            sfx_play(g, SFX_PICKUP);
+            break;
+        }
         case PU_HEART: p->hp += 18.f; if (p->hp > p->maxhp) p->hp = p->maxhp;
                        sfx_play(g, SFX_PICKUP);
                        log_push(g, 0xFF8080FF, "+18 PV"); break;
         case PU_SOUL:  p->souls += 1; sfx_play(g, SFX_PICKUP); break;
-        case PU_COIN:  p->coins += pk->value > 0 ? pk->value : 1;
-                       sfx_play(g, SFX_COIN); break;
+        case PU_COIN: {
+            int v = pk->value > 0 ? pk->value : 1;
+            if (p->coin_drop_mul > 1.f) v = (int)(v * p->coin_drop_mul + 0.5f);
+            if (v < 1) v = 1;
+            p->coins += v;
+            sfx_play(g, SFX_COIN);
+            break;
+        }
         case PU_ELEMENT: {
             Element e = (Element)pk->value;
             /* Plus d'auto-greffe : depose en inventaire (ITEM_KIND_ELEMENT).
@@ -341,7 +382,40 @@ void update_player(Game *g) {
     }
 
     if (p->dash_cd > 0.f) p->dash_cd -= dt;
-    if (p->dash_t > 0.f)  p->dash_t  -= dt;
+    {
+        bool was_dashing = p->dash_t > 0.f;
+        if (p->dash_t > 0.f)  p->dash_t  -= dt;
+        bool ended = was_dashing && p->dash_t <= 0.f;
+        /* Bottes du Trou Noir : attire les ennemis a l arrivee du dash. */
+        if (ended && p->u_dash_pull) {
+            float pull_r = 80.f;
+            for (int i = 0; i < MAX_ENEMIES; i++) {
+                Enemy *e = &g->enemies[i];
+                if (!e->alive || e->dying_t > 0.f) continue;
+                float dxe = p->x - e->x, dye = p->y - e->y;
+                float d2 = dxe*dxe + dye*dye;
+                if (d2 > pull_r * pull_r || d2 < 0.5f) continue;
+                float d = sqrtf(d2);
+                /* knockback dirige vers le joueur, ampleur scale par
+                 * (1 - d/pull_r) pour que les ennemis loin recoivent
+                 * moins. Max ~220 px/s. */
+                float k = (1.f - d / pull_r) * 220.f;
+                e->knockback_x += (dxe / d) * k;
+                e->knockback_y += (dye / d) * k;
+            }
+            /* surface ombre au point d'arrivee pour le visuel */
+            surface_spawn(g, SURF_SHADOW, p->x, p->y, 22.f, 2.0f);
+            /* particules de void en couronne */
+            for (int k = 0; k < 16; k++) {
+                float a = (k / 16.f) * 6.2831f;
+                particle_spawn_kind(g, p->x + cosf(a) * 8.f,
+                                    p->y + sinf(a) * 8.f,
+                                    cosf(a) * -60.f, sinf(a) * -60.f,
+                                    0.40f, 0x8030B0FF, 1.8f, 0);
+            }
+            sfx_play_ex(g, SFX_HEAVY_HIT, 0.65f, 0.8f);
+        }
+    }
     if (p->anim_t > 0.f)  p->anim_t  -= dt;
     bool dashing = p->dash_t > 0.f;
     {
@@ -402,6 +476,9 @@ void update_player(Game *g) {
 
     if (p->invuln_t > 0.f) p->invuln_t -= dt;
     if (p->hit_t    > 0.f) p->hit_t    -= dt;
+    /* free hit timer : decroit vers 0 ; quand <= 0, le prochain coup
+     * sera absorbe gratuitement (puis le timer remonte a 60s). */
+    if (p->free_hit_t > 0.f) p->free_hit_t -= dt;
 
     /* regen */
     /* u_last_stand : tick le buff x2 (visible via shake + particules) */

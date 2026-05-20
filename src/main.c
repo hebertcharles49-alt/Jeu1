@@ -265,6 +265,14 @@ void game_recompute_player_stats(Game *g) {
     for (int ci = 0; ci < ENEMY_CAT_COUNT; ci++) {
         p->dmg_vs_cat[ci] = sb.dmg_vs_cat[ci];
     }
+    p->coin_drop_mul = 1.f + sb.coin_drop_mul;
+    if (p->coin_drop_mul < 0.f) p->coin_drop_mul = 0.f;
+    p->xp_mul = 1.f + sb.xp_mul;
+    if (p->xp_mul < 0.f) p->xp_mul = 0.f;
+    p->pixie_on_kill_pct = sb.pixie_on_kill_pct;
+    if (p->pixie_on_kill_pct < 0) p->pixie_on_kill_pct = 0;
+    if (p->pixie_on_kill_pct > 100) p->pixie_on_kill_pct = 100;
+    p->puddle_on_room = sb.puddle_on_room;
     for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
     /* flags build-defining */
     p->u_explosions_attract = sb.u_explosions_attract;
@@ -283,6 +291,7 @@ void game_recompute_player_stats(Game *g) {
     p->u_crowd_regen        = sb.u_crowd_regen;
     p->u_stun_on_melee      = sb.u_stun_on_melee;
     p->u_void_trail         = sb.u_void_trail;
+    p->u_dash_pull          = sb.u_dash_pull;
     p->u_kill_stack_dmg     = sb.u_kill_stack_dmg;
     p->u_heavy_armor        = sb.u_heavy_armor;
     p->u_expose_weakness    = sb.u_expose_weakness;

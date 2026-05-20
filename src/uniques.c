@@ -42,7 +42,7 @@ typedef struct {
     bool  u_hazard_immune, u_hazard_stacks;
     bool  u_phoenix_revive, u_kill_wave, u_frontal_immune;
     bool  u_dodge_attack, u_crowd_regen, u_stun_on_melee;
-    bool  u_void_trail, u_kill_stack_dmg, u_heavy_armor;
+    bool  u_void_trail, u_dash_pull, u_kill_stack_dmg, u_heavy_armor;
     bool  u_expose_weakness, u_last_stand;
 } UniqueDef;
 
@@ -85,8 +85,8 @@ static const UniqueDef UNIQUE_DEFS[] = {
     { "Veste de Roseaux",        "Regen += 0.1 / ennemi vivant en salle",
       SLOT_CHEST,   .d_maxhp=15.f, .u_crowd_regen=true },
     /* === Brume Mortelle (Vide+Eau+Air) === */
-    { "Voile de Brume",          "+15% esquive, 1 drone supplementaire",
-      SLOT_CHEST,   .d_dodge=0.15f, .u_drone_count=1 },
+    { "Voile de Brume",          "+15% esquive, 2 drones supplementaires",
+      SLOT_CHEST,   .d_dodge=0.15f, .u_drone_count=2 },
     { "Couronne Empoisonneuse",  "Les morts laissent des mines",
       SLOT_HELM,    .d_dmg_mul=0.10f, .u_corpse_mines=true },
     /* === Effondrement (Terre+Air+Vide) === */
@@ -95,6 +95,9 @@ static const UniqueDef UNIQUE_DEFS[] = {
     { "Bottes du Vide",          "Le dash laisse un champ de Vide 3s",
       SLOT_BOOTS,   .d_aff_el=EL_VOID, .d_aff_val=0.20f,
       .u_void_trail=true },
+    { "Bottes du Trou Noir",     "L'arrivee du dash aspire les ennemis",
+      SLOT_BOOTS,   .d_aff_el=EL_VOID, .d_aff_val=0.25f,
+      .u_dash_pull=true },
     /* === Forge Solaire (Acier+Feu+Foudre) === */
     { "Marteau de Forge",        "Chaque kill : +2 dmg flat (max +40)",
       SLOT_GLOVES,  .d_aff_el=EL_STEEL, .d_aff_val=0.20f,
@@ -190,6 +193,7 @@ void unique_apply_to_block(int id, StatBlock *sb) {
     if (u->u_crowd_regen)     sb->u_crowd_regen     = true;
     if (u->u_stun_on_melee)   sb->u_stun_on_melee   = true;
     if (u->u_void_trail)      sb->u_void_trail      = true;
+    if (u->u_dash_pull)       sb->u_dash_pull       = true;
     if (u->u_kill_stack_dmg)  sb->u_kill_stack_dmg  = true;
     if (u->u_heavy_armor)     sb->u_heavy_armor     = true;
     if (u->u_expose_weakness) sb->u_expose_weakness = true;

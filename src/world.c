@@ -142,6 +142,22 @@ void update_room_logic(Game *g) {
             }
             if (!any) {
                 r->cleared = true;
+                /* trinket puddle_on_room : pose une flaque au centre de
+                 * la salle quand elle est nettoyee. Element = water/fire/
+                 * lightning/etc selon trinket equipe. */
+                if (p->puddle_on_room > EL_NONE && p->puddle_on_room < EL_COUNT) {
+                    int kind = SURF_WATER;
+                    switch (p->puddle_on_room) {
+                        case EL_FIRE:      kind = SURF_FIRE; break;
+                        case EL_WATER:     kind = SURF_WATER; break;
+                        case EL_LIGHTNING: kind = SURF_ELECTRIFIED; break;
+                        default: kind = SURF_WATER; break;
+                    }
+                    surface_spawn(g, kind,
+                                  (r->x + r->w / 2) * TILE,
+                                  (r->y + r->h / 2) * TILE,
+                                  28.f, 12.f);
+                }
                 if ((rand() % 100) < 80) {
                     pickup_spawn(g, PU_CHEST, 0,
                                  (r->x + r->w / 2) * TILE,
