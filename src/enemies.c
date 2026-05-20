@@ -236,7 +236,7 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
             pr.x = e->x; pr.y = e->y;
             pr.vx = 0; pr.vy = 0;
             pr.life = 8.f; pr.r = 6.f;
-            pr.dmg = 12.f * powf(1.15f, (float)(g->floor_index - 1));
+            pr.dmg = 12.f * powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
             pr.owner = 0;        /* mine du joueur : touche les ennemis qui
                                   * marchent dessus (proj statique AOE). */
             pr.aoe = 26.f;
@@ -387,7 +387,7 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
         /* === Build-defining effects on kill === */
         /* u_kill_wave : vague de repulsion + dmg autour du joueur */
         if (g->player.u_kill_wave) {
-            float diff = powf(1.15f, (float)(g->floor_index - 1));
+            float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
             float wave_dmg = 6.f * diff;
             for (int j = 0; j < MAX_ENEMIES; j++) {
                 Enemy *o = &g->enemies[j];
@@ -495,7 +495,7 @@ static void boss_phase_transition(Game *g, Enemy *e, int new_phase) {
 static void boss_necropante(Game *g, Enemy *e, float dt, int phase,
                              float dx, float dy, float dist)
 {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     /* mouvement : slow chase. Plus rapide en phase 2 (rage). */
     float speed = 32.f + phase * 8.f;
     if (dist > 30.f) ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
@@ -571,7 +571,7 @@ static void boss_necropante(Game *g, Enemy *e, float dt, int phase,
 static void boss_geant(Game *g, Enemy *e, float dt, int phase,
                        float dx, float dy, float dist)
 {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     float speed = 26.f;
     /* state : 0 = chasse, 1 = telegraph ground pound, 2 = pound active
      *         3 = rocks falling, 4 = charge telegraph, 5 = charging
@@ -733,7 +733,7 @@ static void boss_geant(Game *g, Enemy *e, float dt, int phase,
 static void boss_hydre(Game *g, Enemy *e, float dt, int phase,
                        float dx, float dy, float dist)
 {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     /* kite : essaie de rester a 150 px */
     if (dist > 180.f)      ai_move_toward(g, e, dt, dx, dy, dist, 28.f, false);
     else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 28.f, false);
@@ -813,7 +813,7 @@ static void boss_hydre(Game *g, Enemy *e, float dt, int phase,
 static void boss_forgeron(Game *g, Enemy *e, float dt, int phase,
                           float dx, float dy, float dist)
 {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     float speed = 30.f + phase * 5.f;
     if (dist > 50.f) ai_move_toward(g, e, dt, dx, dy, dist, speed, false);
 
@@ -884,7 +884,7 @@ static void boss_forgeron(Game *g, Enemy *e, float dt, int phase,
 static void boss_avatar(Game *g, Enemy *e, float dt, int phase,
                         float dx, float dy, float dist)
 {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     (void)dist;
     /* state encode dans ai_t2 (cast int) : 0=idle, 1=beam telegraph, 2=fire,
      * 3=teleport spark. */
@@ -1298,7 +1298,7 @@ static void boss_update(Game *g, Enemy *e, float dt) {
     }
     /* contact dmg de base, scale avec la phase pour eviter l etreinte
      * impossible en phase 2. */
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     ai_contact_damage(g, e, (14.f + phase * 4.f) * diff);
 }
 
@@ -1360,7 +1360,7 @@ static int count_zombie_cluster(Game *g, Enemy *self) {
 }
 
 static void ai_zombie(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     e->ai_t += dt;
     /* lunge state machine */
     if (e->ai_t2 > 0.f) {
@@ -1405,7 +1405,7 @@ static void ai_zombie(Game *g, Enemy *e, float dt, float dx, float dy, float dis
  * "atterrissage" (quand le hop multiplier est minimum). La flaque damage
  * sur passage. Garde le split a la mort (deja gere dans enemy_take_damage). */
 static void ai_slime(Game *g, Enemy *e, int i, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     float hop_sin = sinf(g->time * 6.f + i);
     float hop = 0.6f + 0.4f * hop_sin;
     ai_move_toward(g, e, dt, dx, dy, dist, 95.f * hop, false);
@@ -1433,7 +1433,7 @@ static void ai_slime(Game *g, Enemy *e, int i, float dt, float dx, float dy, flo
 /* BANDIT : kite + 3-shot spread + roll lateral occasionnel pour
  * repositionner et eviter les attaques melee. */
 static void ai_bandit(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     e->ai_t += dt;
     /* roll lateral toutes les 4s si le joueur est proche (< 130px) */
     if (e->ai_t2 > 0.f) {
@@ -1478,7 +1478,7 @@ static void ai_bandit(Game *g, Enemy *e, float dt, float dx, float dy, float dis
  * remplissait l ecran). Laisse une trace de feu sous lui qui ralentit le
  * joueur s'il marche dedans (visuel + dmg sur contact via particules). */
 static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     if (dist > 100.f) ai_move_toward(g, e, dt, dx, dy, dist, 30.f, false);
     e->ai_t += dt;
     /* trace de feu : flamme statique posee tous les 0.30s, joue le role
@@ -1525,7 +1525,7 @@ static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist
 /* RAT : tres rapide, zigzag (composante perpendiculaire sinusoidale).
  * Faible, mais en groupe c'est dangereux. */
 static void ai_rat(Game *g, Enemy *e, int i, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     /* perpendiculaire au vecteur joueur, oscillation rapide */
     float perp_x = -dy / dist;
     float perp_y =  dx / dist;
@@ -1541,7 +1541,7 @@ static void ai_rat(Game *g, Enemy *e, int i, float dt, float dx, float dy, float
  * 35% de chance de teleporter de +/-60 px quand il prend un coup. Le
  * teleport est gere ici en lisant hit_flash > 0 + un cooldown. */
 static void ai_ghost(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     /* teleport "reactif" : on tente sur entree de hit_flash (rising edge). */
     e->ai_t += dt;
     if (e->hit_flash > 0.05f && e->ai_t > 0.6f) {
@@ -1577,7 +1577,7 @@ static void ai_ghost(Game *g, Enemy *e, float dt, float dx, float dy, float dist
  *   2 = charging : straight line a 280 speed, 0.9s, gros dmg
  * Quand charging finit -> retour 0 et cooldown forc. */
 static void ai_charger(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     e->ai_t += dt;
     int state = (int)e->ai_t2;          /* 0/1/2 -- on stocke en float */
     if (state == 0) {
@@ -1643,7 +1643,7 @@ static void ai_charger(Game *g, Enemy *e, float dt, float dx, float dy, float di
 
 /* MAGE : kite a 180 px, homing fae bolt toutes les 2s, blink si trop proche */
 static void ai_mage(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     e->ai_t += dt;
     /* blink defensif */
     if (dist < 80.f && e->ai_t2 <= 0.f) {
@@ -1694,7 +1694,7 @@ static void ai_mage(Game *g, Enemy *e, float dt, float dx, float dy, float dist)
  * Pas de degats direct (faible contact). Cible prioritaire pour le
  * joueur car amplifie tous les autres. */
 static void ai_healer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     if (dist > 160.f)      ai_move_toward(g, e, dt, dx, dy, dist, 28.f, false);
     else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 30.f, false);
     e->ai_t += dt;
@@ -1731,7 +1731,7 @@ static void ai_healer(Game *g, Enemy *e, float dt, float dx, float dy, float dis
  * autres ai_<kind> (cf calcul). Simplifie : on applique un mini "buff"
  * timer aux voisins -> melee enemies tapent plus fort si proches. */
 static void ai_buffer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     (void)dx; (void)dy; (void)dist;
     e->ai_t += dt;
     /* aura visuelle continue : anneau acier */
@@ -1769,7 +1769,7 @@ static void ai_buffer(Game *g, Enemy *e, float dt, float dx, float dy, float dis
  * dans 30 px. Cappe a 2 zombies actifs vivants raise par ce necro
  * (compte global pour simplifier). */
 static void ai_necromancer(Game *g, Enemy *e, float dt, float dx, float dy, float dist) {
-    float diff = powf(1.15f, (float)(g->floor_index - 1));
+    float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
     if (dist > 200.f)      ai_move_toward(g, e, dt, dx, dy, dist, 20.f, false);
     else if (dist < 120.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 20.f, false);
     e->ai_t += dt;

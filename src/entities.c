@@ -37,7 +37,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
             e->kind = kind;
             e->r = 6.f;
             e->xp_drop = 1; e->coin_drop = 1;
-            float diff = powf(1.15f, (float)(g->floor_index - 1));
+            float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
             switch (kind) {
                 case EK_ZOMBIE:
                     e->hp = e->maxhp = 18.f * diff;
@@ -117,7 +117,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
              * Bias : 25% de chance de prendre l'element du BIOME courant
              * au lieu d un element random -- ca renforce le theme. */
             if (kind != EK_BOSS) {
-                float chance = 0.05f * (float)g->floor_index;
+                float chance = 0.05f * (float)g->floors_visited;
                 if (chance > 0.50f) chance = 0.50f;
                 if ((rand() / (float)RAND_MAX) < chance) {
                     e->is_elite = true;
@@ -131,7 +131,7 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
                     /* HP multiplicateur croit doucement avec l etage :
                      * x2.0 au floor 1, x2.5 au floor 10. Donne un peu plus
                      * de mordant aux elites en fin de run. */
-                    float elite_mul = 2.0f + (float)g->floor_index * 0.05f;
+                    float elite_mul = 2.0f + (float)g->floors_visited * 0.05f;
                     e->maxhp *= elite_mul;
                     e->hp = e->maxhp;
                     e->r += 1.5f;

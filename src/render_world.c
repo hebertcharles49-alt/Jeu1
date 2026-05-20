@@ -1915,21 +1915,174 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
              * 5 = Archimage (orange/violet). Verrouille = gris. */
             float pr_ = 0.55f, pg_ = 0.90f, pb_ = 1.0f;
             bool locked = false;
+            int pv = pk->value;
             if (g->floor_index == 0) {
-                int v = pk->value;
-                if (v == -1) { pr_ = 1.0f; pg_ = 0.85f; pb_ = 0.30f; }
-                else if (v >= 0 && v <= 4) {
+                if (pv == -1) { pr_ = 1.0f; pg_ = 0.85f; pb_ = 0.30f; }
+                else if (pv >= 0 && pv <= 4) {
                     float br_, bg_, bb_;
-                    biome_tint(v, &br_, &bg_, &bb_);
+                    biome_tint(pv, &br_, &bg_, &bb_);
                     pr_ = br_; pg_ = bg_; pb_ = bb_;
-                    if (g->biome_cleared[v]) locked = true;
-                } else if (v == 5) {
+                    if (g->biome_cleared[pv]) locked = true;
+                } else if (pv == 5) {
                     pr_ = 1.0f; pg_ = 0.50f; pb_ = 0.80f;
                     int n = 0;
                     for (int b = 0; b < 5; b++) if (g->biome_cleared[b]) n++;
                     if (n < 5) locked = true;
                 }
                 if (locked) { pr_ = 0.30f; pg_ = 0.30f; pb_ = 0.35f; }
+
+                /* === Backdrop thematique derriere chaque portail ===
+                 * Place a 1.5 units "behind" (direction outward from
+                 * arena center 28,28). Le visuel varie selon la
+                 * destination. Estompe si locked (50% alpha equivalent
+                 * via couleurs attenuees). */
+                float cx_a = 28.f, cz_a = 28.f;
+                float odx = pos.x - cx_a, odz = pos.z - cz_a;
+                float odl = sqrtf(odx * odx + odz * odz) + 0.01f;
+                odx /= odl; odz /= odl;
+                float bx = pos.x + odx * 1.5f;
+                float bz = pos.z + odz * 1.5f;
+                float dim = locked ? 0.45f : 1.0f;
+                if (pv == -1) {
+                    /* HUB : 2 pierres tombales en arc derriere */
+                    for (int k = -1; k <= 1; k += 2) {
+                        float lx = bx + (-odz) * 0.40f * k;
+                        float lz = bz + ( odx) * 0.40f * k;
+                        /* corps */
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.30f, lz),
+                            v3_make(0.25f, 0.50f, 0.10f),
+                            0.45f * dim, 0.42f * dim, 0.45f * dim);
+                        /* arrondi top */
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.55f, lz),
+                            v3_make(0.15f, 0.10f, 0.12f),
+                            0.42f * dim, 0.40f * dim, 0.42f * dim);
+                    }
+                } else if (pv == 0) {
+                    /* Crypte (DARK) : 3 pierres tombales sombres + croix */
+                    for (int k = -1; k <= 1; k++) {
+                        float lx = bx + (-odz) * 0.50f * k;
+                        float lz = bz + ( odx) * 0.50f * k;
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.35f, lz),
+                            v3_make(0.20f, 0.60f, 0.10f),
+                            0.30f * dim, 0.22f * dim, 0.32f * dim);
+                    }
+                } else if (pv == 1) {
+                    /* Cavernes (EARTH) : 3 stalagmites brunes pointues */
+                    for (int k = -1; k <= 1; k++) {
+                        float lx = bx + (-odz) * 0.45f * k;
+                        float lz = bz + ( odx) * 0.45f * k;
+                        float hh = 0.55f + (k == 0 ? 0.20f : 0.f);
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, hh * 0.5f, lz),
+                            v3_make(0.30f, hh, 0.30f),
+                            0.55f * dim, 0.38f * dim, 0.22f * dim);
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, hh + 0.10f, lz),
+                            v3_make(0.18f, 0.15f, 0.18f),
+                            0.50f * dim, 0.32f * dim, 0.18f * dim);
+                    }
+                } else if (pv == 2) {
+                    /* Marais (WATER) : flaque sombre + spores verts qui flottent */
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 0.04f, bz),
+                        v3_make(1.2f, 0.05f, 1.0f),
+                        0.20f * dim, 0.42f * dim, 0.32f * dim);
+                    for (int k = 0; k < 3; k++) {
+                        float a = g->time * 0.5f + k * 2.094f;
+                        float lx = bx + cosf(a) * 0.40f;
+                        float lz = bz + sinf(a) * 0.30f;
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.55f + sinf(g->time + k) * 0.10f, lz),
+                            v3_make(0.10f, 0.10f, 0.10f),
+                            0.40f * dim, 0.85f * dim, 0.40f * dim);
+                    }
+                } else if (pv == 3) {
+                    /* Forge (FIRE) : enclume + 2 piliers flames */
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 0.30f, bz),
+                        v3_make(0.60f, 0.30f, 0.45f),
+                        0.35f * dim, 0.30f * dim, 0.32f * dim);
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 0.55f, bz),
+                        v3_make(0.30f, 0.20f, 0.30f),
+                        0.40f * dim, 0.32f * dim, 0.30f * dim);
+                    /* flammes : 2 cubes orangés qui pulsent */
+                    float fp = 0.5f + 0.5f * sinf(g->time * 6.f);
+                    for (int k = -1; k <= 1; k += 2) {
+                        float lx = bx + (-odz) * 0.50f * k;
+                        float lz = bz + ( odx) * 0.50f * k;
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.50f, lz),
+                            v3_make(0.12f, 0.40f, 0.12f),
+                            1.0f * dim, (0.45f + 0.35f * fp) * dim, 0.20f * dim);
+                    }
+                } else if (pv == 4) {
+                    /* Sanctuaire (HOLY) : grand pilier blanc + halo */
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 0.80f, bz),
+                        v3_make(0.40f, 1.60f, 0.40f),
+                        0.95f * dim, 0.90f * dim, 0.70f * dim);
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 1.65f, bz),
+                        v3_make(0.55f, 0.10f, 0.55f),
+                        1.0f * dim, 0.92f * dim, 0.55f * dim);
+                    /* halo dore au sol */
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 0.04f, bz),
+                        v3_make(1.1f, 0.04f, 1.1f),
+                        1.0f * dim, 0.85f * dim, 0.40f * dim);
+                } else if (pv == 5) {
+                    /* Archimage : pentacle + 5 piliers void + orbe central */
+                    for (int k = 0; k < 5; k++) {
+                        float a = (k / 5.f) * 6.2831f - 1.57f;
+                        float lx = bx + cosf(a) * 0.70f;
+                        float lz = bz + sinf(a) * 0.70f;
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.04f, lz),
+                            v3_make(0.18f, 0.04f, 0.18f),
+                            0.70f * dim, 0.30f * dim, 0.85f * dim);
+                        /* piliers void verticaux */
+                        gfx_box_draw(g->renderer,
+                            v3_make(lx, 0.65f, lz),
+                            v3_make(0.10f, 1.10f, 0.10f),
+                            0.40f * dim, 0.15f * dim, 0.55f * dim);
+                    }
+                    /* orbe central qui pulse */
+                    float op = 0.6f + 0.4f * sinf(g->time * 4.f);
+                    gfx_box_draw(g->renderer,
+                        v3_make(bx, 1.2f, bz),
+                        v3_make(0.30f * op, 0.30f * op, 0.30f * op),
+                        1.0f * dim, 0.50f * dim, 0.95f * dim);
+                }
+
+                /* === Gemme brillante au-dessus du portail (clean only) ===
+                 * Petit cube qui flotte + pulse en couleur du portail.
+                 * Spin via decalage du highlight. Pas affichee si locked. */
+                if (!locked) {
+                    float gp = 0.85f + 0.15f * sinf(g->time * 5.f);
+                    float gy = 1.85f + sinf(g->time * 2.f + pk->hover_t) * 0.08f;
+                    /* halo derriere */
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x, gy, pos.z),
+                        v3_make(0.28f, 0.28f, 0.28f),
+                        pr_ * 0.45f, pg_ * 0.45f, pb_ * 0.45f);
+                    /* coeur de gemme */
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x, gy, pos.z),
+                        v3_make(0.18f * gp, 0.18f * gp, 0.18f * gp),
+                        pr_, pg_, pb_);
+                    /* highlight blanc qui orbite (spin visuel) */
+                    float sa = g->time * 3.f + pk->hover_t * 4.f;
+                    gfx_box_draw(g->renderer,
+                        v3_make(pos.x + cosf(sa) * 0.06f,
+                                gy + 0.04f,
+                                pos.z + sinf(sa) * 0.06f),
+                        v3_make(0.05f, 0.05f, 0.05f),
+                        1.f, 1.f, 1.f);
+                }
             }
             /* gros disque + halo */
             float a = g->time * 3.f;

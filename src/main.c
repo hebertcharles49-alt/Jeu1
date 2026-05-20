@@ -438,6 +438,7 @@ void game_start_new_run(Game *g) {
      * / kill_stack_count / hazard_stacks / last_stand_t sont deja a 0. */
     g->floor_index = 0;     /* commence sur l'arene-pivot a 7 portails */
     for (int i = 0; i < 5; i++) g->biome_cleared[i] = false;
+    g->floors_visited = 0;
     g->shake_t = 0.f;
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
@@ -533,6 +534,7 @@ void game_next_floor(Game *g) {
         g->state = GS_VICTORY;
         return;
     }
+    if (g->floor_index >= 1 && g->floor_index <= 10) g->floors_visited++;
     log_push(g, 0xFFE090FF, "Etage %d", g->floor_index);
     /* seed du donjon : derivee du run_seed + floor pour que chaque etage
      * d une meme seed soit reproductible et different. */
@@ -571,6 +573,10 @@ void game_jump_to_floor(Game *g, int target) {
         return;
     }
     if (target < 0) target = 0;
+    /* Compte les visites des etages de combat (1..10). Le scaling
+     * des mobs est base la-dessus, pas floor_index, pour que l'ordre
+     * choisi par le joueur ne casse pas la progression. */
+    if (target >= 1 && target <= 10) g->floors_visited++;
     g->floor_index = target;
     if (target == 0)             log_push(g, 0xFFE090FF, "Salle des sept portails");
     else if (target == MAX_FLOORS) log_push(g, 0xFFA040FF, "L'Archimage t'attend...");
@@ -1193,6 +1199,74 @@ void game_run(Game *g) {
         } else if (g->state == GS_CHOOSE_HERO) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
+            /* Transition de portail : fondu au noir + label biome.
+             * Pendant la transition, tout est freeze (pas d'update). */
+            if (g->portal_transition_t > 0.f) {
+                g->portal_transition_t -= dt;
+                if (g->portal_transition_t <= 0.f) {
+                    g->portal_transition_t = 0.f;
+                    int target = g->portal_transition_target;
+                    g->portal_transition_target = 0;
+                    g->portal_transition_label[0] = '\0';
+                    game_jump_to_floor(g, target);
+                }
+                gfx_frame_begin(g->renderer);
+                /* re-render world frozen + overlay fade pour visu fluide */
+                bool sw = true; (void)sw;
+                if (g->state == GS_RUN) {
+                    int sx_, sy_; apply_shake(g, &sx_, &sy_);
+                    g->camera_x = (float)sx_; g->camera_y = (float)sy_;
+                    render_world(g);
+                }
+                gfx_ui_begin(g->renderer);
+                /* fondu : alpha pic a 1.0 a t=1.5s (mi-chemin), fade en
+                 * et hors. Le label apparait en pic. */
+                float t = g->portal_transition_t;
+                float pulse = 1.f - fabsf((1.5f - t) / 1.5f);
+                if (pulse < 0.f) pulse = 0.f;
+                if (pulse > 1.f) pulse = 1.f;
+                uint8_t alpha = (uint8_t)(pulse * 240);
+                gfx_set_blend(g->renderer, true);
+                uint32_t bcol = (uint32_t)((0x00u << 24) | (0x00u << 16)
+                                          | (0x00u << 8) | (uint32_t)alpha);
+                gfx_set_color(g->renderer, bcol);
+                gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
+                gfx_set_blend(g->renderer, false);
+                /* label centre, apparait quand pulse > 0.4 */
+                if (pulse > 0.35f && g->portal_transition_label[0]) {
+                    const char *lbl = g->portal_transition_label;
+                    int tw = text_width(lbl);
+                    /* shadow + texte ; couleur fade dans pulse */
+                    float la_f = ((pulse - 0.35f) / 0.65f) * 255.f;
+                    if (la_f > 255.f) la_f = 255.f;
+                    uint8_t la = (uint8_t)la_f;
+                    uint32_t tc = (uint32_t)((0xFFu << 24) | (0xE0u << 16)
+                                            | (0x80u << 8) | (uint32_t)la);
+                    text_draw(g->renderer,
+                              INTERNAL_W/2 - tw/2 + 1,
+                              INTERNAL_H/2 - 4 + 1, lbl, 0x000000FF);
+                    text_draw(g->renderer,
+                              INTERNAL_W/2 - tw/2,
+                              INTERNAL_H/2 - 4, lbl, tc);
+                    /* sous-titre "Etage X" */
+                    char sub[40];
+                    int tgt = g->portal_transition_target;
+                    if (tgt == MAX_FLOORS)
+                        snprintf(sub, sizeof(sub), "L'arene supreme");
+                    else
+                        snprintf(sub, sizeof(sub), "Etage %d", tgt);
+                    int sw_ = text_width(sub);
+                    text_draw(g->renderer,
+                              INTERNAL_W/2 - sw_/2,
+                              INTERNAL_H/2 + 8, sub,
+                              (uint32_t)((0xC0u << 24) | (0xC0u << 16)
+                                       | (0xCCu << 8) | (uint32_t)la));
+                }
+                gfx_ui_end(g->renderer);
+                gfx_frame_end(g->renderer);
+                SDL_GL_SwapWindow(g->window);
+                continue;       /* skip le reste de la frame */
+            }
             g->run_time += g->dt;
             if (g->scroll_t > 0.f)         g->scroll_t -= g->dt;
             if (g->combo_callout_t > 0.f)  g->combo_callout_t -= g->dt;

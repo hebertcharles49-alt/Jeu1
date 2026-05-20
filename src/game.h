@@ -746,6 +746,15 @@ typedef struct {
      * revient ici apres victoire. Archimage portail debloqu5 quand les
      * 5 biomes sont cleared. */
     bool          biome_cleared[5];
+    int           floors_visited;   /* compteur monotone, +1 par jump vers
+                                       un etage 1..10. Sert au scaling des
+                                       mobs : ordre des biomes libre mais
+                                       difficulte progresse en lineaire. */
+    /* Transition de portail : fondu au noir + nom du biome, puis jump.
+     * Active pour les 7 portails de l'arene-pivot. */
+    float         portal_transition_t;     /* > 0 = en cours (3..0) */
+    int           portal_transition_target;
+    char          portal_transition_label[32];
     /* Archimage (Boss final etage 11) : ordre aleatoire des elements,
      * 3 phases avec speech, stase pendant summon des bosses reserves. */
     int           arch_element_order[10];   /* permutation 0..9 des elements */
