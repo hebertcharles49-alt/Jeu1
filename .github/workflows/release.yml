@@ -32,8 +32,14 @@ jobs:
       - name: Build game
         run: make
 
-      - name: Copy SDL2.dll next to exe
-        run: cp /mingw64/bin/SDL2.dll SDL2.dll
+      - name: Copy runtime DLLs next to exe
+        run: |
+          cp /mingw64/bin/SDL2.dll SDL2.dll
+          # Filets de securite : si jamais le static-link MinGW ne couvre
+          # pas tout (cas exotique), on embarque aussi ces dlls. Sinon
+          # ignore par l'installer via skipifsourcedoesntexist.
+          cp /mingw64/bin/libgcc_s_seh-1.dll libgcc_s_seh-1.dll || true
+          cp /mingw64/bin/libwinpthread-1.dll libwinpthread-1.dll || true
 
       - name: Install Inno Setup
         shell: powershell

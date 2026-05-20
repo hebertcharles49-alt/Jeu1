@@ -14,7 +14,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo === [2/3] Copie SDL2.dll a cote de l'exe ===
+echo === [2/3] Copie SDL2.dll + runtime MinGW a cote de l'exe ===
 if not exist "SDL2.dll" (
     if exist "C:\msys64\mingw64\bin\SDL2.dll" (
         copy /Y "C:\msys64\mingw64\bin\SDL2.dll" "SDL2.dll" >nul
@@ -23,6 +23,11 @@ if not exist "SDL2.dll" (
         exit /b 1
     )
 )
+REM Runtime MinGW : optionnelle (le Makefile static-link deja) mais
+REM on les copie quand meme comme filet de securite. Pas d'erreur
+REM si absentes.
+if exist "C:\msys64\mingw64\bin\libgcc_s_seh-1.dll" copy /Y "C:\msys64\mingw64\bin\libgcc_s_seh-1.dll" "libgcc_s_seh-1.dll" >nul
+if exist "C:\msys64\mingw64\bin\libwinpthread-1.dll" copy /Y "C:\msys64\mingw64\bin\libwinpthread-1.dll" "libwinpthread-1.dll" >nul
 
 echo === [3/3] Compile l'installer Inno Setup ===
 set "ISCC=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

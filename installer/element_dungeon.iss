@@ -46,11 +46,17 @@ Name: "french";  MessagesFile: "compiler:Languages\French.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\element_dungeon.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\SDL2.dll";            DestDir: "{app}"; Flags: ignoreversion
-Source: "..\Readme.txt";          DestDir: "{app}"; Flags: ignoreversion isreadme
-Source: "..\README.md";           DestDir: "{app}"; Flags: ignoreversion
-Source: "..\mods\*";              DestDir: "{app}\mods"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git*"
+Source: "..\element_dungeon.exe";       DestDir: "{app}"; Flags: ignoreversion
+Source: "..\SDL2.dll";                  DestDir: "{app}"; Flags: ignoreversion
+; Runtime MinGW : normalement le Makefile -static-libgcc / -Wl,-Bstatic
+; -lwinpthread couvre tout. On embarque quand meme les dlls si elles
+; sont presentes a cote, pour eviter toute erreur "DLL manquante" cote
+; joueur. skipifsourcedoesntexist : ignore si absentes.
+Source: "..\libgcc_s_seh-1.dll";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\libwinpthread-1.dll";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\Readme.txt";                DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\README.md";                 DestDir: "{app}"; Flags: ignoreversion
+Source: "..\mods\*";                    DestDir: "{app}\mods"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git*"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

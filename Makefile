@@ -19,7 +19,11 @@ ifdef WIN
   TARGET  := element_dungeon.exe
   SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null)
   SDL_LIBS   := $(shell sdl2-config --libs   2>/dev/null)
-  LDFLAGS := $(SDL_LIBS) -lm -lopengl32 -mwindows
+  # Link statique de la runtime MinGW (libgcc + winpthread) pour que
+  # l'exe ne depende plus de libgcc_s_seh-1.dll / libwinpthread-1.dll.
+  # Seule SDL2.dll reste dynamique et est embarquee dans le setup.exe.
+  LDFLAGS := $(SDL_LIBS) -lm -lopengl32 -mwindows \
+             -static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
 else
   TARGET  := element_dungeon
   SDL_CFLAGS := $(shell sdl2-config --cflags)
