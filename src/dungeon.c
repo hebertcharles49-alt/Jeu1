@@ -80,6 +80,94 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         for (int x = 0; x < MAP_W; x++)
             d->tiles[y][x] = T_WALL;
 
+    /* === ETAGE 0 : arene-pivot circulaire avec 7 portails ===
+     * Une seule grande salle circulaire, runes au sol, torches aux
+     * extremites. Les portails sont spawnes par world.c (update_room
+     * logic, depuis g->biome_cleared). */
+    if (floor_index == 0) {
+        int cx = MAP_W / 2, cy = MAP_H / 2;
+        int rad = 14;
+        for (int y = -rad; y <= rad; y++)
+            for (int x = -rad; x <= rad; x++) {
+                if (x*x + y*y <= rad * rad) {
+                    int tx = cx + x, ty = cy + y;
+                    if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H)
+                        d->tiles[ty][tx] = T_FLOOR;
+                }
+            }
+        /* runes circulaires au centre + torches aux 4 cardinaux du bord */
+        d->tiles[cy][cx] = T_RUNE;
+        for (int k = 0; k < 8; k++) {
+            float a = (k / 8.f) * 6.2831f;
+            int rx = cx + (int)(cosf(a) * 4.f);
+            int ry = cy + (int)(sinf(a) * 4.f);
+            if (rx > 0 && ry > 0 && rx < MAP_W-1 && ry < MAP_H-1)
+                d->tiles[ry][rx] = T_RUNE;
+        }
+        for (int k = 0; k < 4; k++) {
+            int tx = cx + (k == 0 ? -rad+2 : (k == 1 ? rad-2 : 0));
+            int ty = cy + (k == 2 ? -rad+2 : (k == 3 ? rad-2 : 0));
+            if (tx > 0 && ty > 0 && tx < MAP_W-1 && ty < MAP_H-1)
+                d->tiles[ty][tx] = T_TORCH;
+        }
+        d->spawn_x = cx; d->spawn_y = cy;
+        d->rooms[0].x = cx - rad; d->rooms[0].y = cy - rad;
+        d->rooms[0].w = rad * 2 + 1; d->rooms[0].h = rad * 2 + 1;
+        d->rooms[0].cleared = true;
+        d->rooms[0].visited = true;
+        d->rooms[0].enemies_to_spawn = 0;
+        d->rooms[0].is_boss_room = false;
+        d->room_count = 1;
+        d->boss_room_idx = -1;
+        return;
+    }
+
+    /* === ETAGE 11 : arene Archimage ===
+     * Salle ronde dediee, T_RUNE au centre, torches. Pas de couloirs.
+     * Le boss spawn via la logique is_boss_room normale. */
+    if (floor_index == 11) {
+        int cx = MAP_W / 2, cy = MAP_H / 2;
+        int rad = 16;
+        for (int y = -rad; y <= rad; y++)
+            for (int x = -rad; x <= rad; x++) {
+                /* arene en forme d'oeil (allongee verticalement) */
+                float fx = (float)x / rad;
+                float fy = (float)y / (rad * 0.85f);
+                if (fx*fx + fy*fy <= 1.0f) {
+                    int tx = cx + x, ty = cy + y;
+                    if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H)
+                        d->tiles[ty][tx] = T_FLOOR;
+                }
+            }
+        /* pentacle au centre : 5 runes */
+        for (int k = 0; k < 5; k++) {
+            float a = (k / 5.f) * 6.2831f - 1.57f;
+            int rx = cx + (int)(cosf(a) * 6.f);
+            int ry = cy + (int)(sinf(a) * 6.f);
+            if (rx > 0 && ry > 0 && rx < MAP_W-1 && ry < MAP_H-1)
+                d->tiles[ry][rx] = T_RUNE;
+        }
+        d->tiles[cy][cx] = T_RUNE;
+        /* torches aux 4 cardinaux distants */
+        for (int k = 0; k < 4; k++) {
+            int tx = cx + (k == 0 ? -rad+3 : (k == 1 ? rad-3 : 0));
+            int ty = cy + (k == 2 ? -rad+3 : (k == 3 ? rad-3 : 0));
+            if (tx > 0 && ty > 0 && tx < MAP_W-1 && ty < MAP_H-1)
+                d->tiles[ty][tx] = T_TORCH;
+        }
+        d->spawn_x = cx; d->spawn_y = cy + rad - 4;
+        d->rooms[0].x = cx - rad; d->rooms[0].y = cy - rad;
+        d->rooms[0].w = rad * 2 + 1; d->rooms[0].h = rad * 2 + 1;
+        d->rooms[0].cleared = false;
+        d->rooms[0].visited = false;
+        d->rooms[0].enemies_to_spawn = 0;
+        d->rooms[0].is_boss_room = true;
+        d->rooms[0].boss_spawned = false;
+        d->boss_room_idx = 0;
+        d->room_count = 1;
+        return;
+    }
+
     int target_rooms = 6 + floor_index / 2;
     if (target_rooms > 12) target_rooms = 12;
     /* portee max d un couloir (Manhattan) entre deux salles : evite les

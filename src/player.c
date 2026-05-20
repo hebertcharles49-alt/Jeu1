@@ -303,11 +303,46 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                                     0.5f, 0xFFD060FF, 2.f, 2);
             }
             break;
-        case PU_PORTAL:
+        case PU_PORTAL: {
+            /* Etage 0 : portails de selection (value = destination).
+             * Sinon : portail standard (shop / next floor). */
+            if (g->floor_index == 0) {
+                int v = pk->value;
+                /* portails verrouilles : on bloque la prise mais on
+                 * laisse le portail visible. */
+                if (v == 5) {
+                    /* Archimage : requiert les 5 biomes cleared */
+                    int n = 0;
+                    for (int b = 0; b < 5; b++) if (g->biome_cleared[b]) n++;
+                    if (n < 5) {
+                        log_push(g, 0xFF8080FF,
+                                 "Archimage verrouille : %d/5 biomes vaincus", n);
+                        sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                        return;
+                    }
+                }
+                if (v >= 0 && v <= 4 && g->biome_cleared[v]) {
+                    log_push(g, 0xFF8080FF, "Biome deja vaincu");
+                    sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                    return;
+                }
+                sfx_play(g, SFX_PORTAL);
+                pk->alive = false;
+                if (v == -1) {
+                    game_to_hub(g);
+                } else if (v == 5) {
+                    game_jump_to_floor(g, MAX_FLOORS);
+                } else {
+                    /* biome i -> first floor de ce biome = i*2 + 1 */
+                    game_jump_to_floor(g, v * 2 + 1);
+                }
+                return;
+            }
             sfx_play(g, SFX_PORTAL);
             pk->alive = false;
             game_open_shop(g);
             return;
+        }
         case PU_ITEM:
             inventory_pickup(g, pk->item);
             break;

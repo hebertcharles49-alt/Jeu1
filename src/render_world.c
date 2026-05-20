@@ -1910,6 +1910,27 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
         }
         case PU_CHEST:   r=0.55f; gg=0.34f; b=0.20f;  sz=0.70f; draw_pillar = false; break;
         case PU_PORTAL: {
+            /* Couleur du portail : sur floor 0, encode la destination
+             * via value. -1 = HUB (dore), 0..4 = biome (couleur biome),
+             * 5 = Archimage (orange/violet). Verrouille = gris. */
+            float pr_ = 0.55f, pg_ = 0.90f, pb_ = 1.0f;
+            bool locked = false;
+            if (g->floor_index == 0) {
+                int v = pk->value;
+                if (v == -1) { pr_ = 1.0f; pg_ = 0.85f; pb_ = 0.30f; }
+                else if (v >= 0 && v <= 4) {
+                    float br_, bg_, bb_;
+                    biome_tint(v, &br_, &bg_, &bb_);
+                    pr_ = br_; pg_ = bg_; pb_ = bb_;
+                    if (g->biome_cleared[v]) locked = true;
+                } else if (v == 5) {
+                    pr_ = 1.0f; pg_ = 0.50f; pb_ = 0.80f;
+                    int n = 0;
+                    for (int b = 0; b < 5; b++) if (g->biome_cleared[b]) n++;
+                    if (n < 5) locked = true;
+                }
+                if (locked) { pr_ = 0.30f; pg_ = 0.30f; pb_ = 0.35f; }
+            }
             /* gros disque + halo */
             float a = g->time * 3.f;
             for (int i = 0; i < 10; i++) {
@@ -1919,17 +1940,25 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
                             0.40f + sinf(ang*0.5f + g->time)*0.30f,
                             pos.z + sinf(ang)*0.55f),
                     v3_make(0.14f, 0.14f, 0.14f),
-                    0.55f, 0.90f, 1.0f);
+                    pr_, pg_, pb_);
             }
-            /* socle bleu lumineux */
+            /* socle lumineux */
             gfx_box_draw(g->renderer, v3_make(pos.x, 0.05f, pos.z),
-                         v3_make(0.85f, 0.06f, 0.85f), 0.30f, 0.60f, 1.0f);
-            /* pillar haut de lumiere */
-            for (int i = 0; i < 4; i++) {
+                         v3_make(0.85f, 0.06f, 0.85f), pr_, pg_, pb_);
+            /* pillar haut de lumiere (plus haut pour archimage) */
+            int n_pillar = (g->floor_index == 0 && pk->value == 5 && !locked) ? 8 : 4;
+            for (int i = 0; i < n_pillar; i++) {
                 gfx_box_draw(g->renderer,
                     v3_make(pos.x, 0.5f + i * 0.6f, pos.z),
                     v3_make(0.10f, 0.5f, 0.10f),
-                    0.30f + i * 0.10f, 0.60f, 1.0f);
+                    pr_, pg_, pb_);
+            }
+            /* croix sombre pour les verrouilles */
+            if (locked) {
+                gfx_box_draw(g->renderer,
+                    v3_make(pos.x, 1.0f, pos.z),
+                    v3_make(0.20f, 0.20f, 0.40f),
+                    0.10f, 0.05f, 0.08f);
             }
             return;
         }
@@ -2446,6 +2475,70 @@ void render_world(Game *g) {
 /* HP bars + names + dmg numbers : passe UI (apres gfx_ui_begin).
    Expose en non-static car appelee par main.c. */
 void render_world_overlay_ui(Game *g) {
+    /* Labels au-dessus des portails de l'arene-pivot (floor 0).
+     * Affiche destination + status (verrouille / X biomes manquants). */
+    if (g->floor_index == 0) {
+        GfxCtx *gc_ = g->renderer;
+        for (int i = 0; i < MAX_PICKUPS; i++) {
+            Pickup *pk = &g->pickups[i];
+            if (!pk->alive || pk->kind != PU_PORTAL) continue;
+            v3 head = v3_make(pk->x / TILE, 2.6f, pk->y / TILE);
+            int sx, sy;
+            if (!world_to_screen(gc_, head, &sx, &sy)) continue;
+            int v = pk->value;
+            char label[48];
+            uint32_t col = 0xFFE080FF;
+            bool locked = false;
+            if (v == -1) {
+                snprintf(label, sizeof(label), "[ HUB ]");
+                col = 0xFFD040FF;
+            } else if (v >= 0 && v <= 4) {
+                snprintf(label, sizeof(label), "%s", biome_name(v));
+                if (g->biome_cleared[v]) {
+                    locked = true;
+                    col = 0x808080FF;
+                } else {
+                    float br_, bg_, bb_;
+                    biome_tint(v, &br_, &bg_, &bb_);
+                    col = ((uint32_t)(br_ * 255) << 24)
+                        | ((uint32_t)(bg_ * 255) << 16)
+                        | ((uint32_t)(bb_ * 255) << 8)
+                        | 0xFF;
+                }
+            } else if (v == 5) {
+                int n = 0;
+                for (int b = 0; b < 5; b++) if (g->biome_cleared[b]) n++;
+                if (n < 5) {
+                    snprintf(label, sizeof(label), "ARCHIMAGE (%d/5)", n);
+                    locked = true;
+                    col = 0x808080FF;
+                } else {
+                    snprintf(label, sizeof(label), "ARCHIMAGE");
+                    col = 0xFF80E0FF;
+                }
+            } else {
+                continue;
+            }
+            int tw = text_width(label);
+            gfx_set_blend(gc_, true);
+            fill_rect(gc_, sx - tw/2 - 3, sy - 2, tw + 6, 10, 0x000000C0);
+            gfx_set_blend(gc_, false);
+            text_draw(gc_, sx - tw/2, sy, label, col);
+            if (locked) {
+                int lw = text_width("verrouille");
+                text_draw(gc_, sx - lw/2, sy + 10, "verrouille", 0xFF6060FF);
+            }
+        }
+        /* banniere centre-haut */
+        const char *banner = "Salle des sept portails -- Choisis ton chemin";
+        int btw = text_width(banner);
+        int bx = INTERNAL_W/2 - btw/2;
+        gfx_set_blend(g->renderer, true);
+        fill_rect(g->renderer, bx - 6, 22, btw + 12, 12, 0x000000A0);
+        gfx_set_blend(g->renderer, false);
+        text_draw(g->renderer, bx, 24, banner, 0xFFE080FF);
+    }
+
     GfxCtx *gc = g->renderer;
     /* Pickups durs (items / armes / elements) : nom au-dessus quand on
      * approche. Ajoute [E] quand on est dans la zone de ramassage. */

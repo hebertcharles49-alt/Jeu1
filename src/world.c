@@ -49,6 +49,27 @@ void update_room_logic(Game *g) {
         bool first_visit = !r->visited;
         r->visited = true;     /* la salle apparait sur la minimap */
         if (first_visit) {
+            /* === FLOOR 0 : spawn des 7 portails en cercle ===
+             * value du portail :
+             *   -1  = HUB (retour cimetiere)
+             *   0..4= biome i (target floor = i*2 + 1)
+             *   5   = ARCHIMAGE (target floor 11), debloque si 5 biomes
+             *         cleared
+             * Pickup_spawn pour chaque, dispose en cercle. */
+            if (g->floor_index == 0) {
+                int cx = g->dungeon.spawn_x * TILE + TILE / 2;
+                int cy = g->dungeon.spawn_y * TILE + TILE / 2;
+                float rad_px = 130.f;
+                int dest[7] = { -1, 0, 1, 2, 3, 4, 5 };
+                for (int k = 0; k < 7; k++) {
+                    float a = (k / 7.f) * 6.2831f - 1.57f;
+                    float px = cx + cosf(a) * rad_px;
+                    float py = cy + sinf(a) * rad_px;
+                    pickup_spawn(g, PU_PORTAL, dest[k], px, py);
+                }
+                log_push(g, 0xFFE090FF,
+                         "Choisis ton chemin (7 portails autour de toi)");
+            }
             /* reset per-salle des charges uniques */
             p->phoenix_charge    = true;
             p->last_stand_charge = true;

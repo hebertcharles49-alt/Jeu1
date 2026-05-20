@@ -436,7 +436,8 @@ void game_start_new_run(Game *g) {
      * activees au premier point_in_room avec first_visit=true). */
     /* le player vient d etre memset a 0, donc phoenix_charge / last_stand
      * / kill_stack_count / hazard_stacks / last_stand_t sont deja a 0. */
-    g->floor_index = 1;
+    g->floor_index = 0;     /* commence sur l'arene-pivot a 7 portails */
+    for (int i = 0; i < 5; i++) g->biome_cleared[i] = false;
     g->shake_t = 0.f;
     g->portal_spawned = false;
     g->boss_intro_t = 0.f;
@@ -511,6 +512,20 @@ void game_open_shop(Game *g) {
 }
 
 void game_next_floor(Game *g) {
+    int prev = g->floor_index;
+    /* Boss de biome (floors 2,4,6,8,10) : marque le biome cleared et
+     * retourne a l'arene-pivot etage 0. Le joueur choisit le prochain
+     * biome ou l'archimage si tous cleared. */
+    if (prev >= 2 && prev <= 10 && (prev % 2) == 0) {
+        int biome = (prev - 1) / 2;        /* 1->0, 2->0, 3->1, 4->1, ... */
+        if (biome >= 0 && biome < 5) {
+            g->biome_cleared[biome] = true;
+            log_push(g, 0x80FF80FF, "Biome %d vaincu", biome + 1);
+        }
+        game_jump_to_floor(g, 0);
+        return;
+    }
+    /* Sortie de l'archimage (floor 11 -> victory geree par game_jump_to_floor) */
     g->floor_index++;
     if (g->floor_index > MAX_FLOORS) {
         g->meta.victories++;
@@ -539,6 +554,44 @@ void game_next_floor(Game *g) {
     g->boss_intro_t = 0.f;
     g->boss_death_t = 0.f;
     g->player.hp += 25.f;
+    if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
+    world_assets_reset(g);
+    world_assets_populate(g);
+    surfaces_seed_biome(g);
+    if (g->settings.debug_room) dungeon_add_debug_room(g);
+    g->state = GS_RUN;
+}
+
+/* Jump direct vers un etage cible (depuis floor 0 ou apres boss). */
+void game_jump_to_floor(Game *g, int target) {
+    if (target > MAX_FLOORS) {
+        g->meta.victories++;
+        save_write(&g->meta);
+        g->state = GS_VICTORY;
+        return;
+    }
+    if (target < 0) target = 0;
+    g->floor_index = target;
+    if (target == 0)             log_push(g, 0xFFE090FF, "Salle des sept portails");
+    else if (target == MAX_FLOORS) log_push(g, 0xFFA040FF, "L'Archimage t'attend...");
+    else                         log_push(g, 0xFFE090FF, "Etage %d", target);
+    dungeon_generate(&g->dungeon, g->floor_index,
+                     g->run_seed * 2654435761u + (unsigned)g->floor_index);
+    g->player.x = g->dungeon.spawn_x * TILE + TILE / 2;
+    g->player.y = g->dungeon.spawn_y * TILE + TILE / 2;
+    memset(g->enemies, 0, sizeof(g->enemies));
+    memset(g->player.loop_states, 0, sizeof(g->player.loop_states));
+    g->player.active_loop_idx  = -1;
+    g->player.active_loop_mask = 0;
+    g->enemy_alive_count = 0;
+    memset(g->projectiles, 0, sizeof(g->projectiles));
+    memset(g->pickups, 0, sizeof(g->pickups));
+    memset(g->fairies, 0, sizeof(g->fairies));
+    memset(g->surfaces, 0, sizeof(g->surfaces));
+    g->portal_spawned = false;
+    g->boss_intro_t = 0.f;
+    g->boss_death_t = 0.f;
+    g->player.hp += 15.f;
     if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
     world_assets_reset(g);
     world_assets_populate(g);

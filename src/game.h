@@ -741,6 +741,11 @@ typedef struct {
     float         boss_intro_t;
     float         boss_death_t;   /* >0 = animation de mort en cours */
     char          boss_name[32];
+    /* Etage 0 : arene-pivot a 7 portails, hub-in-run. Le joueur choisit
+     * un biome a la fois (chaque biome = 2 etages avec boss multi-phase),
+     * revient ici apres victoire. Archimage portail debloqu5 quand les
+     * 5 biomes sont cleared. */
+    bool          biome_cleared[5];
     /* Archimage (Boss final etage 11) : ordre aleatoire des elements,
      * 3 phases avec speech, stase pendant summon des bosses reserves. */
     int           arch_element_order[10];   /* permutation 0..9 des elements */
@@ -879,6 +884,9 @@ bool  tile_solid(TileKind t);
  * Reset les pools (enemies/pickups/projectiles) car le hub n'en a
  * pas. Place le joueur au centre. */
 void  hub_init(Game *g);
+/* Jump direct vers un etage : 0 = arene-pivot, 1..10 biomes, 11 archimage.
+ * Utilise par les portails de l'etage 0 et les boss de biome. */
+void  game_jump_to_floor(Game *g, int target);
 /* Accesseurs sur la table HUB_BUILDINGS de main.c (utilisee par
  * render_world.c pour dessiner les batiments en 3D). */
 typedef struct HubBuilding HubBuilding;
