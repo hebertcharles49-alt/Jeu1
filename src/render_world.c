@@ -697,8 +697,7 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
         return;
     }
 
-    /* swing/bobbing en mouvement */
-    float swing = sinf(g->time * 8.f + e->x * 0.13f + e->y * 0.07f) * 0.06f;
+    /* wobble pour le slime (utilise plus bas) */
     float wobble = (e->kind == EK_SLIME) ? sinf(g->time * 6.f + e->x) * 0.08f : 0.f;
 
     /* ombre */
@@ -707,12 +706,24 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                  v3_make(w + 0.05f, 0.01f, w + 0.05f),
                  0.02f, 0.01f, 0.04f);
 
-    /* SLIME : grosse bulle + reflet + noyau interne + drip occasionnel */
+    /* SLIME : grosse bulle + reflet + noyau interne + drip occasionnel.
+     * Pendant windup, squash-stretch (s'aplatit puis s'etire avant le bond). */
     if (e->kind == EK_SLIME) {
+        float squash = 0.f, stretch = 0.f;
+        if (e->telegraph_t > 0.f) {
+            float t = 1.f - e->telegraph_t / 1.0f;
+            if (t < 0.f) t = 0.f;
+            if (t > 1.f) t = 1.f;
+            /* premiere moitie : s'aplatit, deuxieme : s'etire */
+            if (t < 0.5f) { squash = t * 2.f * 0.20f; }
+            else          { stretch = (t - 0.5f) * 2.f * 0.30f; }
+        }
+        float sw = w + wobble * 0.5f + squash * 0.5f - stretch * 0.3f;
+        float sh = h + wobble - squash * 0.4f + stretch * 0.5f;
         /* corps externe */
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x, h * 0.5f + wobble, pos.z),
-                     v3_make(w + wobble*0.5f, h + wobble, w + wobble*0.5f),
+                     v3_make(pos.x, sh * 0.5f + wobble, pos.z),
+                     v3_make(sw, sh, sw),
                      r, gg, b);
         /* noyau interne plus sombre / sature, visible a travers */
         gfx_box_draw(g->renderer,
@@ -805,12 +816,17 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
 
     /* CHARGER : silhouette de taureau / minotaure, gros torse bas et
      * 2 grosses cornes en avant. Pendant le telegraph (ai_t2 == 1),
-     * une aura rouge clignotante. */
+     * shake violent + aura rouge clignotante. */
     if (e->kind == EK_CHARGER) {
         int state = (int)e->ai_t2;
+        float shake_x = 0.f, shake_z = 0.f;
+        if (state == 1) {
+            shake_x = (sinf(g->time * 60.f) * 0.04f);
+            shake_z = (cosf(g->time * 52.f) * 0.04f);
+        }
         /* gros corps bas */
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x, 0.40f, pos.z),
+                     v3_make(pos.x + shake_x, 0.40f, pos.z + shake_z),
                      v3_make(0.65f, 0.55f, 0.50f),
                      r, gg, b);
         /* tete proeminente plus basse */
@@ -1231,54 +1247,142 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
         return;
     }
 
-    /* ENNEMIS NORMAUX : corps + tete + 2 jambes + 2 bras
-     * Bump de taille bref pendant hit_flash pour la sensation d'impact. */
+    /* ENNEMIS NORMAUX : corps + tete + 2 jambes + 2 bras avec
+     * animations etat-pilotees :
+     *   - walk : leg/arm swing amplifie par |v|
+     *   - idle : petite respiration (sin lent sur y du corps)
+     *   - windup : lean vers le joueur pendant telegraph_t
+     *   - hurt : recul + secousse pendant hit_flash
+     *   - stun : wobble lateral pendant stun_t
+     */
     if (e->hit_flash > 0.f) {
         float k = 1.f + (e->hit_flash / 0.10f) * 0.10f;
         if (k > 1.10f) k = 1.10f;
         h *= k; w *= k;
     }
+    /* vitesse normalisee (0..1 a ~60 px/s) pour amplifier le swing */
+    float spd = sqrtf(e->vx * e->vx + e->vy * e->vy);
+    float walk_amt = spd / 60.f;
+    if (walk_amt > 1.5f) walk_amt = 1.5f;
+    /* swing tempo : 0.4Hz idle, ~8Hz running */
+    float walk_phase = g->time * (4.f + walk_amt * 8.f) + e->x * 0.13f + e->y * 0.07f;
+    float swing_anim = sinf(walk_phase) * (0.04f + 0.10f * walk_amt);
+    /* idle breathing (subtil, additionne au corps y) */
+    float breathe = sinf(g->time * 1.8f + e->x * 0.1f) * 0.020f * (1.f - walk_amt * 0.7f);
+    /* windup lean : pendant telegraph, l'ennemi se penche vers
+     * le joueur (offset face direction). */
+    float windup = 0.f;
+    if (e->telegraph_t > 0.f) windup = 1.f - e->telegraph_t / 1.0f;
+    if (windup < 0.f) windup = 0.f;
+    if (windup > 1.f) windup = 1.f;
+    float wind_pulse = sinf(windup * 6.2831f * 2.f) * 0.5f + 0.5f;
+    /* lean direction : vers le joueur */
+    float pdx = g->player.x - e->x, pdy = g->player.y - e->y;
+    float plen = sqrtf(pdx*pdx + pdy*pdy) + 0.001f;
+    float lean_x = (pdx/plen) / TILE * 0.10f * windup;
+    float lean_z = (pdy/plen) / TILE * 0.10f * windup;
+    /* hurt lean-back : recul oppose au knockback pendant hit_flash */
+    float hurt_kx = 0.f, hurt_kz = 0.f;
+    if (e->hit_flash > 0.f) {
+        float klen = sqrtf(e->knockback_x*e->knockback_x +
+                           e->knockback_y*e->knockback_y) + 0.001f;
+        float hp_k = e->hit_flash / 0.18f; if (hp_k > 1.f) hp_k = 1.f;
+        hurt_kx = (e->knockback_x / klen) / TILE * 0.08f * hp_k;
+        hurt_kz = (e->knockback_y / klen) / TILE * 0.08f * hp_k;
+    }
+    /* stun wobble : oscillation horizontale rapide */
+    float stun_wobble_x = 0.f, stun_wobble_z = 0.f;
+    if (e->stun_t > 0.f) {
+        float sk = sinf(g->time * 18.f) * 0.05f;
+        float sk2 = cosf(g->time * 16.f) * 0.03f;
+        stun_wobble_x = sk; stun_wobble_z = sk2;
+    }
+    /* offset global du corps */
+    float body_off_x = lean_x + hurt_kx + stun_wobble_x;
+    float body_off_z = lean_z + hurt_kz + stun_wobble_z;
+
     float leg_h = 0.32f;
-    float body_y = leg_h + (h - leg_h) * 0.5f;
-    /* jambes */
+    float body_y = leg_h + (h - leg_h) * 0.5f + breathe;
+    /* jambes : swing dans l'axe perpendiculaire au mouvement quand
+     * on marche. Quand a l'arret, jambes immobiles. */
+    float leg_off_x = 0.f, leg_off_z = 0.f;
+    if (spd > 5.f) {
+        float vx_n = e->vx / spd, vy_n = e->vy / spd;
+        /* swing_anim oscille +-, jambes alternent (signe oppose) */
+        leg_off_x = vx_n * swing_anim * 0.6f;
+        leg_off_z = vy_n * swing_anim * 0.6f;
+    }
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x - 0.12f, leg_h * 0.5f + swing * 0.5f, pos.z),
+                 v3_make(pos.x + body_off_x - 0.12f + leg_off_x,
+                         leg_h * 0.5f + swing_anim * 0.5f,
+                         pos.z + body_off_z + leg_off_z),
                  v3_make(0.16f, leg_h, 0.18f),
                  r * 0.6f, gg * 0.6f, b * 0.6f);
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x + 0.12f, leg_h * 0.5f - swing * 0.5f, pos.z),
+                 v3_make(pos.x + body_off_x + 0.12f - leg_off_x,
+                         leg_h * 0.5f - swing_anim * 0.5f,
+                         pos.z + body_off_z - leg_off_z),
                  v3_make(0.16f, leg_h, 0.18f),
                  r * 0.6f, gg * 0.6f, b * 0.6f);
     /* corps */
-    gfx_box_draw(g->renderer, v3_make(pos.x, body_y, pos.z),
+    gfx_box_draw(g->renderer,
+                 v3_make(pos.x + body_off_x, body_y, pos.z + body_off_z),
                  v3_make(w, h - leg_h, w * 0.85f), r, gg, b);
-    /* bras */
-    float arm_swing = swing * 1.5f;
+    /* bras : swing en opposition aux jambes ; pendant windup, levent
+     * tous les deux en avant pour l'attaque */
+    float arm_swing = swing_anim * 1.5f;
+    float arm_lift = windup * 0.15f * wind_pulse;
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x - (w/2 + 0.08f), body_y - arm_swing, pos.z),
+                 v3_make(pos.x + body_off_x - (w/2 + 0.08f),
+                         body_y - arm_swing + arm_lift,
+                         pos.z + body_off_z),
                  v3_make(0.13f, (h - leg_h) * 0.85f, 0.13f),
                  r * 0.9f, gg * 0.9f, b * 0.9f);
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x + (w/2 + 0.08f), body_y + arm_swing, pos.z),
+                 v3_make(pos.x + body_off_x + (w/2 + 0.08f),
+                         body_y + arm_swing + arm_lift,
+                         pos.z + body_off_z),
                  v3_make(0.13f, (h - leg_h) * 0.85f, 0.13f),
                  r * 0.9f, gg * 0.9f, b * 0.9f);
-    /* tete */
-    float head_y = h + 0.18f;
+    /* tete (suit le corps) */
+    float head_y = h + 0.18f + breathe;
     gfx_box_draw(g->renderer,
-                 v3_make(pos.x, head_y, pos.z),
+                 v3_make(pos.x + body_off_x, head_y, pos.z + body_off_z),
                  v3_make(w * 0.7f, 0.36f, w * 0.7f),
                  r * 1.15f, gg * 1.15f, b * 1.15f);
     /* yeux */
     {
         float ey = head_y + 0.05f;
+        /* yeux rouges pendant windup, jaunes normalement */
+        float er_ = 1.f, eg_ = 0.95f, eb_ = 0.25f;
+        if (windup > 0.2f) { er_ = 1.f; eg_ = 0.20f + 0.40f * (1.f - windup); eb_ = 0.10f; }
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x - 0.10f, ey, pos.z + w * 0.36f),
+                     v3_make(pos.x + body_off_x - 0.10f, ey,
+                             pos.z + body_off_z + w * 0.36f),
                      v3_make(0.06f, 0.06f, 0.04f),
-                     1.f, 0.95f, 0.25f);
+                     er_, eg_, eb_);
         gfx_box_draw(g->renderer,
-                     v3_make(pos.x + 0.10f, ey, pos.z + w * 0.36f),
+                     v3_make(pos.x + body_off_x + 0.10f, ey,
+                             pos.z + body_off_z + w * 0.36f),
                      v3_make(0.06f, 0.06f, 0.04f),
-                     1.f, 0.95f, 0.25f);
+                     er_, eg_, eb_);
+    }
+    /* particules de stun (3 etoiles tournantes au-dessus de la tete) */
+    if (e->stun_t > 0.f && (rand() % 100) < 35) {
+        float a = (rand() / (float)RAND_MAX) * 6.2831f;
+        particle_spawn_kind(g,
+            e->x + cosf(a) * 8.f,
+            e->y - 18.f,
+            cosf(a) * 18.f, -8.f,
+            0.40f, 0xFFE040C0, 1.6f, 0);
+    }
+    /* sparks de windup avant l'attaque */
+    if (windup > 0.3f && (rand() % 100) < 15) {
+        particle_spawn_kind(g,
+            e->x + (rand() % 20) - 10,
+            e->y + (rand() % 12) - 6,
+            (rand() % 30) - 15, -15.f,
+            0.30f, 0xFF6040C0, 1.4f, 0);
     }
     /* details par kind */
     switch (e->kind) {
