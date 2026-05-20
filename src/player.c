@@ -98,10 +98,26 @@ void player_take_damage_from(Game *g, float dmg, float srcx, float srcy) {
     g->hitstop_t = 0.05f + intensity * 0.13f;
     g->flash_t   = 0.20f + intensity * 0.18f;
 
-    /* knockback. aabb_solid clampera contre les murs au prochain update. */
+    /* knockback : substep avec collision check pour ne pas teleporter
+     * a travers les murs. Decoupe en N steps de longueur <= 0.5 * r,
+     * abandonne le sens collisionne. */
     float kb = 4.f + intensity * 14.f;
-    p->x += dirx * kb;
-    p->y += diry * kb;
+    float kb_dx = dirx * kb;
+    float kb_dy = diry * kb;
+    float max_step = p->r * 0.5f;
+    int kb_steps = 1;
+    float tot = sqrtf(kb_dx * kb_dx + kb_dy * kb_dy);
+    if (tot > max_step) kb_steps = (int)ceilf(tot / max_step);
+    if (kb_steps > 8) kb_steps = 8;
+    float sx_step = kb_dx / kb_steps;
+    float sy_step = kb_dy / kb_steps;
+    for (int s = 0; s < kb_steps; s++) {
+        if (!aabb_solid(g, p->x + sx_step, p->y, p->r - 1)) p->x += sx_step;
+        else { sx_step = 0.f; }
+        if (!aabb_solid(g, p->x, p->y + sy_step, p->r - 1)) p->y += sy_step;
+        else { sy_step = 0.f; }
+        if (sx_step == 0.f && sy_step == 0.f) break;
+    }
     p->hit_t = 0.45f + intensity * 0.25f;
     p->hit_dir_x = dirx;
     p->hit_dir_y = diry;

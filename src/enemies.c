@@ -1572,21 +1572,47 @@ void update_enemies(Game *g) {
         }
         if (e->slow_t > 0.f) e->slow_t -= dt;
         if (e->stun_t > 0.f) { e->stun_t -= dt; continue; }
-        /* knockback : on capture la vitesse AVANT decay pour pouvoir
-         * calculer les degats d impact si on heurte quelque chose. */
+        /* knockback : substep + bounce.
+         *   - subdivise le deplacement en steps <= r/2 pour ne pas
+         *     tunneler a travers les murs a haute vitesse
+         *   - sur collision, REFLECT la composante (bounce) avec perte
+         *     de 50% d energie, au lieu de zeroes-out (qui faisait
+         *     fusionner l'ennemi dans le mur)
+         *   - applique 1 seule fois les dmg d impact (pas chaque step)
+         *   - decay 0.85x APRES le mouvement */
         float kspeed = sqrtf(e->knockback_x * e->knockback_x +
                              e->knockback_y * e->knockback_y);
+        bool hit_wall = false;
+        float impact_speed = 0.f;
+        if (kspeed > 0.5f) {
+            float total = kspeed * dt;
+            float max_step = e->r * 0.5f;
+            int n_steps = 1;
+            if (total > max_step) n_steps = (int)ceilf(total / max_step);
+            if (n_steps > 8) n_steps = 8;
+            float sxstep = (e->knockback_x * dt) / n_steps;
+            float systep = (e->knockback_y * dt) / n_steps;
+            for (int s = 0; s < n_steps; s++) {
+                if (!aabb_solid(g, e->x + sxstep, e->y, e->r - 1)) {
+                    e->x += sxstep;
+                } else {
+                    if (!hit_wall) impact_speed = fabsf(e->knockback_x);
+                    hit_wall = true;
+                    e->knockback_x = -e->knockback_x * 0.5f;
+                    sxstep = (e->knockback_x * dt) / n_steps;
+                }
+                if (!aabb_solid(g, e->x, e->y + systep, e->r - 1)) {
+                    e->y += systep;
+                } else {
+                    if (!hit_wall) impact_speed = fabsf(e->knockback_y);
+                    hit_wall = true;
+                    e->knockback_y = -e->knockback_y * 0.5f;
+                    systep = (e->knockback_y * dt) / n_steps;
+                }
+            }
+        }
         e->knockback_x *= 0.85f;
         e->knockback_y *= 0.85f;
-        bool hit_wall = false;
-        {
-            float kdx = e->knockback_x * dt;
-            float kdy = e->knockback_y * dt;
-            if (!aabb_solid(g, e->x + kdx, e->y, e->r - 1)) e->x += kdx;
-            else { e->knockback_x = 0; hit_wall = true; }
-            if (!aabb_solid(g, e->x, e->y + kdy, e->r - 1)) e->y += kdy;
-            else { e->knockback_y = 0; hit_wall = true; }
-        }
         /* impact prop : pas de collision dure, mais on declenche la
          * destruction visuelle des props legers a la portee. */
         if (kspeed > 90.f) {
@@ -1596,10 +1622,12 @@ void update_enemies(Game *g) {
                 e->knockback_y *= 0.60f;
             }
         }
-        /* impact mur : degats proportionnels a la vitesse ecrasee. Seuil
-         * 80 px/s pour que les petits knockback ne fassent pas de bruit. */
-        if (hit_wall && kspeed > 80.f) {
-            float impact_dmg = (kspeed - 80.f) * 0.06f;
+        /* impact mur : degats proportionnels a la vitesse a l'instant du
+         * contact (impact_speed), pas la kspeed pre-mouvement. Seuil 80
+         * px/s pour eviter le bruit des petits knockback. Applique une
+         * seule fois meme si bounce sur 2 axes. */
+        if (hit_wall && impact_speed > 80.f) {
+            float impact_dmg = (impact_speed - 80.f) * 0.06f;
             if (impact_dmg > 30.f) impact_dmg = 30.f;
             if (impact_dmg >= 1.f) {
                 /* dust burst sur le point d impact */
