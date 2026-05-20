@@ -246,6 +246,7 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         }
         if (e->is_boss) {
             g->dungeon.boss_dead = true;
+            log_push(g, 0xFFD040FF, "Boss vaincu !");
             /* mort cinematique : shake fort + long hitstop + flash blanc +
              * fragments dans la couleur de l element du boss + portail. */
             g->shake_t = 0.9f; g->shake_mag = 10.f;

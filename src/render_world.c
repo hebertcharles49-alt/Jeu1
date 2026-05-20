@@ -1863,27 +1863,51 @@ void render_world(Game *g) {
    Expose en non-static car appelee par main.c. */
 void render_world_overlay_ui(Game *g) {
     GfxCtx *gc = g->renderer;
-    /* Nom des items poses au sol, visible quand le joueur s'approche.
-     * On utilise une distance generous (90 px monde = ~6 tiles) pour
-     * que les drops ne soient pas perdus dans le decor. */
+    /* Pickups durs (items / armes / elements) : nom au-dessus quand on
+     * approche. Ajoute [E] quand on est dans la zone de ramassage. */
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i];
-        if (!pk->alive || pk->kind != PU_ITEM) continue;
+        if (!pk->alive) continue;
+        bool is_hard = (pk->kind == PU_ITEM || pk->kind == PU_WEAPON ||
+                        pk->kind == PU_ELEMENT);
+        if (!is_hard) continue;
         float dx = pk->x - g->player.x, dy = pk->y - g->player.y;
-        if (dx * dx + dy * dy > 90.f * 90.f) continue;
+        float d2 = dx * dx + dy * dy;
+        if (d2 > 90.f * 90.f) continue;
         v3 head = v3_make(pk->x / TILE, 1.4f, pk->y / TILE);
         int sx, sy;
         if (!world_to_screen(gc, head, &sx, &sy)) continue;
-        const char *nm = pk->item.name[0] ? pk->item.name
-                                          : slot_name(pk->item.slot);
-        uint32_t col = pk->item.is_unique ? 0xFF8030FF
-                                          : rarity_color(pk->item.rarity);
-        int tw = text_width(nm);
-        /* fond sombre pour la lisibilite */
+        char label[64];
+        uint32_t col = 0xCCCCCCFF;
+        if (pk->kind == PU_ITEM) {
+            const char *nm = pk->item.name[0] ? pk->item.name
+                                              : slot_name(pk->item.slot);
+            snprintf(label, sizeof(label), "%s", nm);
+            col = pk->item.is_unique ? 0xFF8030FF
+                                     : rarity_color(pk->item.rarity);
+        } else if (pk->kind == PU_WEAPON) {
+            int kind = pk->value & 0xFF;
+            int rar  = (pk->value >> 8) & 0xFF;
+            snprintf(label, sizeof(label), "%s", weapon_name((WeaponKind)kind));
+            if (rar >= 0 && rar < R_COUNT) col = rarity_color((Rarity)rar);
+        } else { /* PU_ELEMENT */
+            snprintf(label, sizeof(label), "%s", element_name((Element)pk->value));
+            col = element_color((Element)pk->value);
+        }
+        int tw = text_width(label);
         gfx_set_blend(gc, true);
         fill_rect(gc, sx - tw/2 - 2, sy - 3, tw + 4, 9, 0x00000090);
         gfx_set_blend(gc, false);
-        text_draw(gc, sx - tw/2, sy - 2, nm, col);
+        text_draw(gc, sx - tw/2, sy - 2, label, col);
+        /* [E] prompt si dans la zone de ramassage (rayon 18) */
+        if (d2 < 18.f * 18.f) {
+            const char *prompt = "[E] ramasser";
+            int pw = text_width(prompt);
+            gfx_set_blend(gc, true);
+            fill_rect(gc, sx - pw/2 - 2, sy + 7, pw + 4, 9, 0x000000C0);
+            gfx_set_blend(gc, false);
+            text_draw(gc, sx - pw/2, sy + 8, prompt, 0xFFFF80FF);
+        }
     }
     /* Aura pulsante autour du joueur quand le triple combo est en overload.
      * Pose des particules en couronne -- elles seront rendues a la frame

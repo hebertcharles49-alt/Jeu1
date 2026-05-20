@@ -37,7 +37,8 @@ static void poll_input(Game *g, bool *quit) {
             }
             if (sc == SDL_SCANCODE_ESCAPE) {
                 switch (g->state) {
-                    case GS_RUN:        g->state = GS_HUB; g->hub_sub_open = 0; hub_init(g); break;
+                    case GS_RUN:        g->state = GS_PAUSE; break;
+                    case GS_PAUSE:      g->state = GS_RUN; break;
                     case GS_HUB:
                         /* ESC dans un sous-panneau : ferme le panneau,
                          * sinon retour au titre. */
@@ -494,6 +495,7 @@ void game_next_floor(Game *g) {
         g->state = GS_VICTORY;
         return;
     }
+    log_push(g, 0xFFE090FF, "Etage %d", g->floor_index);
     /* seed du donjon : derivee du run_seed + floor pour que chaque etage
      * d une meme seed soit reproductible et different. */
     dungeon_generate(&g->dungeon, g->floor_index,
@@ -1133,6 +1135,7 @@ void game_run(Game *g) {
             world_assets_tick(g);
             update_surfaces(g);
             toast_tick(g);
+            log_tick(g, dt);
             /* killstreak / overdrive timers */
             /* DPS smooth : exponentiel sur 3s. Si dt=0 (hitstop) on saute. */
             if (g->dt > 0.f) {
@@ -1174,6 +1177,7 @@ void game_run(Game *g) {
                 g->player.xp -= g->player.xp_to_next;
                 g->player.xp_to_next = (int)(g->player.xp_to_next * 1.4f) + 1;
                 g->player.level++;
+                log_push(g, 0xFFD040FF, "Niveau %d", g->player.level);
                 /* 8 axes de stats nommees (cf LEVEL_STATS dans apply_levelup_choice).
                  * Chaque choix tire un axe distinct + une rarete via la table
                  * elite par etage : c'est la meme logique probabiliste que
@@ -1214,6 +1218,34 @@ void game_run(Game *g) {
             update_shop(g);
         } else if (g->state == GS_INVENTORY) {
             update_inventory_input(g);
+        } else if (g->state == GS_PAUSE) {
+            /* pause : menu Reprendre / Abandonner.
+             * pause_cursor 0 = Reprendre, 1 = Abandonner. */
+            const int N = 2;
+            int cy0 = INTERNAL_H/2 + 10;
+            int rowh = 18;
+            for (int i = 0; i < N; i++) {
+                if (mouse_in_rect(g, INTERNAL_W/2 - 100, cy0 + i * rowh, 200, 14))
+                    g->pause_cursor = i;
+            }
+            if ((g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])  ||
+                (g->keys[SDL_SCANCODE_W]    && !g->keys_prev[SDL_SCANCODE_W]))
+                g->pause_cursor = (g->pause_cursor + N - 1) % N;
+            if ((g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN]) ||
+                (g->keys[SDL_SCANCODE_S]    && !g->keys_prev[SDL_SCANCODE_S]))
+                g->pause_cursor = (g->pause_cursor + 1) % N;
+            bool act = (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN])
+                    || (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])
+                    || (mouse_in_rect(g, INTERNAL_W/2 - 100,
+                                      cy0 + g->pause_cursor * rowh, 200, 14)
+                        && mouse_clicked(g));
+            if (act) {
+                if (g->pause_cursor == 0) {
+                    g->state = GS_RUN;        /* reprendre */
+                } else {
+                    game_to_hub(g);           /* abandonner */
+                }
+            }
         } else if (g->state == GS_DEAD) {
             if (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) {
                 game_to_hub(g);
@@ -1230,7 +1262,7 @@ void game_run(Game *g) {
            est dessinee en passe ortho par-dessus. */
         bool show_world = (g->state == GS_RUN || g->state == GS_LEVELUP ||
                            g->state == GS_DEAD || g->state == GS_VICTORY ||
-                           g->state == GS_HUB ||
+                           g->state == GS_HUB || g->state == GS_PAUSE ||
                            (g->state == GS_INVENTORY &&
                               (g->state_prev == GS_RUN || g->state_prev == GS_LEVELUP)));
         if (show_world) {
@@ -1261,11 +1293,14 @@ void game_run(Game *g) {
             render_inventory(g);
         } else {
             if (g->state == GS_RUN || g->state == GS_LEVELUP ||
-                g->state == GS_DEAD || g->state == GS_VICTORY) {
+                g->state == GS_DEAD || g->state == GS_VICTORY ||
+                g->state == GS_PAUSE) {
                 render_world_overlay_ui(g);
             }
             render_hud(g);
             if (g->state == GS_RUN) toast_render(g);
+            if (g->state == GS_RUN || g->state == GS_PAUSE) log_render(g);
+            if (g->state == GS_PAUSE) render_pause(g);
             if (g->state == GS_LEVELUP) render_levelup(g);
             if (g->state == GS_DEAD)    render_dead(g);
             if (g->state == GS_VICTORY) render_victory(g);
@@ -1282,16 +1317,11 @@ void game_run(Game *g) {
                 float k = g->flash_t / ref; if (k < 0.f) k = 0.f; if (k > 1.f) k = 1.f;
                 float kq = k * k;          /* peak rapide, fade soft */
                 gfx_set_blend(g->renderer, true);
-                /* (1) wash rouge */
-                int alpha = (int)(220.f * kq);
-                if (alpha > 0) {
-                    uint32_t col = ((uint32_t)0xFF2828U << 8) | (uint32_t)(alpha & 0xFF);
-                    gfx_set_color(g->renderer, col);
-                    gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
-                }
-                /* (2) vignette rouge sur les 4 bords, 6 bandes de plus en
-                 * plus opaques vers le bord. */
-                int vmax = (int)(40.f * k);
+                /* (1) vignette epaisse rouge (plus de wash plein ecran -- le
+                 * voile rouge entier etait trop agressif, il aveuglait). On
+                 * garde uniquement les bandes laterales pour le punch sans
+                 * cacher l'action centrale. */
+                int vmax = (int)(60.f * k);
                 if (vmax > 0) {
                     for (int s = 0; s < 6; s++) {
                         int band = vmax * (s + 1) / 6;

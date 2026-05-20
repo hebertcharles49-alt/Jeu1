@@ -949,6 +949,43 @@ void render_lore(Game *g) {
 }
 
 /* ---------- HELP ---------- */
+/* ---------- PAUSE ---------- */
+void render_pause(Game *g) {
+    GfxCtx *gc = g->renderer;
+    int CX = INTERNAL_W / 2;
+    /* voile assombri */
+    gfx_set_blend(gc, true);
+    fill_rect(gc, 0, 0, INTERNAL_W, INTERNAL_H, 0x000000C0);
+    gfx_set_blend(gc, false);
+    /* titre */
+    const char *t = "PAUSE";
+    int tw = text_width(t);
+    text_draw(gc, CX - tw/2 + 1, INTERNAL_H/2 - 40 + 1, t, 0x000000FF);
+    text_draw(gc, CX - tw/2,     INTERNAL_H/2 - 40,     t, 0xFFE080FF);
+    text_draw(gc, CX - text_width("ECHAP pour reprendre rapidement")/2,
+              INTERNAL_H/2 - 24, "ECHAP pour reprendre rapidement", 0x808080FF);
+    /* menu : Reprendre / Abandonner */
+    const char *items[2] = { "REPRENDRE", "ABANDONNER LA COURSE" };
+    int cy0 = INTERNAL_H/2 + 10;
+    int rowh = 18;
+    for (int i = 0; i < 2; i++) {
+        bool sel = (g->pause_cursor == i);
+        uint32_t col = sel ? 0xFFFF80FF : (i == 0 ? 0x80FFA0FF : 0xFF8080FF);
+        int w = text_width(items[i]);
+        int yi = cy0 + i * rowh;
+        if (sel) {
+            gfx_set_blend(gc, true);
+            fill_rect(gc, CX - 110, yi - 2, 220, 14, 0x402020A0);
+            gfx_set_blend(gc, false);
+            text_draw(gc, CX - w/2 - 14, yi + 2, ">", col);
+            text_draw(gc, CX + w/2 + 8,  yi + 2, "<", col);
+        }
+        text_draw(gc, CX - w/2, yi + 2, items[i], col);
+    }
+    text_draw(gc, CX - text_width("ENTREE pour valider")/2,
+              cy0 + 2 * rowh + 8, "ENTREE pour valider", 0x808080FF);
+}
+
 void render_help(Game *g) {
     fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H, 0x080612FF);
     text_draw(g->renderer, 8, 6, "AIDE", 0xFFE080FF);

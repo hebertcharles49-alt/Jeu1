@@ -157,7 +157,8 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
     switch (pk->kind) {
         case PU_XP:    p->xp += 1; sfx_play(g, SFX_PICKUP); break;
         case PU_HEART: p->hp += 18.f; if (p->hp > p->maxhp) p->hp = p->maxhp;
-                       sfx_play(g, SFX_PICKUP); break;
+                       sfx_play(g, SFX_PICKUP);
+                       log_push(g, 0xFF8080FF, "+18 PV"); break;
         case PU_SOUL:  p->souls += 1; sfx_play(g, SFX_PICKUP); break;
         case PU_COIN:  p->coins += pk->value > 0 ? pk->value : 1;
                        sfx_play(g, SFX_COIN); break;
@@ -166,6 +167,8 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             Weapon *w = &p->weapons[p->active_weapon];
             weapon_attach_element(w, e);
             sfx_play(g, SFX_LEVELUP);
+            log_push(g, element_color(e), "Element greffe : %s",
+                     element_name(e));
             if (e > 0 && e < EL_COUNT && !g->meta.element_discovered[e]) {
                 g->meta.element_discovered[e] = true;
                 save_write(&g->meta);
@@ -202,6 +205,10 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             p->weapons[slot].owned = true;
             p->active_weapon = slot;
             sfx_play(g, SFX_LEVELUP);
+            log_push(g, rarity_color((Rarity)rarity),
+                     "Arme : %s (%s)",
+                     weapon_name((WeaponKind)kind),
+                     rarity_name((Rarity)rarity));
             if (kind > 0 && kind < W_COUNT && !g->meta.weapon_discovered[kind]) {
                 g->meta.weapon_discovered[kind] = true;
                 save_write(&g->meta);
@@ -416,32 +423,41 @@ void update_player(Game *g) {
         if (p->hp > p->maxhp) p->hp = p->maxhp;
     }
 
-    /* pickup pull / collect : aimant a loot, rayons differents selon le
-     * kind (xp/coins genereux, items prudents). */
+    /* pickup pull / collect.
+     * AIMANT : seulement sur consommables (XP/COIN/SOUL/FOOD/HEART) ;
+     *          les objets durs (items/armes/elements) restent au sol et
+     *          demandent un ramassage manuel (touche E ou collision si
+     *          autoriseE par le joueur). */
+    SDL_Scancode k_interact = g->settings.keys[BIND_INTERACT];
+    if (k_interact == SDL_SCANCODE_UNKNOWN) k_interact = SDL_SCANCODE_E;
+    bool press_e = (g->keys[k_interact] && !g->keys_prev[k_interact]);
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *pk = &g->pickups[i];
         if (!pk->alive) continue;
         float ddx = p->x - pk->x, ddy = p->y - pk->y;
         float d2 = ddx * ddx + ddy * ddy;
-        float pull, vmag;
-        switch (pk->kind) {
-            case PU_XP:
-            case PU_COIN:
-            case PU_SOUL:
-            case PU_FOOD:
-                pull = 130.f; vmag = 220.f; break;
-            case PU_PORTAL:
-                pull = 0.f;   vmag = 0.f;  break;
-            default:
-                pull = 60.f;  vmag = 140.f; break;
+        bool is_soft = (pk->kind == PU_XP || pk->kind == PU_COIN ||
+                        pk->kind == PU_SOUL || pk->kind == PU_FOOD ||
+                        pk->kind == PU_HEART);
+        bool is_hard = (pk->kind == PU_ITEM || pk->kind == PU_WEAPON ||
+                        pk->kind == PU_ELEMENT);
+        if (is_soft) {
+            float pull = 130.f, vmag = 220.f;
+            if (d2 < pull * pull) {
+                float d = sqrtf(d2) + 0.01f;
+                pk->x += ddx / d * vmag * dt;
+                pk->y += ddy / d * vmag * dt;
+            }
+            if (d2 < 12.f * 12.f) on_pickup_collect(g, pk);
+        } else if (is_hard) {
+            /* Pas d'aimant. Ramassage manuel : E pres de l'objet. */
+            if (press_e && d2 < 18.f * 18.f) on_pickup_collect(g, pk);
+        } else {
+            /* PU_PORTAL / PU_CHEST / PU_SCROLL / PU_SHRINE : collision
+             * directe (le portail change d'etat tout seul). */
+            if (d2 < 12.f * 12.f) on_pickup_collect(g, pk);
         }
-        if (pull > 0.f && d2 < pull * pull) {
-            float d = sqrtf(d2) + 0.01f;
-            pk->x += ddx / d * vmag * dt;
-            pk->y += ddy / d * vmag * dt;
-        }
-        if (d2 < 12.f * 12.f) on_pickup_collect(g, pk);
-        if (g->state == GS_SHOP) return;   /* portail change l'etat */
+        if (g->state == GS_SHOP) return;
     }
     /* feedback loop : decroit en dehors du combat */
     loop_decay(g, g->dt);

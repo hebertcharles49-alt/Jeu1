@@ -102,7 +102,7 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         }
         if (overlap) continue;
         if (placed > 0) {
-            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0 };
+            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0, ROOM_KIND_NORMAL };
             bool ok = false;
             for (int i = 0; i < placed; i++) {
                 if (room_center_dist(&candidate, &d->rooms[i]) <= MAX_LINK_DIST) {
@@ -180,6 +180,38 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
                 if (abs(xx) + abs(yy) == 3 && cx+xx>0 && cy+yy>0 && cx+xx<MAP_W-1 && cy+yy<MAP_H-1) {
                     d->tiles[cy + yy][cx + xx] = T_RUNE;
                 }
+            }
+        }
+    }
+
+    /* Salles speciales : on convertit jusqu'a 3 salles non-boss / non-spawn
+     * en TREASURE / INN / CHALLENGE, dans cet ordre. Pas plus d'une de
+     * chaque par etage. Seed-deterministe via rand() consume ici. */
+    {
+        int candidates[32]; int n_cand = 0;
+        for (int i = 1; i < placed; i++) {
+            if (d->rooms[i].is_boss_room) continue;
+            candidates[n_cand++] = i;
+        }
+        /* shuffle Fisher-Yates */
+        for (int i = n_cand - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            int t = candidates[i]; candidates[i] = candidates[j]; candidates[j] = t;
+        }
+        RoomKind types[3] = { ROOM_KIND_TREASURE, ROOM_KIND_INN, ROOM_KIND_CHALLENGE };
+        int n_assign = n_cand < 3 ? n_cand : 3;
+        for (int k = 0; k < n_assign; k++) {
+            Room *r = &d->rooms[candidates[k]];
+            r->kind = types[k];
+            if (r->kind == ROOM_KIND_TREASURE) {
+                r->enemies_to_spawn = 0;
+                r->cleared = true;
+            } else if (r->kind == ROOM_KIND_INN) {
+                r->enemies_to_spawn = 0;
+                r->cleared = true;
+            } else if (r->kind == ROOM_KIND_CHALLENGE) {
+                /* +50% ennemis, mais loot bonus a la fin */
+                r->enemies_to_spawn = (int)(r->enemies_to_spawn * 1.5f) + 1;
             }
         }
     }

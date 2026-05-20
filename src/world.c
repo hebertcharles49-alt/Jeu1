@@ -55,6 +55,30 @@ void update_room_logic(Game *g) {
             p->hazard_stacks     = 0;
             /* kill_stack_count : reset SEULEMENT en entrant chez le boss */
             if (r->is_boss_room) p->kill_stack_count = 0;
+            /* Salles speciales : spawn de loot a l'entree. */
+            int cx = (r->x + r->w / 2) * TILE + TILE / 2;
+            int cy = (r->y + r->h / 2) * TILE + TILE / 2;
+            if (r->kind == ROOM_KIND_TREASURE) {
+                /* 3 coffres en triangle + 2 PU_COIN */
+                pickup_spawn(g, PU_CHEST, 0, cx - 24, cy);
+                pickup_spawn(g, PU_CHEST, 0, cx + 24, cy);
+                pickup_spawn(g, PU_CHEST, 0, cx, cy - 20);
+                pickup_spawn(g, PU_COIN, 3, cx - 8, cy + 16);
+                pickup_spawn(g, PU_COIN, 3, cx + 8, cy + 16);
+                log_push(g, 0xFFD040FF, "Salle au tresor");
+            } else if (r->kind == ROOM_KIND_INN) {
+                /* coeur + 2 food + scroll. Heal au passage. */
+                pickup_spawn(g, PU_HEART, 0, cx, cy);
+                pickup_spawn(g, PU_FOOD, 18, cx - 18, cy + 8);
+                pickup_spawn(g, PU_FOOD, 18, cx + 18, cy + 8);
+                pickup_spawn(g, PU_SCROLL, 0, cx, cy - 18);
+                /* heal modere immediat (auberge accueillante) */
+                p->hp += 25.f;
+                if (p->hp > p->maxhp) p->hp = p->maxhp;
+                log_push(g, 0x80E0A0FF, "Auberge : +25 PV");
+            } else if (r->kind == ROOM_KIND_CHALLENGE) {
+                log_push(g, 0xFF8040FF, "Salle de defi !");
+            }
         }
 
         if (r->is_boss_room) {
@@ -122,6 +146,17 @@ void update_room_logic(Game *g) {
                     pickup_spawn(g, PU_CHEST, 0,
                                  (r->x + r->w / 2) * TILE,
                                  (r->y + r->h / 2) * TILE);
+                }
+                /* Salle de defi : bonus chest garanti + un coin pour la
+                 * difficulte accrue. */
+                if (r->kind == ROOM_KIND_CHALLENGE) {
+                    pickup_spawn(g, PU_CHEST, 0,
+                                 (r->x + r->w / 2 + 1) * TILE,
+                                 (r->y + r->h / 2 + 1) * TILE);
+                    pickup_spawn(g, PU_COIN, 5,
+                                 (r->x + r->w / 2) * TILE,
+                                 (r->y + r->h / 2 - 1) * TILE);
+                    log_push(g, 0xFF8040FF, "Defi reussi : +bonus !");
                 }
                 /* Loot contextuel "petit objet flottant".
                  * 35% : un PU_FOOD pose entre coffre et entree.

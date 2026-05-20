@@ -236,6 +236,63 @@ void toast_render(Game *g) {
     }
 }
 
+/* ============================================================
+ *  COMBAT LOG : ring buffer de 8 entrees, chaque vit ~8s puis fade
+ *  sur la derniere seconde. Affichage bas-droite pendant la run.
+ * ============================================================ */
+#include <stdarg.h>
+void log_push(Game *g, uint32_t color, const char *fmt, ...) {
+    if (!g || !fmt) return;
+    int n = (int)(sizeof(g->logs) / sizeof(g->logs[0]));
+    int i = g->log_head;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g->logs[i].text, sizeof(g->logs[i].text), fmt, ap);
+    va_end(ap);
+    g->logs[i].color = color;
+    g->logs[i].life = 8.f;
+    g->log_head = (i + 1) % n;
+}
+
+void log_tick(Game *g, float dt) {
+    if (!g) return;
+    int n = (int)(sizeof(g->logs) / sizeof(g->logs[0]));
+    for (int i = 0; i < n; i++) {
+        if (g->logs[i].life > 0.f) g->logs[i].life -= dt;
+        if (g->logs[i].life < 0.f) g->logs[i].life = 0.f;
+    }
+}
+
+void log_render(Game *g) {
+    if (!g) return;
+    int N = (int)(sizeof(g->logs) / sizeof(g->logs[0]));
+    /* affichage : du plus recent (en haut de la pile) au plus ancien (bas).
+     * Position : bas-droite, juste au-dessus des toasts. */
+    int by = INTERNAL_H - 20;
+    int bx = INTERNAL_W - 4;
+    int rendered = 0;
+    /* iter du plus recent au plus ancien : on remonte log_head */
+    for (int k = 0; k < N && rendered < N; k++) {
+        int idx = (g->log_head - 1 - k + N * 2) % N;
+        if (g->logs[idx].life <= 0.f) continue;
+        float t = g->logs[idx].life / 8.f;
+        if (t > 1.f) t = 1.f;
+        uint8_t alpha = (uint8_t)(t > 0.125f ? 255 : (uint8_t)(255.f * t * 8.f));
+        uint32_t col = (g->logs[idx].color & 0xFFFFFF00u) | alpha;
+        int tw = text_width(g->logs[idx].text);
+        int pad = 3;
+        int px = bx - tw - pad;
+        int py = by - rendered * 9;
+        if (py < 80) break;     /* deborde, stop */
+        gfx_set_blend(g->renderer, true);
+        fill_rect(g->renderer, px - pad, py - 1, tw + pad * 2, 9,
+                  (uint32_t)((0x00u << 24) | (0x00u << 16) | (0x00u << 8) | (uint32_t)(alpha * 0x80 / 255)));
+        gfx_set_blend(g->renderer, false);
+        text_draw(g->renderer, px, py, g->logs[idx].text, col);
+        rendered++;
+    }
+}
+
 /* Vignette plein-ecran : assombrit les bords (utilise par render_world). */
 void draw_vignette(Game *g) {
     gfx_set_blend(g->renderer, true);

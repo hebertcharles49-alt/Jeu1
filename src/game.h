@@ -478,6 +478,17 @@ typedef enum {
     T_WALL_CRACKED,    /* mur destructible : casse par AOE > seuil */
 } TileKind;
 
+/* Type de salle special : determine la decoration et le comportement.
+ * 0 = combat normal, 1 = tresor (coffres seulement, 0 ennemis),
+ * 2 = defi (vague d'ennemis renforces + recompense),
+ * 3 = auberge (heal + scroll + repos). */
+typedef enum {
+    ROOM_KIND_NORMAL = 0,
+    ROOM_KIND_TREASURE,
+    ROOM_KIND_CHALLENGE,
+    ROOM_KIND_INN,
+} RoomKind;
+
 typedef struct {
     int x, y, w, h;
     bool cleared;
@@ -487,6 +498,7 @@ typedef struct {
     bool boss_spawned;
     bool is_debug_room;       /* salle bac-a-sable spawnee via options.debug_room */
     bool visited;             /* devient true quand le joueur entre dedans (minimap) */
+    RoomKind kind;            /* type special (tresor / defi / auberge) */
 } Room;
 
 typedef struct {
@@ -571,6 +583,7 @@ typedef enum {
     GS_OPTIONS,
     GS_CHOOSE_HERO,
     GS_RUN,
+    GS_PAUSE,           /* pause / confirmation d'abandon en pleine run */
     GS_LEVELUP,
     GS_SHOP,
     GS_INVENTORY,
@@ -620,6 +633,7 @@ typedef struct {
     int           hub_sub_open;
     int           hub_sub_cursor;
     int           title_cursor;     /* index focused menu sur l ecran titre */
+    int           pause_cursor;     /* 0 = Reprendre, 1 = Abandonner */
     /* Etat "paysan" : le joueur entre dans le hub sans arme ni classe.
      * Il doit visiter la FORGE pour choisir une arme et la TAVERNE pour
      * choisir une classe avant de pouvoir entrer dans le DONJON. */
@@ -740,6 +754,15 @@ typedef struct {
         float    life;        /* secondes restantes -- 0 = slot libre */
         float    life_max;
     }             toasts[4];
+
+    /* Combat log : 8 entrees recentes (ring buffer). Affiche en bas-droite
+     * pendant la run. Persist 8s par entree, fade sur la derniere seconde. */
+    struct {
+        char     text[64];
+        uint32_t color;
+        float    life;
+    }             logs[8];
+    int           log_head;       /* prochaine ecriture */
 } Game;
 
 /* ---------- API ---------- */
@@ -878,6 +901,11 @@ void  render_world(Game *g);
 void  render_world_overlay_ui(Game *g);   /* HP bars/noms/dmgnums en UI 2D */
 void  render_hud(Game *g);
 void  render_hub(Game *g);
+void  render_pause(Game *g);
+/* Combat log : push une entree, tick toutes (decay), affiche dans le HUD. */
+void  log_push(Game *g, uint32_t color, const char *fmt, ...);
+void  log_tick(Game *g, float dt);
+void  log_render(Game *g);
 void  render_levelup(Game *g);
 void  render_dead(Game *g);
 void  render_title(Game *g);

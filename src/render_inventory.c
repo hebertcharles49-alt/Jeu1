@@ -269,15 +269,8 @@ void render_inventory(Game *g) {
                        it->is_unique ? "UNIQUE " : "",
                        rarity_name(it->rarity),
                        is_equip ? " (equipe)" : "");
-            /* archetype : visible des R_MAGIC pour les items non-uniques. */
-            int ay = dpy + 24;
-            if (!it->is_unique && it->rarity > R_COMMON) {
-                text_drawf(g->renderer, dpx + 4, ay, 0x808080FF,
-                           "Archetype : %s", archetype_name(it->base_kind));
-                ay += 10;
-            } else {
-                ay = dpy + 26;
-            }
+            /* archetype : nom retire (cote dev seulement). */
+            int ay = dpy + 26;
             if (it->is_unique) {
                 /* description fixe du unique au lieu de la stat de base. */
                 text_drawf(g->renderer, dpx + 4, ay, 0x80FFC0FF, "%s",
@@ -389,12 +382,12 @@ void render_inventory(Game *g) {
     text_draw(g->renderer, INTERNAL_W/2 - text_width("ECHAP POUR FERMER")/2,
               INTERNAL_H - 8, "ECHAP POUR FERMER", 0xFFFF80FF);
 
-    /* ---- TOOLTIPS ----
-     * Detection : si la souris survole un slot de l inventaire (sac ou
-     * equipement), on affiche un petit panneau a cote du curseur avec
-     * nom + rarete + stats principales. Tient compte du clamping a
-     * droite pour ne pas sortir de l ecran. */
-    for (int idx = 0; idx < INV_CURSOR_MAX; idx++) {
+    /* ---- TOOLTIPS RETIRES ----
+     * La boite descriptive permanente (cote droit, focused item) suffit.
+     * Pas besoin de doubler avec un tooltip flottant qui suit le curseur.
+     * On garde le bloc pour reference si besoin de re-activer.
+     */
+    if (0) for (int idx = 0; idx < INV_CURSOR_MAX; idx++) {
         int x, y, w, h;
         if (!inv_layout_rect(idx, &x, &y, &w, &h)) continue;
         if (!mouse_in_rect(g, x, y, w, h)) continue;
