@@ -720,6 +720,10 @@ typedef struct {
 
     int           floor_index;
     bool          portal_spawned;
+    /* Confirmation retour HUB depuis l'etage 0 : actif quand le joueur
+     * marche sur le portail HUB (v=-1). Bloque la transition + freeze
+     * l'input gameplay tant que pas confirme/annule. */
+    bool          hub_confirm_active;
 
     /* parchemin de lore actuel (overlay UI temporaire) */
     char          scroll_text[224];

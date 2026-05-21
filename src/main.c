@@ -3,6 +3,7 @@
  */
 #include "game.h"
 #include "gfx.h"
+#include "ui_common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1205,6 +1206,78 @@ void game_run(Game *g) {
         } else if (g->state == GS_CHOOSE_HERO) {
             update_choose_hero(g);
         } else if (g->state == GS_RUN) {
+            /* === Confirmation retour HUB (avant la transition fade) ===
+             * Freeze l'input gameplay + overlay sombre + dialog Y/N. */
+            if (g->hub_confirm_active) {
+                bool confirm = (g->keys[SDL_SCANCODE_Y] && !g->keys_prev[SDL_SCANCODE_Y]) ||
+                               (g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]);
+                bool cancel  = (g->keys[SDL_SCANCODE_N] && !g->keys_prev[SDL_SCANCODE_N]) ||
+                               (g->keys[SDL_SCANCODE_ESCAPE] && !g->keys_prev[SDL_SCANCODE_ESCAPE]);
+                /* clicks sur les boutons OUI / NON */
+                int dlg_w = 280, dlg_h = 110;
+                int dlg_x = (INTERNAL_W - dlg_w) / 2;
+                int dlg_y = (INTERNAL_H - dlg_h) / 2;
+                int btn_w = 90, btn_h = 22;
+                int by    = dlg_y + dlg_h - btn_h - 14;
+                int bxY   = dlg_x + 22;
+                int bxN   = dlg_x + dlg_w - btn_w - 22;
+                bool hov_yes = mouse_in_rect(g, bxY, by, btn_w, btn_h);
+                bool hov_no  = mouse_in_rect(g, bxN, by, btn_w, btn_h);
+                if (mouse_clicked(g)) {
+                    if (hov_yes) confirm = true;
+                    if (hov_no)  cancel  = true;
+                }
+                if (confirm) {
+                    g->hub_confirm_active = false;
+                    game_to_hub(g);
+                    continue;
+                }
+                if (cancel) {
+                    g->hub_confirm_active = false;
+                }
+                /* render world frozen + overlay dialog */
+                gfx_frame_begin(g->renderer);
+                int sx_, sy_; apply_shake(g, &sx_, &sy_);
+                g->camera_x = (float)sx_; g->camera_y = (float)sy_;
+                render_world(g);
+                gfx_ui_begin(g->renderer);
+                /* fond sombre semi-transparent */
+                gfx_set_blend(g->renderer, true);
+                gfx_set_color(g->renderer, 0x00000088);
+                gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
+                gfx_set_blend(g->renderer, false);
+                /* box dialog */
+                fill_rect(g->renderer, dlg_x, dlg_y, dlg_w, dlg_h, 0x100C18FF);
+                rect_outline(g->renderer, dlg_x, dlg_y, dlg_w, dlg_h, 0xFFC080FF);
+                const char *t1 = "RETOUR AU CIMETIERE ?";
+                const char *t2 = "Tu perds tout le progres de la run.";
+                int t1w = text_width(t1), t2w = text_width(t2);
+                text_draw(g->renderer, dlg_x + (dlg_w - t1w) / 2,
+                          dlg_y + 12, t1, 0xFFE080FF);
+                text_draw(g->renderer, dlg_x + (dlg_w - t2w) / 2,
+                          dlg_y + 30, t2, 0xCCCCCCFF);
+                /* boutons */
+                fill_rect(g->renderer, bxY, by, btn_w, btn_h,
+                          hov_yes ? 0x803030FF : 0x401818FF);
+                rect_outline(g->renderer, bxY, by, btn_w, btn_h,
+                             hov_yes ? 0xFF8080FF : 0x803030FF);
+                const char *bty = "OUI (Y)";
+                int btyw = text_width(bty);
+                text_draw(g->renderer, bxY + (btn_w - btyw) / 2,
+                          by + 7, bty, 0xFFFFFFFF);
+                fill_rect(g->renderer, bxN, by, btn_w, btn_h,
+                          hov_no  ? 0x305030FF : 0x182818FF);
+                rect_outline(g->renderer, bxN, by, btn_w, btn_h,
+                             hov_no  ? 0x80FF80FF : 0x305030FF);
+                const char *btn = "NON (N/Echap)";
+                int btnw = text_width(btn);
+                text_draw(g->renderer, bxN + (btn_w - btnw) / 2,
+                          by + 7, btn, 0xFFFFFFFF);
+                gfx_ui_end(g->renderer);
+                gfx_frame_end(g->renderer);
+                SDL_GL_SwapWindow(g->window);
+                continue;
+            }
             /* Transition de portail : fondu au noir + label biome.
              * Pendant la transition, tout est freeze (pas d'update). */
             if (g->portal_transition_t > 0.f) {
@@ -1225,36 +1298,49 @@ void game_run(Game *g) {
                     render_world(g);
                 }
                 gfx_ui_begin(g->renderer);
-                /* fondu : alpha pic a 1.0 a t=1.5s (mi-chemin), fade en
-                 * et hors. Le label apparait en pic. */
+                /* fondu : alpha pic a 1.0 a t=1.5s (mi-chemin), easing
+                 * smoothstep (3t^2 - 2t^3) pour les transitions douces.
+                 * Le label apparait des le debut, croit avec pulse. */
                 float t = g->portal_transition_t;
-                float pulse = 1.f - fabsf((1.5f - t) / 1.5f);
-                if (pulse < 0.f) pulse = 0.f;
-                if (pulse > 1.f) pulse = 1.f;
-                uint8_t alpha = (uint8_t)(pulse * 240);
+                float lin = 1.f - fabsf((1.5f - t) / 1.5f);
+                if (lin < 0.f) lin = 0.f;
+                if (lin > 1.f) lin = 1.f;
+                /* smoothstep */
+                float pulse = lin * lin * (3.f - 2.f * lin);
+                uint8_t alpha = (uint8_t)(pulse * 250);
                 gfx_set_blend(g->renderer, true);
                 uint32_t bcol = (uint32_t)((0x00u << 24) | (0x00u << 16)
                                           | (0x00u << 8) | (uint32_t)alpha);
                 gfx_set_color(g->renderer, bcol);
                 gfx_fill_rect(g->renderer, 0, 0, INTERNAL_W, INTERNAL_H);
                 gfx_set_blend(g->renderer, false);
-                /* label centre, apparait quand pulse > 0.4 */
-                if (pulse > 0.35f && g->portal_transition_label[0]) {
+                /* label centre + sous-titre. Apparait des pulse > 0.15. */
+                if (pulse > 0.10f && g->portal_transition_label[0]) {
                     const char *lbl = g->portal_transition_label;
                     int tw = text_width(lbl);
-                    /* shadow + texte ; couleur fade dans pulse */
-                    float la_f = ((pulse - 0.35f) / 0.65f) * 255.f;
+                    float la_f = ((pulse - 0.10f) / 0.90f) * 255.f;
                     if (la_f > 255.f) la_f = 255.f;
+                    if (la_f < 0.f)   la_f = 0.f;
                     uint8_t la = (uint8_t)la_f;
-                    uint32_t tc = (uint32_t)((0xFFu << 24) | (0xE0u << 16)
-                                            | (0x80u << 8) | (uint32_t)la);
-                    text_draw(g->renderer,
-                              INTERNAL_W/2 - tw/2 + 1,
-                              INTERNAL_H/2 - 4 + 1, lbl, 0x000000FF);
-                    text_draw(g->renderer,
-                              INTERNAL_W/2 - tw/2,
-                              INTERNAL_H/2 - 4, lbl, tc);
-                    /* sous-titre "Etage X" */
+                    /* shadow + texte. Couleur or fade. */
+                    uint32_t tc_shadow = (uint32_t)((0x00u << 24) | (0x00u << 16)
+                                                  | (0x00u << 8) | (uint32_t)la);
+                    uint32_t tc_main   = (uint32_t)((0xFFu << 24) | (0xE0u << 16)
+                                                  | (0x70u << 8) | (uint32_t)la);
+                    /* doubler le titre en rendant deux fois (effet bold) */
+                    int cx = INTERNAL_W/2 - tw/2;
+                    int cy = INTERNAL_H/2 - 18;
+                    text_draw(g->renderer, cx + 2, cy + 2, lbl, tc_shadow);
+                    text_draw(g->renderer, cx + 1, cy + 1, lbl, tc_shadow);
+                    text_draw(g->renderer, cx,     cy,     lbl, tc_main);
+                    text_draw(g->renderer, cx - 1, cy,     lbl, tc_main);
+                    /* Accent : 2 lignes horizontales encadrant le titre */
+                    uint32_t acc = (uint32_t)((0xC0u << 24) | (0x80u << 16)
+                                            | (0x30u << 8) | (uint32_t)la);
+                    gfx_set_color(g->renderer, acc);
+                    gfx_fill_rect(g->renderer, cx - 12, cy - 4, tw + 24, 1);
+                    gfx_fill_rect(g->renderer, cx - 12, cy + 12, tw + 24, 1);
+                    /* Sous-titre : "Etage X" ou descripteur. */
                     char sub[40];
                     int tgt = g->portal_transition_target;
                     if (tgt == MAX_FLOORS)
@@ -1262,11 +1348,25 @@ void game_run(Game *g) {
                     else
                         snprintf(sub, sizeof(sub), "Etage %d", tgt);
                     int sw_ = text_width(sub);
+                    uint32_t sc_ = (uint32_t)((0xC0u << 24) | (0xC0u << 16)
+                                            | (0xCCu << 8) | (uint32_t)la);
+                    text_draw(g->renderer,
+                              INTERNAL_W/2 - sw_/2 + 1,
+                              INTERNAL_H/2 + 18 + 1, sub, tc_shadow);
                     text_draw(g->renderer,
                               INTERNAL_W/2 - sw_/2,
-                              INTERNAL_H/2 + 8, sub,
-                              (uint32_t)((0xC0u << 24) | (0xC0u << 16)
-                                       | (0xCCu << 8) | (uint32_t)la));
+                              INTERNAL_H/2 + 18, sub, sc_);
+                    /* Compteur visible des secondes restantes en bas */
+                    if (t > 0.2f) {
+                        char count[16];
+                        snprintf(count, sizeof(count), "%.1fs", t);
+                        int cw = text_width(count);
+                        uint32_t cnc = (uint32_t)((0x80u << 24) | (0x80u << 16)
+                                                | (0x90u << 8) | (uint32_t)la);
+                        text_draw(g->renderer,
+                                  INTERNAL_W/2 - cw/2,
+                                  INTERNAL_H - 28, count, cnc);
+                    }
                 }
                 gfx_ui_end(g->renderer);
                 gfx_frame_end(g->renderer);

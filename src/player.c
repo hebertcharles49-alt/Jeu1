@@ -337,15 +337,15 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                     return;
                 }
                 sfx_play(g, SFX_PORTAL);
-                pk->alive = false;
-                /* Lance la transition fondu-au-noir 3s. Le jump effectif
-                 * se fait quand portal_transition_t atteint 0 (cf
-                 * game_run loop). HUB = immediat (pas de fondu cinematique
-                 * sur un retour pacifique). */
+                /* HUB return : demande confirmation avant d abandonner
+                 * la run en cours. On NE detruit PAS le pickup (pour
+                 * pouvoir annuler), on toggle hub_confirm_active.
+                 * La transition fade ne se declenche pas non plus. */
                 if (v == -1) {
-                    game_to_hub(g);
+                    g->hub_confirm_active = true;
                     return;
                 }
+                pk->alive = false;
                 int target;
                 const char *lbl;
                 if (v == 5) {
