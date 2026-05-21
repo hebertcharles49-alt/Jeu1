@@ -505,7 +505,7 @@ void update_player(Game *g) {
         if (kdash == SDL_SCANCODE_UNKNOWN) kdash = SDL_SCANCODE_SPACE;
         if (g->keys[kdash] && !g->keys_prev[kdash] &&
             p->dash_cd <= 0.f && len > 0.01f) {
-            p->dash_cd = p->u_free_dash ? 0.f : 0.7f;
+            p->dash_cd = p->u_free_dash ? 0.f : 4.0f;
             p->dash_t = (p->hero == HERO_VOLEUR) ? 0.22f : 0.18f;
             /* u_void_trail : depose un champ de Vide a la position de
              * depart du dash. 3s de slow + dmg DARK. */

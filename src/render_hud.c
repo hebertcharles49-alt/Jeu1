@@ -9,7 +9,7 @@
 /* ---------- HUD ---------- */
 void render_hud(Game *g) {
     Player *p = &g->player;
-    /* HP bar : y 4..14 (haut 11 px, texte centre verticalement) */
+    /* === Top-left : HP / XP / Endurance dash (bars empilees) === */
     fill_rect(g->renderer, 4, 4, 110, 11, 0x000000FF);
     fill_rect(g->renderer, 5, 5, 108, 9, 0x202020FF);
     int hf = (int)(108 * (p->hp / p->maxhp));
@@ -18,83 +18,54 @@ void render_hud(Game *g) {
     fill_rect(g->renderer, 5, 5, hf, 3, 0xE05050FF);
     text_drawf(g->renderer, 7, 6, 0xFFFFFFFF, "PV %d/%d", (int)p->hp, (int)p->maxhp);
 
-    /* XP bar juste sous la HP bar : y 17..22 */
+    /* XP bar sous la HP bar : y 17..22 */
     fill_rect(g->renderer, 4, 17, 110, 5, 0x102040FF);
     int xf = p->xp_to_next > 0 ? (110 * p->xp / p->xp_to_next) : 0;
     fill_rect(g->renderer, 4, 17, xf, 5, 0x40A0FFFF);
 
-    /* Ligne stats principales sous la XP bar : y=25, 1 ligne propre. */
-    text_drawf(g->renderer, 4,   25, 0xCCCCFFFF, "LV %d", p->level);
-    text_drawf(g->renderer, 40,  25, 0xFFD040FF, "%d", p->coins);
-    fill_rect (g->renderer, 62, 26, 5, 5, 0xFFD040FF);
-    text_drawf(g->renderer, 76,  25, 0xC0FFC0FF, "AME %d", p->souls);
+    /* Endurance dash : barre verte sous la XP bar. Remplit en 4s.
+     * Quand pleine (dash_cd == 0), barre saturee + petite icone "DASH".
+     * Pendant le CD, fond gris + remplissage vert proportionnel a
+     * (1 - dash_cd / 4.0). */
+    {
+        const float DASH_CD_MAX = 4.0f;
+        float ratio = 1.f - (p->dash_cd / DASH_CD_MAX);
+        if (ratio < 0.f) ratio = 0.f;
+        if (ratio > 1.f) ratio = 1.f;
+        fill_rect(g->renderer, 4, 24, 110, 5, 0x102018FF);
+        uint32_t bar_col = (p->dash_cd <= 0.001f) ? 0x60FF60FF : 0x40C040FF;
+        fill_rect(g->renderer, 4, 24, (int)(110 * ratio), 5, bar_col);
+        /* texte ETD/READY a droite de la barre */
+        if (p->dash_cd > 0.001f) {
+            text_drawf(g->renderer, 116, 24, 0x80C080FF, "%.1fs", p->dash_cd);
+        } else {
+            text_draw(g->renderer, 116, 24, "DASH", 0x80FF80FF);
+        }
+    }
 
-    /* Ligne contexte run : y=35 */
-    text_drawf(g->renderer, 4, 35, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f  ARM %.0f",
-               g->floor_index, MAX_FLOORS, g->run_kills, g->run_time, p->armor);
+    /* Ligne stats principales : y=33 */
+    text_drawf(g->renderer, 4,   33, 0xCCCCFFFF, "LV %d", p->level);
+    text_drawf(g->renderer, 40,  33, 0xFFD040FF, "%d", p->coins);
+    fill_rect (g->renderer, 62, 34, 5, 5, 0xFFD040FF);
+    text_drawf(g->renderer, 76,  33, 0xC0FFC0FF, "AME %d", p->souls);
 
-    /* Badge biome a droite, y=5 (au niveau de la HP bar). */
+    /* Ligne contexte run : y=43 */
+    text_drawf(g->renderer, 4, 43, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f",
+               g->floor_index, MAX_FLOORS, g->run_kills, g->run_time);
+
+    /* Subclass : y=53 */
+    const char *sc = subclass_name(p->weapons[0].kind, p->weapons[1].kind);
+    text_drawf(g->renderer, 4, 53, 0xFF80FFFF, "[%s] %s", hero_name(p->hero), sc);
+
+    /* Badge biome a droite, sous la minimap (rendu plus bas). On le
+     * dessine ici en small au-dessus du minimap. */
     {
         int bi = biome_for_floor(g->floor_index);
         Element be = biome_element(bi);
         char bbuf[64];
-        snprintf(bbuf, sizeof(bbuf), "* %s (%s)", biome_name(bi), element_name(be));
+        snprintf(bbuf, sizeof(bbuf), "%s (%s)", biome_name(bi), element_name(be));
         int bw = text_width(bbuf);
         text_draw(g->renderer, INTERNAL_W - bw - 6, 6, bbuf, element_color(be));
-    }
-
-    /* Subclass : y=45 */
-    const char *sc = subclass_name(p->weapons[0].kind, p->weapons[1].kind);
-    text_drawf(g->renderer, 4, 45, 0xFF80FFFF, "[%s] %s", hero_name(p->hero), sc);
-
-    /* ---- PANNEAU STATS (gauche) ---- */
-    {
-        int x = 4, y = 56;
-        gfx_set_blend(g->renderer, true);
-        fill_rect(g->renderer, x - 1, y - 1, 90, 122, 0x000000A0);
-        gfx_set_blend(g->renderer, false);
-        rect_outline(g->renderer, x - 1, y - 1, 90, 122, 0x30303AFF);
-        text_draw(g->renderer, x + 2, y, "STATS", 0xFFE080FF);
-        y += 10;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "PV  %d/%d", (int)p->hp, (int)p->maxhp); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "ATK x%.2f", p->dmg_mul); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "ARM %.0f", p->armor); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "VIT %.0f", p->speed); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "CRIT %.0f%%", p->crit_chance * 100.f); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "VOL %.0f%%", p->lifesteal * 100.f); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "REG %.1f/s", p->regen_per_sec); y += 9;
-        text_drawf(g->renderer, x + 2, y, 0xFFFFFFFF,
-                   "ESQ %.0f%%", p->dodge * 100.f); y += 9;
-        /* separateur */
-        fill_rect(g->renderer, x + 2, y, 84, 1, 0x40404AFF);
-        y += 3;
-        /* DPS smoothed (debug TTK). 0 si pas de combat actif. */
-        text_drawf(g->renderer, x + 2, y, 0xC0E0FFFF,
-                   "DPS %.0f", g->dps_smooth); y += 9;
-        /* TTK estime sur le boss vivant si on tape. */
-        if (g->dps_smooth > 1.f) {
-            for (int i = 0; i < MAX_ENEMIES; i++) {
-                Enemy *be = &g->enemies[i];
-                if (!be->alive || !be->is_boss || be->dying_t > 0.f) continue;
-                float ttk = be->hp / g->dps_smooth;
-                text_drawf(g->renderer, x + 2, y, 0xFFD080FF,
-                           "TTK %.1fs", ttk);
-                y += 9;
-                break;
-            }
-        }
-        /* seed en bas, couleur discrete. Permet de partager une run.
-         * Seed complete (10 chiffres possibles) -- plus de troncature
-         * a 5 chiffres qui limitait artificiellement le partage. */
-        text_drawf(g->renderer, x + 2, y, 0x808080FF,
-                   "SEED %u", g->run_seed);
     }
 
     /* weapon slots */
@@ -125,36 +96,37 @@ void render_hud(Game *g) {
     text_draw(g->renderer, INTERNAL_W - 122, INTERNAL_H - 12, "TAB ARMES   I INVENTAIRE", 0x808080FF);
     text_draw(g->renderer, INTERNAL_W - 122, INTERNAL_H - 4,  "ESPACE DASH", 0x808080FF);
 
-    /* ---- MINIMAP (top-right) ---- */
+    /* ---- MINIMAP (top-right) plus grande ----
+     * 110x110 (au lieu de 60x60). Affiche les tiles a 2px chacune
+     * (donc on couvre jusqu'a 55x55 tiles), suffisant pour MAP_W=56. */
     {
         Dungeon *d = &g->dungeon;
-        int mm_w = 60, mm_h = 60;
+        int mm_w = 110, mm_h = 110;
         int mm_x = INTERNAL_W - mm_w - 4;
-        int mm_y = 4;
-        int ox = mm_x + 2, oy = mm_y + 2;
+        int mm_y = 16;       /* sous le badge biome */
+        int ox = mm_x + 4, oy = mm_y + 4;
+        int sc = 2;          /* echelle : 2 px par tile */
         /* fond */
         gfx_set_blend(g->renderer, true);
         fill_rect(g->renderer, mm_x, mm_y, mm_w, mm_h, 0x000000B0);
         gfx_set_blend(g->renderer, false);
         rect_outline(g->renderer, mm_x, mm_y, mm_w, mm_h, 0x404048FF);
-        /* salles visitees (1 px par tile, MAP_W=56 -> fit dans 56x56) */
+        /* salles visitees (sc px par tile) */
         int ptx = (int)(g->player.x / TILE);
         int pty = (int)(g->player.y / TILE);
         for (int i = 0; i < d->room_count; i++) {
             Room *r = &d->rooms[i];
             if (!r->visited) continue;
-            int rx = ox + r->x;
-            int ry = oy + r->y;
-            uint32_t col = 0x606068FF;          /* visitee normale */
+            int rx = ox + r->x * sc;
+            int ry = oy + r->y * sc;
+            uint32_t col = 0x606068FF;
             if (!r->cleared)         col = 0xA0A040FF;
             if (r->is_boss_room)     col = 0xC04040FF;
             if (r->is_debug_room)    col = 0x40A0C0FF;
-            fill_rect(g->renderer, rx, ry, r->w, r->h, col);
-            /* contour subtil */
-            rect_outline(g->renderer, rx, ry, r->w, r->h, 0x18181EFF);
+            fill_rect(g->renderer, rx, ry, r->w * sc, r->h * sc, col);
+            rect_outline(g->renderer, rx, ry, r->w * sc, r->h * sc, 0x18181EFF);
         }
-        /* portes visibles : on traverse une bande etroite autour de chaque
-         * salle visitee et on pose un pixel chaud sur les T_DOOR. */
+        /* portes T_DOOR : pixel chaud (sc x sc) */
         for (int i = 0; i < d->room_count; i++) {
             Room *r = &d->rooms[i];
             if (!r->visited) continue;
@@ -162,7 +134,8 @@ void render_hud(Game *g) {
                 for (int y = r->y - 1; y <= r->y + r->h; y++) {
                     if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
                     if (d->tiles[y][x] == T_DOOR) {
-                        fill_rect(g->renderer, ox + x, oy + y, 1, 1, 0xFFC080FF);
+                        fill_rect(g->renderer, ox + x * sc, oy + y * sc,
+                                  sc, sc, 0xFFC080FF);
                     }
                 }
             }
@@ -177,36 +150,30 @@ void render_hud(Game *g) {
         for (int i = 0; i < d->room_count; i++) {
             Room *r = &d->rooms[i];
             if (!r->visited) continue;
-            int cx = ox + r->x + r->w / 2;
-            int cy = oy + r->y + r->h / 2;
+            int cx = ox + (r->x + r->w / 2) * sc;
+            int cy = oy + (r->y + r->h / 2) * sc;
             if (r->is_boss_room) {
-                /* boss : croix rouge clignote (skull-ish) */
                 uint32_t bc = ((int)(g->time * 3.f) & 1) ? 0xFF6060FF : 0xC02020FF;
-                fill_rect(g->renderer, cx - 2, cy,     5, 1, bc);
-                fill_rect(g->renderer, cx,     cy - 2, 1, 5, bc);
+                fill_rect(g->renderer, cx - 3, cy,     7, 2, bc);
+                fill_rect(g->renderer, cx,     cy - 3, 2, 7, bc);
                 if (d->boss_dead) {
-                    /* boss vaincu : croix plus sombre, ne clignote plus */
-                    fill_rect(g->renderer, cx - 2, cy,     5, 1, 0x603030FF);
-                    fill_rect(g->renderer, cx,     cy - 2, 1, 5, 0x603030FF);
+                    fill_rect(g->renderer, cx - 3, cy,     7, 2, 0x603030FF);
+                    fill_rect(g->renderer, cx,     cy - 3, 2, 7, 0x603030FF);
                 }
             } else if (r->is_debug_room) {
-                /* etoile 4-branches cyan */
-                fill_rect(g->renderer, cx,     cy - 2, 1, 5, 0x80FFFFFF);
-                fill_rect(g->renderer, cx - 2, cy,     5, 1, 0x80FFFFFF);
+                fill_rect(g->renderer, cx,     cy - 3, 2, 7, 0x80FFFFFF);
+                fill_rect(g->renderer, cx - 3, cy,     7, 2, 0x80FFFFFF);
             } else if (i == 0) {
-                /* spawn : S mini blanc */
                 text_draw(g->renderer, cx - 2, cy - 3, "S", 0xFFFFFFFF);
             }
         }
-        /* pickups dans une salle visitee : dot dore. Coffres + items
-         * uniquement, pour eviter de spammer xp/coin sur la mini. */
+        /* pickups (dot dore, 2x2 sur la map x2) */
         for (int i = 0; i < MAX_PICKUPS; i++) {
             Pickup *pk = &g->pickups[i];
             if (!pk->alive) continue;
             if (pk->kind != PU_ITEM && pk->kind != PU_CHEST &&
                 pk->kind != PU_WEAPON) continue;
             int tx = (int)(pk->x / TILE), ty = (int)(pk->y / TILE);
-            /* on n affiche que si la tile est dans une salle visitee */
             bool in_visited = false;
             for (int r = 0; r < d->room_count && !in_visited; r++) {
                 Room *rr = &d->rooms[r];
@@ -217,21 +184,48 @@ void render_hud(Game *g) {
             if (!in_visited) continue;
             uint32_t pc = 0xFFD040FF;
             if (pk->kind == PU_ITEM && pk->item.is_unique) pc = 0xFF8030FF;
-            fill_rect(g->renderer, ox + tx, oy + ty, 1, 1, pc);
+            fill_rect(g->renderer, ox + tx * sc, oy + ty * sc, sc, sc, pc);
         }
         /* portail de sortie (clignote) si visible */
         if (d->boss_dead) {
-            int px = ox + d->exit_x, py = oy + d->exit_y;
+            int px = ox + d->exit_x * sc, py = oy + d->exit_y * sc;
             uint32_t pc = ((int)(g->time * 4.f) & 1) ? 0x80E0FFFF : 0x4070C0FF;
-            fill_rect(g->renderer, px - 1, py - 1, 3, 3, pc);
+            fill_rect(g->renderer, px - 2, py - 2, 5, 5, pc);
         }
-        /* joueur : point jaune clignotant (par-dessus tout) */
-        int px = ox + ptx, py = oy + pty;
+        /* joueur : point jaune clignotant 3x3 */
+        int px = ox + ptx * sc, py = oy + pty * sc;
         uint32_t playerc = ((int)(g->time * 5.f) & 1) ? 0xFFFF80FF : 0xFFFFFFFF;
-        fill_rect(g->renderer, px - 1, py - 1, 3, 3, playerc);
+        fill_rect(g->renderer, px - 2, py - 2, 4, 4, playerc);
 
-        /* legende minuscule sous la minimap */
-        text_draw(g->renderer, mm_x, mm_y + mm_h + 1, "MAP", 0x808080FF);
+        /* === PANNEAU STATS sous la minimap ===
+         * Liste compacte des stats du joueur (PV, ATK, ARM, VIT, CRIT,
+         * VOL, REG, ESQ). Plus de DPS / TTK / SEED ici. */
+        {
+            int sx2 = mm_x, sy2 = mm_y + mm_h + 6;
+            int sw2 = mm_w, sh2 = 102;
+            gfx_set_blend(g->renderer, true);
+            fill_rect(g->renderer, sx2, sy2, sw2, sh2, 0x000000A0);
+            gfx_set_blend(g->renderer, false);
+            rect_outline(g->renderer, sx2, sy2, sw2, sh2, 0x30303AFF);
+            text_draw(g->renderer, sx2 + 3, sy2 + 2, "STATS", 0xFFE080FF);
+            int sy3 = sy2 + 12;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "PV  %d/%d", (int)p->hp, (int)p->maxhp); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "ATK x%.2f", p->dmg_mul); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "ARM %.0f", p->armor); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "VIT %.0f", p->speed); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "CRIT %.0f%%", p->crit_chance * 100.f); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "VOL %.0f%%", p->lifesteal * 100.f); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "REG %.1f/s", p->regen_per_sec); sy3 += 9;
+            text_drawf(g->renderer, sx2 + 3, sy3, 0xFFFFFFFF,
+                       "ESQ %.0f%%", p->dodge * 100.f);
+        }
     }
 }
 
