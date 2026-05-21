@@ -830,17 +830,43 @@ static void update_hub(Game *g) {
                 g->hub_sub_open = 0;
             }
         } else if (g->hub_sub_open == 2) {
-            /* FORGE : 5 armes (excl. fists). Sub_cursor 0..4. */
+            /* FORGE : 5 armes (excl. fists). Sub_cursor 0..4.
+             * Layout : rowh=30 (sync avec render_hub_forge). */
             const int N = 5;
             int w = 280;
             int x = INTERNAL_W / 2 - w / 2;
             int y = INTERNAL_H / 2 - 110;
-            int rowh = 22;
+            int rowh = 30;
+            static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
+            /* Helper inline pour le cout d'upgrade : doit matcher
+             * weapon_upgrade_cost de render_menus.c (30, 60, 120, 240, 480). */
             for (int k = 0; k < N; k++) {
                 int sy = y + 50 + k * rowh;
                 if (mouse_in_rect(g, x + 10, sy, w - 20, rowh - 2)) {
                     g->hub_sub_cursor = k;
-                    if (mouse_clicked(g)) hub_forge_pick(g, k);
+                }
+                /* Bouton UPGRADE a droite (synced avec render) */
+                int bw = 78, bh = 18;
+                int bx = x + w - bw - 14;
+                int by = sy + (rowh - bh) / 2 - 1;
+                int wlvl = g->meta.weapon_dmg_bonus[PICKS[k]];
+                if (wlvl < FORGE_MAX_LEVEL &&
+                    mouse_in_rect(g, bx, by, bw, bh) && mouse_clicked(g)) {
+                    int cost = 30 << wlvl;        /* 30,60,120,240,480 */
+                    if (g->player.souls >= cost) {
+                        g->player.souls -= cost;
+                        g->meta.weapon_dmg_bonus[PICKS[k]]++;
+                        save_write(&g->meta);
+                        sfx_play(g, SFX_LEVELUP);
+                    } else {
+                        sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                    }
+                    return;
+                }
+                /* clic gauche dans la rangee (hors bouton) = equipe */
+                if (mouse_in_rect(g, x + 10, sy, w - 20 - bw - 14, rowh - 2)
+                    && mouse_clicked(g)) {
+                    hub_forge_pick(g, k);
                 }
             }
             if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
@@ -850,6 +876,21 @@ static void update_hub(Game *g) {
             if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
                 (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]))
                 hub_forge_pick(g, g->hub_sub_cursor);
+            /* U : upgrade weapon courant via souls */
+            if (g->keys[SDL_SCANCODE_U] && !g->keys_prev[SDL_SCANCODE_U]) {
+                int wlvl = g->meta.weapon_dmg_bonus[PICKS[g->hub_sub_cursor]];
+                if (wlvl < FORGE_MAX_LEVEL) {
+                    int cost = 30 << wlvl;
+                    if (g->player.souls >= cost) {
+                        g->player.souls -= cost;
+                        g->meta.weapon_dmg_bonus[PICKS[g->hub_sub_cursor]]++;
+                        save_write(&g->meta);
+                        sfx_play(g, SFX_LEVELUP);
+                    } else {
+                        sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                    }
+                }
+            }
         }
         return;
     }

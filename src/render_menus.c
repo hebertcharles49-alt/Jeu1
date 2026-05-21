@@ -54,12 +54,21 @@ static void render_hub_temple(Game *g) {
               y + h - 14, "ENTREE OU ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
-/* sous-panneau FORGE : choisis ton arme pour la run (5 options). */
+/* sous-panneau FORGE : choisis ton arme pour la run + ameliore-la
+ * via souls (meta-progression). Chaque arme garde son niveau entre
+ * les runs (meta.weapon_dmg_bonus). */
+static int weapon_upgrade_cost(int level) {
+    /* progression : 30 -> 60 -> 120 -> 240 -> 480 souls */
+    int base = 30;
+    for (int i = 0; i < level; i++) base *= 2;
+    return base;
+}
+
 static void render_hub_forge(Game *g) {
     int x, y, w, h;
     sub_panel_bg(g, &x, &y, &w, &h, "FORGE");
-    text_draw(g->renderer, x + w / 2 - text_width("Choisis ton arme pour la course.") / 2,
-              y + 22, "Choisis ton arme pour la course.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("Choisis ton arme. Ameliore-la en payant des AMES.") / 2,
+              y + 22, "Choisis ton arme. Ameliore-la en payant des AMES.", 0xCCCCCCFF);
     static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
     static const char *DESCR[5] = {
         "Slash transversal rapide, motion blur.",
@@ -68,7 +77,7 @@ static void render_hub_forge(Game *g) {
         "Projectile magique a tete chercheuse.",
         "Chop overhead AOE lourd, lent."
     };
-    int rowh = 22;
+    int rowh = 30;
     int N = 5;
     for (int k = 0; k < N; k++) {
         int sy = y + 50 + k * rowh;
@@ -78,17 +87,39 @@ static void render_hub_forge(Game *g) {
         uint32_t bd = sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0x504048FF);
         fill_rect(g->renderer, x + 10, sy, w - 20, rowh - 2, bg);
         rect_outline(g->renderer, x + 10, sy, w - 20, rowh - 2, bd);
-        text_draw(g->renderer, x + 16, sy + 3,
-                  weapon_name(PICKS[k]),
-                  sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0xFFFFFFFF));
-        text_draw(g->renderer, x + 16, sy + 12,
-                  DESCR[k], 0x808890FF);
+        int wlvl = g->meta.weapon_dmg_bonus[PICKS[k]];
+        text_drawf(g->renderer, x + 16, sy + 3,
+                   sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0xFFFFFFFF),
+                   "%s  LVL %d", weapon_name(PICKS[k]), wlvl);
+        text_draw(g->renderer, x + 16, sy + 12, DESCR[k], 0x808890FF);
+        /* bonus actuel + cost upgrade */
+        text_drawf(g->renderer, x + 16, sy + 21, 0xC0E0FFFF,
+                   "+%d dmg permanent", wlvl * 5);
         if (chosen) {
-            text_draw(g->renderer, x + w - 50, sy + 6, "EQUIPEE", 0x60D040FF);
+            text_draw(g->renderer, x + w - 60, sy + 4, "EQUIPEE", 0x60D040FF);
+        }
+        /* bouton AMELIORER (cote droit) si niveau < max */
+        int bw = 78, bh = 18;
+        int bx = x + w - bw - 14;
+        int by = sy + (rowh - bh) / 2 - 1;
+        if (wlvl < FORGE_MAX_LEVEL) {
+            int cost = weapon_upgrade_cost(wlvl);
+            bool affordable = (g->player.souls >= cost);
+            uint32_t bbg = affordable ? 0x304030FF : 0x281820FF;
+            uint32_t bbd = affordable ? 0x80FF80FF : 0x404048FF;
+            fill_rect(g->renderer, bx, by, bw, bh, bbg);
+            rect_outline(g->renderer, bx, by, bw, bh, bbd);
+            text_drawf(g->renderer, bx + 4, by + 6,
+                       affordable ? 0xFFFFFFFF : 0x808080FF,
+                       "U:%d AMES", cost);
+        } else {
+            text_draw(g->renderer, bx + 14, by + 6, "LVL MAX", 0xFFD040FF);
         }
     }
-    text_draw(g->renderer, x + w / 2 - text_width("ENTREE / CLIC POUR EQUIPER -- ECHAP POUR FERMER") / 2,
-              y + h - 14, "ENTREE / CLIC POUR EQUIPER -- ECHAP POUR FERMER", 0xFFFF80FF);
+    text_drawf(g->renderer, x + 12, y + h - 26, 0xFFD040FF,
+               "Ames disponibles : %d", g->player.souls);
+    text_draw(g->renderer, x + w / 2 - text_width("ENTREE / CLIC : equipe -- U : ameliore -- ECHAP : ferme") / 2,
+              y + h - 14, "ENTREE / CLIC : equipe -- U : ameliore -- ECHAP : ferme", 0xFFFF80FF);
 }
 
 /* sous-panneau LICHE : work in progress placeholder. */
@@ -999,7 +1030,7 @@ void render_help(Game *g) {
     text_draw(g->renderer, 8, y, "ECHAP            ABANDONNER / QUITTER", 0xFFFFFFFF); y += 12;
     text_draw(g->renderer, 8, y, "REGLES", 0xFFE080FF); y += 9;
     text_draw(g->renderer, 8, y, "Tu commences avec tes POINGS sur 2 slots", 0xCCCCCCFF); y += 9;
-    text_draw(g->renderer, 8, y, "Trouve / achete des armes pour debloquer ta sous-classe", 0xCCCCCCFF); y += 9;
+    text_draw(g->renderer, 8, y, "Trouve / achete des armes pour evoluer ton style", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Greffe jusqu'a 3 elements par arme (ramassage = arme active)", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Nettoie les pieces, abats le BOSS, prends le portail", 0xCCCCCCFF); y += 9;
     text_draw(g->renderer, 8, y, "Shop entre etages: pieces dorees", 0xCCCCCCFF); y += 9;

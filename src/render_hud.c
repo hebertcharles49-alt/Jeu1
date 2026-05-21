@@ -53,9 +53,8 @@ void render_hud(Game *g) {
     text_drawf(g->renderer, 4, 43, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f",
                g->floor_index, MAX_FLOORS, g->run_kills, g->run_time);
 
-    /* Subclass : y=53 */
-    const char *sc = subclass_name(p->weapons[0].kind, p->weapons[1].kind);
-    text_drawf(g->renderer, 4, 53, 0xFF80FFFF, "[%s] %s", hero_name(p->hero), sc);
+    /* Nom du heros : y=53 (sous-classes retirees -- nom du heros suffit) */
+    text_drawf(g->renderer, 4, 53, 0xFF80FFFF, "[%s]", hero_name(p->hero));
 
     /* Badge biome a droite, sous la minimap (rendu plus bas). On le
      * dessine ici en small au-dessus du minimap. */
