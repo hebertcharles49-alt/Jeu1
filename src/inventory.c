@@ -464,6 +464,16 @@ bool inventory_equip(Game *g, int inv_index) {
             g->inv_msg_t = 2.5f;
             return false;
         }
+        /* Pas de doublon : impossible d'avoir deux fois le meme element
+         * sur la meme arme (eviter "triple feu"). Force le combo nomme. */
+        for (int k = 0; k < w->element_count; k++) {
+            if (w->elements[k] == e) {
+                snprintf(g->inv_msg, sizeof(g->inv_msg),
+                         "Element deja greffe sur cette arme");
+                g->inv_msg_t = 2.5f;
+                return false;
+            }
+        }
         weapon_attach_element(w, e);
         /* discovery codex element */
         if (!g->meta.element_discovered[e]) {
@@ -703,15 +713,25 @@ static void talisman_cycle(Game *g, int weapon_idx, int talisman_idx) {
     }
     Element current = (talisman_idx < w->element_count)
                         ? w->elements[talisman_idx] : EL_NONE;
-    /* trouve le prochain : current -> pool[idx+1], avec EL_NONE -> pool[0] */
+    /* trouve le prochain : current -> pool[idx+1], avec EL_NONE -> pool[0].
+     * On saute les elements deja portes sur d'autres slots de la meme arme
+     * pour eviter les doublons (pas de triple feu, etc). */
     int next = -1;
-    if (current == EL_NONE) {
-        next = 0;
-    } else {
-        for (int i = 0; i < pn; i++) if (pool[i] == current) { next = i + 1; break; }
-        /* current pas trouve (element non decouvert) -> repart sur pool[0] */
-        if (next < 0) next = 0;
+    int start = 0;
+    if (current != EL_NONE) {
+        for (int i = 0; i < pn; i++) if (pool[i] == current) { start = i + 1; break; }
     }
+    for (int step = start; step <= pn; step++) {
+        if (step >= pn) { next = pn; break; }  /* fin -> retire */
+        Element cand = pool[step];
+        bool taken = false;
+        for (int k = 0; k < w->element_count; k++) {
+            if (k == talisman_idx) continue;
+            if (w->elements[k] == cand) { taken = true; break; }
+        }
+        if (!taken) { next = step; break; }
+    }
+    if (next < 0) next = pn;  /* tous occupes -> retire */
     if (next >= pn) {
         /* fin de la liste -> retire le talisman */
         if (talisman_idx < w->element_count) {

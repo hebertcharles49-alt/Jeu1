@@ -8,6 +8,7 @@
  */
 #include "game.h"
 #include <stdlib.h>
+#include <math.h>
 
 /* ---------- PARTICLES ---------- */
 void update_particles(Game *g) {
@@ -27,6 +28,37 @@ void update_particles(Game *g) {
 /* ---------- PICKUPS ---------- */
 void update_pickups(Game *g) {
     float dt = g->dt;
+    /* Collision items vs portail : un item ne peut pas rester sur le
+     * portail de sortie de donjon (le joueur passait sans le ramasser).
+     * Ejection radiale douce jusqu'a sortir du rayon. */
+    const float PORTAL_REPEL_R = 18.f;
+    for (int i = 0; i < MAX_PICKUPS; i++) {
+        Pickup *po = &g->pickups[i];
+        if (!po->alive || po->kind != PU_PORTAL) continue;
+        for (int j = 0; j < MAX_PICKUPS; j++) {
+            if (i == j) continue;
+            Pickup *it = &g->pickups[j];
+            if (!it->alive) continue;
+            /* on n'ejecte que les pickups "lourds" (equipement, armes,
+             * talismans, coffres). Les coins/food gardent leur position. */
+            if (it->kind != PU_ITEM && it->kind != PU_WEAPON &&
+                it->kind != PU_ELEMENT && it->kind != PU_CHEST) continue;
+            float ddx = it->x - po->x;
+            float ddy = it->y - po->y;
+            float d2 = ddx * ddx + ddy * ddy;
+            if (d2 < PORTAL_REPEL_R * PORTAL_REPEL_R) {
+                float d = sqrtf(d2);
+                if (d < 0.5f) {
+                    /* exactement sur le portail : pousse dans une dir random */
+                    float a = (rand() % 360) * 0.01745f;
+                    ddx = cosf(a); ddy = sinf(a); d = 1.f;
+                }
+                float push = (PORTAL_REPEL_R - d) + 1.f;
+                it->x += (ddx / d) * push;
+                it->y += (ddy / d) * push;
+            }
+        }
+    }
     for (int i = 0; i < MAX_PICKUPS; i++) {
         Pickup *p = &g->pickups[i];
         if (!p->alive) continue;

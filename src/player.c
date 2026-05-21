@@ -593,8 +593,10 @@ void update_player(Game *g) {
 
     /* BUILD-DEF u_drone_count : maintient le nombre de drones (fees
      * EL_FAE) au-dessus de u_drone_count. Refresh leur life pour
-     * qu elles persistent toute la course. */
-    if (p->u_drone_count > 0) {
+     * qu elles persistent toute la course.
+     * Pas dans le HUB : pas d'orbes parasites dans le cimetiere
+     * (les uniques peuvent rester equipes entre les runs). */
+    if (p->u_drone_count > 0 && g->state != GS_HUB) {
         int alive = 0;
         for (int i = 0; i < MAX_FAIRIES; i++) {
             Fairy *f = &g->fairies[i];

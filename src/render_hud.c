@@ -90,9 +90,11 @@ void render_hud(Game *g) {
                 break;
             }
         }
-        /* seed en bas, couleur discrete. Permet de partager une run. */
+        /* seed en bas, couleur discrete. Permet de partager une run.
+         * Seed complete (10 chiffres possibles) -- plus de troncature
+         * a 5 chiffres qui limitait artificiellement le partage. */
         text_drawf(g->renderer, x + 2, y, 0x808080FF,
-                   "SEED %u", g->run_seed % 100000);
+                   "SEED %u", g->run_seed);
     }
 
     /* weapon slots */

@@ -625,13 +625,17 @@ static void draw_player_3d(Game *g) {
                     p->trail_z[p->trail_head] = tipz;
                     p->trail_head = (p->trail_head + 1) % N;
                     if (p->trail_count < N) p->trail_count++;
-                    /* dessine le trail : les plus anciennes positions
-                     * sont plus petites et plus pales. */
-                    for (int ti = 0; ti < p->trail_count; ti++) {
+                    /* Trail allege : 4 dernieres positions seulement, plus
+                     * fines et plus pales. L'ancienne trainee de 8 cubes
+                     * couvrait le champ de vision et masquait les
+                     * ennemis a courte portee. */
+                    int trail_max = 4;
+                    if (trail_max > p->trail_count) trail_max = p->trail_count;
+                    for (int ti = 0; ti < trail_max; ti++) {
                         int idx = (p->trail_head - 1 - ti + N) % N;
-                        float age = (float)ti / (float)N;
+                        float age = (float)ti / (float)trail_max;
                         float fade = 1.f - age;
-                        float sz = 0.10f * fade;
+                        float sz = 0.06f * fade;
                         if (sz < 0.02f) continue;
                         float cr = 0.95f * fade + 0.05f;
                         float cg = 0.65f * fade + 0.20f;

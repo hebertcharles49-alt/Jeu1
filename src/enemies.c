@@ -114,7 +114,10 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
                              e->x - 12, e->y - 12);
             }
         }
-    } else if (d.item_chance > 0 && (rand() % 300) < d.item_chance) {
+    } else if (d.item_chance > 0 && (rand() % 600) < d.item_chance) {
+        /* Drop equipement encore divise par 2 : les ennemis arrosaient
+         * de loot, on passe de /300 a /600 (-50%). Les boss et coffres
+         * gardent leur drop rate, donc moins de spam de baseline. */
         Item it = item_drop_for_floor(g, prog, e->is_elite, false);
         pickup_spawn_item(g, it, e->x, e->y);
     }

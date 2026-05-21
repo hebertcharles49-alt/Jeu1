@@ -273,9 +273,11 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         }
     }
 
-    /* Salles speciales : on convertit jusqu'a 3 salles non-boss / non-spawn
-     * en TREASURE / INN / CHALLENGE, dans cet ordre. Pas plus d'une de
-     * chaque par etage. Seed-deterministe via rand() consume ici. */
+    /* Salles speciales : MAXIMUM UNE par etage (le joueur trouvait avant
+     * 3 salles paisibles en sprint -- on en garde une seule, tiree au
+     * sort entre TREASURE / INN / CHALLENGE pour preserver la variete.
+     * Challenge n'est pas paisible donc on l'autorise toujours en plus
+     * si la salle pacifique tiree est TREASURE ou INN. */
     {
         int candidates[32]; int n_cand = 0;
         for (int i = 1; i < placed; i++) {
@@ -287,21 +289,19 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
             int j = rand() % (i + 1);
             int t = candidates[i]; candidates[i] = candidates[j]; candidates[j] = t;
         }
-        RoomKind types[3] = { ROOM_KIND_TREASURE, ROOM_KIND_INN, ROOM_KIND_CHALLENGE };
-        int n_assign = n_cand < 3 ? n_cand : 3;
-        for (int k = 0; k < n_assign; k++) {
-            Room *r = &d->rooms[candidates[k]];
-            r->kind = types[k];
-            if (r->kind == ROOM_KIND_TREASURE) {
-                r->enemies_to_spawn = 0;
-                r->cleared = true;
-            } else if (r->kind == ROOM_KIND_INN) {
-                r->enemies_to_spawn = 0;
-                r->cleared = true;
-            } else if (r->kind == ROOM_KIND_CHALLENGE) {
-                /* +50% ennemis, mais loot bonus a la fin */
-                r->enemies_to_spawn = (int)(r->enemies_to_spawn * 1.5f) + 1;
-            }
+        /* Tire UNE seule salle peaceful (treasure ou inn, 50/50). Si on a
+         * encore une salle dispo, on peut placer un CHALLENGE en plus
+         * (combat avec loot bonus, pas pacifique). */
+        if (n_cand >= 1) {
+            Room *r = &d->rooms[candidates[0]];
+            r->kind = (rand() % 2 == 0) ? ROOM_KIND_TREASURE : ROOM_KIND_INN;
+            r->enemies_to_spawn = 0;
+            r->cleared = true;
+        }
+        if (n_cand >= 2) {
+            Room *r = &d->rooms[candidates[1]];
+            r->kind = ROOM_KIND_CHALLENGE;
+            r->enemies_to_spawn = (int)(r->enemies_to_spawn * 1.5f) + 1;
         }
     }
 
