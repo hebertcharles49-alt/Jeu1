@@ -314,6 +314,11 @@ static Rarity roll_table(const int *row) {
     return R_COMMON;
 }
 
+/* Important : on indexe la table par le NOMBRE de biome-floors deja
+ * visites dans la run, pas par floor_index. Sinon commencer au sanctuaire
+ * (floors 9-10) donnerait du legendaire des le premier biome. Le param
+ * 'floor_index' garde son nom pour compat API mais represente desormais
+ * "progression effective" (clampe 1..10). */
 Rarity rarity_for_floor_elite(int floor_index) {
     int idx = floor_index - 1;
     if (idx < 0) idx = 0;
@@ -560,10 +565,10 @@ bool inventory_unequip(Game *g, int equip_index) {
  * Renvoie true si trouve et remplit out_a/b/c. Sinon false. */
 bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
     Player *p = &g->player;
-    /* Fusion : 3 items de MEME SLOT + MEME RARETE. L'archetype
-     * (base_kind) peut differer -- si les 3 sont du meme archetype,
-     * le resultat est garanti dans ce type ; sinon, le type est tire
-     * au sort (33% chance par archetype source). */
+    /* Auto-detect : 3 items MEME SLOT + MEME RARETE + MEME SUB_KIND.
+     * Le sub_kind doit matcher (ex : pantalons rarete 1 frenetiques x3).
+     * Pour fusionner des archetypes mixtes, l'utilisateur doit marquer
+     * manuellement avec M -- la fusion appliquera alors la lottery 33%. */
     int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
     if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
     for (int i = 0; i < inv_cap; i++) {
@@ -578,7 +583,9 @@ bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
             if (!jj->occupied) continue;
             if (jj->kind != ITEM_KIND_EQUIP) continue;
             if (jj->is_unique) continue;
-            if (jj->slot == ii->slot && jj->rarity == ii->rarity) {
+            if (jj->slot == ii->slot &&
+                jj->rarity == ii->rarity &&
+                jj->base_kind == ii->base_kind) {
                 matches[cnt++] = j;
             }
         }
@@ -603,8 +610,8 @@ bool inventory_fuse(Game *g) {
     } else {
         if (!inventory_find_fusion_group(g, &a, &b, &c)) {
             snprintf(g->inv_msg, sizeof(g->inv_msg),
-                     "Aucune fusion possible : il faut 3 items identiques");
-            g->inv_msg_t = 2.5f;
+                     "Marque 3 items (M) ou 3 identiques");
+            g->inv_msg_t = 3.0f;
             return false;
         }
     }
@@ -814,9 +821,12 @@ nav_done:;
             talisman_cycle(g, rel / 3, rel % 3);
         }
     }
-    /* M = mark for fusion */
+    /* M = mark for fusion. Le sac peut etre etendu via trinkets, donc
+     * on borne sur INV_CURSOR_EQUIP_BASE (debut zone equipement) au lieu
+     * du 12 hardcode. */
     if (g->keys[SDL_SCANCODE_M] && !g->keys_prev[SDL_SCANCODE_M]) {
-        if (g->inv_cursor < 12 && g->player.inventory[g->inv_cursor].occupied) {
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE &&
+            g->player.inventory[g->inv_cursor].occupied) {
             int idx = g->inv_cursor;
             /* toggle */
             int found = -1;

@@ -1908,7 +1908,36 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
                          rr, gg2, bb);
             return;
         }
-        case PU_CHEST:   r=0.55f; gg=0.34f; b=0.20f;  sz=0.70f; draw_pillar = false; break;
+        case PU_CHEST: {
+            /* Coffre : tronc bois + bandes dorees + pillar de lumiere
+             * pulsant doree pour le repere a distance. */
+            r=0.55f; gg=0.34f; b=0.20f; sz=0.85f; draw_pillar = false;
+            /* corps du coffre (plus gros que les autres pickups) */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.18f, pos.z),
+                         v3_make(sz * 0.7f, 0.30f, sz * 0.5f),
+                         r, gg, b);
+            /* bandes en metal dore */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.32f, pos.z),
+                         v3_make(sz * 0.72f, 0.04f, sz * 0.52f),
+                         0.95f, 0.78f, 0.20f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.08f, pos.z),
+                         v3_make(sz * 0.72f, 0.04f, sz * 0.52f),
+                         0.95f, 0.78f, 0.20f);
+            /* cadenas / serrure devant */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.18f, pos.z + sz * 0.27f),
+                         v3_make(0.08f, 0.10f, 0.04f),
+                         1.0f, 0.85f, 0.30f);
+            /* pillar de lumiere doree pulsant -- visible a travers la salle */
+            float cpulse = 0.6f + 0.4f * sinf(g->time * 3.f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.50f + cpulse * 0.25f, pos.z),
+                         v3_make(0.08f, 0.60f + cpulse * 0.30f, 0.08f),
+                         1.0f, 0.85f, 0.35f);
+            /* halo plus large au pied du coffre */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.02f, pos.z),
+                         v3_make(sz * 1.1f, 0.02f, sz * 0.9f),
+                         1.0f, 0.80f, 0.20f);
+            return;
+        }
         case PU_PORTAL: {
             /* Couleur du portail : sur floor 0, encode la destination
              * via value. -1 = HUB (dore), 0..4 = biome (couleur biome),

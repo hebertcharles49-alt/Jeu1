@@ -44,6 +44,7 @@ typedef struct {
     int   d_next_buy_free; /* +N achats gratuits charges */
     int   d_next_buy_double;/* +N achats double effet charges */
     int   d_free_hit_chg;  /* +N coups gratuits charges (free_hit_t mis a 60s) */
+    int   d_no_atk_cap;    /* 1 = bypass le plancher de cd minimum */
 } Recipe;
 
 static const Recipe RECIPES[] = {
@@ -202,6 +203,14 @@ static const Recipe RECIPES[] = {
       0,0,0, 0,0,0,    0,0,0, 0,0,  0.15f,0.50f, 0,0, 0,0, 0,0 },
     { "Larme du Cristal",   "+30% degats elem, +15% portee",     55, R_LEGENDARY,
       0,0,0, 0,0,0,    0,0,0, 0.30f,0, 0,0,  0.15f,0, 0,0, 0,0 },
+    /* Style Isaac "Soy Milk" : -40% degats par coup mais bypass le cap
+     * de cadence => build full atk speed degenere. Designated initializer
+     * pour ne pas avoir a compter les 40+ champs de la struct. */
+    { .name = "Lait de Soja",
+      .desc = "-40% degats / aucune limite atk speed",
+      .cost = 60, .rarity = R_LEGENDARY,
+      .d_dmg_mul = -0.40f,
+      .d_no_atk_cap = 1 },
 
     /* ---- PACTES (PU_SHRINE only) ----
      * Bonus enormes + malus reels. Decision irreversible pour la run.
@@ -279,17 +288,27 @@ void shop_recipe_apply_to_block(int rid, StatBlock *sb) {
     sb->coin_drop_mul       += r->d_coin_drop;
     sb->xp_mul              += r->d_xp_mul;
     sb->pixie_on_kill_pct   += r->d_pixie_on_kill_pct;
+    if (r->d_no_atk_cap) sb->no_atk_speed_cap = true;
     if (r->d_puddle_on_room > EL_NONE && r->d_puddle_on_room < EL_COUNT)
         sb->puddle_on_room = (Element)r->d_puddle_on_room;
     if (r->d_aff_el  > 0 && r->d_aff_el  < EL_COUNT) sb->aff[r->d_aff_el]  += r->d_aff_val;
     if (r->d_aff_el2 > 0 && r->d_aff_el2 < EL_COUNT) sb->aff[r->d_aff_el2] += r->d_aff_val2;
 }
 
-/* generation aleatoire selon l'etage : raretes plus elevees plus tard */
-static int pick_recipe_for_floor(int floor_idx) {
+/* generation aleatoire selon l'etage : raretes plus elevees plus tard.
+ * Filtre les recettes deja achetees dans la run (one-shot par trinket). */
+static bool recipe_already_owned(Game *g, int rid) {
+    if (!g) return false;
+    for (int i = 0; i < g->player.shop_purchased_count; i++)
+        if (g->player.shop_purchased[i] == rid) return true;
+    return false;
+}
+
+static int pick_recipe_for_floor(Game *g, int floor_idx) {
     int weight_total = 0;
     int weights[NUM_RECIPES];
     for (int i = 0; i < NUM_RECIPES; i++) {
+        if (recipe_already_owned(g, i)) { weights[i] = 0; continue; }
         Rarity r = RECIPES[i].rarity;
         int w = 0;
         switch (r) {
@@ -303,7 +322,13 @@ static int pick_recipe_for_floor(int floor_idx) {
         weights[i] = w;
         weight_total += w;
     }
-    if (weight_total == 0) return 0;
+    /* Si toutes les recettes du tier sont epuisees : fallback sur la
+     * premiere recette dispo, sinon 0. Evite un crash dans le pool vide. */
+    if (weight_total == 0) {
+        for (int i = 0; i < NUM_RECIPES; i++)
+            if (!recipe_already_owned(g, i)) return i;
+        return 0;
+    }
     int roll = rand() % weight_total;
     int acc = 0;
     for (int i = 0; i < NUM_RECIPES; i++) {
@@ -318,7 +343,15 @@ void shop_generate(Game *g) {
     for (int i = 0; i < SHOP_SLOTS; i++) {
         ShopItem *si = &g->shop_items[i];
         memset(si, 0, sizeof(*si));
-        si->recipe_id = pick_recipe_for_floor(g->floor_index);
+        si->recipe_id = pick_recipe_for_floor(g, g->floor_index);
+        /* anti-duplicate intra-shop : evite que le meme trinket apparaisse
+         * 2 fois dans la meme salle (les 4 slots doivent etre distincts). */
+        for (int k = 0; k < i; k++) {
+            int retries = 8;
+            while (retries-- > 0 && g->shop_items[k].recipe_id == si->recipe_id) {
+                si->recipe_id = pick_recipe_for_floor(g, g->floor_index);
+            }
+        }
         /* cost ajuste selon etage, puis reduction shop_discount du joueur.
          * Si discount >= 100% le cout passe a 0 (shop gratuit). */
         int base_cost = shop_recipe_cost(si->recipe_id);

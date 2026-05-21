@@ -422,6 +422,8 @@ typedef struct {
     float free_hit_t;         /* timer d'un coup gratuit (anneau du gardien) */
     int   pixie_on_kill_pct;  /* 0..100 chance de spawn une pixie par kill */
     Element puddle_on_room;   /* spawn une flaque a chaque salle clear, EL_NONE = off */
+    bool  no_atk_speed_cap;   /* trinket "Lait de Soja" : passe outre le
+                                 cap de cd minimum (style Isaac). */
     /* affinites elementaires : multiplicateur de dmg par element (+/-) */
     float elem_affinity[EL_COUNT];
 
@@ -1117,6 +1119,7 @@ typedef struct {
     float xp_mul;
     int   pixie_on_kill_pct;
     Element puddle_on_room;
+    bool  no_atk_speed_cap;  /* trinket Lait de Soja */
     float aff[EL_COUNT];
     /* flags build-defining propages des uniques. Identiques aux champs
      * Player.u_* ; recopies a la fin du recompute. */

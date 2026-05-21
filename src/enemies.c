@@ -88,10 +88,17 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
      * system (cf world_enemy_damage). Le champ est garde dans DropProfile
      * pour le debug futur mais on ne tire plus dessus. */
     (void)d.element_chance;
+    /* progression effective : on utilise floors_visited (compteur monotone
+     * des biome-floors completes) pour les tables de loot. Eviter
+     * floor_index : commencer au sanctuaire ne doit pas donner du
+     * legendaire des le premier biome. */
+    int prog = g->floors_visited;
+    if (prog < 1) prog = 1;
+    if (prog > 10) prog = 10;
     if (e->is_boss) {
-        Item it1 = item_drop_for_floor(g, g->floor_index, false, true);
+        Item it1 = item_drop_for_floor(g, prog, false, true);
         pickup_spawn_item(g, it1, e->x, e->y);
-        Item it2 = item_drop_for_floor(g, g->floor_index, false, true);
+        Item it2 = item_drop_for_floor(g, prog, false, true);
         pickup_spawn_item(g, it2, e->x + 12, e->y + 12);
         bool has_fists = false;
         for (int s = 0; s < WEAPON_SLOTS; s++)
@@ -101,17 +108,14 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
             for (int wk = W_SWORD; wk < W_COUNT; wk++)
                 if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
             if (wn > 0) {
-                Rarity wr = rarity_for_floor_boss(g->floor_index);
+                Rarity wr = rarity_for_floor_boss(prog);
                 pickup_spawn(g, PU_WEAPON,
                              weapons[rand() % wn] | (((int)wr) << 8),
                              e->x - 12, e->y - 12);
             }
         }
     } else if (d.item_chance > 0 && (rand() % 300) < d.item_chance) {
-        /* equipment drop rate divise par 3 (rand() % 300 vs item_chance
-         * en /100). Force le joueur a survivre plus longtemps avant de
-         * combo des items, et donne plus de poids au shop / boss. */
-        Item it = item_drop_for_floor(g, g->floor_index, e->is_elite, false);
+        Item it = item_drop_for_floor(g, prog, e->is_elite, false);
         pickup_spawn_item(g, it, e->x, e->y);
     }
 }
@@ -1058,8 +1062,9 @@ static void boss_archmage(Game *g, Enemy *e, float dt, int phase,
     (void)dist;
     Player *p = &g->player;
 
-    /* speech decay */
-    if (g->arch_speech_t > 0.f) g->arch_speech_t -= dt;
+    /* speech decay : fait globalement dans update_game, on ne le
+     * touche plus ici pour eviter qu'il s'arrete quand l'archimage
+     * est en stasis ou mort. */
 
     /* === ELEMENT LEAKS ===
      * Pendant le combat, particules elementaires qui "leak" depuis les
@@ -1323,6 +1328,9 @@ static void ai_move_toward(Game *g, Enemy *e, float dt,
 
 static void ai_contact_damage(Game *g, Enemy *e, float dmg) {
     Player *p = &g->player;
+    /* Buff global enemy contact dmg : x1.8. Sans ce buff le joueur
+     * peut etre touche en permanence sans crever. */
+    dmg *= 1.8f;
     /* BUFFER aura : si dmg_flat > 0 (set par ai_buffer pour les voisins),
      * on amplifie. Decay rapide pour qu il faille rester pres du totem. */
     if (e->dmg_flat > 0.f) {
@@ -1453,12 +1461,12 @@ static void ai_bandit(Game *g, Enemy *e, float dt, float dx, float dy, float dis
             e->ai_t2 = 0.35f;     /* declenche un roll */
         }
     }
-    /* triple shot : 3 daguettes en eventail */
-    if (e->ai_t > 1.6f && dist < 220.f && e->ai_t2 <= 0.f) {
+    /* 5-shot fan (etait 3) + cd plus court (1.6 -> 1.1) */
+    if (e->ai_t > 1.1f && dist < 220.f && e->ai_t2 <= 0.f) {
         e->ai_t = 0;
-        for (int k = -1; k <= 1; k++) {
-            float a0 = atan2f(dy, dx);
-            float a = a0 + k * 0.20f;
+        float a0 = atan2f(dy, dx);
+        for (int k = -2; k <= 2; k++) {
+            float a = a0 + k * 0.16f;
             Projectile pr = {0};
             pr.x = e->x; pr.y = e->y;
             pr.vx = cosf(a) * 130.f;
@@ -1501,12 +1509,12 @@ static void ai_demon(Game *g, Enemy *e, float dt, float dx, float dy, float dist
     } else {
         e->ai_t2 -= dt;
     }
-    /* triple aim shot */
-    if (e->ai_t > 1.4f && dist < 260.f) {
+    /* 5-shot aim (etait 3) + cd 1.4 -> 1.0. Trace de feu + spray. */
+    if (e->ai_t > 1.0f && dist < 260.f) {
         e->ai_t = 0;
         float a0 = atan2f(dy, dx);
-        for (int k = -1; k <= 1; k++) {
-            float a = a0 + k * 0.18f;
+        for (int k = -2; k <= 2; k++) {
+            float a = a0 + k * 0.14f;
             Projectile pr = {0};
             pr.x = e->x; pr.y = e->y;
             pr.vx = cosf(a) * 120.f;
@@ -1670,20 +1678,24 @@ static void ai_mage(Game *g, Enemy *e, float dt, float dx, float dy, float dist)
         else if (dist < 160.f) ai_move_toward(g, e, dt, -dx, -dy, dist, 25.f, false);
     }
     if (e->ai_t2 > 0.f) e->ai_t2 -= dt;
-    /* tir homing fae */
-    if (e->ai_t > 2.0f && dist < 260.f) {
+    /* MAGE : 3 projectiles homing en eventail (etait 1 seul) + cd 2.0->1.3 */
+    if (e->ai_t > 1.3f && dist < 260.f) {
         e->ai_t = 0.f;
-        Projectile pr = {0};
-        pr.x = e->x; pr.y = e->y;
-        pr.vx = dx / dist * 90.f;
-        pr.vy = dy / dist * 90.f;
-        pr.life = 4.f; pr.r = 4.f;
-        pr.dmg = 9.f * diff; pr.owner = 1; pr.reflectable = true;
-        pr.primary = EL_FAE;
-        pr.homing = 1.5f;               /* recherche le joueur */
-        pr.target_idx = -1;
-        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-        projectile_spawn(g, pr);
+        float a0 = atan2f(dy, dx);
+        for (int k = -1; k <= 1; k++) {
+            float a = a0 + k * 0.30f;
+            Projectile pr = {0};
+            pr.x = e->x; pr.y = e->y;
+            pr.vx = cosf(a) * 90.f;
+            pr.vy = sinf(a) * 90.f;
+            pr.life = 4.f; pr.r = 4.f;
+            pr.dmg = 9.f * diff; pr.owner = 1; pr.reflectable = true;
+            pr.primary = EL_FAE;
+            pr.homing = 1.5f;               /* recherche le joueur */
+            pr.target_idx = -1;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
         sfx_play(g, SFX_ZAP);
     }
     ai_contact_damage(g, e, 3.f * diff);

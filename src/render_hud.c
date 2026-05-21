@@ -9,44 +9,47 @@
 /* ---------- HUD ---------- */
 void render_hud(Game *g) {
     Player *p = &g->player;
-    /* HP bar */
-    fill_rect(g->renderer, 4, 4, 110, 9, 0x000000FF);
-    fill_rect(g->renderer, 5, 5, 108, 7, 0x202020FF);
+    /* HP bar : y 4..14 (haut 11 px, texte centre verticalement) */
+    fill_rect(g->renderer, 4, 4, 110, 11, 0x000000FF);
+    fill_rect(g->renderer, 5, 5, 108, 9, 0x202020FF);
     int hf = (int)(108 * (p->hp / p->maxhp));
     if (hf < 0) hf = 0;
-    fill_rect(g->renderer, 5, 5, hf, 7, 0xC03030FF);
-    fill_rect(g->renderer, 5, 5, hf, 2, 0xE05050FF);
-    text_drawf(g->renderer, 7, 5, 0xFFFFFFFF, "PV %d/%d", (int)p->hp, (int)p->maxhp);
+    fill_rect(g->renderer, 5, 5, hf, 9, 0xC03030FF);
+    fill_rect(g->renderer, 5, 5, hf, 3, 0xE05050FF);
+    text_drawf(g->renderer, 7, 6, 0xFFFFFFFF, "PV %d/%d", (int)p->hp, (int)p->maxhp);
 
-    /* XP bar */
-    fill_rect(g->renderer, 4, 15, 110, 4, 0x102040FF);
+    /* XP bar juste sous la HP bar : y 17..22 */
+    fill_rect(g->renderer, 4, 17, 110, 5, 0x102040FF);
     int xf = p->xp_to_next > 0 ? (110 * p->xp / p->xp_to_next) : 0;
-    fill_rect(g->renderer, 4, 15, xf, 4, 0x40A0FFFF);
-    text_drawf(g->renderer, 120, 5,  0xCCCCFFFF, "LV %d", p->level);
-    text_drawf(g->renderer, 120, 14, 0xFFD040FF, "%d", p->coins);
-    fill_rect(g->renderer, 142, 14, 5, 5, 0xFFD040FF);
-    text_drawf(g->renderer, 158, 14, 0xC0FFC0FF, "AME %d", p->souls);
+    fill_rect(g->renderer, 4, 17, xf, 5, 0x40A0FFFF);
 
-    text_drawf(g->renderer, 4, 22, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f  ARMURE %.0f",
+    /* Ligne stats principales sous la XP bar : y=25, 1 ligne propre. */
+    text_drawf(g->renderer, 4,   25, 0xCCCCFFFF, "LV %d", p->level);
+    text_drawf(g->renderer, 40,  25, 0xFFD040FF, "%d", p->coins);
+    fill_rect (g->renderer, 62, 26, 5, 5, 0xFFD040FF);
+    text_drawf(g->renderer, 76,  25, 0xC0FFC0FF, "AME %d", p->souls);
+
+    /* Ligne contexte run : y=35 */
+    text_drawf(g->renderer, 4, 35, 0xFFE0A0FF, "ETAGE %d/%d  KILLS %d  T %.0f  ARM %.0f",
                g->floor_index, MAX_FLOORS, g->run_kills, g->run_time, p->armor);
-    /* badge biome : nom + couleur de l element du biome. Aligne a droite
-       pour ne pas chevaucher la ligne ETAGE/KILLS sur les longues valeurs. */
+
+    /* Badge biome a droite, y=5 (au niveau de la HP bar). */
     {
         int bi = biome_for_floor(g->floor_index);
         Element be = biome_element(bi);
         char bbuf[64];
         snprintf(bbuf, sizeof(bbuf), "* %s (%s)", biome_name(bi), element_name(be));
         int bw = text_width(bbuf);
-        text_draw(g->renderer, INTERNAL_W - bw - 6, 5, bbuf, element_color(be));
+        text_draw(g->renderer, INTERNAL_W - bw - 6, 6, bbuf, element_color(be));
     }
 
-    /* subclass */
+    /* Subclass : y=45 */
     const char *sc = subclass_name(p->weapons[0].kind, p->weapons[1].kind);
-    text_drawf(g->renderer, 4, 30, 0xFF80FFFF, "[%s] %s", hero_name(p->hero), sc);
+    text_drawf(g->renderer, 4, 45, 0xFF80FFFF, "[%s] %s", hero_name(p->hero), sc);
 
     /* ---- PANNEAU STATS (gauche) ---- */
     {
-        int x = 4, y = 40;
+        int x = 4, y = 56;
         gfx_set_blend(g->renderer, true);
         fill_rect(g->renderer, x - 1, y - 1, 90, 122, 0x000000A0);
         gfx_set_blend(g->renderer, false);

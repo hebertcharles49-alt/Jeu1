@@ -37,59 +37,59 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
             e->kind = kind;
             e->r = 6.f;
             e->xp_drop = 1; e->coin_drop = 1;
+            /* Buff HP global : *3.0 sur la baseline mob, *3.5 sur boss.
+             * Le joueur ramene des coups a 1000+ via combos / uniques ;
+             * sans ce buff, le run est trivial. */
             float diff = powf(1.15f, (float)(g->floors_visited > 0 ? g->floors_visited - 1 : 0));
             switch (kind) {
                 case EK_ZOMBIE:
-                    e->hp = e->maxhp = 18.f * diff;
+                    e->hp = e->maxhp = 54.f * diff;
                     e->r = 6.f; e->xp_drop = 1; e->coin_drop = 1;
                     break;
                 case EK_BANDIT:
-                    e->hp = e->maxhp = 14.f * diff;
+                    e->hp = e->maxhp = 42.f * diff;
                     e->r = 6.f; e->xp_drop = 2; e->coin_drop = 2;
                     break;
                 case EK_DEMON:
-                    e->hp = e->maxhp = 38.f * diff;
+                    e->hp = e->maxhp = 114.f * diff;
                     e->r = 9.f; e->xp_drop = 4; e->coin_drop = 4;
                     break;
                 case EK_SLIME:
-                    e->hp = e->maxhp = 12.f * diff;
+                    e->hp = e->maxhp = 36.f * diff;
                     e->r = 5.f; e->xp_drop = 1; e->coin_drop = 1;
                     e->split_left = 1;
                     break;
                 case EK_RAT:
-                    e->hp = e->maxhp = 8.f * diff;
+                    e->hp = e->maxhp = 24.f * diff;
                     e->r = 4.f; e->xp_drop = 1; e->coin_drop = 0;
                     break;
                 case EK_GHOST:
-                    e->hp = e->maxhp = 25.f * diff;
+                    e->hp = e->maxhp = 75.f * diff;
                     e->r = 6.f; e->xp_drop = 3; e->coin_drop = 2;
                     break;
                 case EK_CHARGER:
-                    e->hp = e->maxhp = 50.f * diff;
+                    e->hp = e->maxhp = 150.f * diff;
                     e->r = 9.f; e->xp_drop = 4; e->coin_drop = 3;
-                    /* ai_t2 sert au state-machine charge : 0=cooldown,
-                     * 1=telegraph, 2=charging. Voir enemies.c. */
                     e->ai_t2 = 0.f;
                     break;
                 case EK_MAGE:
-                    e->hp = e->maxhp = 22.f * diff;
+                    e->hp = e->maxhp = 66.f * diff;
                     e->r = 6.f; e->xp_drop = 3; e->coin_drop = 3;
                     break;
                 case EK_HEALER:
-                    e->hp = e->maxhp = 18.f * diff;
+                    e->hp = e->maxhp = 54.f * diff;
                     e->r = 6.f; e->xp_drop = 3; e->coin_drop = 2;
                     break;
                 case EK_BUFFER:
-                    /* totem : ne bouge pas, plus de HP en compensation. */
-                    e->hp = e->maxhp = 32.f * diff;
+                    e->hp = e->maxhp = 96.f * diff;
                     e->r = 7.f; e->xp_drop = 3; e->coin_drop = 2;
                     break;
                 case EK_NECROMANCER:
-                    e->hp = e->maxhp = 26.f * diff;
+                    e->hp = e->maxhp = 78.f * diff;
                     e->r = 6.f; e->xp_drop = 4; e->coin_drop = 3;
                     break;
                 case EK_BOSS:
-                    e->hp = e->maxhp = 220.f * diff;
+                    e->hp = e->maxhp = 770.f * diff;
                     e->r = 14.f; e->xp_drop = 12; e->coin_drop = 30;
                     e->is_boss = true;
                     e->variant = (g->floor_index - 1) % 5;
@@ -168,6 +168,11 @@ int enemy_spawn(Game *g, int kind, float x, float y) {
 }
 
 int projectile_spawn(Game *g, Projectile p) {
+    /* Buff projectiles ennemis : +60% dmg. Cible uniquement les
+     * projectiles d'owner == 1 (ennemis) pour ne pas amplifier le
+     * joueur. Permet aux mobs distants d etre menaçants sans avoir
+     * a editer 30 callsites. */
+    if (p.owner == 1) p.dmg *= 1.6f;
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         if (!g->projectiles[i].alive) {
             g->projectiles[i] = p;

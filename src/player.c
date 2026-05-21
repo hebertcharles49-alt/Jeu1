@@ -273,7 +273,10 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                         if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
                     if (wn > 0) {
                         int wpick = weapons[rand() % wn];
-                        Rarity wr = rarity_for_floor_elite(g->floor_index);
+                        int prog = g->floors_visited;
+                        if (prog < 1) prog = 1;
+                        if (prog > 10) prog = 10;
+                        Rarity wr = rarity_for_floor_elite(prog);
                         pickup_spawn(g, PU_WEAPON,
                                      wpick | (((int)wr) << 8),
                                      pk->x, pk->y - 6);

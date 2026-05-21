@@ -273,6 +273,7 @@ void game_recompute_player_stats(Game *g) {
     if (p->pixie_on_kill_pct < 0) p->pixie_on_kill_pct = 0;
     if (p->pixie_on_kill_pct > 100) p->pixie_on_kill_pct = 100;
     p->puddle_on_room = sb.puddle_on_room;
+    p->no_atk_speed_cap = sb.no_atk_speed_cap;
     for (int i = 0; i < EL_COUNT; i++) p->elem_affinity[i] = sb.aff[i];
     /* flags build-defining */
     p->u_explosions_attract = sb.u_explosions_attract;
@@ -1273,6 +1274,12 @@ void game_run(Game *g) {
             if (g->boss_intro_t > 0.f) g->boss_intro_t -= dt;
             if (g->boss_death_t > 0.f) g->boss_death_t -= dt;
             if (g->flash_t > 0.f)      g->flash_t -= dt;
+            /* decay global du speech de l'archimage : doit s'effacer
+             * meme s'il est en stasis / interphase / mort. */
+            if (g->arch_speech_t > 0.f) {
+                g->arch_speech_t -= dt;
+                if (g->arch_speech_t <= 0.f) g->arch_speech[0] = 0;
+            }
             update_player(g);
             update_weapons(g);
             update_enemies(g);
@@ -1340,7 +1347,12 @@ void game_run(Game *g) {
                 for (int c = 0; c < 3; c++) {
                     g->levelup_choice_kind[c] = 2;
                     g->levelup_choices[c]      = statpool[c];
-                    g->levelup_choice_rarity[c]= (int)rarity_for_floor_elite(g->floor_index);
+                    {
+                        int prog = g->floors_visited;
+                        if (prog < 1) prog = 1;
+                        if (prog > 10) prog = 10;
+                        g->levelup_choice_rarity[c]= (int)rarity_for_floor_elite(prog);
+                    }
                 }
                 g->state = GS_LEVELUP;
                 sfx_play(g, SFX_LEVELUP);

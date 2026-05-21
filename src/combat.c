@@ -605,6 +605,10 @@ void update_weapons(Game *g) {
         if (p->u_berserk_cd && p->hp < p->maxhp * 0.5f) cd_final *= 0.5f;
         /* u_last_stand actif : cd /2 (cumul si berserk). */
         if (p->last_stand_t > 0.f) cd_final *= 0.5f;
+        /* CAP de cadence : on plancher a 0.12s entre 2 swings. Le trinket
+         * "Lait de Soja" (no_atk_speed_cap) bypass ce plancher pour
+         * permettre un build full atk speed degenere. */
+        if (!p->no_atk_speed_cap && cd_final < 0.12f) cd_final = 0.12f;
         w->cooldown = cd_final;
     }
 }
