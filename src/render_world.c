@@ -2478,28 +2478,45 @@ void render_world(Game *g) {
         Projectile *pr = &g->projectiles[i]; if (!pr->alive) continue;
         draw_projectile_3d(g, pr);
     }
-    /* Barreaux rouges sur les portes verrouillees. Pulse pour attirer
-     * l'oeil et signaler que la salle n'est pas finie. */
+    /* Porte verrouillee : mur rouge translucide pulsant. Bloque le
+     * passage visuellement (en plus du blocage solide cote collision).
+     * Doit etre tres visible : 2 grosses colonnes + barre transversale
+     * + halo au sol. */
     {
         float pulse = 0.6f + 0.4f * sinf(g->time * 4.f);
+        float pr_ = 1.0f * pulse;
+        float pg_ = 0.15f;
+        float pb_ = 0.15f;
         for (int y = 0; y < MAP_H; y++) {
             for (int x = 0; x < MAP_W; x++) {
                 if (g->dungeon.tiles[y][x] != T_DOOR) continue;
                 if (!door_locked_at(g, x, y)) continue;
                 float wx = (float)x + 0.5f;
                 float wz = (float)y + 0.5f;
-                /* 3 barreaux verticaux rouges, hauteur 0.8 */
-                for (int k = -1; k <= 1; k++) {
-                    gfx_box_draw(g->renderer,
-                                 v3_make(wx + k * 0.25f, 0.50f, wz),
-                                 v3_make(0.06f, 0.45f, 0.45f),
-                                 0.95f * pulse, 0.20f, 0.20f);
-                }
-                /* halo au sol */
+                /* halo lumineux au sol, large et brillant */
                 gfx_box_draw(g->renderer,
-                             v3_make(wx, 0.02f, wz),
-                             v3_make(0.50f, 0.02f, 0.50f),
-                             0.90f * pulse, 0.10f, 0.10f);
+                             v3_make(wx, 0.03f, wz),
+                             v3_make(0.95f, 0.04f, 0.95f),
+                             pr_, pg_, pb_);
+                /* 2 colonnes verticales epaisses, hauteur pleine */
+                gfx_box_draw(g->renderer,
+                             v3_make(wx - 0.32f, 0.55f, wz),
+                             v3_make(0.18f, 1.10f, 0.18f),
+                             pr_, pg_, pb_);
+                gfx_box_draw(g->renderer,
+                             v3_make(wx + 0.32f, 0.55f, wz),
+                             v3_make(0.18f, 1.10f, 0.18f),
+                             pr_, pg_, pb_);
+                /* barre transversale au milieu (forme un X visuel) */
+                gfx_box_draw(g->renderer,
+                             v3_make(wx, 0.65f, wz),
+                             v3_make(0.85f, 0.14f, 0.18f),
+                             pr_, pg_, pb_);
+                /* cadenas central pulsant plus brillant */
+                gfx_box_draw(g->renderer,
+                             v3_make(wx, 0.65f, wz),
+                             v3_make(0.18f, 0.22f, 0.22f),
+                             1.0f, 0.40f * pulse, 0.10f);
             }
         }
     }

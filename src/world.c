@@ -87,6 +87,7 @@ void update_room_logic(Game *g) {
         if (first_visit && !r->cleared &&
             (r->enemies_to_spawn > 0 || r->is_boss_room)) {
             r->locked = true;
+            log_push(g, 0xFF6060FF, "Portes verrouillees -- elimine les ennemis");
         }
         if (first_visit) {
             /* === FLOOR 0 : spawn des 7 portails en cercle ===

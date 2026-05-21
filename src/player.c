@@ -127,9 +127,10 @@ void player_take_damage_from(Game *g, float dmg, float srcx, float srcy) {
     g->hitstop_t = 0.05f + intensity * 0.13f;
     g->flash_t   = 0.20f + intensity * 0.18f;
 
-    /* knockback : substep avec collision check pour ne pas teleporter
-     * a travers les murs. Decoupe en N steps de longueur <= 0.5 * r,
-     * abandonne le sens collisionne. */
+    /* knockback : substep + BOUNCE (au lieu de juste zeroer la composante
+     * sur collision). Resolution similaire aux ennemis pour eviter de
+     * coincer le joueur dans un mur ou un coin. Decoupe en N steps de
+     * longueur <= 0.5 * r ; reverse l'axe collisionne avec 50% perte. */
     float kb = 4.f + intensity * 14.f;
     float kb_dx = dirx * kb;
     float kb_dy = diry * kb;
@@ -141,11 +142,17 @@ void player_take_damage_from(Game *g, float dmg, float srcx, float srcy) {
     float sx_step = kb_dx / kb_steps;
     float sy_step = kb_dy / kb_steps;
     for (int s = 0; s < kb_steps; s++) {
-        if (!aabb_solid(g, p->x + sx_step, p->y, p->r - 1)) p->x += sx_step;
-        else { sx_step = 0.f; }
-        if (!aabb_solid(g, p->x, p->y + sy_step, p->r - 1)) p->y += sy_step;
-        else { sy_step = 0.f; }
-        if (sx_step == 0.f && sy_step == 0.f) break;
+        if (!aabb_solid(g, p->x + sx_step, p->y, p->r - 1)) {
+            p->x += sx_step;
+        } else {
+            sx_step = -sx_step * 0.5f;   /* bounce X avec perte */
+        }
+        if (!aabb_solid(g, p->x, p->y + sy_step, p->r - 1)) {
+            p->y += sy_step;
+        } else {
+            sy_step = -sy_step * 0.5f;   /* bounce Y avec perte */
+        }
+        if (fabsf(sx_step) < 0.05f && fabsf(sy_step) < 0.05f) break;
     }
     p->hit_t = 0.45f + intensity * 0.25f;
     p->hit_dir_x = dirx;
@@ -404,6 +411,29 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
 void update_player(Game *g) {
     Player *p = &g->player;
     float dt = g->dt;
+
+    /* UNSTUCK : si la position courante est dans un mur (apres un
+     * knockback / cas limite), on cherche le tile libre le plus proche
+     * via une spirale 8 directions et on s'y teleporte doucement.
+     * Evite le "fusionne dans le mur" definitif. */
+    if (aabb_solid(g, p->x, p->y, p->r - 1)) {
+        static const float DIRS[8][2] = {
+            { 1, 0}, {-1, 0}, {0, 1}, {0,-1},
+            { 0.707f, 0.707f}, {-0.707f, 0.707f},
+            { 0.707f,-0.707f}, {-0.707f,-0.707f}
+        };
+        bool ok = false;
+        for (float push = (float)TILE; push <= (float)(TILE * 4) && !ok; push += TILE) {
+            for (int d = 0; d < 8 && !ok; d++) {
+                float nx = p->x + DIRS[d][0] * push;
+                float ny = p->y + DIRS[d][1] * push;
+                if (!aabb_solid(g, nx, ny, p->r - 1)) {
+                    p->x = nx; p->y = ny;
+                    ok = true;
+                }
+            }
+        }
+    }
 
     float ix = 0, iy = 0;
     if (g->keys[SDL_SCANCODE_W] || g->keys[SDL_SCANCODE_UP])    iy -= 1.f;

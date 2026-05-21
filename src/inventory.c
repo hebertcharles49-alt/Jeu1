@@ -632,9 +632,43 @@ bool inventory_fuse(Game *g) {
         a = g->inv_marked[0]; b = g->inv_marked[1]; c = g->inv_marked[2];
     } else {
         if (!inventory_find_fusion_group(g, &a, &b, &c)) {
-            snprintf(g->inv_msg, sizeof(g->inv_msg),
-                     "Marque 3 items (M) ou 3 identiques");
-            g->inv_msg_t = 3.0f;
+            /* Diagnostic : scan le sac et trouve le groupe le plus
+             * proche d'un trio (par kind+sub+rarete). Aide l'utilisateur
+             * a comprendre ce qui manque. */
+            int inv_cap_d = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+            if (inv_cap_d > INVENTORY_MAX_SLOTS) inv_cap_d = INVENTORY_MAX_SLOTS;
+            int best_cnt = 0;
+            const Item *best = NULL;
+            for (int i = 0; i < inv_cap_d; i++) {
+                Item *ii = &p->inventory[i];
+                if (!ii->occupied || ii->is_unique) continue;
+                if (ii->kind != ITEM_KIND_EQUIP && ii->kind != ITEM_KIND_WEAPON) continue;
+                if (ii->rarity >= R_LEGENDARY) continue;
+                int cnt = 1;
+                for (int j = 0; j < inv_cap_d; j++) {
+                    if (j == i) continue;
+                    Item *jj = &p->inventory[j];
+                    if (!jj->occupied || jj->is_unique) continue;
+                    if (jj->kind != ii->kind) continue;
+                    if (jj->rarity != ii->rarity) continue;
+                    if (jj->base_kind != ii->base_kind) continue;
+                    if (ii->kind == ITEM_KIND_EQUIP && jj->slot != ii->slot) continue;
+                    cnt++;
+                }
+                if (cnt > best_cnt) { best_cnt = cnt; best = ii; }
+            }
+            if (best && best_cnt >= 2) {
+                const char *what = (best->kind == ITEM_KIND_WEAPON)
+                    ? weapon_name((WeaponKind)best->base_kind)
+                    : slot_name(best->slot);
+                snprintf(g->inv_msg, sizeof(g->inv_msg),
+                         "%dx %s %s (besoin 3)",
+                         best_cnt, rarity_name(best->rarity), what);
+            } else {
+                snprintf(g->inv_msg, sizeof(g->inv_msg),
+                         "Rien a fusionner (3 items meme type+rarete)");
+            }
+            g->inv_msg_t = 3.5f;
             return false;
         }
     }
