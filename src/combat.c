@@ -484,7 +484,10 @@ void update_weapons(Game *g) {
         if (fx.status > 0 && fx.status < EL_COUNT) {
             pmul *= (1.f + p->elem_affinity[fx.status]);
         }
-        bool crit = (rand() / (float)RAND_MAX) < p->crit_chance;
+        /* TAG_UNSTABLE / TAG_VOLATILE : +crit chance via fx.crit_chance_add */
+        float crit_chance = p->crit_chance + fx.crit_chance_add;
+        if (crit_chance > 1.f) crit_chance = 1.f;
+        bool crit = (rand() / (float)RAND_MAX) < crit_chance;
         if (crit) pmul *= p->crit_dmg;
         /* OVERDRIVE actif : +30% dmg, atk_speed_mul plus court, crit
          * roll redouble (deja roule). */
@@ -590,6 +593,17 @@ void update_weapons(Game *g) {
         if (w->element_count == 3) combo_refresh_active_loop(g, mask);
         combo_apply_loop_modifiers(g, &fx);
 
+        /* Propage les effets passifs TAG_* du combo au site de damage
+         * via le Game state (world_enemy_damage les lit). Reset apres
+         * le swing (a la fin du switch). */
+        g->cur_knockback_mul   = fx.knockback_mul > 0.f ? fx.knockback_mul : 1.f;
+        g->cur_status_dur_mul  = fx.status_dur_mul > 0.f ? fx.status_dur_mul : 1.f;
+        g->cur_freeze_on_hit   = fx.freeze_on_hit;
+        g->cur_puddle_on_hit   = fx.puddle_on_hit;
+        g->cur_heal_on_kill    = fx.heal_on_kill;
+        g->cur_void_on_kill    = fx.void_on_kill;
+        g->cur_corrosive_stack = fx.corrosive_stack;
+
         switch (w->kind) {
             case W_FISTS:  fire_fists (g, w, fx); break;
             case W_SWORD:  fire_sword (g, w, fx); break;
@@ -600,6 +614,15 @@ void update_weapons(Game *g) {
             default: break;
         }
         g->current_attack_crit = false;
+        /* reset des cur_* tags : evite la fuite vers d'autres frames
+         * (projectiles ennemis, DOT tick, etc). */
+        g->cur_knockback_mul = 1.f;
+        g->cur_status_dur_mul = 1.f;
+        g->cur_freeze_on_hit = false;
+        g->cur_puddle_on_hit = false;
+        g->cur_heal_on_kill = false;
+        g->cur_void_on_kill = false;
+        g->cur_corrosive_stack = false;
         /* u_berserk_cd : sous 50% HP, le cooldown est divise par 2. */
         float cd_final = w->base_cd * fx.cd_mul * p->atk_speed_mul;
         if (p->u_berserk_cd && p->hp < p->maxhp * 0.5f) cd_final *= 0.5f;

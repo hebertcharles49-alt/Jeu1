@@ -557,10 +557,41 @@ static int status_priority(Element e) {
     }
 }
 
+/* ---------- Personnalite par TAG : effets passifs intrinseques.
+ * Chaque tag, present dans l'union active des tags, contribue a un
+ * effet structurel sur le combo, en plus des regles emergentes
+ * conditionnees sur paires. Donne du caractere aux elements seuls.
+ * Applique APRES Couche 1 (collection des tags) et APRES les
+ * tag_interactions (qui peuvent en ajouter / supprimer). */
+static void apply_tag_personality(uint32_t tags, ComboFx *c) {
+    if (tags & TAG_HOT)         c->dmg_mul        += 0.05f;
+    if (tags & TAG_FLUID)       c->puddle_on_hit   = true;
+    if (tags & TAG_HEAVY)       c->knockback_mul  *= 1.50f;
+    if (tags & TAG_LIGHT)     { c->range_mul      *= 1.05f;
+                                c->proj_speed_mul *= 1.20f; }
+    if (tags & TAG_CONDUCTIVE)  c->chain           = true;
+    if (tags & TAG_PERSISTENT)  c->status_dur_mul *= 1.50f;
+    if (tags & TAG_UNSTABLE)    c->crit_chance_add += 0.15f;
+    if (tags & TAG_CORROSIVE)   c->corrosive_stack = true;
+    if (tags & TAG_DIVINE)      c->heal_on_kill    = true;
+    if (tags & TAG_SHADOW)      c->void_on_kill    = true;
+    if (tags & TAG_METALLIC)    c->pierces         = true;
+    if (tags & TAG_HOMING_TAG)  c->homing          = true;
+    if (tags & TAG_BURNING)     c->status_dur_mul *= 1.20f;
+    if (tags & TAG_WET)         c->status_dur_mul *= 1.20f;
+    if (tags & TAG_FROZEN)      c->freeze_on_hit   = true;
+    if (tags & TAG_STABLE)      c->dmg_mul        += 0.05f;
+    if (tags & TAG_VOLATILE)    c->crit_chance_add += 0.10f;
+    if (tags & TAG_CURSED)      c->lifesteal       = true;
+    if (tags & TAG_AIRY)        c->knockback_mul  *= 1.30f;
+}
+
 /* ---------- compute_combo : 3 couches additives ---------- */
 ComboFx combo_compute(int mask) {
     ComboFx c = {0};
     c.dmg_mul = 1.0f; c.cd_mul = 1.0f; c.range_mul = 1.0f;
+    c.knockback_mul = 1.0f; c.status_dur_mul = 1.0f;
+    c.proj_speed_mul = 1.0f;
     c.color = 0xFFFFFFFF; c.tag = "Brut";
     if (mask == 0) return c;
 
@@ -593,6 +624,11 @@ ComboFx combo_compute(int mask) {
     /* Engelure : detecte via TAG_ENGELURE pour appliquer slow + cold-DOT
      * en plus du dmg bonus de l'EmergentRule. */
     if (active_tags & TAG_ENGELURE) c.engelure = true;
+    /* Couche 1.75 : personnalite par tag.
+     * Chaque tag present (apres interactions) contribue de son cote
+     * a knockback / status_dur / crit / on-hit / on-kill / proj-speed.
+     * Donne du caractere aux elements meme sans paire. */
+    apply_tag_personality(active_tags, &c);
     /* Couche 2 */
     for (int i = 0; i < N_EMERGENT; i++) {
         const EmergentRule *r = &EMERGENT_RULES[i];
@@ -624,6 +660,11 @@ void combo_apply_to_enemy_projectile(int mask, Projectile *pr) {
     if (fx.aoe_explode  && pr->aoe     == 0.f) pr->aoe     = 28.f;
     if (fx.homing       && pr->homing  == 0.f) pr->homing  = 1.2f;
     if (fx.pierces      && pr->pierce  == 0)   pr->pierce  = 1;
+    /* TAG_LIGHT : projectiles ennemis plus rapides */
+    if (fx.proj_speed_mul != 1.f) {
+        pr->vx *= fx.proj_speed_mul;
+        pr->vy *= fx.proj_speed_mul;
+    }
     pr->dmg *= (0.6f + fx.dmg_mul * 0.4f);
     if (fx.status && pr->primary == EL_NONE) pr->primary = fx.status;
 }

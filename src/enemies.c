@@ -7,6 +7,7 @@
  */
 #include "game.h"
 #include "world_internal.h"
+#include "combat_internal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,13 +158,33 @@ static void enemy_take_damage(Game *g, Enemy *e, float dmg, Element el,
         }
         return;
     }
+    /* TAG_CORROSIVE : amplifie le dmg via stacks accumules. */
+    if (e->corruption_stacks > 0) {
+        float amp = 1.f + (float)e->corruption_stacks * 0.05f;
+        dmg *= amp;
+    }
     e->hp -= dmg;
     e->hit_flash = (eff >= 2.f) ? 0.18f : 0.10f;
-    if (el == EL_FIRE)      { e->fire_dot = 2.f; e->fire_dps = 4.f + dmg * 0.2f; }
-    if (el == EL_WATER)     { e->slow_t = 1.5f; }
-    if (el == EL_LIGHTNING) { e->stun_t = 0.4f; }
-    e->knockback_x += kx;
-    e->knockback_y += ky;
+    /* Status durations modulees par TAG_PERSISTENT / TAG_BURNING / TAG_WET
+     * via cur_status_dur_mul positionne par le swing site. */
+    float sdm = (g->cur_status_dur_mul > 0.f) ? g->cur_status_dur_mul : 1.f;
+    if (el == EL_FIRE)      { e->fire_dot = 2.f * sdm; e->fire_dps = 4.f + dmg * 0.2f; }
+    if (el == EL_WATER)     { e->slow_t = 1.5f * sdm; }
+    if (el == EL_LIGHTNING) { e->stun_t = 0.4f * sdm; }
+    /* TAG_FROZEN : freeze a l'impact (stun + slow long). */
+    if (g->cur_freeze_on_hit) {
+        if (e->stun_t < 0.8f) e->stun_t = 0.8f;
+        if (e->slow_t < 2.0f * sdm) e->slow_t = 2.0f * sdm;
+    }
+    /* TAG_CORROSIVE : pose un stack de corruption sur l'ennemi. */
+    if (g->cur_corrosive_stack) {
+        if (e->corruption_stacks < 10) e->corruption_stacks++;
+        e->corruption_decay = 5.0f;     /* reset le timer de decay */
+    }
+    /* TAG_HEAVY/TAG_AIRY : multiplie le knockback applique. */
+    float km = (g->cur_knockback_mul > 0.f) ? g->cur_knockback_mul : 1.f;
+    e->knockback_x += kx * km;
+    e->knockback_y += ky * km;
     if (dmg > 0.f) {
         bool crit = g->current_attack_crit;
         bool big = crit || (dmg > 30.f) || e->is_boss;
@@ -350,6 +371,10 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     if (e->dying_t > 0.f) return;
     bool already_dead = (e->hp <= 0.f);
     enemy_take_damage(g, e, dmg, el, kx, ky);
+    /* TAG_FLUID : pose une petite flaque d'eau au point d'impact. */
+    if (g->cur_puddle_on_hit && dmg > 0.f) {
+        surface_spawn(g, SURF_WATER, e->x, e->y, 18.f, 2.5f);
+    }
     if (dmg > 0.f) {
         g->run_damage_dealt += (int)dmg;
         g->dps_frame_acc    += dmg;
@@ -357,6 +382,15 @@ void world_enemy_damage(Game *g, int idx, float dmg, Element el, float kx, float
     loop_on_hit(g);
     if (e->hp <= 0.f && !already_dead) {
         loop_on_kill(g);
+        /* TAG_DIVINE : heal 1 HP par kill. */
+        if (g->cur_heal_on_kill && g->player.hp < g->player.maxhp) {
+            g->player.hp += 1.f;
+            if (g->player.hp > g->player.maxhp) g->player.hp = g->player.maxhp;
+        }
+        /* TAG_SHADOW : pose une surface ombre au cadavre (DOT + slow). */
+        if (g->cur_void_on_kill) {
+            surface_spawn(g, SURF_SHADOW, e->x, e->y, 24.f, 3.5f);
+        }
         /* trinket : pixie_on_kill_pct chance de spawn une pixie sur kill */
         if (g->player.pixie_on_kill_pct > 0 &&
             (rand() % 100) < g->player.pixie_on_kill_pct) {
@@ -1915,6 +1949,16 @@ void update_enemies(Game *g) {
         }
         if (e->slow_t > 0.f) e->slow_t -= dt;
         if (e->stun_t > 0.f) { e->stun_t -= dt; continue; }
+        /* Corruption (TAG_CORROSIVE) : timer de decay. Quand il tombe,
+         * on perd 1 stack et on relance le timer ; permet de purger
+         * progressivement la corruption si on ne tape plus. */
+        if (e->corruption_stacks > 0) {
+            e->corruption_decay -= dt;
+            if (e->corruption_decay <= 0.f) {
+                e->corruption_stacks--;
+                e->corruption_decay = e->corruption_stacks > 0 ? 5.0f : 0.f;
+            }
+        }
         /* knockback : substep + bounce.
          *   - subdivise le deplacement en steps <= r/2 pour ne pas
          *     tunneler a travers les murs a haute vitesse

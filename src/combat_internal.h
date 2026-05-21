@@ -23,6 +23,17 @@ typedef struct {
     bool  reflect_proj;
     bool  lifesteal;
     bool  engelure;          /* applique slow + cold-DOT sur l'ennemi touche */
+    /* === personnalite par tag : effets passifs portes par chaque TAG_*.
+     * Compute pass dans apply_tag_personality juste apres Couche 1. === */
+    float knockback_mul;     /* TAG_HEAVY *1.5, TAG_AIRY *1.3 */
+    float status_dur_mul;    /* TAG_PERSISTENT *1.5, TAG_BURNING/WET *1.2 */
+    float crit_chance_add;   /* TAG_UNSTABLE +0.15, TAG_VOLATILE +0.10 */
+    float proj_speed_mul;    /* TAG_LIGHT *1.20 */
+    bool  freeze_on_hit;     /* TAG_FROZEN : stun 0.8s a l'impact */
+    bool  puddle_on_hit;     /* TAG_FLUID : surface eau a l'impact */
+    bool  heal_on_kill;      /* TAG_DIVINE : +1 HP sur kill */
+    bool  void_on_kill;      /* TAG_SHADOW : surface void sur kill */
+    bool  corrosive_stack;   /* TAG_CORROSIVE : +5% dmg recu cumulable */
     int   extra_proj;
     Element status;
     uint32_t color;

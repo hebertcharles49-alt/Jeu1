@@ -248,6 +248,10 @@ typedef struct {
     float slow_t;
     float stun_t;
     float knockback_x, knockback_y;
+    /* TAG_CORROSIVE : chaque hit empile +5% dmg recu, cap a 10 stacks
+     * (=> +50% dmg cumule). Decay 0.1 stack/s (reset si pas touche). */
+    int   corruption_stacks;
+    float corruption_decay;
     float ai_t;
     float ai_t2;
     float facing;
@@ -729,6 +733,16 @@ typedef struct {
     /* flag de crit pour l'attaque en cours : positionne par update_weapons,
      * lu par enemy_take_damage pour colorer/scale le dmgnum. */
     bool          current_attack_crit;
+    /* Effets passifs venant des TAG_* du combo courant. Set par
+     * update_weapons (combat.c) au moment du swing, lus par
+     * world_enemy_damage pour appliquer les effets on-hit / on-kill. */
+    float         cur_knockback_mul;
+    float         cur_status_dur_mul;
+    bool          cur_freeze_on_hit;
+    bool          cur_puddle_on_hit;
+    bool          cur_heal_on_kill;
+    bool          cur_void_on_kill;
+    bool          cur_corrosive_stack;
 
     /* shop */
     ShopItem      shop_items[SHOP_SLOTS];
