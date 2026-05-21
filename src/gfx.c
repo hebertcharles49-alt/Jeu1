@@ -646,6 +646,24 @@ void gfx_frame_begin(GfxCtx *gc) {
     glEnable(GL_DEPTH_TEST);
 }
 
+void gfx_set_viewport_rect(GfxCtx *gc, int x, int y, int w, int h) {
+    /* Viewport en coords FBO. Y inverse car GL utilise origin bottom-left. */
+    int gly = gc->fbo_h - y - h;
+    glViewport(x, gly, w, h);
+}
+
+void gfx_reset_viewport(GfxCtx *gc) {
+    glViewport(0, 0, gc->fbo_w, gc->fbo_h);
+}
+
+void gfx_clear_depth_rect(GfxCtx *gc, int x, int y, int w, int h) {
+    int gly = gc->fbo_h - y - h;
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, gly, w, h);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
+}
+
 void gfx_frame_end(GfxCtx *gc) {
     /* blit FBO -> default framebuffer en upscaling NEAREST */
     pglBindFramebuffer(GL_FRAMEBUFFER, 0);

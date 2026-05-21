@@ -90,6 +90,13 @@ void gfx_shutdown(GfxCtx *gc);
 void gfx_frame_begin(GfxCtx *gc);
 void gfx_frame_end  (GfxCtx *gc);   /* blit FBO -> backbuffer + present (caller fait SDL_GL_SwapWindow) */
 void gfx_set_camera (GfxCtx *gc, m4 view, m4 proj);
+/* Limite le viewport a un rect en coords FBO (internes). Utile pour
+ * rendre une scene 3D dans une zone UI (paperdoll inventaire).
+ * Reset_viewport restore le viewport plein FBO. clear_depth efface la
+ * profondeur dans le rect (pour ne pas voir la scene precedente). */
+void gfx_set_viewport_rect(GfxCtx *gc, int x, int y, int w, int h);
+void gfx_reset_viewport   (GfxCtx *gc);
+void gfx_clear_depth_rect (GfxCtx *gc, int x, int y, int w, int h);
 
 /* ---------- terrain chunk ---------- */
 /* upload une mesh de chunk (positions 3f, normal 3f, color 3f par vertex) */

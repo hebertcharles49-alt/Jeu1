@@ -5,6 +5,11 @@
  */
 #include "ui_common.h"
 #include "gfx.h"
+
+/* externs : on appelle le vrai render 3D du joueur (utilise dans
+ * render_world.c) pour le paperdoll. Pas de duplication de code. */
+v3 player_world_pos(Player *p);
+void draw_player_3d(Game *g);
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -164,7 +169,9 @@ static uint32_t equip_tint_color(Item *it, uint32_t default_col) {
 }
 
 /* personnage centre sur (cx, cy), reflet de la silhouette 3D + tints
- * d'equipement. */
+ * d'equipement. NOTE : remplace par un rendu 3D du vrai joueur via
+ * draw_player_3d dans un viewport limite. Garde le code en fallback. */
+__attribute__((unused))
 static void draw_paperdoll_figure(Game *g, int cx, int cy) {
     Player *p = &g->player;
     uint32_t cape, tunic;
@@ -388,7 +395,43 @@ void render_inventory(Game *g) {
     /* fond box subtil pour le perso */
     fill_rect(g->renderer, cx - 70, cy - 80, 140, 200, 0x100C18FF);
     rect_outline(g->renderer, cx - 70, cy - 80, 140, 200, 0x303040FF);
-    draw_paperdoll_figure(g, cx, cy);
+    /* Paperdoll 3D : on rend le vrai joueur 3D dans un viewport limite
+     * a la box du paperdoll, via draw_player_3d. Temporairement on
+     * deplace le joueur a une position "showcase" (centre du monde,
+     * vitesse zero pour figer le bobbing) puis on restore. */
+    {
+        Player *pp = &g->player;
+        float sx = pp->x, sy = pp->y, svx = pp->vx, svy = pp->vy;
+        float sinvuln = pp->invuln_t, shit = pp->hit_t;
+        int   sanim = pp->anim_kind;
+        /* place le joueur a (28*TILE, 28*TILE) (centre HUB-like) immobile.
+         * draw_player_3d utilise player_world_pos qui retourne pos/TILE,
+         * donc on ramene le joueur a (28*TILE, 28*TILE) -> world (28, 28). */
+        pp->x = 28.f * TILE; pp->y = 28.f * TILE;
+        pp->vx = pp->vy = 0.f;
+        pp->invuln_t = 0.f; pp->hit_t = 0.f;
+        pp->anim_kind = 0;
+        /* viewport rect en coords FBO (== INTERNAL_W/H) sur la box paperdoll */
+        int vp_x = cx - 70, vp_y = cy - 80, vp_w = 140, vp_h = 200;
+        gfx_set_viewport_rect(g->renderer, vp_x, vp_y, vp_w, vp_h);
+        gfx_clear_depth_rect (g->renderer, vp_x, vp_y, vp_w, vp_h);
+        /* camera frontale 3/4 cadree sur le joueur (~3 units away) */
+        v3 target = v3_make(28.5f, 0.6f, 28.5f);
+        v3 eye    = v3_make(target.x + 2.2f, target.y + 1.8f, target.z + 2.8f);
+        m4 view = m4_lookat(eye, target, v3_make(0, 1, 0));
+        float aspect = (float)vp_w / (float)vp_h;
+        m4 proj = m4_perspective(0.85f, aspect, 0.1f, 30.0f);
+        gfx_set_camera(g->renderer, view, proj);
+        /* pedestal sous le perso pour ne pas voir dans le vide */
+        gfx_box_draw(g->renderer, v3_make(28.5f, 0.04f, 28.5f),
+                     v3_make(1.20f, 0.08f, 1.20f),
+                     0.18f, 0.14f, 0.24f);
+        draw_player_3d(g);
+        gfx_reset_viewport(g->renderer);
+        /* restore */
+        pp->x = sx; pp->y = sy; pp->vx = svx; pp->vy = svy;
+        pp->invuln_t = sinvuln; pp->hit_t = shit; pp->anim_kind = sanim;
+    }
 
     /* 6 slots equipement autour du personnage */
     for (int i = 0; i < EQUIP_SLOTS; i++) {

@@ -208,11 +208,13 @@ static void enemy_color(Enemy *e, float *r, float *g, float *b) {
     if (e->hit_flash > 0.f) { *r = 1.f; *g = 1.f; *b = 1.f; }
 }
 
-static v3 player_world_pos(Player *p) {
+v3 player_world_pos(Player *p);
+v3 player_world_pos(Player *p) {
     return v3_make(p->x / TILE, 0.f, p->y / TILE);
 }
 
-static void draw_player_3d(Game *g) {
+void draw_player_3d(Game *g);
+void draw_player_3d(Game *g) {
     Player *p = &g->player;
     bool blink = p->invuln_t > 0.f && (((int)(g->time * 24.f)) % 2 == 0);
     /* I-frame visible : pendant les invuln, anneau jaune-rouge au pied
