@@ -36,16 +36,46 @@ static const EquipSlotLayout EQUIP_LAYOUT[EQUIP_SLOTS] = {
     [SLOT_BOOTS]  = { -14,  44, "BOTTES"  },  /* dessous les pieds */
 };
 
-/* Centres du paper-doll : DOIVENT rester synchronises avec render_inventory.
- * Si tu changes ces constantes, change-les aussi dans render_inventory. */
-#define INV_PAPERDOLL_CX 240
-#define INV_PAPERDOLL_CY 110
-#define INV_BAG_X        410
-#define INV_BAG_Y         22
-#define INV_BAG_CELL      26
+/* Layout v2 (reorganise) :
+ *   LEFT COLUMN (x=10..210) :
+ *     SAC (bag)    y=30..174 (4 cols x 24, jusqu'a 6 rows)
+ *     TALISBAG     y=185..237 (5x2)
+ *     FUSIONNEUR   y=250..345 (3 slots + bouton)
+ *   TOP-RIGHT :
+ *     TRINKETS     x=220..360, y=15..200
+ *     PAPERDOLL    cx=470, cy=95 (box ~400..540, ~15..175)
+ *     EQUIPMENT    autour du paperdoll (EQUIP_LAYOUT)
+ *     WEAPONS      cx-44 / cx+8, y=cy+80 (sous paperdoll)
+ *   BOTTOM-RIGHT :
+ *     HOVER item   x=350..790, y=250..340 (juste au dessus)
+ *     COMPARATEUR  x=350..790, y=345..440 (en bas) */
+#define INV_PAPERDOLL_CX 470
+#define INV_PAPERDOLL_CY 95
+#define INV_BAG_X         15
+#define INV_BAG_Y         30
+#define INV_BAG_CELL      24
 #define INV_WEAPON_Y     (INV_PAPERDOLL_CY + 80)
 #define INV_WEAPON_X0    (INV_PAPERDOLL_CX - 44)
 #define INV_WEAPON_X1    (INV_PAPERDOLL_CX +  8)
+/* Sections du layout v2 (cf doc en haut). Constantes consommees par
+ * render_inventory + update_inventory_input + inv_layout_rect. */
+#define INV_TALISBAG_X   INV_BAG_X
+#define INV_TALISBAG_Y   195
+#define INV_TRINKETS_X   220
+#define INV_TRINKETS_Y   15
+#define INV_TRINKETS_W   140
+#define INV_TRINKETS_H   185
+#define INV_FUSION_X     10
+#define INV_FUSION_Y     250
+#define INV_FUSION_W     200
+#define INV_HOVER_X      350
+#define INV_HOVER_Y      250
+#define INV_HOVER_W      440
+#define INV_HOVER_H      90
+#define INV_COMPARE_X    350
+#define INV_COMPARE_Y    345
+#define INV_COMPARE_W    440
+#define INV_COMPARE_H    95
 
 bool inv_layout_rect(int cursor_idx, int *x, int *y, int *w, int *h) {
     if (cursor_idx < 0 || cursor_idx >= INV_CURSOR_MAX) return false;
@@ -81,14 +111,14 @@ bool inv_layout_rect(int cursor_idx, int *x, int *y, int *w, int *h) {
         *w = 12; *h = 12;
         return true;
     }
-    /* Sac talisman dedie : 5 colonnes x 2 lignes, sous la zone armes */
+    /* Sac talisman dedie : 5 cols x 2 lignes, sous la BAG en colonne gauche */
     {
         int rel = cursor_idx - INV_CURSOR_TALISBAG_BASE;
         if (rel < 0 || rel >= TALISMAN_BAG_SLOTS) return false;
         int col = rel % 5;
         int row = rel / 5;
-        *x = INV_BAG_X + col * 20;
-        *y = INV_WEAPON_Y + 70 + row * 20;
+        *x = INV_TALISBAG_X + col * 20;
+        *y = INV_TALISBAG_Y + 12 + row * 20;
         *w = 18; *h = 18;
         return true;
     }
@@ -452,10 +482,10 @@ void render_inventory(Game *g) {
                               INV_CURSOR_WEAPON_BASE + 1,
                               INV_CURSOR_TALISMAN_BASE + 3);
 
-    /* ---- SAC (droite, 4 cols x N rows, N depend de la capacite) ---- */
+    /* ---- SAC (gauche-haut, 4 cols x N rows) ---- */
     int inv_cap = INVENTORY_SLOTS + p->inv_capacity_bonus;
     if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
-    int bag_x = 410, bag_y = 22, cell = 26;
+    int bag_x = INV_BAG_X, bag_y = INV_BAG_Y, cell = INV_BAG_CELL;
     int bag_rows = (inv_cap + 3) / 4;
     if (bag_rows < 3) bag_rows = 3;
     char bag_hdr[24];
@@ -479,25 +509,23 @@ void render_inventory(Game *g) {
         render_item_slot(g, sx, sy, 24, &p->inventory[i], sel, mk, NULL);
     }
 
-    /* ---- SAC TALISMAN dedie (5 col x 2 lignes), sous les armes ---- */
-    text_draw(g->renderer, INV_BAG_X, INV_WEAPON_Y + 60, "TALISMANS", 0xC0E0FFFF);
+    /* ---- SAC TALISMAN dedie (5 col x 2 lignes), gauche sous la bag ---- */
+    text_draw(g->renderer, INV_TALISBAG_X, INV_TALISBAG_Y, "TALISMANS", 0xC0E0FFFF);
     for (int i = 0; i < TALISMAN_BAG_SLOTS; i++) {
         int col = i % 5;
         int row = i / 5;
-        int sx = INV_BAG_X + col * 20;
-        int sy = INV_WEAPON_Y + 70 + row * 20;
+        int sx = INV_TALISBAG_X + col * 20;
+        int sy = INV_TALISBAG_Y + 12 + row * 20;
         bool sel = (g->inv_cursor == INV_CURSOR_TALISBAG_BASE + i);
         render_item_slot(g, sx, sy, 18, &p->talisman_bag[i], sel, false, NULL);
     }
 
-    /* ---- FUSIONNEUR (gauche-bas, sous le paper-doll/armes) ----
-     * 3 slots ou le joueur depose des items du sac (click). Validation
-     * automatique : meme kind + meme rarete (pas de sub_kind requis).
-     * Equipement = meme slot, armes = meme WeaponKind. Bouton Fusionner
-     * en vert si valide. inv_marked[] sert de backing store (max 3). */
+    /* ---- FUSIONNEUR (gauche, sous le talisbag) ----
+     * 3 slots ou le joueur depose des items du sac (click droit).
+     * Validation : meme kind + meme rarete (sub_kind ignore). */
     {
-        int fx0 = 10, fy0 = 320;
-        int fw = 220, fh = 122;
+        int fx0 = INV_FUSION_X, fy0 = INV_FUSION_Y;
+        int fw = INV_FUSION_W, fh = 95;
         fill_rect(g->renderer, fx0, fy0, fw, fh, 0x140C18FF);
         rect_outline(g->renderer, fx0, fy0, fw, fh, 0x504850FF);
         text_draw(g->renderer, fx0 + 6, fy0 + 4, "FUSIONNEUR", 0xFFD040FF);
@@ -546,7 +574,7 @@ void render_inventory(Game *g) {
             }
         }
         /* Bouton Fusionner */
-        int bx = fx0 + 10, by = fy0 + 78, bw = fw - 20, bh = 22;
+        int bx = fx0 + 10, by = fy0 + 65, bw = fw - 20, bh = 22;
         uint32_t bcol = (g->inv_marked_count == 3 && valid)
                           ? 0x205020FF : 0x282030FF;
         uint32_t bborder = (g->inv_marked_count == 3 && valid)
@@ -561,11 +589,23 @@ void render_inventory(Game *g) {
                   (g->inv_marked_count == 3 && valid) ? 0xFFFFFFFF : 0x808080FF);
     }
 
-    /* ---- DETAILS PANEL (sous le sac) ---- */
-    int dpx = bag_x, dpy = bag_y + bag_rows * cell + 12;
-    int dpw = INTERNAL_W - dpx - 8, dph = INTERNAL_H - dpy - 26;
+    /* ---- HOVER PANEL (bottom-right, juste au dessus du comparateur)
+     * + COMPARATEUR (en bas a droite, montre l'item equipe pour comparer)
+     * Le bloc detail original generait HOVER+COMPARE dans une seule box ;
+     * on dessine 2 box visuellement distinctes. Le code de remplissage
+     * (en dessous) gere les 2 zones via cmp_y > INV_COMPARE_Y. */
+    int dpx = INV_HOVER_X, dpy = INV_HOVER_Y;
+    int dpw = INV_HOVER_W, dph = INV_HOVER_H;
     fill_rect(g->renderer, dpx, dpy, dpw, dph, 0x14101AFF);
     rect_outline(g->renderer, dpx, dpy, dpw, dph, 0x404048FF);
+    /* box COMPARATEUR (vide pour l instant, contenu pose par le code
+     * dans la branche EQUIP/WEAPON en dessous via cmp_y = ...) */
+    fill_rect(g->renderer, INV_COMPARE_X, INV_COMPARE_Y,
+              INV_COMPARE_W, INV_COMPARE_H, 0x14101AFF);
+    rect_outline(g->renderer, INV_COMPARE_X, INV_COMPARE_Y,
+                 INV_COMPARE_W, INV_COMPARE_H, 0x404048FF);
+    text_draw(g->renderer, INV_COMPARE_X + 6, INV_COMPARE_Y + 4,
+              "COMPARATEUR", 0x808080FF);
     /* contenu : depend du cursor */
     if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
         bool is_equip = (g->inv_cursor >= INV_CURSOR_EQUIP_BASE);
@@ -646,29 +686,30 @@ void render_inventory(Game *g) {
             /* valeur de revente */
             text_drawf(g->renderer, dpx + 4, ay + 2, 0xFFD080FF,
                        "Vente : %d coins", item_sell_value(it));
-            /* ===== COMPARAISON =====
+            /* ===== COMPARATEUR (panneau separe en bas a droite) =====
              * Si on hover un equipement (inventaire), affiche l'equipe
-             * actuel pour le meme slot en dessous, pour comparer.
-             * Pareil pour les armes : montre l'arme active. */
-            int cmp_y = ay + 18;
+             * actuel pour le meme slot dans le panel COMPARATEUR
+             * (INV_COMPARE_*). Pareil pour les armes : arme active. */
+            int cpx = INV_COMPARE_X + 4;
+            int cmp_y = INV_COMPARE_Y + 16;     /* sous le label */
+            (void)ay;
             if (it->kind == ITEM_KIND_EQUIP && !is_equip) {
                 Item *cur = &p->equipped[it->slot];
-                fill_rect(g->renderer, dpx + 2, cmp_y - 2, dpw - 4, 1, 0x404048FF);
-                text_drawf(g->renderer, dpx + 4, cmp_y + 1, 0x808080FF,
+                text_drawf(g->renderer, cpx, cmp_y, 0x808080FF,
                            "Actuel (%s)", slot_name(it->slot));
                 cmp_y += 11;
                 if (cur->occupied) {
                     uint32_t cc = cur->is_unique ? 0xFF8030FF
                                                 : rarity_color(cur->rarity);
-                    text_drawf(g->renderer, dpx + 4, cmp_y, cc, "%s",
+                    text_drawf(g->renderer, cpx, cmp_y, cc, "%s",
                                cur->name[0] ? cur->name : slot_name(cur->slot));
                     cmp_y += 10;
-                    text_drawf(g->renderer, dpx + 4, cmp_y, rarity_color(cur->rarity),
+                    text_drawf(g->renderer, cpx, cmp_y, rarity_color(cur->rarity),
                                "%s%s", cur->is_unique ? "UNIQUE " : "",
                                rarity_name(cur->rarity));
                     cmp_y += 10;
                     if (cur->is_unique) {
-                        text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                        text_drawf(g->renderer, cpx, cmp_y, 0x80FFC0FF,
                                    "%s", unique_def_desc(cur->unique_id));
                     } else {
                         const char *u2 = "";
@@ -682,34 +723,32 @@ void render_inventory(Game *g) {
                             default: break;
                         }
                         if (cur->slot == SLOT_GLOVES || cur->slot == SLOT_BOOTS) {
-                            text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                            text_drawf(g->renderer, cpx, cmp_y, 0x80FFC0FF,
                                        "+%.0f%% %s", cur->stat_value * 100.f, u2);
                         } else {
-                            text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                            text_drawf(g->renderer, cpx, cmp_y, 0x80FFC0FF,
                                        "+%.1f %s", cur->stat_value, u2);
                         }
                         cmp_y += 10;
                         for (int a = 0; a < cur->affix_count; a++) {
                             char ab[40]; affix_label(&cur->affixes[a], ab, sizeof(ab));
-                            text_draw(g->renderer, dpx + 4, cmp_y, ab, 0xC0E0FFFF);
+                            text_draw(g->renderer, cpx, cmp_y, ab, 0xC0E0FFFF);
                             cmp_y += 9;
                         }
                     }
                 } else {
-                    text_draw(g->renderer, dpx + 4, cmp_y, "(rien d'equipe)", 0x606060FF);
+                    text_draw(g->renderer, cpx, cmp_y, "(rien d'equipe)", 0x606060FF);
                 }
             } else if (it->kind == ITEM_KIND_WEAPON && !is_equip) {
                 Weapon *aw = &p->weapons[p->active_weapon];
-                fill_rect(g->renderer, dpx + 2, cmp_y - 2, dpw - 4, 1, 0x404048FF);
-                text_drawf(g->renderer, dpx + 4, cmp_y + 1, 0x808080FF,
-                           "Arme active");
+                text_drawf(g->renderer, cpx, cmp_y, 0x808080FF, "Arme active");
                 cmp_y += 11;
                 if (aw->owned) {
-                    text_drawf(g->renderer, dpx + 4, cmp_y, rarity_color(aw->rarity),
+                    text_drawf(g->renderer, cpx, cmp_y, rarity_color(aw->rarity),
                                "%s (%s)", weapon_name(aw->kind),
                                rarity_name(aw->rarity));
                     cmp_y += 10;
-                    text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                    text_drawf(g->renderer, cpx, cmp_y, 0x80FFC0FF,
                                "Talismans : %d / %d",
                                aw->element_count, weapon_slot_count(aw->rarity));
                 }
@@ -782,11 +821,12 @@ void render_inventory(Game *g) {
                    "F = %s %s", rarity_name(base->rarity + 1), slot_name(base->slot));
     }
 
-    /* ---- TRINKETS DE SHOP : panel sous le paperdoll ----
+    /* ---- TRINKETS DE SHOP : panel top-left du top-row ----
      * Liste les recettes achetees au shop, par ordre d'acquisition. Une
      * cellule = un trinket. Couleur = couleur de rarete. */
     {
-        int tx = 12, ty = 245, tw = 390, th = 60;
+        int tx = INV_TRINKETS_X, ty = INV_TRINKETS_Y;
+        int tw = INV_TRINKETS_W, th = INV_TRINKETS_H;
         fill_rect(g->renderer, tx, ty, tw, th, 0x100C18FF);
         rect_outline(g->renderer, tx, ty, tw, th, 0x303040FF);
         char hdr[48];

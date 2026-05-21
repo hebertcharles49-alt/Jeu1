@@ -853,25 +853,24 @@ static void fusion_toggle_mark(Game *g, int inv_idx) {
 /* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
     /* === FUSIONNEUR : clicks sur les 3 slots + bouton ===
-     * Layout en parallele avec render_inventory (constants en dur). */
+     * Layout en parallele avec render_inventory (cf constantes
+     * INV_FUSION_X / INV_FUSION_Y dans render_inventory.c). */
     {
-        int fx0 = 10, fy0 = 320;
+        int fx0 = 10, fy0 = 250;        /* INV_FUSION_X / INV_FUSION_Y */
         int slot_sz = 30, slot_y = fy0 + 22;
         int slot_x[3] = { fx0 + 10, fx0 + 60, fx0 + 110 };
         if (mouse_clicked(g)) {
             for (int s = 0; s < 3; s++) {
                 if (mouse_in_rect(g, slot_x[s], slot_y, slot_sz, slot_sz)) {
                     if (s < g->inv_marked_count) {
-                        /* unmark : retire ce slot du fusionneur */
                         for (int j = s; j < g->inv_marked_count - 1; j++)
                             g->inv_marked[j] = g->inv_marked[j + 1];
                         g->inv_marked_count--;
                     }
-                    return;     /* skip le reste du frame d'input */
+                    return;
                 }
             }
-            /* Bouton Fusionner */
-            int bx = fx0 + 10, by = fy0 + 78, bw = (220 - 20), bh = 22;
+            int bx = fx0 + 10, by = fy0 + 65, bw = (200 - 20), bh = 22;
             if (mouse_in_rect(g, bx, by, bw, bh) && g->inv_marked_count == 3) {
                 inventory_fuse(g);
                 return;
