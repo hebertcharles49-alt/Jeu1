@@ -80,6 +80,14 @@ void update_room_logic(Game *g) {
         if (!point_in_room(r, p->x, p->y)) continue;
         bool first_visit = !r->visited;
         r->visited = true;     /* la salle apparait sur la minimap */
+        /* Lock des portes : a la 1ere entree d'une salle non-clear avec
+         * des ennemis (ou boss room non finie), on verrouille. Les
+         * portes T_DOOR de la salle deviennent solides. Reset a false
+         * automatiquement quand cleared dans update_enemies. */
+        if (first_visit && !r->cleared &&
+            (r->enemies_to_spawn > 0 || r->is_boss_room)) {
+            r->locked = true;
+        }
         if (first_visit) {
             /* === FLOOR 0 : spawn des 7 portails en cercle ===
              * value du portail :
@@ -232,6 +240,9 @@ void update_room_logic(Game *g) {
             }
             if (!any) {
                 r->cleared = true;
+                /* Unlock des portes : la salle est videe, le joueur peut
+                 * passer librement vers les salles adjacentes. */
+                r->locked = false;
                 /* trinket puddle_on_room : pose une flaque au centre de
                  * la salle quand elle est nettoyee. Element = water/fire/
                  * lightning/etc selon trinket equipe. */

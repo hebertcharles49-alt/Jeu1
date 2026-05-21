@@ -66,14 +66,27 @@ bool inv_layout_rect(int cursor_idx, int *x, int *y, int *w, int *h) {
         *w = 36; *h = 36;
         return true;
     }
-    /* talisman : weapon = (idx - base) / 3, sub = (idx - base) % 3 */
-    int rel = cursor_idx - INV_CURSOR_TALISMAN_BASE;
-    int wi = rel / 3, ti = rel % 3;
-    int wx = (wi == 0) ? INV_WEAPON_X0 : INV_WEAPON_X1;
-    *x = (wx - 2) + ti * 14;
-    *y = INV_WEAPON_Y + 50;
-    *w = 12; *h = 12;
-    return true;
+    if (cursor_idx < INV_CURSOR_TALISBAG_BASE) {
+        /* talisman actifs sur arme : (idx - base) / 3 = weapon, % 3 = slot */
+        int rel = cursor_idx - INV_CURSOR_TALISMAN_BASE;
+        int wi = rel / 3, ti = rel % 3;
+        int wx = (wi == 0) ? INV_WEAPON_X0 : INV_WEAPON_X1;
+        *x = (wx - 2) + ti * 14;
+        *y = INV_WEAPON_Y + 50;
+        *w = 12; *h = 12;
+        return true;
+    }
+    /* Sac talisman dedie : 5 colonnes x 2 lignes, sous la zone armes */
+    {
+        int rel = cursor_idx - INV_CURSOR_TALISBAG_BASE;
+        if (rel < 0 || rel >= TALISMAN_BAG_SLOTS) return false;
+        int col = rel % 5;
+        int row = rel / 5;
+        *x = INV_BAG_X + col * 20;
+        *y = INV_WEAPON_Y + 70 + row * 20;
+        *w = 18; *h = 18;
+        return true;
+    }
 }
 
 static void render_item_slot(Game *g, int sx, int sy, int sz, Item *it,
@@ -418,6 +431,17 @@ void render_inventory(Game *g) {
         if (g->inv_marked_count == 0 && has_auto_fuse &&
             (i == fa || i == fb || i == fc)) mk = true;
         render_item_slot(g, sx, sy, 24, &p->inventory[i], sel, mk, NULL);
+    }
+
+    /* ---- SAC TALISMAN dedie (5 col x 2 lignes), sous les armes ---- */
+    text_draw(g->renderer, INV_BAG_X, INV_WEAPON_Y + 60, "TALISMANS", 0xC0E0FFFF);
+    for (int i = 0; i < TALISMAN_BAG_SLOTS; i++) {
+        int col = i % 5;
+        int row = i / 5;
+        int sx = INV_BAG_X + col * 20;
+        int sy = INV_WEAPON_Y + 70 + row * 20;
+        bool sel = (g->inv_cursor == INV_CURSOR_TALISBAG_BASE + i);
+        render_item_slot(g, sx, sy, 18, &p->talisman_bag[i], sel, false, NULL);
     }
 
     /* ---- DETAILS PANEL (sous le sac) ---- */

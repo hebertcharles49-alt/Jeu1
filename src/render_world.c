@@ -2476,6 +2476,31 @@ void render_world(Game *g) {
         Projectile *pr = &g->projectiles[i]; if (!pr->alive) continue;
         draw_projectile_3d(g, pr);
     }
+    /* Barreaux rouges sur les portes verrouillees. Pulse pour attirer
+     * l'oeil et signaler que la salle n'est pas finie. */
+    {
+        float pulse = 0.6f + 0.4f * sinf(g->time * 4.f);
+        for (int y = 0; y < MAP_H; y++) {
+            for (int x = 0; x < MAP_W; x++) {
+                if (g->dungeon.tiles[y][x] != T_DOOR) continue;
+                if (!door_locked_at(g, x, y)) continue;
+                float wx = (float)x + 0.5f;
+                float wz = (float)y + 0.5f;
+                /* 3 barreaux verticaux rouges, hauteur 0.8 */
+                for (int k = -1; k <= 1; k++) {
+                    gfx_box_draw(g->renderer,
+                                 v3_make(wx + k * 0.25f, 0.50f, wz),
+                                 v3_make(0.06f, 0.45f, 0.45f),
+                                 0.95f * pulse, 0.20f, 0.20f);
+                }
+                /* halo au sol */
+                gfx_box_draw(g->renderer,
+                             v3_make(wx, 0.02f, wz),
+                             v3_make(0.50f, 0.02f, 0.50f),
+                             0.90f * pulse, 0.10f, 0.10f);
+            }
+        }
+    }
     draw_particles_3d(g);
 
     /* HUB walkable : dessine les 5 batiments en 3D + decoration

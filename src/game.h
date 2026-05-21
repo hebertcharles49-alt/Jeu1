@@ -39,13 +39,16 @@ typedef struct GfxCtx GfxCtx;
 /* mapping inv_cursor : 0-11 sac, 12-17 equipement, 18-19 armes,
  * 20-22 talismans arme 0, 23-25 talismans arme 1. */
 /* mapping cursor : bag 0..(INVENTORY_MAX_SLOTS-1), puis equip / armes /
- * talismans. INV_CURSOR_EQUIP_BASE doit etre >= INVENTORY_MAX_SLOTS pour
- * que la capacite dynamique du sac n'empiete pas sur les slots equip. */
+ * talismans-actifs / talisbag (sac talismans dedie 5x2). INV_CURSOR_EQUIP_BASE
+ * doit etre >= INVENTORY_MAX_SLOTS pour que la capacite dynamique du sac
+ * n'empiete pas sur les slots equip. */
 #define INV_CURSOR_BAG_BASE       0
 #define INV_CURSOR_EQUIP_BASE     24
 #define INV_CURSOR_WEAPON_BASE    30
 #define INV_CURSOR_TALISMAN_BASE  32
-#define INV_CURSOR_MAX            38
+#define INV_CURSOR_TALISBAG_BASE  38
+#define TALISMAN_BAG_SLOTS        10
+#define INV_CURSOR_MAX            48
 
 #define MAX_FLOORS 11
 
@@ -468,6 +471,10 @@ typedef struct {
     /* inventaire */
     Item  inventory[INVENTORY_MAX_SLOTS];
     Item  equipped[EQUIP_SLOTS];
+    /* Sac talisman dedie : 10 slots (5 col x 2 lignes), non upgradable.
+     * Les drops PU_ELEMENT y vont automatiquement au lieu d'envahir
+     * le sac principal. */
+    Item  talisman_bag[TALISMAN_BAG_SLOTS];
 
     /* shop items achetes durant la course (effets cumulatifs) */
     int   shop_purchased[64];   /* tableau d'index d'item achete */
@@ -549,6 +556,9 @@ typedef struct {
     bool boss_spawned;
     bool is_debug_room;       /* salle bac-a-sable spawnee via options.debug_room */
     bool visited;             /* devient true quand le joueur entre dedans (minimap) */
+    bool locked;              /* portes T_DOOR de la salle solides tant que !cleared.
+                                 Mis a true quand le joueur entre dans une salle non
+                                 videe ; reset a false quand last enemy mort. */
     RoomKind kind;            /* type special (tresor / defi / auberge) */
 } Room;
 
@@ -890,6 +900,7 @@ void        meta_item_mark(MetaSave *m, EquipSlot slot, int sub_kind, Rarity r);
 /* world */
 void  dungeon_generate(Dungeon *d, int floor_index, unsigned seed);
 bool  tile_solid(TileKind t);
+bool  door_locked_at(Game *g, int tx, int ty);
 /* Construit la scene HUB (Cimetiere walkable) : une grande salle
  * unique avec 5 batiments en NPC. Cf hub_buildings[] dans main.c.
  * Reset les pools (enemies/pickups/projectiles) car le hub n'en a

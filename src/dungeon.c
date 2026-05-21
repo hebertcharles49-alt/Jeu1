@@ -177,8 +177,11 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
     int placed = 0, attempts = 0;
     while (placed < target_rooms && attempts < 400) {
         attempts++;
-        int rw = rand_range(7, 13);
-        int rh = rand_range(7, 11);
+        /* Salles agrandies +25% par rapport a l'ancien (7..13 / 7..11)
+         * pour donner plus d'espace au combat. Le HUB et l'etage 0
+         * (pivot 7 portails) ont leur propre arene fixee, non touchee. */
+        int rw = rand_range(9, 16);
+        int rh = rand_range(9, 14);
         int rx = rand_range(2, MAP_W - rw - 2);
         int ry = rand_range(2, MAP_H - rh - 2);
         bool overlap = false;
@@ -191,7 +194,7 @@ void dungeon_generate(Dungeon *d, int floor_index, unsigned seed) {
         }
         if (overlap) continue;
         if (placed > 0) {
-            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0, ROOM_KIND_NORMAL };
+            Room candidate = { rx, ry, rw, rh, 0,0,0,0,0,0,0,0, ROOM_KIND_NORMAL };
             bool ok = false;
             for (int i = 0; i < placed; i++) {
                 if (room_center_dist(&candidate, &d->rooms[i]) <= MAX_LINK_DIST) {

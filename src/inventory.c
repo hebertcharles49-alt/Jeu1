@@ -376,12 +376,24 @@ const char *item_label(const Item *it, char *buf, int bufsz) {
     return buf;
 }
 
-/* push an item into first empty inventory slot */
+/* push an item into first empty inventory slot. Les talismans
+ * (ITEM_KIND_ELEMENT) vont dans le sac talisman dedie (5x2). */
 void inventory_pickup(Game *g, Item it) {
     Player *p = &g->player;
     /* codex : on enregistre la decouverte (slot, sub_kind, rarete) */
     meta_item_mark(&g->meta, it.slot, it.base_kind, it.rarity);
     save_write(&g->meta);
+    if (it.kind == ITEM_KIND_ELEMENT) {
+        for (int i = 0; i < TALISMAN_BAG_SLOTS; i++) {
+            if (!p->talisman_bag[i].occupied) {
+                p->talisman_bag[i] = it;
+                sfx_play(g, SFX_PICKUP);
+                return;
+            }
+        }
+        /* sac talisman plein (rare : seulement 7 talismans par run) :
+         * fallback dans le sac principal pour ne rien perdre. */
+    }
     int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
     if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
     for (int i = 0; i < inv_cap; i++) {
@@ -803,9 +815,36 @@ void update_inventory_input(Game *g) {
                 } else if (i < INV_CURSOR_TALISMAN_BASE) {
                     /* slot arme : pas d'action click pour l'instant
                      * (les armes ne se "deposent" pas dans le sac). */
-                } else {
+                } else if (i < INV_CURSOR_TALISBAG_BASE) {
                     int rel = i - INV_CURSOR_TALISMAN_BASE;
                     talisman_cycle(g, rel / 3, rel % 3);
+                } else {
+                    /* talisbag : equipe le talisman sur arme active */
+                    int ti = i - INV_CURSOR_TALISBAG_BASE;
+                    Item *t = &g->player.talisman_bag[ti];
+                    if (t->occupied) {
+                        /* reutilise la logique equip pour ITEM_KIND_ELEMENT
+                         * en routant via un slot fake : on swap dans le bag
+                         * principal temporairement, equip, puis le slot
+                         * fake est vide par inventory_equip. */
+                        Item saved = *t;
+                        *t = (Item){0};
+                        /* trouve un slot libre temporaire dans le sac */
+                        int tmp = -1;
+                        int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+                        if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
+                        for (int s = 0; s < cap; s++)
+                            if (!g->player.inventory[s].occupied) { tmp = s; break; }
+                        if (tmp < 0) { *t = saved; }
+                        else {
+                            g->player.inventory[tmp] = saved;
+                            if (!inventory_equip(g, tmp)) {
+                                /* echec : remet dans le talisbag */
+                                *t = g->player.inventory[tmp];
+                                g->player.inventory[tmp] = (Item){0};
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -816,6 +855,7 @@ void update_inventory_input(Game *g) {
         if (g->inv_cursor < INV_CURSOR_EQUIP_BASE)         g->inv_cursor = INV_CURSOR_EQUIP_BASE;
         else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE)   g->inv_cursor = INV_CURSOR_WEAPON_BASE;
         else if (g->inv_cursor < INV_CURSOR_TALISMAN_BASE) g->inv_cursor = INV_CURSOR_TALISMAN_BASE;
+        else if (g->inv_cursor < INV_CURSOR_TALISBAG_BASE) g->inv_cursor = INV_CURSOR_TALISBAG_BASE;
         else                                                g->inv_cursor = 0;
     }
     /* fleches : navigation locale a chaque zone */
@@ -850,24 +890,56 @@ void update_inventory_input(Game *g) {
         if (kd) { g->inv_cursor = INV_CURSOR_TALISMAN_BASE + w * 3; goto nav_done; }
         if (ku) { g->inv_cursor = INV_CURSOR_EQUIP_BASE; goto nav_done; }
         g->inv_cursor = INV_CURSOR_WEAPON_BASE + w;
-    } else {
+    } else if (g->inv_cursor < INV_CURSOR_TALISBAG_BASE) {
         int rel = g->inv_cursor - INV_CURSOR_TALISMAN_BASE;
         int wi = rel / 3, ti = rel % 3;
         if (kr) { ti++; if (ti >= 3) { wi = (wi + 1) % WEAPON_SLOTS; ti = 0; } }
         if (kl) { ti--; if (ti < 0)  { wi = (wi + WEAPON_SLOTS - 1) % WEAPON_SLOTS; ti = 2; } }
         if (ku) { g->inv_cursor = INV_CURSOR_WEAPON_BASE + wi; goto nav_done; }
+        if (kd) { g->inv_cursor = INV_CURSOR_TALISBAG_BASE; goto nav_done; }
         g->inv_cursor = INV_CURSOR_TALISMAN_BASE + wi * 3 + ti;
+    } else {
+        /* talisbag 5x2 : navigation grille */
+        int rel = g->inv_cursor - INV_CURSOR_TALISBAG_BASE;
+        int row = rel / 5, col = rel % 5;
+        if (kr) col = (col + 1) % 5;
+        if (kl) col = (col + 4) % 5;
+        if (ku) { row--; if (row < 0) { g->inv_cursor = INV_CURSOR_TALISMAN_BASE; goto nav_done; } }
+        if (kd) { row++; if (row >= 2) { g->inv_cursor = 0; goto nav_done; } }
+        g->inv_cursor = INV_CURSOR_TALISBAG_BASE + row * 5 + col;
     }
 nav_done:;
-    /* E = equip / unequip / cycle talisman */
+    /* E = equip / unequip / cycle talisman / equip talisbag */
     if (g->keys[SDL_SCANCODE_E] && !g->keys_prev[SDL_SCANCODE_E]) {
         if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
             inventory_equip(g, g->inv_cursor);
         } else if (g->inv_cursor < INV_CURSOR_WEAPON_BASE) {
             inventory_unequip(g, g->inv_cursor - INV_CURSOR_EQUIP_BASE);
-        } else if (g->inv_cursor >= INV_CURSOR_TALISMAN_BASE) {
+        } else if (g->inv_cursor < INV_CURSOR_TALISBAG_BASE &&
+                   g->inv_cursor >= INV_CURSOR_TALISMAN_BASE) {
             int rel = g->inv_cursor - INV_CURSOR_TALISMAN_BASE;
             talisman_cycle(g, rel / 3, rel % 3);
+        } else if (g->inv_cursor >= INV_CURSOR_TALISBAG_BASE &&
+                   g->inv_cursor < INV_CURSOR_TALISBAG_BASE + TALISMAN_BAG_SLOTS) {
+            int ti = g->inv_cursor - INV_CURSOR_TALISBAG_BASE;
+            Item *t = &g->player.talisman_bag[ti];
+            if (t->occupied) {
+                Item saved = *t;
+                *t = (Item){0};
+                int tmp = -1;
+                int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+                if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
+                for (int s = 0; s < cap; s++)
+                    if (!g->player.inventory[s].occupied) { tmp = s; break; }
+                if (tmp < 0) { *t = saved; }
+                else {
+                    g->player.inventory[tmp] = saved;
+                    if (!inventory_equip(g, tmp)) {
+                        *t = g->player.inventory[tmp];
+                        g->player.inventory[tmp] = (Item){0};
+                    }
+                }
+            }
         }
     }
     /* M = mark for fusion. Le sac peut etre etendu via trinkets, donc

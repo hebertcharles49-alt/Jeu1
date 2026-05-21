@@ -12,6 +12,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Helper : une porte T_DOOR est-elle verrouillee (solide) ?
+ * Une porte est solide ssi elle est sur le perimetre d'une salle
+ * qui a locked=true. Permet d'enfermer le joueur jusqu'au clear.
+ * Expose pour render_world.c (visuel barriere rouge). */
+bool door_locked_at(Game *g, int tx, int ty) {
+    if (g->dungeon.tiles[ty][tx] != T_DOOR) return false;
+    for (int i = 0; i < g->dungeon.room_count; i++) {
+        const Room *r = &g->dungeon.rooms[i];
+        if (!r->locked) continue;
+        /* perimetre = bordure exterieure de la salle (1 tile autour) */
+        if (tx >= r->x - 1 && tx <= r->x + r->w &&
+            ty >= r->y - 1 && ty <= r->y + r->h) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ---------- COLLISION ---------- */
 bool aabb_solid(Game *g, float x, float y, float r) {
     int xs[2] = { (int)((x - r) / TILE), (int)((x + r) / TILE) };
@@ -21,6 +39,7 @@ bool aabb_solid(Game *g, float x, float y, float r) {
             int tx = xs[i], ty = ys[j];
             if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return true;
             if (tile_solid(g->dungeon.tiles[ty][tx])) return true;
+            if (door_locked_at(g, tx, ty)) return true;
         }
     }
     return false;
