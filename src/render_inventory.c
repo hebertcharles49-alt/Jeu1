@@ -505,6 +505,74 @@ void render_inventory(Game *g) {
             /* valeur de revente */
             text_drawf(g->renderer, dpx + 4, ay + 2, 0xFFD080FF,
                        "Vente : %d coins", item_sell_value(it));
+            /* ===== COMPARAISON =====
+             * Si on hover un equipement (inventaire), affiche l'equipe
+             * actuel pour le meme slot en dessous, pour comparer.
+             * Pareil pour les armes : montre l'arme active. */
+            int cmp_y = ay + 18;
+            if (it->kind == ITEM_KIND_EQUIP && !is_equip) {
+                Item *cur = &p->equipped[it->slot];
+                fill_rect(g->renderer, dpx + 2, cmp_y - 2, dpw - 4, 1, 0x404048FF);
+                text_drawf(g->renderer, dpx + 4, cmp_y + 1, 0x808080FF,
+                           "Actuel (%s)", slot_name(it->slot));
+                cmp_y += 11;
+                if (cur->occupied) {
+                    uint32_t cc = cur->is_unique ? 0xFF8030FF
+                                                : rarity_color(cur->rarity);
+                    text_drawf(g->renderer, dpx + 4, cmp_y, cc, "%s",
+                               cur->name[0] ? cur->name : slot_name(cur->slot));
+                    cmp_y += 10;
+                    text_drawf(g->renderer, dpx + 4, cmp_y, rarity_color(cur->rarity),
+                               "%s%s", cur->is_unique ? "UNIQUE " : "",
+                               rarity_name(cur->rarity));
+                    cmp_y += 10;
+                    if (cur->is_unique) {
+                        text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                                   "%s", unique_def_desc(cur->unique_id));
+                    } else {
+                        const char *u2 = "";
+                        switch (cur->slot) {
+                            case SLOT_HELM:   u2 = "PV";    break;
+                            case SLOT_CHEST:  u2 = "ARM";   break;
+                            case SLOT_LEGS:   u2 = "VIT";   break;
+                            case SLOT_BOOTS:  u2 = "DASH";  break;
+                            case SLOT_BELT:   u2 = "REG";   break;
+                            case SLOT_GLOVES: u2 = "DMG";   break;
+                            default: break;
+                        }
+                        if (cur->slot == SLOT_GLOVES || cur->slot == SLOT_BOOTS) {
+                            text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                                       "+%.0f%% %s", cur->stat_value * 100.f, u2);
+                        } else {
+                            text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                                       "+%.1f %s", cur->stat_value, u2);
+                        }
+                        cmp_y += 10;
+                        for (int a = 0; a < cur->affix_count; a++) {
+                            char ab[40]; affix_label(&cur->affixes[a], ab, sizeof(ab));
+                            text_draw(g->renderer, dpx + 4, cmp_y, ab, 0xC0E0FFFF);
+                            cmp_y += 9;
+                        }
+                    }
+                } else {
+                    text_draw(g->renderer, dpx + 4, cmp_y, "(rien d'equipe)", 0x606060FF);
+                }
+            } else if (it->kind == ITEM_KIND_WEAPON && !is_equip) {
+                Weapon *aw = &p->weapons[p->active_weapon];
+                fill_rect(g->renderer, dpx + 2, cmp_y - 2, dpw - 4, 1, 0x404048FF);
+                text_drawf(g->renderer, dpx + 4, cmp_y + 1, 0x808080FF,
+                           "Arme active");
+                cmp_y += 11;
+                if (aw->owned) {
+                    text_drawf(g->renderer, dpx + 4, cmp_y, rarity_color(aw->rarity),
+                               "%s (%s)", weapon_name(aw->kind),
+                               rarity_name(aw->rarity));
+                    cmp_y += 10;
+                    text_drawf(g->renderer, dpx + 4, cmp_y, 0x80FFC0FF,
+                               "Talismans : %d / %d",
+                               aw->element_count, weapon_slot_count(aw->rarity));
+                }
+            }
             detail_done: ;
         } else if (is_equip) {
             text_drawf(g->renderer, dpx + 4, dpy + 4, 0x808080FF, "Slot vide : %s",

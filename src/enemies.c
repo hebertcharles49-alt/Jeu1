@@ -1776,6 +1776,27 @@ static void ai_buffer(Game *g, Enemy *e, float dt, float dx, float dy, float dis
             }
         }
     }
+    /* Anti-kite : le totem statique tire un beam acier vers le joueur
+     * toutes les 3.5s s'il est trop loin (ne peut plus etre kited).
+     * ai_t2 sert au timer (e->ai_t est consomme par l aura). */
+    e->ai_t2 += dt;
+    if (e->ai_t2 >= 3.5f && dist > 60.f && dist < 320.f) {
+        e->ai_t2 = 0.f;
+        float a = atan2f(dy, dx);
+        for (int k = 0; k < 10; k++) {
+            Projectile pr = {0};
+            pr.x = e->x + cosf(a) * (12.f + k * 14.f);
+            pr.y = e->y + sinf(a) * (12.f + k * 14.f);
+            pr.vx = cosf(a) * 220.f;
+            pr.vy = sinf(a) * 220.f;
+            pr.life = 1.4f; pr.r = 3.5f;
+            pr.dmg = 6.f * diff; pr.owner = 1; pr.reflectable = false;
+            pr.primary = EL_STEEL;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        sfx_play(g, SFX_BOSS);
+    }
     /* contact dmg legerement plus fort pour pas etre passif total */
     ai_contact_damage(g, e, 6.f * diff);
 }
@@ -1809,20 +1830,41 @@ static void ai_necromancer(Game *g, Enemy *e, float dt, float dx, float dy, floa
             sfx_play(g, SFX_BOSS);
         }
     }
-    /* tir occasionnel : void bolt droit */
+    /* Rayon de la mort : telegraph 0.8s (particules d'avertissement le
+     * long du rayon), puis fait feu d'un beam dense de void en ligne
+     * droite (12 projectiles alignes). Bien plus menacant qu'un bolt
+     * isole et donne au necromant un timing exploitable a l'esquive. */
     e->ai_t2 += dt;
-    if (e->ai_t2 > 2.0f && dist < 220.f) {
+    /* Phase telegraphe : entre 2.0s et 2.8s, on dessine des particules
+     * rouges sur la trajectoire. */
+    if (e->ai_t2 >= 2.0f && e->ai_t2 < 2.8f && dist < 260.f) {
+        float a = atan2f(dy, dx);
+        for (int k = 0; k < 6; k++) {
+            float r = 12.f + k * 22.f;
+            particle_spawn_kind(g, e->x + cosf(a) * r, e->y + sinf(a) * r,
+                                0, 0, 0.18f, 0xFF3030FF, 1.6f, 0);
+        }
+    }
+    /* Tir du beam a 2.8s + petit cooldown 0.5s avant reset */
+    if (e->ai_t2 >= 2.8f && dist < 260.f) {
         e->ai_t2 = 0.f;
-        Projectile pr = {0};
-        pr.x = e->x; pr.y = e->y;
-        pr.vx = dx / dist * 95.f;
-        pr.vy = dy / dist * 95.f;
-        pr.life = 3.f; pr.r = 3.f;
-        pr.dmg = 8.f * diff; pr.owner = 1; pr.reflectable = true;
-        pr.primary = EL_DARK;
-        combo_apply_to_enemy_projectile(e->combo_mask, &pr);
-        projectile_spawn(g, pr);
-        sfx_play(g, SFX_SHOOT);
+        float a = atan2f(dy, dx);
+        for (int k = 0; k < 12; k++) {
+            Projectile pr = {0};
+            pr.x = e->x + cosf(a) * (10.f + k * 14.f);
+            pr.y = e->y + sinf(a) * (10.f + k * 14.f);
+            pr.vx = cosf(a) * 240.f;
+            pr.vy = sinf(a) * 240.f;
+            pr.life = 1.5f; pr.r = 4.f;
+            pr.dmg = 7.f * diff; pr.owner = 1; pr.reflectable = false;
+            pr.primary = EL_DARK;
+            combo_apply_to_enemy_projectile(e->combo_mask, &pr);
+            projectile_spawn(g, pr);
+        }
+        sfx_play(g, SFX_BOSS);
+    } else if (e->ai_t2 >= 2.8f) {
+        /* hors range : reset sans tirer pour eviter le spam */
+        e->ai_t2 = 0.f;
     }
     ai_contact_damage(g, e, 5.f * diff);
 }

@@ -575,29 +575,30 @@ bool inventory_unequip(Game *g, int equip_index) {
  * Renvoie true si trouve et remplit out_a/b/c. Sinon false. */
 bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
     Player *p = &g->player;
-    /* Auto-detect : 3 items MEME SLOT + MEME RARETE + MEME SUB_KIND.
-     * Le sub_kind doit matcher (ex : pantalons rarete 1 frenetiques x3).
-     * Pour fusionner des archetypes mixtes, l'utilisateur doit marquer
-     * manuellement avec M -- la fusion appliquera alors la lottery 33%. */
+    /* Auto-detect : 3 items MEME KIND + MEME SUB_KIND + MEME RARETE.
+     * Pour equipement : meme slot + sub_kind (archetype). Pour armes :
+     * meme base_kind (WeaponKind) + rarete. Les 2 sont supportes ; la
+     * priorite va au premier groupe rencontre. */
     int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
     if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
     for (int i = 0; i < inv_cap; i++) {
         Item *ii = &p->inventory[i];
         if (!ii->occupied || ii->rarity >= R_LEGENDARY) continue;
-        if (ii->kind != ITEM_KIND_EQUIP) continue;
+        if (ii->kind != ITEM_KIND_EQUIP && ii->kind != ITEM_KIND_WEAPON) continue;
         if (ii->is_unique) continue;
         int matches[3] = { i, -1, -1 };
         int cnt = 1;
         for (int j = i + 1; j < inv_cap && cnt < 3; j++) {
             Item *jj = &p->inventory[j];
             if (!jj->occupied) continue;
-            if (jj->kind != ITEM_KIND_EQUIP) continue;
+            if (jj->kind != ii->kind) continue;        /* meme type d'item */
             if (jj->is_unique) continue;
-            if (jj->slot == ii->slot &&
-                jj->rarity == ii->rarity &&
-                jj->base_kind == ii->base_kind) {
-                matches[cnt++] = j;
-            }
+            if (jj->rarity != ii->rarity) continue;
+            if (jj->base_kind != ii->base_kind) continue;
+            /* pour equipement : meme slot. Pour armes : slot pas
+             * significatif (toutes les armes vivent hors slot). */
+            if (ii->kind == ITEM_KIND_EQUIP && jj->slot != ii->slot) continue;
+            matches[cnt++] = j;
         }
         if (cnt == 3) {
             if (out_a) *out_a = matches[0];
@@ -634,10 +635,15 @@ bool inventory_fuse(Game *g) {
         return false;
     }
     /* Fusion : meme slot + meme rarete. Archetype peut differer. */
-    if (ia->kind != ITEM_KIND_EQUIP || ib->kind != ITEM_KIND_EQUIP ||
-        ic->kind != ITEM_KIND_EQUIP) {
+    bool weap_fuse = (ia->kind == ITEM_KIND_WEAPON &&
+                      ib->kind == ITEM_KIND_WEAPON &&
+                      ic->kind == ITEM_KIND_WEAPON);
+    bool equip_fuse = (ia->kind == ITEM_KIND_EQUIP &&
+                       ib->kind == ITEM_KIND_EQUIP &&
+                       ic->kind == ITEM_KIND_EQUIP);
+    if (!weap_fuse && !equip_fuse) {
         snprintf(g->inv_msg, sizeof(g->inv_msg),
-                 "Fusion : equipement seulement");
+                 "Fusion : 3 items du meme type");
         g->inv_msg_t = 2.f;
         return false;
     }
@@ -647,7 +653,7 @@ bool inventory_fuse(Game *g) {
         g->inv_msg_t = 2.f;
         return false;
     }
-    if (!(ia->slot == ib->slot && ib->slot == ic->slot)) {
+    if (equip_fuse && !(ia->slot == ib->slot && ib->slot == ic->slot)) {
         snprintf(g->inv_msg, sizeof(g->inv_msg), "Meme slot requis");
         g->inv_msg_t = 2.f;
         return false;
@@ -657,33 +663,56 @@ bool inventory_fuse(Game *g) {
         g->inv_msg_t = 2.f;
         return false;
     }
+    if (weap_fuse && !(ia->base_kind == ib->base_kind &&
+                       ib->base_kind == ic->base_kind)) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Armes : meme type requis");
+        g->inv_msg_t = 2.f;
+        return false;
+    }
     if (ia->rarity >= R_LEGENDARY) {
         snprintf(g->inv_msg, sizeof(g->inv_msg), "Deja Legendaire (max)");
         g->inv_msg_t = 2.f;
         return false;
     }
     Rarity newr = (Rarity)(ia->rarity + 1);
-    /* Selection de l'archetype : si les 3 partagent le meme, on garde.
-     * Sinon, tirage uniforme parmi les 3 (33% chacun). Ainsi fusionner
-     * 3 frenetiques garantit du frenetique ; fusionner front/vamp/agr
-     * donne du front, vamp ou agr avec 1/3 de chance. */
-    int chosen_archetype;
-    int sources[3] = { ia->base_kind, ib->base_kind, ic->base_kind };
-    if (sources[0] == sources[1] && sources[1] == sources[2]) {
-        chosen_archetype = sources[0];
+    Item fused;
+    if (weap_fuse) {
+        /* fusion d'armes : meme kind+rarete -> upgrade rarete. Pas de
+         * lottery archetype, le base_kind est fixe (= WeaponKind). */
+        fused = (Item){0};
+        fused.occupied = true;
+        fused.kind = ITEM_KIND_WEAPON;
+        fused.base_kind = ia->base_kind;
+        fused.rarity = newr;
+        snprintf(fused.name, sizeof(fused.name), "%s",
+                 weapon_name((WeaponKind)fused.base_kind));
     } else {
-        chosen_archetype = sources[rand() % 3];
+        /* equipement : si les 3 partagent l'archetype, on garde. Sinon
+         * tirage uniforme 33%. */
+        int chosen_archetype;
+        int sources[3] = { ia->base_kind, ib->base_kind, ic->base_kind };
+        if (sources[0] == sources[1] && sources[1] == sources[2]) {
+            chosen_archetype = sources[0];
+        } else {
+            chosen_archetype = sources[rand() % 3];
+        }
+        fused = item_make(ia->slot, newr, chosen_archetype);
+        fused.stat_value *= 1.20f;
     }
-    Item fused = item_make(ia->slot, newr, chosen_archetype);
-    fused.stat_value *= 1.20f;
     ia->occupied = false;
     ib->occupied = false;
     ic->occupied = false;
     p->inventory[a] = fused;
     g->inv_marked_count = 0;
     sfx_play(g, SFX_FUSE);
-    snprintf(g->inv_msg, sizeof(g->inv_msg), "Fusion -> %s %s",
-             rarity_name(newr), slot_name(fused.slot));
+    if (weap_fuse) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg), "Fusion arme -> %s %s",
+                 rarity_name(newr), weapon_name((WeaponKind)fused.base_kind));
+    } else {
+        snprintf(g->inv_msg, sizeof(g->inv_msg), "Fusion -> %s %s",
+                 rarity_name(newr), slot_name(fused.slot));
+    }
     g->inv_msg_t = 2.5f;
     return true;
 }
