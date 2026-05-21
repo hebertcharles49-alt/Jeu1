@@ -19,10 +19,14 @@ bool mouse_in_rect(Game *g, int x, int y, int w, int h) {
 bool mouse_clicked(Game *g) {
     return g->mouse_btn && !g->mouse_btn_prev;
 }
+bool mouse_right_clicked(Game *g) {
+    return g->mouse_btn_r && !g->mouse_btn_r_prev;
+}
 
 static void poll_input(Game *g, bool *quit) {
     SDL_Event ev;
-    g->mouse_btn_prev = g->mouse_btn;
+    g->mouse_btn_prev   = g->mouse_btn;
+    g->mouse_btn_r_prev = g->mouse_btn_r;
     g->mouse_wheel = 0;
     if (g->keys) memcpy(g->keys_prev, g->keys, SDL_NUM_SCANCODES);
     while (SDL_PollEvent(&ev)) {
@@ -76,7 +80,8 @@ static void poll_input(Game *g, bool *quit) {
     Uint32 mb = SDL_GetMouseState(&mx, &my);
     g->mouse_x = mx / WINDOW_SCALE;
     g->mouse_y = my / WINDOW_SCALE;
-    g->mouse_btn = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) ? 1 : 0;
+    g->mouse_btn   = (mb & SDL_BUTTON(SDL_BUTTON_LEFT))  ? 1 : 0;
+    g->mouse_btn_r = (mb & SDL_BUTTON(SDL_BUTTON_RIGHT)) ? 1 : 0;
 }
 
 /* shake polish :

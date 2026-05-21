@@ -678,6 +678,8 @@ typedef struct {
     int           mouse_x, mouse_y;
     int           mouse_btn;
     int           mouse_btn_prev;
+    int           mouse_btn_r;       /* clic droit */
+    int           mouse_btn_r_prev;
     int           mouse_wheel;     /* delta vertical de molette ce frame */
     Uint8         keys_prev[SDL_NUM_SCANCODES];
 
@@ -1118,6 +1120,7 @@ void  render_lore(Game *g);
 /* helpers souris */
 bool  mouse_in_rect(Game *g, int x, int y, int w, int h);
 bool  mouse_clicked(Game *g);
+bool  mouse_right_clicked(Game *g);
 
 /* toast notifications : reserves un slot, decremente toutes les
  * frames. La life est dans le slot, pas globale. */

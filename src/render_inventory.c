@@ -461,6 +461,9 @@ void render_inventory(Game *g) {
     char bag_hdr[24];
     snprintf(bag_hdr, sizeof(bag_hdr), "SAC (%d)", inv_cap);
     text_draw(g->renderer, bag_x, bag_y - 9, bag_hdr, 0xCCCCFFFF);
+    /* hint click droit pour le fusionneur */
+    text_draw(g->renderer, bag_x + 50, bag_y - 9,
+              "(clic droit -> fusionneur)", 0x808080FF);
     int fa = -1, fb = -1, fc = -1;
     bool has_auto_fuse = inventory_find_fusion_group(g, &fa, &fb, &fc);
     for (int i = 0; i < inv_cap; i++) {
@@ -485,6 +488,77 @@ void render_inventory(Game *g) {
         int sy = INV_WEAPON_Y + 70 + row * 20;
         bool sel = (g->inv_cursor == INV_CURSOR_TALISBAG_BASE + i);
         render_item_slot(g, sx, sy, 18, &p->talisman_bag[i], sel, false, NULL);
+    }
+
+    /* ---- FUSIONNEUR (gauche-bas, sous le paper-doll/armes) ----
+     * 3 slots ou le joueur depose des items du sac (click). Validation
+     * automatique : meme kind + meme rarete (pas de sub_kind requis).
+     * Equipement = meme slot, armes = meme WeaponKind. Bouton Fusionner
+     * en vert si valide. inv_marked[] sert de backing store (max 3). */
+    {
+        int fx0 = 10, fy0 = 320;
+        int fw = 220, fh = 122;
+        fill_rect(g->renderer, fx0, fy0, fw, fh, 0x140C18FF);
+        rect_outline(g->renderer, fx0, fy0, fw, fh, 0x504850FF);
+        text_draw(g->renderer, fx0 + 6, fy0 + 4, "FUSIONNEUR", 0xFFD040FF);
+        /* 3 slots horizontaux (32x32) avec "+" entre eux et "=" + zone resultat */
+        int slot_sz = 30;
+        int slot_y  = fy0 + 22;
+        int slot_x[3] = { fx0 + 10, fx0 + 60, fx0 + 110 };
+        for (int s = 0; s < 3; s++) {
+            uint32_t border = 0x303038FF;
+            if (s < g->inv_marked_count) border = 0xA0E0FFFF;
+            fill_rect(g->renderer, slot_x[s], slot_y, slot_sz, slot_sz, 0x080612FF);
+            rect_outline(g->renderer, slot_x[s], slot_y, slot_sz, slot_sz, border);
+            if (s < g->inv_marked_count) {
+                int idx = g->inv_marked[s];
+                if (idx >= 0 && idx < INVENTORY_MAX_SLOTS) {
+                    Item *it = &p->inventory[idx];
+                    if (it->occupied) {
+                        uint32_t col = rarity_color(it->rarity);
+                        if (it->kind == ITEM_KIND_ELEMENT)
+                            col = element_color((Element)it->base_kind);
+                        fill_rect(g->renderer, slot_x[s] + 4, slot_y + 4,
+                                  slot_sz - 8, slot_sz - 8, col);
+                    }
+                }
+            } else {
+                text_draw(g->renderer, slot_x[s] + 12, slot_y + 12, "?", 0x505058FF);
+            }
+            if (s < 2) text_draw(g->renderer, slot_x[s] + slot_sz + 4,
+                                 slot_y + 12, "+", 0xCCCCCCFF);
+        }
+        /* Validation : meme kind / rarete (+ slot equip ou weapon kind) */
+        bool valid = false;
+        if (g->inv_marked_count == 3) {
+            Item *a = &p->inventory[g->inv_marked[0]];
+            Item *b = &p->inventory[g->inv_marked[1]];
+            Item *c = &p->inventory[g->inv_marked[2]];
+            if (a->occupied && b->occupied && c->occupied &&
+                !a->is_unique && !b->is_unique && !c->is_unique &&
+                a->kind == b->kind && b->kind == c->kind &&
+                a->rarity == b->rarity && b->rarity == c->rarity &&
+                a->rarity < R_LEGENDARY) {
+                if (a->kind == ITEM_KIND_EQUIP &&
+                    a->slot == b->slot && b->slot == c->slot) valid = true;
+                if (a->kind == ITEM_KIND_WEAPON &&
+                    a->base_kind == b->base_kind && b->base_kind == c->base_kind) valid = true;
+            }
+        }
+        /* Bouton Fusionner */
+        int bx = fx0 + 10, by = fy0 + 78, bw = fw - 20, bh = 22;
+        uint32_t bcol = (g->inv_marked_count == 3 && valid)
+                          ? 0x205020FF : 0x282030FF;
+        uint32_t bborder = (g->inv_marked_count == 3 && valid)
+                             ? 0x80FF80FF : 0x404048FF;
+        bool bhover = mouse_in_rect(g, bx, by, bw, bh);
+        if (bhover && g->inv_marked_count == 3 && valid) bcol = 0x308030FF;
+        fill_rect(g->renderer, bx, by, bw, bh, bcol);
+        rect_outline(g->renderer, bx, by, bw, bh, bborder);
+        const char *btxt = (g->inv_marked_count < 3) ? "Clique 3 items dans le sac"
+                         : (valid ? "FUSIONNER" : "Items incompatibles");
+        text_draw(g->renderer, bx + 8, by + 7, btxt,
+                  (g->inv_marked_count == 3 && valid) ? 0xFFFFFFFF : 0x808080FF);
     }
 
     /* ---- DETAILS PANEL (sous le sac) ---- */

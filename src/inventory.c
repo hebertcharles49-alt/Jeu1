@@ -587,10 +587,12 @@ bool inventory_unequip(Game *g, int equip_index) {
  * Renvoie true si trouve et remplit out_a/b/c. Sinon false. */
 bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
     Player *p = &g->player;
-    /* Auto-detect : 3 items MEME KIND + MEME SUB_KIND + MEME RARETE.
-     * Pour equipement : meme slot + sub_kind (archetype). Pour armes :
-     * meme base_kind (WeaponKind) + rarete. Les 2 sont supportes ; la
-     * priorite va au premier groupe rencontre. */
+    /* Regles allegees : 3 items MEME KIND + MEME RARETE.
+     * - Equipement : meme slot (helmet vs torse pas fusables).
+     * - Armes : meme WeaponKind (sword vs axe pas fusables).
+     * - L ARCHETYPE (base_kind sur equip) est IGNORE : fusionner 3
+     *   helmets rares de differents archetypes est OK ; le resultat
+     *   tire un archetype au sort (33%, cf inventory_fuse). */
     int inv_cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
     if (inv_cap > INVENTORY_MAX_SLOTS) inv_cap = INVENTORY_MAX_SLOTS;
     for (int i = 0; i < inv_cap; i++) {
@@ -606,10 +608,9 @@ bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
             if (jj->kind != ii->kind) continue;        /* meme type d'item */
             if (jj->is_unique) continue;
             if (jj->rarity != ii->rarity) continue;
-            if (jj->base_kind != ii->base_kind) continue;
-            /* pour equipement : meme slot. Pour armes : slot pas
-             * significatif (toutes les armes vivent hors slot). */
+            /* equip : meme slot. arme : meme WeaponKind (base_kind). */
             if (ii->kind == ITEM_KIND_EQUIP && jj->slot != ii->slot) continue;
+            if (ii->kind == ITEM_KIND_WEAPON && jj->base_kind != ii->base_kind) continue;
             matches[cnt++] = j;
         }
         if (cnt == 3) {
@@ -828,8 +829,55 @@ static void talisman_cycle(Game *g, int weapon_idx, int talisman_idx) {
     sfx_play(g, SFX_PICKUP);
 }
 
+/* helper : marque / demarque un item du sac pour la fusion. Toggle. */
+static void fusion_toggle_mark(Game *g, int inv_idx) {
+    if (inv_idx < 0 || inv_idx >= INVENTORY_MAX_SLOTS) return;
+    if (!g->player.inventory[inv_idx].occupied) return;
+    for (int i = 0; i < g->inv_marked_count; i++) {
+        if (g->inv_marked[i] == inv_idx) {
+            for (int j = i; j < g->inv_marked_count - 1; j++)
+                g->inv_marked[j] = g->inv_marked[j + 1];
+            g->inv_marked_count--;
+            return;
+        }
+    }
+    if (g->inv_marked_count < 3) {
+        g->inv_marked[g->inv_marked_count++] = inv_idx;
+    } else {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Fusionneur plein (3 max)");
+        g->inv_msg_t = 1.5f;
+    }
+}
+
 /* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
+    /* === FUSIONNEUR : clicks sur les 3 slots + bouton ===
+     * Layout en parallele avec render_inventory (constants en dur). */
+    {
+        int fx0 = 10, fy0 = 320;
+        int slot_sz = 30, slot_y = fy0 + 22;
+        int slot_x[3] = { fx0 + 10, fx0 + 60, fx0 + 110 };
+        if (mouse_clicked(g)) {
+            for (int s = 0; s < 3; s++) {
+                if (mouse_in_rect(g, slot_x[s], slot_y, slot_sz, slot_sz)) {
+                    if (s < g->inv_marked_count) {
+                        /* unmark : retire ce slot du fusionneur */
+                        for (int j = s; j < g->inv_marked_count - 1; j++)
+                            g->inv_marked[j] = g->inv_marked[j + 1];
+                        g->inv_marked_count--;
+                    }
+                    return;     /* skip le reste du frame d'input */
+                }
+            }
+            /* Bouton Fusionner */
+            int bx = fx0 + 10, by = fy0 + 78, bw = (220 - 20), bh = 22;
+            if (mouse_in_rect(g, bx, by, bw, bh) && g->inv_marked_count == 3) {
+                inventory_fuse(g);
+                return;
+            }
+        }
+    }
     /* mouse hover/click : on parcourt TOUS les slots possibles (sac,
      * equipement, armes, talismans) en utilisant le layout commun.
      * Skip les slots bag au-dessus de la capacite actuelle. */
@@ -841,6 +889,11 @@ void update_inventory_input(Game *g) {
         if (!inv_layout_rect(i, &x, &y, &w, &h)) continue;
         if (mouse_in_rect(g, x, y, w, h)) {
             g->inv_cursor = i;
+            /* Clic DROIT sur item du sac : toggle dans le fusionneur. */
+            if (mouse_right_clicked(g) && i < INV_CURSOR_EQUIP_BASE) {
+                fusion_toggle_mark(g, i);
+                return;
+            }
             if (mouse_clicked(g)) {
                 if (i < INV_CURSOR_EQUIP_BASE) {
                     inventory_equip(g, i);
