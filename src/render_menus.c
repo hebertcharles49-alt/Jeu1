@@ -54,21 +54,26 @@ static void render_hub_temple(Game *g) {
               y + h - 14, "ENTREE OU ECHAP POUR FERMER", 0xFFFF80FF);
 }
 
-/* sous-panneau FORGE : choisis ton arme pour la run + ameliore-la
- * via souls (meta-progression). Chaque arme garde son niveau entre
- * les runs (meta.weapon_dmg_bonus). */
-static int weapon_upgrade_cost(int level) {
-    /* progression : 30 -> 60 -> 120 -> 240 -> 480 souls */
-    int base = 30;
-    for (int i = 0; i < level; i++) base *= 2;
-    return base;
+/* Cout en ames pour debloquer une arme.
+ * Epee est offerte (cost 0 -> deja unlocked au demarrage). */
+static int weapon_unlock_cost(WeaponKind wk) {
+    switch (wk) {
+        case W_SHIELD: return 60;
+        case W_BOW:    return 80;
+        case W_WAND:   return 120;
+        case W_AXE:    return 150;
+        default:       return 0;
+    }
 }
 
+/* sous-panneau FORGE : choisis ton arme pour la run.
+ * Les armes verrouillees sont deblocables via souls (meta-progression
+ * persistente). Pas d'upgrade : c'est binaire locked/unlocked. */
 static void render_hub_forge(Game *g) {
     int x, y, w, h;
     sub_panel_bg(g, &x, &y, &w, &h, "FORGE");
-    text_draw(g->renderer, x + w / 2 - text_width("Choisis ton arme. Ameliore-la en payant des AMES.") / 2,
-              y + 22, "Choisis ton arme. Ameliore-la en payant des AMES.", 0xCCCCCCFF);
+    text_draw(g->renderer, x + w / 2 - text_width("Debloque tes armes, choisis celle de la run.") / 2,
+              y + 22, "Debloque tes armes, choisis celle de la run.", 0xCCCCCCFF);
     static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
     static const char *DESCR[5] = {
         "Slash transversal rapide, motion blur.",
@@ -77,49 +82,49 @@ static void render_hub_forge(Game *g) {
         "Projectile magique a tete chercheuse.",
         "Chop overhead AOE lourd, lent."
     };
-    int rowh = 30;
+    int rowh = 28;
     int N = 5;
     for (int k = 0; k < N; k++) {
         int sy = y + 50 + k * rowh;
         bool sel = (g->hub_sub_cursor == k);
-        bool chosen = (g->player.weapons[0].kind == PICKS[k]);
-        uint32_t bg = sel ? 0x281828FF : 0x18141EFF;
-        uint32_t bd = sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0x504048FF);
+        bool unlocked = g->meta.weapon_unlocked[PICKS[k]];
+        bool chosen   = unlocked && (g->player.weapons[0].kind == PICKS[k]);
+        uint32_t bg = sel ? 0x281828FF
+                          : (unlocked ? 0x18141EFF : 0x100C14FF);
+        uint32_t bd = sel ? 0xFFFF40FF
+                          : (chosen ? 0x60D040FF
+                                    : (unlocked ? 0x504048FF : 0x303038FF));
         fill_rect(g->renderer, x + 10, sy, w - 20, rowh - 2, bg);
         rect_outline(g->renderer, x + 10, sy, w - 20, rowh - 2, bd);
-        int wlvl = g->meta.weapon_dmg_bonus[PICKS[k]];
-        text_drawf(g->renderer, x + 16, sy + 3,
-                   sel ? 0xFFFF40FF : (chosen ? 0x60D040FF : 0xFFFFFFFF),
-                   "%s  LVL %d", weapon_name(PICKS[k]), wlvl);
-        text_draw(g->renderer, x + 16, sy + 12, DESCR[k], 0x808890FF);
-        /* bonus actuel + cost upgrade */
-        text_drawf(g->renderer, x + 16, sy + 21, 0xC0E0FFFF,
-                   "+%d dmg permanent", wlvl * 5);
+        uint32_t name_col = sel ? 0xFFFF40FF
+                                : (chosen ? 0x60D040FF
+                                          : (unlocked ? 0xFFFFFFFF : 0x707080FF));
+        text_drawf(g->renderer, x + 16, sy + 3, name_col,
+                   "%s%s", weapon_name(PICKS[k]),
+                   unlocked ? "" : "  [VERROUILLEE]");
+        text_draw(g->renderer, x + 16, sy + 13, DESCR[k], 0x808890FF);
         if (chosen) {
-            text_draw(g->renderer, x + w - 60, sy + 4, "EQUIPEE", 0x60D040FF);
-        }
-        /* bouton AMELIORER (cote droit) si niveau < max */
-        int bw = 78, bh = 18;
-        int bx = x + w - bw - 14;
-        int by = sy + (rowh - bh) / 2 - 1;
-        if (wlvl < FORGE_MAX_LEVEL) {
-            int cost = weapon_upgrade_cost(wlvl);
+            text_draw(g->renderer, x + w - 60, sy + 8, "EQUIPEE", 0x60D040FF);
+        } else if (!unlocked) {
+            /* bouton DEBLOQUER a droite */
+            int bw = 92, bh = 18;
+            int bx = x + w - bw - 14;
+            int by = sy + (rowh - bh) / 2 - 1;
+            int cost = weapon_unlock_cost(PICKS[k]);
             bool affordable = (g->player.souls >= cost);
-            uint32_t bbg = affordable ? 0x304030FF : 0x281820FF;
-            uint32_t bbd = affordable ? 0x80FF80FF : 0x404048FF;
+            uint32_t bbg = affordable ? 0x404020FF : 0x281820FF;
+            uint32_t bbd = affordable ? 0xFFD040FF : 0x404048FF;
             fill_rect(g->renderer, bx, by, bw, bh, bbg);
             rect_outline(g->renderer, bx, by, bw, bh, bbd);
             text_drawf(g->renderer, bx + 4, by + 6,
                        affordable ? 0xFFFFFFFF : 0x808080FF,
-                       "U:%d AMES", cost);
-        } else {
-            text_draw(g->renderer, bx + 14, by + 6, "LVL MAX", 0xFFD040FF);
+                       "%d AMES (U)", cost);
         }
     }
     text_drawf(g->renderer, x + 12, y + h - 26, 0xFFD040FF,
                "Ames disponibles : %d", g->player.souls);
-    text_draw(g->renderer, x + w / 2 - text_width("ENTREE / CLIC : equipe -- U : ameliore -- ECHAP : ferme") / 2,
-              y + h - 14, "ENTREE / CLIC : equipe -- U : ameliore -- ECHAP : ferme", 0xFFFF80FF);
+    text_draw(g->renderer, x + w / 2 - text_width("ENTREE / CLIC : equipe (si debloquee) -- U : debloque -- ECHAP : ferme") / 2,
+              y + h - 14, "ENTREE / CLIC : equipe (si debloquee) -- U : debloque -- ECHAP : ferme", 0xFFFF80FF);
 }
 
 /* sous-panneau LICHE : work in progress placeholder. */

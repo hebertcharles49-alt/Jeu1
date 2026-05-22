@@ -277,7 +277,7 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
                 if (has_fists) {
                     int weapons[8]; int wn = 0;
                     for (int wk = W_SWORD; wk < W_COUNT; wk++)
-                        if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
+                        if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
                     if (wn > 0) {
                         int wpick = weapons[rand() % wn];
                         int prog = g->floors_visited;

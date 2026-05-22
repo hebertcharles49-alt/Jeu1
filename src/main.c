@@ -350,6 +350,10 @@ void game_init(Game *g) {
     g->meta.hero_discovered[HERO_GUERRIER] = true;
     g->meta.weapon_discovered[W_FISTS]   = true;
     g->meta.weapon_discovered[W_SWORD]   = true;
+    /* deblocages de base : poings + epee sont gratuits. Les autres
+     * armes doivent etre achetees au FORGE avec des ames. */
+    g->meta.weapon_unlocked[W_FISTS] = true;
+    g->meta.weapon_unlocked[W_SWORD] = true;
     g->meta.element_discovered[EL_FIRE]  = true;
 
     audio_init(g);
@@ -809,11 +813,14 @@ static void hub_forge_pick(Game *g, int idx) {
     static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
     if (idx < 0 || idx >= 5) return;
     WeaponKind k = PICKS[idx];
+    /* refuse l'equipement d'une arme non debloquee (filet de securite
+     * en plus du gate UI). */
+    if (!g->meta.weapon_unlocked[k]) {
+        sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+        return;
+    }
     weapon_init_defaults(&g->player.weapons[0], k);
     g->player.weapons[0].owned = true;
-    /* applique le bonus FORGE meta */
-    int b = g->meta.weapon_dmg_bonus[k];
-    if (b > 0) g->player.weapons[0].base_dmg += b * 5.f;
     g->hub_weapon_chosen = true;
     g->hub_sub_open = 0;
     sfx_play(g, SFX_LEVELUP);
@@ -830,43 +837,45 @@ static void update_hub(Game *g) {
                 g->hub_sub_open = 0;
             }
         } else if (g->hub_sub_open == 2) {
-            /* FORGE : 5 armes (excl. fists). Sub_cursor 0..4.
-             * Layout : rowh=30 (sync avec render_hub_forge). */
+            /* FORGE : armes deblocables avec souls. Sub_cursor 0..4.
+             * rowh=28 (sync avec render_hub_forge). */
             const int N = 5;
             int w = 280;
             int x = INTERNAL_W / 2 - w / 2;
             int y = INTERNAL_H / 2 - 110;
-            int rowh = 30;
+            int rowh = 28;
             static const WeaponKind PICKS[5] = { W_SWORD, W_SHIELD, W_BOW, W_WAND, W_AXE };
-            /* Helper inline pour le cout d'upgrade : doit matcher
-             * weapon_upgrade_cost de render_menus.c (30, 60, 120, 240, 480). */
+            /* couts unlock : sync avec weapon_unlock_cost dans render_menus.c */
+            static const int UNLOCK_COST[5] = { 0, 60, 80, 120, 150 };
             for (int k = 0; k < N; k++) {
                 int sy = y + 50 + k * rowh;
                 if (mouse_in_rect(g, x + 10, sy, w - 20, rowh - 2)) {
                     g->hub_sub_cursor = k;
                 }
-                /* Bouton UPGRADE a droite (synced avec render) */
-                int bw = 78, bh = 18;
-                int bx = x + w - bw - 14;
-                int by = sy + (rowh - bh) / 2 - 1;
-                int wlvl = g->meta.weapon_dmg_bonus[PICKS[k]];
-                if (wlvl < FORGE_MAX_LEVEL &&
-                    mouse_in_rect(g, bx, by, bw, bh) && mouse_clicked(g)) {
-                    int cost = 30 << wlvl;        /* 30,60,120,240,480 */
-                    if (g->player.souls >= cost) {
-                        g->player.souls -= cost;
-                        g->meta.weapon_dmg_bonus[PICKS[k]]++;
-                        save_write(&g->meta);
-                        sfx_play(g, SFX_LEVELUP);
-                    } else {
-                        sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                bool unlocked = g->meta.weapon_unlocked[PICKS[k]];
+                if (!unlocked) {
+                    /* bouton DEBLOQUER (a droite) */
+                    int bw = 92, bh = 18;
+                    int bx = x + w - bw - 14;
+                    int by = sy + (rowh - bh) / 2 - 1;
+                    if (mouse_in_rect(g, bx, by, bw, bh) && mouse_clicked(g)) {
+                        int cost = UNLOCK_COST[k];
+                        if (g->player.souls >= cost) {
+                            g->player.souls -= cost;
+                            g->meta.weapon_unlocked[PICKS[k]] = true;
+                            save_write(&g->meta);
+                            sfx_play(g, SFX_LEVELUP);
+                        } else {
+                            sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                        }
+                        return;
                     }
-                    return;
-                }
-                /* clic gauche dans la rangee (hors bouton) = equipe */
-                if (mouse_in_rect(g, x + 10, sy, w - 20 - bw - 14, rowh - 2)
-                    && mouse_clicked(g)) {
-                    hub_forge_pick(g, k);
+                } else {
+                    /* clic dans la rangee = equiper (si debloquee) */
+                    if (mouse_in_rect(g, x + 10, sy, w - 20, rowh - 2)
+                        && mouse_clicked(g)) {
+                        hub_forge_pick(g, k);
+                    }
                 }
             }
             if (g->keys[SDL_SCANCODE_UP]   && !g->keys_prev[SDL_SCANCODE_UP])
@@ -874,16 +883,22 @@ static void update_hub(Game *g) {
             if (g->keys[SDL_SCANCODE_DOWN] && !g->keys_prev[SDL_SCANCODE_DOWN])
                 g->hub_sub_cursor = (g->hub_sub_cursor + 1) % N;
             if ((g->keys[SDL_SCANCODE_RETURN] && !g->keys_prev[SDL_SCANCODE_RETURN]) ||
-                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE]))
-                hub_forge_pick(g, g->hub_sub_cursor);
-            /* U : upgrade weapon courant via souls */
+                (g->keys[SDL_SCANCODE_SPACE]  && !g->keys_prev[SDL_SCANCODE_SPACE])) {
+                /* equiper : echoue si verrouillee (refus sonore) */
+                if (g->meta.weapon_unlocked[PICKS[g->hub_sub_cursor]]) {
+                    hub_forge_pick(g, g->hub_sub_cursor);
+                } else {
+                    sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                }
+            }
+            /* U : debloque l'arme courante via souls */
             if (g->keys[SDL_SCANCODE_U] && !g->keys_prev[SDL_SCANCODE_U]) {
-                int wlvl = g->meta.weapon_dmg_bonus[PICKS[g->hub_sub_cursor]];
-                if (wlvl < FORGE_MAX_LEVEL) {
-                    int cost = 30 << wlvl;
+                WeaponKind wk = PICKS[g->hub_sub_cursor];
+                if (!g->meta.weapon_unlocked[wk]) {
+                    int cost = UNLOCK_COST[g->hub_sub_cursor];
                     if (g->player.souls >= cost) {
                         g->player.souls -= cost;
-                        g->meta.weapon_dmg_bonus[PICKS[g->hub_sub_cursor]]++;
+                        g->meta.weapon_unlocked[wk] = true;
                         save_write(&g->meta);
                         sfx_play(g, SFX_LEVELUP);
                     } else {

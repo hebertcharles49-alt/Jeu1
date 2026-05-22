@@ -601,8 +601,10 @@ typedef struct {
     int  item_seen_rarity[EQUIP_SLOTS][5];
     /* uniques decouverts (par id). Cf uniques.c. */
     bool unique_seen[32];
-    /* FORGE : bonus de dmg permanent par arme (0..FORGE_MAX_LEVEL). Cout
-     * croissant. Lu par weapon_init_defaults pour ajuster base_dmg. */
+    /* FORGE : armes deblocables avec des ames (souls). W_FISTS et
+     * W_SWORD sont deblocables par defaut ; les autres demandent
+     * un cout fixe. weapon_dmg_bonus est conserve mais plus utilise. */
+    bool weapon_unlocked[W_COUNT];
     int  weapon_dmg_bonus[W_COUNT];
 } MetaSave;
 #define FORGE_MAX_LEVEL 5

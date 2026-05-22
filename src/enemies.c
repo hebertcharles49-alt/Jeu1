@@ -107,7 +107,7 @@ static void enemy_drop_loot(Game *g, Enemy *e) {
         if (has_fists) {
             int weapons[8]; int wn = 0;
             for (int wk = W_SWORD; wk < W_COUNT; wk++)
-                if (g->meta.weapon_discovered[wk]) weapons[wn++] = wk;
+                if (g->meta.weapon_unlocked[wk]) weapons[wn++] = wk;
             if (wn > 0) {
                 Rarity wr = rarity_for_floor_boss(prog);
                 pickup_spawn(g, PU_WEAPON,
