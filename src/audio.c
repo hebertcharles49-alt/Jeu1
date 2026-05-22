@@ -8,6 +8,8 @@
  * variation de pitch (resampling lineaire) et volume par voix.
  */
 #include "game.h"
+#define WAV_LOADER_IMPLEMENTATION
+#include "wav_loader.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -473,6 +475,54 @@ void audio_shutdown(Game *g) {
     for (int i = 0; i < SFX_COUNT; i++) {
         if (g_sfx_data[i]) { free(g_sfx_data[i]); g_sfx_data[i] = NULL; }
     }
+}
+
+/* === Charge un fichier WAV et remplace le SFX_id par son contenu ===
+ * Le sample_rate du WAV est remappe vers SR=22050 (resample lineaire).
+ * Float [-1, 1] -> int16. Replace le buffer procedural existant.
+ * Renvoie true si charge avec succes, false sinon (le SFX procedural
+ * est conserve). */
+bool audio_load_wav(Game *g, SfxId id, const char *path) {
+    (void)g;
+    if (id < 0 || id >= SFX_COUNT) return false;
+    WavData w = {0};
+    if (!wav_load_file(path, &w)) return false;
+    /* resample lineaire vers SR (mixer interne). */
+    int new_n;
+    int16_t *new_buf = NULL;
+    if (w.sample_rate == SR) {
+        new_n = w.sample_count;
+        new_buf = (int16_t *)malloc(sizeof(int16_t) * new_n);
+        for (int i = 0; i < new_n; i++) {
+            float v = w.samples[i] * 32767.f;
+            if (v > 32767.f) v = 32767.f;
+            if (v < -32768.f) v = -32768.f;
+            new_buf[i] = (int16_t)v;
+        }
+    } else {
+        float ratio = (float)SR / (float)w.sample_rate;
+        new_n = (int)((float)w.sample_count * ratio);
+        if (new_n <= 0) { wav_free(&w); return false; }
+        new_buf = (int16_t *)malloc(sizeof(int16_t) * new_n);
+        for (int i = 0; i < new_n; i++) {
+            float src_idx = i / ratio;
+            int si = (int)src_idx;
+            float frac = src_idx - si;
+            float a = (si     < w.sample_count) ? w.samples[si    ] : 0.f;
+            float b = (si + 1 < w.sample_count) ? w.samples[si + 1] : a;
+            float v = (a + (b - a) * frac) * 32767.f;
+            if (v > 32767.f) v = 32767.f;
+            if (v < -32768.f) v = -32768.f;
+            new_buf[i] = (int16_t)v;
+        }
+    }
+    wav_free(&w);
+    if (g_voice_mutex) SDL_LockMutex(g_voice_mutex);
+    if (g_sfx_data[id]) free(g_sfx_data[id]);
+    g_sfx_data[id] = new_buf;
+    g_sfx_len[id]  = new_n;
+    if (g_voice_mutex) SDL_UnlockMutex(g_voice_mutex);
+    return true;
 }
 
 /* priorite par defaut. Le hurt joueur et la mort passent au-dessus du

@@ -1452,6 +1452,43 @@ void gfx_sparkle_draw(GfxCtx *gc, v3 pos, float size,
     glDepthMask(prev_depth_write);
 }
 
+/* === Meshes externes (OBJ-loaded ou autre source) === */
+bool gfx_mesh_upload(GfxCtx *gc, GfxMesh *out,
+                     const float *verts, int vert_count) {
+    (void)gc;
+    if (!out || !verts || vert_count <= 0) return false;
+    pglGenVertexArrays(1, &out->vao);
+    pglGenBuffers(1, &out->vbo);
+    pglBindVertexArray(out->vao);
+    pglBindBuffer(GL_ARRAY_BUFFER, out->vbo);
+    pglBufferData(GL_ARRAY_BUFFER,
+                  (GLsizeiptr)(vert_count * 9 * sizeof(float)),
+                  verts, GL_STATIC_DRAW);
+    pglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)0);
+    pglVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(3*sizeof(float)));
+    pglVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(6*sizeof(float)));
+    pglEnableVertexAttribArray(0);
+    pglEnableVertexAttribArray(1);
+    pglEnableVertexAttribArray(2);
+    out->vert_count = vert_count;
+    return true;
+}
+
+void gfx_mesh_free(GfxCtx *gc, GfxMesh *m) {
+    (void)gc;
+    if (!m) return;
+    if (m->vao) pglDeleteVertexArrays(1, &m->vao);
+    if (m->vbo) pglDeleteBuffers(1, &m->vbo);
+    m->vao = m->vbo = 0;
+    m->vert_count = 0;
+}
+
+void gfx_mesh_draw(GfxCtx *gc, const GfxMesh *m, m4 model,
+                   float r, float g, float b) {
+    if (!m || m->vert_count <= 0) return;
+    draw_bb_mesh(gc, model, m->vao, m->vert_count, r, g, b);
+}
+
 void gfx_cone_draw(GfxCtx *gc, v3 center, float radius, float height,
                    float r, float g, float b) {
     /* base diametre = 2*radius. Cone mesh en [0,1]^2 base, height 1. */

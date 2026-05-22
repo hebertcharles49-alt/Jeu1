@@ -166,6 +166,22 @@ void gfx_cone_draw      (GfxCtx *gc, v3 center, float rad, float h, float r, flo
 void gfx_billboard_draw(GfxCtx *gc, v3 center, float w, float h,
                         float r, float g, float b, float a);
 
+/* === Mesh assets externes (OBJ via obj_loader.h) ===
+ * GfxMesh = handle leger sur un VAO/VBO upload depuis un OBJ
+ * ou tout array de vertices (pos 3f + normal 3f + color 3f).
+ * Dessine via gfx_mesh_draw avec un model matrix arbitraire,
+ * shading bb_prog (fog + lighting coherents avec le reste). */
+typedef struct {
+    GLuint vao, vbo;
+    int    vert_count;
+} GfxMesh;
+
+bool gfx_mesh_upload(GfxCtx *gc, GfxMesh *out,
+                     const float *verts, int vert_count);
+void gfx_mesh_free  (GfxCtx *gc, GfxMesh *m);
+void gfx_mesh_draw  (GfxCtx *gc, const GfxMesh *m, m4 model,
+                     float r, float g, float b);
+
 /* === SPARKLES 2D ===
  * Quad billboard toujours face camera, gradient circulaire alpha
  * en bordure, blending additif. Le shader genere le cercle dans

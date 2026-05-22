@@ -4,6 +4,8 @@
 #include "game.h"
 #include "gfx.h"
 #include "ui_common.h"
+#define OBJ_LOADER_IMPLEMENTATION
+#include "obj_loader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,7 +358,47 @@ void game_init(Game *g) {
     g->meta.weapon_unlocked[W_SWORD] = true;
     g->meta.element_discovered[EL_FIRE]  = true;
 
+    /* Test-load de l'OBJ parser : sanity check au demarrage avec
+     * un cube en memoire. Si echec, on log mais on continue. */
+    {
+        const char *test_cube_obj =
+            "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\n"
+            "v 0 0 1\nv 1 0 1\nv 1 1 1\nv 0 1 1\n"
+            "f 1 2 3 4\nf 5 8 7 6\nf 1 5 6 2\n"
+            "f 3 7 8 4\nf 2 6 7 3\nf 1 4 8 5\n";
+        ObjMesh tm = {0};
+        if (obj_load_string(test_cube_obj, &tm)) {
+            printf("[obj_loader] cube test OK : %d verts\n", tm.vert_count);
+            obj_free(&tm);
+        } else {
+            fprintf(stderr, "[obj_loader] FAIL sur le test cube\n");
+        }
+    }
     audio_init(g);
+    /* Auto-load des WAV externes dans mods/sounds/ : si un fichier
+     * existe, il remplace le SFX procedural. Le nom du fichier matche
+     * l'enum SfxId. Ex: mods/sounds/SFX_HIT.wav remplace le hit. */
+    {
+        static const struct { SfxId id; const char *name; } MAP[] = {
+            { SFX_HIT,        "mods/sounds/hit.wav" },
+            { SFX_HEAVY_HIT,  "mods/sounds/heavy_hit.wav" },
+            { SFX_PUNCH,      "mods/sounds/punch.wav" },
+            { SFX_SWING,      "mods/sounds/swing.wav" },
+            { SFX_EXPLODE,    "mods/sounds/explode.wav" },
+            { SFX_PICKUP,     "mods/sounds/pickup.wav" },
+            { SFX_COIN,       "mods/sounds/coin.wav" },
+            { SFX_LEVELUP,    "mods/sounds/levelup.wav" },
+            { SFX_PORTAL,     "mods/sounds/portal.wav" },
+            { SFX_SHOOT,      "mods/sounds/shoot.wav" },
+            { SFX_ZAP,        "mods/sounds/zap.wav" },
+            { SFX_BOSS,       "mods/sounds/boss.wav" },
+        };
+        for (int i = 0; i < (int)(sizeof(MAP)/sizeof(MAP[0])); i++) {
+            if (audio_load_wav(g, MAP[i].id, MAP[i].name)) {
+                printf("[audio] WAV externe charge : %s\n", MAP[i].name);
+            }
+        }
+    }
     mods_load(g);
 
     /* initialise la table des touches : evite memcpy depuis NULL au 1er frame */

@@ -1114,6 +1114,9 @@ void  sfx_play(Game *g, SfxId id);
  * et multiplicateur de volume (0..1+). Utilise par les variations
  * contextuelles : low-HP grunt, heavy thump etc. */
 void  sfx_play_ex(Game *g, SfxId id, float pitch, float vol_mul);
+/* Charge un .wav externe pour remplacer le SFX procedural sur le slot id.
+ * Resample auto vers le sample_rate du mixer. Retourne true si OK. */
+bool  audio_load_wav(Game *g, SfxId id, const char *path);
 
 /* settings */
 void  settings_defaults(Settings *s);
