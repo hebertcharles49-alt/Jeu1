@@ -23,6 +23,67 @@ void update_particles(Game *g) {
         p->life -= dt;
         if (p->life <= 0.f) p->alive = false;
     }
+    /* === Particules ambiantes par biome (effet "ciel vivant") ===
+     * Spawn aleatoire autour du joueur dans un rayon visible. Type +
+     * couleur + vecteur de drift dependent du biome courant. */
+    static float ambient_timer = 0.f;
+    ambient_timer += dt;
+    if (ambient_timer < 0.06f) return;
+    ambient_timer = 0.f;
+    if (g->state != GS_RUN) return;
+    int bi = biome_for_floor(g->floor_index);
+    /* spawn area : autour du joueur en world coords (TILE-based) */
+    float px = g->player.x, py = g->player.y;
+    float sx = px + ((rand() % 400) - 200);
+    float sy = py + ((rand() % 250) - 200);
+    uint32_t col;
+    float vx, vy, life, sz;
+    int kind = 0;
+    switch (bi) {
+        case 0: /* Cimetiere : pollen violet drift bas */
+            col = 0x9078A0A0;
+            vx  = ((rand() % 40) - 20) * 0.2f;
+            vy  = 8.f + (rand() % 10);
+            life = 4.0f;
+            sz   = 1.5f;
+            break;
+        case 1: /* Forge : embers oranges qui montent */
+            col = 0xFFA040C0;
+            vx  = ((rand() % 30) - 15) * 0.3f;
+            vy  = -20.f - (rand() % 20);
+            life = 3.5f;
+            sz   = 1.8f;
+            break;
+        case 2: /* Marais : motes vert-bleues legeres */
+            col = 0x80E0A080;
+            vx  = ((rand() % 30) - 15) * 0.4f;
+            vy  = -6.f + ((rand() % 12) - 6);
+            life = 5.0f;
+            sz   = 1.4f;
+            break;
+        case 3: /* Verger : pollen dore + spores */
+            col = 0xFFE060B0;
+            vx  = ((rand() % 50) - 25) * 0.3f;
+            vy  = -10.f + ((rand() % 14) - 7);
+            life = 5.5f;
+            sz   = 1.5f;
+            break;
+        case 4: /* Sanctuaire : flocons blancs */
+            col = 0xE0E0FFD0;
+            vx  = ((rand() % 30) - 15) * 0.3f;
+            vy  = 14.f + (rand() % 10);
+            life = 4.5f;
+            sz   = 1.8f;
+            break;
+        default: /* etage 0 / archimage : motes violet cosmiques */
+            col = 0xA060FFB0;
+            vx  = ((rand() % 30) - 15) * 0.3f;
+            vy  = ((rand() % 30) - 15) * 0.3f;
+            life = 6.0f;
+            sz   = 1.6f;
+            break;
+    }
+    particle_spawn_kind(g, sx, sy, vx, vy, life, col, sz, kind);
 }
 
 /* ---------- PICKUPS ---------- */

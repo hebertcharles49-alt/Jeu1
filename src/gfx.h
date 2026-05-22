@@ -74,11 +74,12 @@ typedef struct GfxCtx {
      * fs_vao : fullscreen quad VBO
      * shaders : bright_prog, blur_prog (H + V via uniform),
      *           composite_prog (scene + bloom + ACES + grading) */
-    GLuint post_fbo[3];          /* 0=bright, 1=blur_a, 2=blur_b */
-    GLuint post_tex[3];          /* color textures matching fbos */
+    GLuint post_fbo[5];          /* 0=bright, 1=blur_a, 2=blur_b, 3=q_a, 4=q_b */
+    GLuint post_tex[5];          /* color textures matching fbos */
     int    post_w, post_h;       /* half-res */
+    int    post_qw, post_qh;     /* quarter-res (wide bloom halo) */
     GLuint fs_vao, fs_vbo;
-    GLuint bright_prog, blur_prog, composite_prog;
+    GLuint bright_prog, blur_prog, composite_prog, sky_prog;
     /* grading uniforms (positionnees par gfx_set_grading depuis le
      * world render). Tint shadows / highlights + exposure. */
     v3     grade_shadow, grade_highlight;
@@ -100,6 +101,7 @@ typedef struct GfxCtx {
     v3 fog_color;
     v3 sky_color;
     v3 player_world_pos;       /* relayee aux billboards via gfx_cube_draw */
+    v3 cam_pos;                /* extraite de la view matrix par gfx_set_camera */
 } GfxCtx;
 
 /* ---------- init / shutdown ---------- */

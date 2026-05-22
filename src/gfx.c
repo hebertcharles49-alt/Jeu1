@@ -329,11 +329,23 @@ static const char *FS_BB =
 "uniform vec3 u_light_dir;\n"
 "uniform vec3 u_player_pos;\n"
 "uniform vec3 u_fog_color;\n"
+"uniform vec3 u_sky_color;\n"
+"uniform vec3 u_cam_pos;\n"
 "void main() {\n"
 "    vec3 n = normalize(v_normal);\n"
 "    vec3 ld = normalize(u_light_dir);\n"
 "    float ndotl = max(dot(n, ld), 0.0);\n"
-"    vec3 col = v_color * (0.40 + 0.60 * ndotl);\n"
+"    vec3 col = v_color * (0.35 + 0.65 * ndotl);\n"
+"    /* hemi ambient depuis le ciel (subtil) */\n"
+"    float hemi = 0.5 + 0.5 * n.y;\n"
+"    col += v_color * u_sky_color * hemi * 0.10;\n"
+"    /* Rim light : fresnel-like, plus marque aux silhouettes.\n"
+"     * Eclaircit les bords avec la couleur du ciel, donne un look\n"
+"     * stylise (les entites se decoupent sur le fond). */\n"
+"    vec3 view_dir = normalize(u_cam_pos - v_world);\n"
+"    float rim = 1.0 - max(dot(n, view_dir), 0.0);\n"
+"    rim = pow(rim, 2.5);\n"
+"    col += u_sky_color * rim * 0.35;\n"
 "    /* fog matche le terrain pour cohesion */\n"
 "    float pd = length(v_world.xz - u_player_pos.xz);\n"
 "    float fog_d = max((pd - 8.0) / 14.0, 0.0);\n"
@@ -419,42 +431,80 @@ static const char *FS_BLUR =
 "    frag = vec4(c, 1.0);\n"
 "}\n";
 
-/* Composite final : scene + bloom additif, ACES tonemap,
- * biome color grading (shadow/highlight tint), vignette douce. */
+/* Composite final : scene + 2 niveaux de bloom (large + serre),
+ * ACES, biome grading, vignette renforcee, aberration chromatique,
+ * film grain. La couche "lab" qui pousse le rendu en cinematique. */
 static const char *FS_COMPOSITE =
 "#version 330 core\n"
 "in vec2 v_uv;\n"
 "out vec4 frag;\n"
 "uniform sampler2D u_scene;\n"
 "uniform sampler2D u_bloom;\n"
+"uniform sampler2D u_bloom_wide;\n"
 "uniform vec3 u_shadow_tint;\n"
 "uniform vec3 u_highlight_tint;\n"
 "uniform float u_exposure;\n"
 "uniform float u_bloom_intensity;\n"
+"uniform float u_time;\n"
 "vec3 aces(vec3 x) {\n"
-"    /* Narkowicz ACES approximation */\n"
 "    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;\n"
 "    return clamp((x * (a*x + b)) / (x * (c*x + d) + e), 0.0, 1.0);\n"
 "}\n"
+"/* hash 2D pour le grain */\n"
+"float hash21(vec2 p) {\n"
+"    p = fract(p * vec2(123.34, 456.21));\n"
+"    p += dot(p, p + 45.32);\n"
+"    return fract(p.x * p.y);\n"
+"}\n"
 "void main() {\n"
-"    vec3 scn = texture(u_scene, v_uv).rgb;\n"
-"    vec3 blm = texture(u_bloom, v_uv).rgb;\n"
-"    /* additif : le bloom rehausse les sources lumineuses */\n"
-"    vec3 c = scn + blm * u_bloom_intensity;\n"
-"    /* exposure puis tonemap filmique */\n"
+"    /* Aberration chromatique : decale legerement R et B depuis le\n"
+"     * centre. Plus forte aux coins via la distance au centre. */\n"
+"    vec2 d = v_uv - 0.5;\n"
+"    float dist2 = dot(d, d);\n"
+"    float ca = dist2 * 0.012;\n"
+"    vec2 offs = normalize(d + vec2(0.0001, 0.0)) * ca;\n"
+"    vec3 scn;\n"
+"    scn.r = texture(u_scene, v_uv + offs).r;\n"
+"    scn.g = texture(u_scene, v_uv         ).g;\n"
+"    scn.b = texture(u_scene, v_uv - offs).b;\n"
+"    /* 2 niveaux de bloom : serre (precis) + large (halo) */\n"
+"    vec3 bl1 = texture(u_bloom,      v_uv).rgb;\n"
+"    vec3 bl2 = texture(u_bloom_wide, v_uv).rgb;\n"
+"    vec3 c = scn + bl1 * u_bloom_intensity + bl2 * (u_bloom_intensity * 0.55);\n"
+"    /* exposure -> ACES */\n"
 "    c *= u_exposure;\n"
 "    c = aces(c);\n"
-"    /* color grading par biome : decompose en ombre/highlight selon\n"
-"     * luminance puis re-tinte. Subtil pour ne pas casser les couleurs\n"
-"     * des elements / particules. */\n"
+"    /* color grading par biome (lum-based mix) */\n"
 "    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
 "    vec3 shadow = c * u_shadow_tint;\n"
 "    vec3 highlight = c * u_highlight_tint;\n"
 "    c = mix(shadow, highlight, lum);\n"
-"    /* vignette douce : assombrit les coins (~10%) */\n"
-"    vec2 d = v_uv - 0.5;\n"
-"    float vig = 1.0 - dot(d, d) * 0.6;\n"
+"    /* contrast lift : sigmoid douce pour pousser noir/blanc */\n"
+"    c = mix(c, smoothstep(0.0, 1.0, c), 0.15);\n"
+"    /* vignette plus marquee (-20% aux coins) */\n"
+"    float vig = 1.0 - dot(d, d) * 1.05;\n"
+"    vig = clamp(vig, 0.0, 1.0);\n"
 "    c *= vig;\n"
+"    /* film grain anime, modere */\n"
+"    float g = hash21(v_uv * 1024.0 + u_time * 60.0);\n"
+"    c += (g - 0.5) * 0.025;\n"
+"    frag = vec4(c, 1.0);\n"
+"}\n";
+
+/* Sky gradient : remplit le FBO avec un degrade vertical fog -> sky
+ * avant le terrain. Donne un "horizon" subtle au lieu d'un fond plat. */
+static const char *FS_SKY =
+"#version 330 core\n"
+"in vec2 v_uv;\n"
+"out vec4 frag;\n"
+"uniform vec3 u_fog_color;\n"
+"uniform vec3 u_sky_color;\n"
+"void main() {\n"
+"    /* v_uv.y = 0 en haut, 1 en bas (post triangle).\n"
+"     * sky en haut, fog en bas, mix non lineaire. */\n"
+"    float t = 1.0 - v_uv.y;\n"
+"    t = smoothstep(0.0, 1.0, t);\n"
+"    vec3 c = mix(u_fog_color, u_sky_color * 1.15, t);\n"
 "    frag = vec4(c, 1.0);\n"
 "}\n";
 
@@ -694,8 +744,10 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     gc->bright_prog    = make_program(VS_POST, FS_BRIGHT);
     gc->blur_prog      = make_program(VS_POST, FS_BLUR);
     gc->composite_prog = make_program(VS_POST, FS_COMPOSITE);
+    gc->sky_prog       = make_program(VS_POST, FS_SKY);
     if (!gc->terr_prog || !gc->bb_prog || !gc->ui_prog ||
-        !gc->bright_prog || !gc->blur_prog || !gc->composite_prog) {
+        !gc->bright_prog || !gc->blur_prog || !gc->composite_prog ||
+        !gc->sky_prog) {
         fprintf(stderr, "[gfx] shader programs absents\n");
         return false;
     }
@@ -704,6 +756,9 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     gc->grade_highlight = v3_make(1.08f, 1.02f, 0.92f);
     gc->grade_exposure  = 1.10f;
     gc->bloom_intensity = 0.55f;
+    /* atmosphere defaults (nuit froide), override par render_world */
+    gc->fog_color = v3_make(0.06f, 0.05f, 0.10f);
+    gc->sky_color = v3_make(0.30f, 0.32f, 0.45f);
 
     /* terrain VBO/VAO (donne plus tard via gfx_terrain_upload) */
     pglGenVertexArrays(1, &gc->terr_vao);
@@ -745,17 +800,24 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     }
     pglBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    /* === POST-PROCESS : 3 FBOs (bright + ping-pong blur) demi-res === */
-    gc->post_w = fbo_w / 2;
-    gc->post_h = fbo_h / 2;
-    pglGenFramebuffers(3, gc->post_fbo);
-    glGenTextures(3, gc->post_tex);
-    for (int i = 0; i < 3; i++) {
+    /* === POST-PROCESS : 5 FBOs ===
+     *   0=bright (half-res)   1=blur_a (half)    2=blur_b (half)
+     *   3=qblur_a (quart)     4=qblur_b (quart)
+     * Le bloom large utilise les 2 FBOs quart-res pour un halo plus
+     * spread (style "lens dirty"). */
+    gc->post_w  = fbo_w / 2;
+    gc->post_h  = fbo_h / 2;
+    gc->post_qw = fbo_w / 4;
+    gc->post_qh = fbo_h / 4;
+    pglGenFramebuffers(5, gc->post_fbo);
+    glGenTextures(5, gc->post_tex);
+    for (int i = 0; i < 5; i++) {
+        int pw = (i < 3) ? gc->post_w  : gc->post_qw;
+        int ph = (i < 3) ? gc->post_h  : gc->post_qh;
         pglBindFramebuffer(GL_FRAMEBUFFER, gc->post_fbo[i]);
         glBindTexture(GL_TEXTURE_2D, gc->post_tex[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, gc->post_w, gc->post_h, 0,
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pw, ph, 0,
                      GL_RGB, GL_UNSIGNED_BYTE, NULL);
-        /* LINEAR : pour que le blur gaussien profite de l'interpolation */
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -801,13 +863,14 @@ void gfx_shutdown(GfxCtx *gc) {
     if (gc->fbo_color) glDeleteTextures(1, &gc->fbo_color);
     if (gc->fbo_depth) pglDeleteRenderbuffers(1, &gc->fbo_depth);
     if (gc->fbo)       pglDeleteFramebuffers(1, &gc->fbo);
-    /* post chain */
-    if (gc->post_tex[0]) glDeleteTextures(3, gc->post_tex);
-    if (gc->post_fbo[0]) pglDeleteFramebuffers(3, gc->post_fbo);
+    /* post chain (5 FBOs : half + quart) */
+    if (gc->post_tex[0]) glDeleteTextures(5, gc->post_tex);
+    if (gc->post_fbo[0]) pglDeleteFramebuffers(5, gc->post_fbo);
     if (gc->fs_vao)      pglDeleteVertexArrays(1, &gc->fs_vao);
     if (gc->bright_prog)    pglDeleteProgram(gc->bright_prog);
     if (gc->blur_prog)      pglDeleteProgram(gc->blur_prog);
     if (gc->composite_prog) pglDeleteProgram(gc->composite_prog);
+    if (gc->sky_prog)       pglDeleteProgram(gc->sky_prog);
     if (gc->gl_ctx) SDL_GL_DeleteContext(gc->gl_ctx);
 }
 
@@ -815,8 +878,17 @@ void gfx_frame_begin(GfxCtx *gc) {
     /* bind FBO offscreen */
     pglBindFramebuffer(GL_FRAMEBUFFER, gc->fbo);
     glViewport(0, 0, gc->fbo_w, gc->fbo_h);
-    glClearColor(0.025f, 0.018f, 0.045f, 1.f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    /* Sky gradient en pass full-screen (remplace le clear color flat).
+     * Donne un horizon stylise fog-sky meme dans les arenes ouvertes. */
+    glDisable(GL_DEPTH_TEST);
+    pglUseProgram(gc->sky_prog);
+    pglUniform3f(pglGetUniformLocation(gc->sky_prog, "u_fog_color"),
+                 gc->fog_color.x, gc->fog_color.y, gc->fog_color.z);
+    pglUniform3f(pglGetUniformLocation(gc->sky_prog, "u_sky_color"),
+                 gc->sky_color.x, gc->sky_color.y, gc->sky_color.z);
+    pglBindVertexArray(gc->fs_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
     glEnable(GL_DEPTH_TEST);
 }
 
@@ -853,10 +925,12 @@ static void post_draw_fullscreen(GfxCtx *gc) {
 
 void gfx_frame_end(GfxCtx *gc) {
     /* === POST-PROCESS chain ===
-     * 1. bright pass : scene -> post[0] (half-res)
-     * 2. blur H : post[0] -> post[1]
-     * 3. blur V : post[1] -> post[2]
-     * 4. composite : scene + post[2] -> backbuffer (ACES + grading) */
+     * 1. bright pass : scene -> post[0] (half)
+     * 2. blur H+V : post[0] -> post[1] -> post[2] (bloom serre, half)
+     * 3. downsample post[2] -> post[3] (quart) puis blur H+V -> post[4]
+     *    -> post[3] (bloom large, halo lens dirty)
+     * 4. composite : scene + bloom_serre (post[2]) + bloom_large (post[3])
+     *    + ACES + grading + chromatic ab + grain + vignette */
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
@@ -869,9 +943,8 @@ void gfx_frame_end(GfxCtx *gc) {
     pglUniform1i(pglGetUniformLocation(gc->bright_prog, "u_scene"), 0);
     post_draw_fullscreen(gc);
 
-    /* Pass 2 : blur H */
+    /* Pass 2a : blur H half */
     pglBindFramebuffer(GL_FRAMEBUFFER, gc->post_fbo[1]);
-    glViewport(0, 0, gc->post_w, gc->post_h);
     pglUseProgram(gc->blur_prog);
     glBindTexture(GL_TEXTURE_2D, gc->post_tex[0]);
     pglUniform1i(pglGetUniformLocation(gc->blur_prog, "u_tex"), 0);
@@ -879,15 +952,30 @@ void gfx_frame_end(GfxCtx *gc) {
                  1.0f / (float)gc->post_w, 0.0f);
     post_draw_fullscreen(gc);
 
-    /* Pass 3 : blur V */
+    /* Pass 2b : blur V half */
     pglBindFramebuffer(GL_FRAMEBUFFER, gc->post_fbo[2]);
-    glViewport(0, 0, gc->post_w, gc->post_h);
     glBindTexture(GL_TEXTURE_2D, gc->post_tex[1]);
     pglUniform2f(pglGetUniformLocation(gc->blur_prog, "u_direction"),
                  0.0f, 1.0f / (float)gc->post_h);
     post_draw_fullscreen(gc);
 
-    /* Pass 4 : composite vers backbuffer */
+    /* Pass 3a : downsample vers quart-res (juste blur H avec direction
+     * negligeable, fait du LINEAR sampling) */
+    pglBindFramebuffer(GL_FRAMEBUFFER, gc->post_fbo[4]);
+    glViewport(0, 0, gc->post_qw, gc->post_qh);
+    glBindTexture(GL_TEXTURE_2D, gc->post_tex[2]);
+    pglUniform2f(pglGetUniformLocation(gc->blur_prog, "u_direction"),
+                 1.0f / (float)gc->post_qw, 0.0f);
+    post_draw_fullscreen(gc);
+
+    /* Pass 3b : blur V quart */
+    pglBindFramebuffer(GL_FRAMEBUFFER, gc->post_fbo[3]);
+    glBindTexture(GL_TEXTURE_2D, gc->post_tex[4]);
+    pglUniform2f(pglGetUniformLocation(gc->blur_prog, "u_direction"),
+                 0.0f, 1.0f / (float)gc->post_qh);
+    post_draw_fullscreen(gc);
+
+    /* Pass 4 : composite final vers backbuffer */
     pglBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, gc->win_w, gc->win_h);
     glClearColor(0, 0, 0, 1);
@@ -899,6 +987,9 @@ void gfx_frame_end(GfxCtx *gc) {
     pglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, gc->post_tex[2]);
     pglUniform1i(pglGetUniformLocation(gc->composite_prog, "u_bloom"), 1);
+    pglActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, gc->post_tex[3]);
+    pglUniform1i(pglGetUniformLocation(gc->composite_prog, "u_bloom_wide"), 2);
     pglUniform3f(pglGetUniformLocation(gc->composite_prog, "u_shadow_tint"),
                  gc->grade_shadow.x, gc->grade_shadow.y, gc->grade_shadow.z);
     pglUniform3f(pglGetUniformLocation(gc->composite_prog, "u_highlight_tint"),
@@ -907,6 +998,8 @@ void gfx_frame_end(GfxCtx *gc) {
                  gc->grade_exposure);
     pglUniform1f(pglGetUniformLocation(gc->composite_prog, "u_bloom_intensity"),
                  gc->bloom_intensity);
+    pglUniform1f(pglGetUniformLocation(gc->composite_prog, "u_time"),
+                 (float)((double)SDL_GetTicks() / 1000.0));
     post_draw_fullscreen(gc);
     pglActiveTexture(GL_TEXTURE0);
 }
@@ -914,6 +1007,17 @@ void gfx_frame_end(GfxCtx *gc) {
 void gfx_set_camera(GfxCtx *gc, m4 view, m4 proj) {
     gc->view = view;
     gc->proj = proj;
+    /* Extrait la position camera depuis l'inverse de la view matrix
+     * (necessaire pour le rim light + futures features world-space).
+     * Pour une lookAt, la translation est -R*T avec R rotation et T
+     * position camera, donc T = -R^T * view.translation. */
+    float r00 = view.m[0],  r10 = view.m[1],  r20 = view.m[2];
+    float r01 = view.m[4],  r11 = view.m[5],  r21 = view.m[6];
+    float r02 = view.m[8],  r12 = view.m[9],  r22 = view.m[10];
+    float tx  = view.m[12], ty  = view.m[13], tz  = view.m[14];
+    gc->cam_pos.x = -(r00 * tx + r10 * ty + r20 * tz);
+    gc->cam_pos.y = -(r01 * tx + r11 * ty + r21 * tz);
+    gc->cam_pos.z = -(r02 * tx + r12 * ty + r22 * tz);
 }
 
 /* ============================================================
@@ -974,6 +1078,10 @@ void gfx_cube_draw(GfxCtx *gc, m4 model, float r, float g, float b) {
     pglUniform3f(loc, gc->player_world_pos.x, gc->player_world_pos.y, gc->player_world_pos.z);
     loc = pglGetUniformLocation(gc->bb_prog, "u_fog_color");
     pglUniform3f(loc, gc->fog_color.x, gc->fog_color.y, gc->fog_color.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_sky_color");
+    pglUniform3f(loc, gc->sky_color.x, gc->sky_color.y, gc->sky_color.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_cam_pos");
+    pglUniform3f(loc, gc->cam_pos.x, gc->cam_pos.y, gc->cam_pos.z);
 
     pglBindVertexArray(gc->cube_vao);
     glDrawArrays(GL_TRIANGLES, 0, gc->cube_vert_count);
