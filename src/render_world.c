@@ -89,6 +89,42 @@ MAYBE_UNUSED static bool tile_is_floor(TileKind t) {
     return t != T_VOID && t != T_WALL;
 }
 
+/* === Hash deterministe par tile pour la variation procedurale ===
+ * Renvoie un float dans [0, 1) stable pour un couple (x, y, salt).
+ * Utilise pour : jitter hauteur murs, color noise, distribution
+ * vegetation, presence debris/dommages. Pas du Perlin smooth mais
+ * suffisant pour casser l'uniformite des cubes voxel. */
+static float tile_hash01(int x, int y, int salt) {
+    uint32_t h = (uint32_t)(x * 0x1B873593) ^
+                 (uint32_t)(y * 0xCC9E2D51) ^
+                 (uint32_t)(salt * 0xE6546B64);
+    h = (h ^ (h >> 13)) * 0x5BD1E995;
+    h ^= h >> 15;
+    return (float)(h & 0xFFFFFF) / (float)0x1000000;
+}
+
+/* Pousse un mini-cube quelconque dans le terrain mesh (utilise pour
+ * debris, vegetation, chips). Verite : 6 faces, normales standard. */
+static void mesh_push_box(float cx, float cy, float cz,
+                          float sx, float sy, float sz,
+                          float r, float g, float b) {
+    float x0 = cx - sx*0.5f, x1 = cx + sx*0.5f;
+    float y0 = cy - sy*0.5f, y1 = cy + sy*0.5f;
+    float z0 = cz - sz*0.5f, z1 = cz + sz*0.5f;
+    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
+                   v3_make(1,0,0), r,g,b);
+    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x0,y1,z1), v3_make(x0,y1,z0), v3_make(x0,y0,z0),
+                   v3_make(-1,0,0), r,g,b);
+    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x1,y0,z1), v3_make(x1,y1,z1), v3_make(x0,y1,z1),
+                   v3_make(0,0,1), r*0.92f,g*0.92f,b*0.92f);
+    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x0,y0,z0), v3_make(x0,y1,z0), v3_make(x1,y1,z0),
+                   v3_make(0,0,-1), r*1.08f,g*1.08f,b*1.08f);
+    mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
+                   v3_make(0,1,0), r*1.10f,g*1.10f,b*1.10f);
+    mesh_push_quad(v3_make(x0,y0,z0), v3_make(x1,y0,z0), v3_make(x1,y0,z1), v3_make(x0,y0,z1),
+                   v3_make(0,-1,0), r*0.75f,g*0.75f,b*0.75f);
+}
+
 /* Tint biome applique lors du build du mesh. Set par build_dungeon_mesh,
  * lu par emit_wall_column / emit_floor_top via tile/wall_color_*. */
 static float s_biome_r = 1.f, s_biome_g = 1.f, s_biome_b = 1.f;
@@ -97,13 +133,29 @@ static float s_wall_tint = 1.f;
 static float s_wall_height = 0.f;       /* override de hauteur ; 0 = WALL_H */
 
 static void emit_wall_column(float x, float z) {
+    int ix = (int)x, iz = (int)z;
+    /* === jitter procedural par cube ===
+     * - hauteur : +/-0.15 pour casser l'alignement parfait
+     * - color : tint ±5% sur RGB indep pour casser l'uniformite */
+    float h_jitter = (tile_hash01(ix, iz, 1) - 0.5f) * 0.30f;
+    float c_jitter_r = 1.f + (tile_hash01(ix, iz, 2) - 0.5f) * 0.10f;
+    float c_jitter_g = 1.f + (tile_hash01(ix, iz, 3) - 0.5f) * 0.10f;
+    float c_jitter_b = 1.f + (tile_hash01(ix, iz, 4) - 0.5f) * 0.10f;
+    float dmg_roll = tile_hash01(ix, iz, 7);  /* 10% chance "abime" */
+    bool damaged = (dmg_roll < 0.10f);
+
     float x0 = x, x1 = x + 1.f;
     float z0 = z, z1 = z + 1.f;
-    float y0 = 0.f, y1 = (s_wall_height > 0.f) ? s_wall_height : WALL_H;
+    float base_h = (s_wall_height > 0.f) ? s_wall_height : WALL_H;
+    float y0 = 0.f, y1 = base_h + h_jitter;
+    /* murs abimes : plus bas (60-80% hauteur) */
+    if (damaged) y1 = base_h * (0.60f + dmg_roll * 2.0f);
+    if (y1 < 0.40f) y1 = 0.40f;
+
     float r, g, b; wall_color_side(&r, &g, &b);
-    r *= s_biome_r * s_wall_tint;
-    g *= s_biome_g * s_wall_tint;
-    b *= s_biome_b * s_wall_tint;
+    r *= s_biome_r * s_wall_tint * c_jitter_r;
+    g *= s_biome_g * s_wall_tint * c_jitter_g;
+    b *= s_biome_b * s_wall_tint * c_jitter_b;
     /* +X face */
     mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
                    v3_make(1,0,0), r,g,b);
@@ -118,34 +170,178 @@ static void emit_wall_column(float x, float z) {
                    v3_make(0,0,-1), r*1.1f,g*1.1f,b*1.1f);
     /* top (lit) */
     float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
-    tr *= s_biome_r * s_wall_tint;
-    tg *= s_biome_g * s_wall_tint;
-    tb *= s_biome_b * s_wall_tint;
+    tr *= s_biome_r * s_wall_tint * c_jitter_r;
+    tg *= s_biome_g * s_wall_tint * c_jitter_g;
+    tb *= s_biome_b * s_wall_tint * c_jitter_b;
     mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
                    v3_make(0,1,0), tr,tg,tb);
+
+    /* === Cubes additionnels : casser la silhouette === */
+    if (damaged) {
+        /* 1-2 morceaux casses sur le dessus du mur (chips) */
+        float chip_h = (base_h - y1) + 0.05f + tile_hash01(ix, iz, 8) * 0.20f;
+        float chip_w = 0.35f + tile_hash01(ix, iz, 9) * 0.25f;
+        float chip_x = x + 0.20f + tile_hash01(ix, iz, 10) * 0.40f;
+        float chip_z = z + 0.20f + tile_hash01(ix, iz, 11) * 0.40f;
+        mesh_push_box(chip_x, y1 + chip_h * 0.5f, chip_z,
+                      chip_w, chip_h, chip_w,
+                      r * 0.85f, g * 0.85f, b * 0.85f);
+        /* debris au pied du mur (4 cotes) */
+        for (int k = 0; k < 2; k++) {
+            float roll = tile_hash01(ix, iz, 20 + k);
+            if (roll > 0.6f) continue;
+            float off = 0.55f + tile_hash01(ix, iz, 30 + k) * 0.30f;
+            int side = (int)(tile_hash01(ix, iz, 40 + k) * 4.f);
+            float dx = (side == 0) ? -off : (side == 1) ? off : 0.f;
+            float dz = (side == 2) ? -off : (side == 3) ? off : 0.f;
+            float dbg_sz = 0.12f + tile_hash01(ix, iz, 50 + k) * 0.10f;
+            mesh_push_box(x + 0.5f + dx, dbg_sz * 0.5f, z + 0.5f + dz,
+                          dbg_sz, dbg_sz, dbg_sz,
+                          r * 0.7f, g * 0.7f, b * 0.7f);
+        }
+    } else if (tile_hash01(ix, iz, 5) < 0.18f) {
+        /* mur intact : 18% chance d'un petit debris contre le mur */
+        float side_pick = tile_hash01(ix, iz, 6);
+        float dbg_x = x + 0.5f + (side_pick < 0.25f ? -0.55f :
+                                   side_pick < 0.5f  ?  0.55f : 0.f);
+        float dbg_z = z + 0.5f + (side_pick >= 0.5f && side_pick < 0.75f ? -0.55f :
+                                   side_pick >= 0.75f ? 0.55f : 0.f);
+        float sz_d = 0.14f + tile_hash01(ix, iz, 12) * 0.08f;
+        mesh_push_box(dbg_x, sz_d * 0.5f, dbg_z, sz_d, sz_d, sz_d,
+                      r * 0.75f, g * 0.75f, b * 0.75f);
+    }
 }
 
+/* biome courant pour decoration vegetation (set par build_dungeon_mesh) */
+static int s_decor_biome = -1;
+
 static void emit_floor_top(float x, float z, TileKind t) {
+    int ix = (int)x, iz = (int)z;
     float x0 = x, x1 = x + 1.f;
     float z0 = z, z1 = z + 1.f;
+    /* micro-jitter floor color (perturb organique) */
+    float floor_jitter = (tile_hash01(ix, iz, 100) - 0.5f) * 0.10f;
     float y = 0.f;
     float r, g, b; tile_color_top(t, &r, &g, &b);
-    /* tint biome : on attenue moins sur les tiles "speciales" (torche,
-     * rune, blood) pour qu elles restent reconnaissables. */
     float k = (t == T_FLOOR) ? 1.f : 0.5f;
     r *= (1.f - k) + k * s_biome_r;
     g *= (1.f - k) + k * s_biome_g;
     b *= (1.f - k) + k * s_biome_b;
+    r = r + floor_jitter * 0.5f * r;
+    g = g + floor_jitter * 0.5f * g;
+    b = b + floor_jitter * 0.5f * b;
     mesh_push_quad(v3_make(x0,y,z0), v3_make(x0,y,z1), v3_make(x1,y,z1), v3_make(x1,y,z0),
                    v3_make(0,1,0), r,g,b);
+
+    /* === Decoration vegetation / debris sur floor ===
+     * Tile FLOOR seulement (pas RUNE/TORCH/BLOOD). Pas pres des bords
+     * de map (eviter clipping). Probabilite ~10-15% par tile. */
+    if (t != T_FLOOR) return;
+    if (ix <= 1 || iz <= 1 || ix >= MAP_W - 2 || iz >= MAP_H - 2) return;
+    float decor_roll = tile_hash01(ix, iz, 200);
+    if (decor_roll > 0.15f) return;
+    /* position aleatoire dans la tile, centre + offset */
+    float dx = 0.3f + tile_hash01(ix, iz, 201) * 0.4f;
+    float dz = 0.3f + tile_hash01(ix, iz, 202) * 0.4f;
+    float sub = tile_hash01(ix, iz, 203);
+    float wx = x + dx, wz = z + dz;
+    switch (s_decor_biome) {
+        case 0: /* Cimetiere : ossements blanchatres + crane (petit cube) */
+            if (sub < 0.5f) {
+                /* 3 mini-os couches en travers */
+                for (int o = 0; o < 3; o++) {
+                    float ox = (o - 1) * 0.10f;
+                    mesh_push_box(wx + ox, 0.04f, wz,
+                                  0.08f, 0.06f, 0.22f,
+                                  0.85f, 0.82f, 0.72f);
+                }
+            } else {
+                /* crane / petit dome */
+                mesh_push_box(wx, 0.10f, wz, 0.16f, 0.16f, 0.16f,
+                              0.90f, 0.86f, 0.75f);
+            }
+            break;
+        case 1: { /* Forge : tas de charbon noir + brasero */
+            mesh_push_box(wx, 0.06f, wz, 0.30f, 0.12f, 0.30f,
+                          0.18f, 0.12f, 0.10f);
+            if (sub < 0.4f) {
+                /* braise rougeoyante */
+                mesh_push_box(wx, 0.14f, wz, 0.12f, 0.06f, 0.12f,
+                              1.0f, 0.55f, 0.20f);
+            }
+            break;
+        }
+        case 2: { /* Marais : herbes hautes + champignons */
+            if (sub < 0.5f) {
+                /* champignon : pied + chapeau */
+                mesh_push_box(wx, 0.10f, wz, 0.07f, 0.18f, 0.07f,
+                              0.85f, 0.82f, 0.70f);
+                mesh_push_box(wx, 0.22f, wz, 0.20f, 0.10f, 0.20f,
+                              0.60f, 0.25f, 0.20f);
+            } else {
+                /* 3 touffes d'herbe haute */
+                for (int o = 0; o < 3; o++) {
+                    float ox = (o - 1) * 0.10f;
+                    float h = 0.20f + tile_hash01(ix, iz, 210 + o) * 0.12f;
+                    mesh_push_box(wx + ox, h * 0.5f, wz, 0.05f, h, 0.05f,
+                                  0.35f, 0.55f, 0.30f);
+                }
+            }
+            break;
+        }
+        case 3: { /* Verger : fleurs + fougeres + lierres */
+            if (sub < 0.4f) {
+                /* fougere : tige + couronne verte */
+                mesh_push_box(wx, 0.18f, wz, 0.06f, 0.30f, 0.06f,
+                              0.30f, 0.50f, 0.25f);
+                mesh_push_box(wx, 0.34f, wz, 0.22f, 0.10f, 0.22f,
+                              0.45f, 0.75f, 0.35f);
+            } else if (sub < 0.75f) {
+                /* fleur : tige + bouton */
+                mesh_push_box(wx, 0.10f, wz, 0.04f, 0.20f, 0.04f,
+                              0.40f, 0.55f, 0.30f);
+                mesh_push_box(wx, 0.22f, wz, 0.10f, 0.08f, 0.10f,
+                              0.95f, 0.65f, 0.25f);
+            } else {
+                /* champignon dore */
+                mesh_push_box(wx, 0.08f, wz, 0.06f, 0.14f, 0.06f,
+                              0.95f, 0.85f, 0.45f);
+                mesh_push_box(wx, 0.18f, wz, 0.18f, 0.08f, 0.18f,
+                              0.95f, 0.85f, 0.20f);
+            }
+            break;
+        }
+        case 4: /* Sanctuaire : cristaux + pierres tombees */
+            if (sub < 0.5f) {
+                /* cristal vertical bleu pale */
+                mesh_push_box(wx, 0.18f, wz, 0.10f, 0.32f, 0.10f,
+                              0.75f, 0.85f, 1.00f);
+                mesh_push_box(wx, 0.36f, wz, 0.05f, 0.10f, 0.05f,
+                              1.00f, 1.00f, 1.00f);
+            } else {
+                /* pierre tombee plate */
+                mesh_push_box(wx, 0.04f, wz, 0.30f, 0.06f, 0.20f,
+                              0.85f, 0.85f, 0.92f);
+            }
+            break;
+        default: /* HUB / arene archimage : motes cosmiques violet */
+            if (sub < 0.5f) {
+                mesh_push_box(wx, 0.10f, wz, 0.08f, 0.18f, 0.08f,
+                              0.40f, 0.20f, 0.60f);
+                mesh_push_box(wx, 0.22f, wz, 0.06f, 0.06f, 0.06f,
+                              0.85f, 0.55f, 1.00f);
+            }
+            break;
+    }
 }
 
 static void build_dungeon_mesh(Game *g) {
     s_mesh_count = 0;
     Dungeon *d = &g->dungeon;
-    /* sync tint biome avant de pousser les quads */
+    /* sync tint biome + decor biome avant de pousser les quads */
     biome_tint(biome_for_floor(g->floor_index),
                &s_biome_r, &s_biome_g, &s_biome_b);
+    s_decor_biome = (g->state == GS_RUN) ? biome_for_floor(g->floor_index) : -1;
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++) {
             TileKind t = d->tiles[y][x];
