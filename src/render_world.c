@@ -2933,15 +2933,27 @@ static void draw_fairy_3d(Game *g, Fairy *f) {
 }
 
 static void draw_particles_3d(Game *g) {
+    /* === Particules : sparkles billboard additifs (style Valheim) ===
+     * Au lieu de cubes solides, chaque particule est un quad cam-facing
+     * avec gradient circulaire alpha. Additif -> les zones denses
+     * (torches, magie, kills) s'eclaircissent comme des paillettes. */
     for (int i = 0; i < MAX_PARTICLES; i++) {
         Particle *p = &g->particles[i];
         if (!p->alive) continue;
         uint32_t c = p->color;
-        float r = ((c>>24)&0xFF)/255.f, gg = ((c>>16)&0xFF)/255.f, b = ((c>>8)&0xFF)/255.f;
+        float r = ((c>>24)&0xFF)/255.f;
+        float gg = ((c>>16)&0xFF)/255.f;
+        float b = ((c>>8)&0xFF)/255.f;
+        float a = ((c) & 0xFF) / 255.f;
+        if (a < 0.05f) a = 0.5f;
+        /* fade out avec la life restante (life ratio) */
+        float life_ratio = (p->life_max > 0.f) ? (p->life / p->life_max) : 1.f;
+        if (life_ratio > 1.f) life_ratio = 1.f;
+        a *= life_ratio;
         v3 pos = v3_make(p->x / TILE, 0.5f, p->y / TILE);
-        float s = (p->size + 1.f) / TILE * 1.5f;
-        if (s < 0.05f) s = 0.05f;
-        gfx_box_draw(g->renderer, pos, v3_make(s, s, s), r, gg, b);
+        float s = (p->size + 0.8f) / TILE * 1.8f;
+        if (s < 0.06f) s = 0.06f;
+        gfx_sparkle_draw(g->renderer, pos, s, r, gg, b, a);
     }
 }
 

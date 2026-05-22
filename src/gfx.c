@@ -491,6 +491,44 @@ static const char *FS_COMPOSITE =
 "    frag = vec4(c, 1.0);\n"
 "}\n";
 
+/* === SPARKLE shader === Quad billboard cam-facing, gradient
+ * circulaire en alpha pour creer le look "paillette additive" Valheim.
+ * VS : prend un quad [-0.5,0.5] et l'oriente face camera + scale + translate.
+ * FS : alpha = smoothstep(1.0, 0.2, length(uv)) * intensity. */
+static const char *VS_SPARKLE =
+"#version 330 core\n"
+"layout (location = 0) in vec2 a_quad;\n"
+"uniform mat4 u_view;\n"
+"uniform mat4 u_proj;\n"
+"uniform vec3 u_pos;\n"
+"uniform float u_size;\n"
+"out vec2 v_uv;\n"
+"void main() {\n"
+"    /* extrait right / up de la view matrix (lignes 0 et 1) */\n"
+"    vec3 right = vec3(u_view[0][0], u_view[1][0], u_view[2][0]);\n"
+"    vec3 up    = vec3(u_view[0][1], u_view[1][1], u_view[2][1]);\n"
+"    vec3 world = u_pos + (right * a_quad.x + up * a_quad.y) * u_size;\n"
+"    v_uv = a_quad * 2.0;\n"
+"    gl_Position = u_proj * u_view * vec4(world, 1.0);\n"
+"}\n";
+
+static const char *FS_SPARKLE =
+"#version 330 core\n"
+"in vec2 v_uv;\n"
+"out vec4 frag;\n"
+"uniform vec3 u_color;\n"
+"uniform float u_alpha;\n"
+"void main() {\n"
+"    float d = length(v_uv);\n"
+"    /* coeur brillant + falloff smoothstep */\n"
+"    float core = smoothstep(0.0, 0.3, 1.0 - d);\n"
+"    float halo = smoothstep(0.0, 1.0, 1.0 - d);\n"
+"    float a = (core * 0.7 + halo * 0.3) * u_alpha;\n"
+"    /* coeur plus brillant que la couleur */\n"
+"    vec3 col = u_color + vec3(core * 0.5);\n"
+"    frag = vec4(col, a);\n"
+"}\n";
+
 /* Sky gradient : remplit le FBO avec un degrade vertical fog -> sky
  * avant le terrain. Donne un "horizon" subtle au lieu d'un fond plat. */
 static const char *FS_SKY =
@@ -745,6 +783,7 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     gc->blur_prog      = make_program(VS_POST, FS_BLUR);
     gc->composite_prog = make_program(VS_POST, FS_COMPOSITE);
     gc->sky_prog       = make_program(VS_POST, FS_SKY);
+    gc->sparkle_prog   = make_program(VS_SPARKLE, FS_SPARKLE);
     if (!gc->terr_prog || !gc->bb_prog || !gc->ui_prog ||
         !gc->bright_prog || !gc->blur_prog || !gc->composite_prog ||
         !gc->sky_prog) {
@@ -920,6 +959,24 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
         pglEnableVertexAttribArray(0); pglEnableVertexAttribArray(1); pglEnableVertexAttribArray(2);
         gc->cone_vert_count = N * 6;
     }
+    /* === Sparkle quad : 6 verts (2 triangles), unit space [-0.5, 0.5] === */
+    {
+        static const float Q[6 * 2] = {
+            -0.5f, -0.5f,
+             0.5f, -0.5f,
+             0.5f,  0.5f,
+            -0.5f, -0.5f,
+             0.5f,  0.5f,
+            -0.5f,  0.5f,
+        };
+        pglGenVertexArrays(1, &gc->sparkle_vao);
+        pglGenBuffers(1, &gc->sparkle_vbo);
+        pglBindVertexArray(gc->sparkle_vao);
+        pglBindBuffer(GL_ARRAY_BUFFER, gc->sparkle_vbo);
+        pglBufferData(GL_ARRAY_BUFFER, sizeof(Q), Q, GL_STATIC_DRAW);
+        pglVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (const void*)0);
+        pglEnableVertexAttribArray(0);
+    }
     ui_init(gc);
 
     /* offscreen FBO pour pixel-art look */
@@ -1009,6 +1066,9 @@ void gfx_shutdown(GfxCtx *gc) {
     if (gc->oct_vbo)   pglDeleteBuffers(1, &gc->oct_vbo);
     if (gc->cone_vao)  pglDeleteVertexArrays(1, &gc->cone_vao);
     if (gc->cone_vbo)  pglDeleteBuffers(1, &gc->cone_vbo);
+    if (gc->sparkle_vao) pglDeleteVertexArrays(1, &gc->sparkle_vao);
+    if (gc->sparkle_vbo) pglDeleteBuffers(1, &gc->sparkle_vbo);
+    if (gc->sparkle_prog) pglDeleteProgram(gc->sparkle_prog);
     if (gc->ui_vao)    pglDeleteVertexArrays(1, &gc->ui_vao);
     if (gc->fbo_color) glDeleteTextures(1, &gc->fbo_color);
     if (gc->fbo_depth) pglDeleteRenderbuffers(1, &gc->fbo_depth);
@@ -1294,6 +1354,39 @@ void gfx_octahedron_draw(GfxCtx *gc, v3 center, v3 size,
     m4 s = m4_scale(size);
     m4 model = m4_mul(t, s);
     draw_bb_mesh(gc, model, gc->oct_vao, gc->oct_vert_count, r, g, b);
+}
+
+void gfx_sparkle_draw(GfxCtx *gc, v3 pos, float size,
+                      float r, float g, float b, float a) {
+    /* Additive blending pour le look "paillette lumineuse". Etat
+     * sauvegarde pour ne pas polluer le reste du frame. */
+    GLboolean prev_depth_write;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &prev_depth_write);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);    /* additif */
+
+    pglUseProgram(gc->sparkle_prog);
+    GLint loc;
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_view");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->view.m);
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_proj");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->proj.m);
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_pos");
+    pglUniform3f(loc, pos.x, pos.y, pos.z);
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_size");
+    pglUniform1f(loc, size);
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_color");
+    pglUniform3f(loc, r, g, b);
+    loc = pglGetUniformLocation(gc->sparkle_prog, "u_alpha");
+    pglUniform1f(loc, a);
+
+    pglBindVertexArray(gc->sparkle_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    /* restore state */
+    glDisable(GL_BLEND);
+    glDepthMask(prev_depth_write);
 }
 
 void gfx_cone_draw(GfxCtx *gc, v3 center, float radius, float height,

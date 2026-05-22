@@ -60,6 +60,9 @@ typedef struct GfxCtx {
     GLuint pyr_vao,  pyr_vbo;   int pyr_vert_count;
     GLuint oct_vao,  oct_vbo;   int oct_vert_count;
     GLuint cone_vao, cone_vbo;  int cone_vert_count;  /* 8 cotes */
+    /* Sparkle shader + quad (billboard cam-facing avec circle alpha) */
+    GLuint sparkle_prog;
+    GLuint sparkle_vao, sparkle_vbo;
 
     /* UI batcher */
     GLuint ui_vao, ui_vbo;
@@ -162,6 +165,13 @@ void gfx_cone_draw      (GfxCtx *gc, v3 center, float rad, float h, float r, flo
 /* draw_quad_billboard : quad face camera positionne en world space */
 void gfx_billboard_draw(GfxCtx *gc, v3 center, float w, float h,
                         float r, float g, float b, float a);
+
+/* === SPARKLES 2D ===
+ * Quad billboard toujours face camera, gradient circulaire alpha
+ * en bordure, blending additif. Le shader genere le cercle dans
+ * le fragment, pas besoin de texture. Look "Valheim sparkles". */
+void gfx_sparkle_draw(GfxCtx *gc, v3 pos, float size,
+                      float r, float g, float b, float a);
 
 /* ---------- UI 2D (ortho) ---------- */
 /* signatures compatibles avec l'ancien "fill_rect" SDL */

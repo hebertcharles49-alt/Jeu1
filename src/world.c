@@ -28,9 +28,52 @@ void update_particles(Game *g) {
      * couleur + vecteur de drift dependent du biome courant. */
     static float ambient_timer = 0.f;
     ambient_timer += dt;
-    if (ambient_timer < 0.06f) return;
+    /* Plus dense que avant (0.06s -> 0.025s = ~40/s pour saturer le
+     * visuel sparkles Valheim) */
+    if (ambient_timer < 0.025f) return;
     ambient_timer = 0.f;
     if (g->state != GS_RUN) return;
+    /* Sparkles autour des torches : pour chaque tile T_TORCH proche
+     * du joueur, spawn 1 ember additionnel chaque update. */
+    {
+        Dungeon *d = &g->dungeon;
+        int ptx = (int)(g->player.x / TILE);
+        int pty = (int)(g->player.y / TILE);
+        for (int dz = -8; dz <= 8; dz++) {
+            for (int dx = -8; dx <= 8; dx++) {
+                int tx = ptx + dx, ty = pty + dz;
+                if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
+                if (d->tiles[ty][tx] != T_TORCH) continue;
+                if ((rand() % 100) > 35) continue;
+                float sx = tx * TILE + TILE / 2 + (rand() % 8) - 4;
+                float sy = ty * TILE + TILE / 2 + (rand() % 8) - 4;
+                float vy = -25.f - (rand() % 20);
+                particle_spawn_kind(g, sx, sy, (rand() % 14) - 7, vy,
+                                     1.5f, 0xFFB050E0, 2.2f, 0);
+            }
+        }
+    }
+    /* Sparkles autour du joueur quand il porte un unique / element :
+     * petite aura. Une particule legere par tick. */
+    if ((rand() % 100) < 50) {
+        Player *pp = &g->player;
+        bool sparkle = false;
+        for (int s = 0; s < EQUIP_SLOTS; s++) {
+            Item *it = &pp->equipped[s];
+            if (it->occupied && (it->is_unique || it->rarity >= R_EPIC)) {
+                sparkle = true; break;
+            }
+        }
+        if (sparkle) {
+            float ang = (rand() % 360) * 0.01745f;
+            float r2 = 12.f + (rand() % 14);
+            uint32_t cc = 0xFFE040C0;
+            particle_spawn_kind(g, pp->x + cosf(ang) * r2, pp->y + sinf(ang) * r2,
+                                 ((rand() % 30) - 15) * 0.4f,
+                                 -10.f - (rand() % 15),
+                                 1.2f, cc, 1.5f, 0);
+        }
+    }
     int bi = biome_for_floor(g->floor_index);
     /* spawn area : autour du joueur en world coords (TILE-based) */
     float px = g->player.x, py = g->player.y;
