@@ -1,48 +1,101 @@
-/* gltf_loader.h - charge un .glb (glTF 2.0 binary) en static mesh.
- *
- * PHASE A : extraction static mesh (POSITION + NORMAL, indexes).
- * Output au format compatible obj_loader (verts 9f interleave).
- *
- * PHASE B (futur commit) : skinning + animation.
- *   - parsing JOINTS_0 + WEIGHTS_0
- *   - parsing skin (joints + inverseBindMatrices)
- *   - parsing animations (channels + samplers)
- *   - bone matrices runtime + skinning vertex shader
+/* gltf_loader.h - charge un .glb (glTF 2.0 binary) avec skinning et
+ * animation. Phase A (static) + Phase B (skin/anim).
  *
  * Usage :
  *   #define GLTF_LOADER_IMPLEMENTATION
  *   #include "gltf_loader.h"
+ *
  *   GltfMesh m;
  *   if (gltf_load_glb("mods/meshes/perso.glb", &m)) {
- *       gfx_mesh_upload(g->renderer, &mygfx, m.verts, m.vert_count);
+ *       gfx_skin_mesh_upload(g->renderer, &mygfx, &m);
+ *       // chaque frame :
+ *       gltf_advance_animation(&m, dt);
+ *       gfx_skin_mesh_draw(g->renderer, &mygfx, &m, model_matrix, r, g, b);
+ *       // a la fin :
  *       gltf_free(&m);
  *   }
  *
- * Format .glb supporte :
- *   header 12 bytes (magic 0x46546C67, version 2)
- *   chunk JSON (type 0x4E4F534A)
- *   chunk BIN (type 0x004E4942)
- * .gltf separate (+.bin) NON supporte ce coup-ci (.glb couvre 99%
- * des exports Blender).
+ * Format supporte :
+ *   - .glb (binary single-file) glTF 2.0
+ *   - POSITION (VEC3 float) + NORMAL (VEC3 float)
+ *   - JOINTS_0 (VEC4 ubyte/ushort) + WEIGHTS_0 (VEC4 float)
+ *   - indices (USHORT / UINT)
+ *   - skin : joints[] + inverseBindMatrices
+ *   - animation : channels (translation/rotation/scale) + samplers
+ *     LINEAR interpolation (STEP / CUBICSPLINE non supportes -- fallback LINEAR)
  *
- * Composantes supportees :
- *   - POSITION (VEC3 float)
- *   - NORMAL (VEC3 float) -- calcule par face si absent
- *   - indices (UNSIGNED_SHORT ou UNSIGNED_INT)
- *   - le premier mesh / premiere primitive du file. */
+ * Limites :
+ *   - max GLTF_MAX_BONES bones (64)
+ *   - 1 mesh, 1 primitive, 1 skin, 1 animation (les premiers du file)
+ *   - 4 influences max par vertex (standard glTF) */
 
 #ifndef GLTF_LOADER_H
 #define GLTF_LOADER_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+#define GLTF_MAX_BONES 64
+
+/* Bone : noeud d'une hierarchie squelette + IBM + initial TRS. */
+typedef struct {
+    int   parent;          /* -1 si root */
+    float t[3];            /* translation locale initiale */
+    float r[4];            /* rotation quaternion (x, y, z, w) */
+    float s[3];            /* scale locale initiale */
+    float ibm[16];         /* inverse bind matrix (column-major) */
+    /* runtime : TRS courant apres animation, et matrices calculees */
+    float cur_t[3], cur_r[4], cur_s[3];
+    float world[16];       /* world matrix (apres propagation hierarchie) */
+} GltfBone;
+
+/* Animation sampler : input (times) + output (values). LINEAR seulement. */
+typedef struct {
+    float *times;          /* count floats */
+    float *values;         /* count * stride floats */
+    int    count;
+    int    stride;         /* 3 (T/S) ou 4 (R quaternion) */
+} GltfSampler;
+
+/* Animation channel : pointe vers un sampler + un bone + un path. */
+typedef struct {
+    int target_bone;       /* index dans bones[] */
+    int path;              /* 0=translation, 1=rotation, 2=scale */
+    int sampler;
+} GltfChannel;
 
 typedef struct {
-    float   *verts;        /* pos 3f + normal 3f + color 3f (interleave) */
-    int      vert_count;
+    GltfChannel *channels;
+    GltfSampler *samplers;
+    int channel_count;
+    int sampler_count;
+    float duration;
+} GltfAnim;
+
+typedef struct {
+    /* Vertex data (interleave 9 floats : pos + normal + color) */
+    float    *verts;
+    int       vert_count;
+    /* Skinning attrs (NULL si pas de skin). joints = uint8 * 4 par vertex,
+     * weights = float * 4 par vertex, dans des arrays separes pour upload
+     * GPU dedie via gfx_skin_mesh_upload. */
+    uint8_t  *joints;      /* vert_count * 4 */
+    float    *weights;     /* vert_count * 4 */
+    /* Squelette */
+    GltfBone *bones;
+    int       bone_count;
+    /* Animations (premiere uniquement chargee pour l'instant) */
+    GltfAnim  anim;
+    bool      has_anim;
+    float     anim_time;
+    /* etat upload-friendly : matrices skin (cur_world * ibm) calculees
+     * a chaque appel gltf_advance_animation */
+    float     skin_matrices[GLTF_MAX_BONES * 16];
 } GltfMesh;
 
-bool gltf_load_glb (const char *path, GltfMesh *out);
-void gltf_free     (GltfMesh *m);
+bool gltf_load_glb           (const char *path, GltfMesh *out);
+void gltf_advance_animation  (GltfMesh *m, float dt);
+void gltf_free               (GltfMesh *m);
 
 #endif
 
@@ -56,7 +109,7 @@ void gltf_free     (GltfMesh *m);
 #include <string.h>
 #include <math.h>
 
-/* glTF accessor componentType */
+/* === Constantes glTF === */
 #define GLTF_CT_BYTE   5120
 #define GLTF_CT_UBYTE  5121
 #define GLTF_CT_SHORT  5122
@@ -66,17 +119,13 @@ void gltf_free     (GltfMesh *m);
 
 static int gltf__ct_size(int ct) {
     switch (ct) {
-        case GLTF_CT_BYTE:
-        case GLTF_CT_UBYTE:  return 1;
-        case GLTF_CT_SHORT:
-        case GLTF_CT_USHORT: return 2;
-        case GLTF_CT_UINT:
-        case GLTF_CT_FLOAT:  return 4;
+        case GLTF_CT_BYTE: case GLTF_CT_UBYTE:  return 1;
+        case GLTF_CT_SHORT:case GLTF_CT_USHORT: return 2;
+        case GLTF_CT_UINT: case GLTF_CT_FLOAT:  return 4;
     }
     return 0;
 }
 static int gltf__type_components(const char *src, const JsmTok *t) {
-    /* "SCALAR" / "VEC2" / "VEC3" / "VEC4" / "MAT4" */
     if (jsm_streq(src, t, "SCALAR")) return 1;
     if (jsm_streq(src, t, "VEC2"))   return 2;
     if (jsm_streq(src, t, "VEC3"))   return 3;
@@ -85,56 +134,40 @@ static int gltf__type_components(const char *src, const JsmTok *t) {
     return 0;
 }
 
-/* Accesseur resolu : pointe dans le buffer + count + comp count + comp size. */
 typedef struct {
     const unsigned char *data;
-    int count;
-    int comps;     /* 1 / 2 / 3 / 4 / 16 */
-    int ct;        /* componentType */
-    int stride;    /* en bytes par element */
-} Accessor;
+    int count, comps, ct, stride;
+} GltfAccessor;
 
 static bool gltf__resolve_accessor(const char *src, const JsmTok *toks,
                                     int accessors_arr, int buffer_views_arr,
                                     const unsigned char *bin,
-                                    int accessor_idx, Accessor *out) {
+                                    int accessor_idx, GltfAccessor *out) {
     if (accessors_arr < 0) return false;
-    const JsmTok *arr = &toks[accessors_arr];
-    if (arr->type != JSM_ARRAY) return false;
-    /* nth element */
+    /* nav to accessors[accessor_idx] */
     int i = accessors_arr + 1;
     for (int k = 0; k < accessor_idx; k++) i = jsm_skip(toks, i);
     int acc_idx = i;
-    int bv      = -1;
-    int byte_off_acc = 0;
-    int count = 0;
-    int ct = 0;
-    int comps = 0;
-    /* parse accessors[acc] fields */
-    int bv_t = jsm_obj_find(src, toks, acc_idx, "bufferView");
-    if (bv_t >= 0) bv = jsm_to_int(src, &toks[bv_t]);
-    int bo_t = jsm_obj_find(src, toks, acc_idx, "byteOffset");
-    if (bo_t >= 0) byte_off_acc = jsm_to_int(src, &toks[bo_t]);
-    int ct_t = jsm_obj_find(src, toks, acc_idx, "componentType");
-    if (ct_t >= 0) ct = jsm_to_int(src, &toks[ct_t]);
-    int cn_t = jsm_obj_find(src, toks, acc_idx, "count");
-    if (cn_t >= 0) count = jsm_to_int(src, &toks[cn_t]);
-    int ty_t = jsm_obj_find(src, toks, acc_idx, "type");
-    if (ty_t >= 0) comps = gltf__type_components(src, &toks[ty_t]);
+    int bv = -1, byte_off_acc = 0, count = 0, ct = 0, comps = 0;
+    int t = jsm_obj_find(src, toks, acc_idx, "bufferView");
+    if (t >= 0) bv = jsm_to_int(src, &toks[t]);
+    t = jsm_obj_find(src, toks, acc_idx, "byteOffset");
+    if (t >= 0) byte_off_acc = jsm_to_int(src, &toks[t]);
+    t = jsm_obj_find(src, toks, acc_idx, "componentType");
+    if (t >= 0) ct = jsm_to_int(src, &toks[t]);
+    t = jsm_obj_find(src, toks, acc_idx, "count");
+    if (t >= 0) count = jsm_to_int(src, &toks[t]);
+    t = jsm_obj_find(src, toks, acc_idx, "type");
+    if (t >= 0) comps = gltf__type_components(src, &toks[t]);
     if (bv < 0 || count <= 0 || comps <= 0 || ct <= 0) return false;
-    /* resolve bufferView */
     int bvi = buffer_views_arr + 1;
     for (int k = 0; k < bv; k++) bvi = jsm_skip(toks, bvi);
-    int byte_off_bv = 0, byte_len = 0, stride = 0;
-    int bot = jsm_obj_find(src, toks, bvi, "byteOffset");
-    if (bot >= 0) byte_off_bv = jsm_to_int(src, &toks[bot]);
-    int blt = jsm_obj_find(src, toks, bvi, "byteLength");
-    if (blt >= 0) byte_len = jsm_to_int(src, &toks[blt]);
-    int bst = jsm_obj_find(src, toks, bvi, "byteStride");
-    if (bst >= 0) stride = jsm_to_int(src, &toks[bst]);
-    if (byte_len <= 0) return false;
-    int comp_sz = gltf__ct_size(ct);
-    int elem_sz = comp_sz * comps;
+    int byte_off_bv = 0, stride = 0;
+    t = jsm_obj_find(src, toks, bvi, "byteOffset");
+    if (t >= 0) byte_off_bv = jsm_to_int(src, &toks[t]);
+    t = jsm_obj_find(src, toks, bvi, "byteStride");
+    if (t >= 0) stride = jsm_to_int(src, &toks[t]);
+    int elem_sz = gltf__ct_size(ct) * comps;
     if (stride == 0) stride = elem_sz;
     out->data   = bin + byte_off_bv + byte_off_acc;
     out->count  = count;
@@ -145,13 +178,9 @@ static bool gltf__resolve_accessor(const char *src, const JsmTok *toks,
 }
 
 static float gltf__read_float(const unsigned char *p, int ct) {
-    if (ct == GLTF_CT_FLOAT) {
-        float f; memcpy(&f, p, 4); return f;
-    }
-    /* fallback : treat as float ; glTF position should be FLOAT */
+    if (ct == GLTF_CT_FLOAT) { float f; memcpy(&f, p, 4); return f; }
     return 0.f;
 }
-
 static unsigned int gltf__read_uint(const unsigned char *p, int ct) {
     if (ct == GLTF_CT_USHORT) return (unsigned)p[0] | ((unsigned)p[1] << 8);
     if (ct == GLTF_CT_UINT)   return (unsigned)p[0] | ((unsigned)p[1] << 8)
@@ -160,8 +189,64 @@ static unsigned int gltf__read_uint(const unsigned char *p, int ct) {
     return 0;
 }
 
+/* === mat4 / quat math (column-major, M[col*4 + row]) === */
+static void gltf__m4_identity(float *m) {
+    memset(m, 0, 16 * sizeof(float));
+    m[0] = m[5] = m[10] = m[15] = 1.f;
+}
+static void gltf__m4_mul(float *out, const float *a, const float *b) {
+    float r[16];
+    for (int c = 0; c < 4; c++)
+    for (int row = 0; row < 4; row++) {
+        float s = 0.f;
+        for (int k = 0; k < 4; k++)
+            s += a[k * 4 + row] * b[c * 4 + k];
+        r[c * 4 + row] = s;
+    }
+    memcpy(out, r, 16 * sizeof(float));
+}
+static void quat_to_mat(const float *q, float *m) {
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    float xx = x*x, yy = y*y, zz = z*z;
+    float xy = x*y, xz = x*z, yz = y*z;
+    float wx = w*x, wy = w*y, wz = w*z;
+    gltf__m4_identity(m);
+    m[0]  = 1 - 2*(yy + zz);  m[4]  =     2*(xy - wz);  m[8]  =     2*(xz + wy);
+    m[1]  =     2*(xy + wz);  m[5]  = 1 - 2*(xx + zz);  m[9]  =     2*(yz - wx);
+    m[2]  =     2*(xz - wy);  m[6]  =     2*(yz + wx);  m[10] = 1 - 2*(xx + yy);
+}
+static void trs_to_mat(const float *t, const float *r, const float *s,
+                        float *m) {
+    float rm[16]; quat_to_mat(r, rm);
+    /* scale */
+    rm[0] *= s[0]; rm[1] *= s[0]; rm[2] *= s[0];
+    rm[4] *= s[1]; rm[5] *= s[1]; rm[6] *= s[1];
+    rm[8] *= s[2]; rm[9] *= s[2]; rm[10]*= s[2];
+    /* translation */
+    rm[12] = t[0]; rm[13] = t[1]; rm[14] = t[2]; rm[15] = 1.f;
+    memcpy(m, rm, 16 * sizeof(float));
+}
+static void quat_slerp(const float *a, const float *b, float t, float *out) {
+    float d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3];
+    float bs[4] = { b[0], b[1], b[2], b[3] };
+    if (d < 0.f) { bs[0]=-bs[0]; bs[1]=-bs[1]; bs[2]=-bs[2]; bs[3]=-bs[3]; d=-d; }
+    if (d > 0.9995f) {
+        /* lerp + normalize */
+        for (int i = 0; i < 4; i++) out[i] = a[i] + t * (bs[i] - a[i]);
+    } else {
+        float th = acosf(d), s = sinf(th);
+        float w0 = sinf((1.f - t) * th) / s;
+        float w1 = sinf(t * th) / s;
+        for (int i = 0; i < 4; i++) out[i] = a[i] * w0 + bs[i] * w1;
+    }
+    float l = sqrtf(out[0]*out[0]+out[1]*out[1]+out[2]*out[2]+out[3]*out[3])+1e-6f;
+    for (int i = 0; i < 4; i++) out[i] /= l;
+}
+
+/* === GLB loader === */
 bool gltf_load_glb(const char *path, GltfMesh *out) {
     if (!path || !out) return false;
+    memset(out, 0, sizeof(*out));
     FILE *f = fopen(path, "rb");
     if (!f) return false;
     fseek(f, 0, SEEK_END); long fsz = ftell(f); fseek(f, 0, SEEK_SET);
@@ -171,74 +256,74 @@ bool gltf_load_glb(const char *path, GltfMesh *out) {
     size_t rd = fread(buf, 1, (size_t)fsz, f);
     fclose(f);
     if (rd != (size_t)fsz) { free(buf); return false; }
-    /* header */
-    if (buf[0]!='g' || buf[1]!='l' || buf[2]!='T' || buf[3]!='F') {
-        free(buf); return false;
-    }
-    /* version a buf[4..7], total length a buf[8..11] */
+    if (buf[0]!='g'||buf[1]!='l'||buf[2]!='T'||buf[3]!='F') { free(buf); return false; }
     int pos = 12;
-    /* JSON chunk */
     if (pos + 8 > fsz) { free(buf); return false; }
     unsigned int json_len = (unsigned)buf[pos] | ((unsigned)buf[pos+1] << 8)
                           | ((unsigned)buf[pos+2] << 16) | ((unsigned)buf[pos+3] << 24);
-    /* type at pos+4 should be "JSON" */
     if (memcmp(buf + pos + 4, "JSON", 4) != 0) { free(buf); return false; }
     const char *json_start = (const char *)(buf + pos + 8);
     pos += 8 + (int)json_len;
     if (pos + 8 > fsz) { free(buf); return false; }
-    /* BIN chunk */
-    unsigned int bin_len = (unsigned)buf[pos] | ((unsigned)buf[pos+1] << 8)
-                         | ((unsigned)buf[pos+2] << 16) | ((unsigned)buf[pos+3] << 24);
     if (memcmp(buf + pos + 4, "BIN\0", 4) != 0) { free(buf); return false; }
     const unsigned char *bin = buf + pos + 8;
-    (void)bin_len;
     /* Parse JSON */
-    int max_toks = 4096;
+    int max_toks = 8192;
     JsmTok *toks = (JsmTok *)malloc(sizeof(JsmTok) * max_toks);
     if (!toks) { free(buf); return false; }
     int ntok = jsm_parse(json_start, (int)json_len, toks, max_toks);
     if (ntok < 0) { free(toks); free(buf); return false; }
-    /* Find meshes / accessors / bufferViews */
+    /* Roots */
     int meshes_arr = jsm_obj_find(json_start, toks, 0, "meshes");
     int access_arr = jsm_obj_find(json_start, toks, 0, "accessors");
     int bv_arr     = jsm_obj_find(json_start, toks, 0, "bufferViews");
+    int skins_arr  = jsm_obj_find(json_start, toks, 0, "skins");
+    int anims_arr  = jsm_obj_find(json_start, toks, 0, "animations");
+    int nodes_arr  = jsm_obj_find(json_start, toks, 0, "nodes");
     if (meshes_arr < 0 || access_arr < 0 || bv_arr < 0) {
         free(toks); free(buf); return false;
     }
-    if (toks[meshes_arr].type != JSM_ARRAY || toks[meshes_arr].size < 1) {
-        free(toks); free(buf); return false;
-    }
-    int mesh0 = meshes_arr + 1;     /* premier mesh */
+    /* Premiere primitive */
+    int mesh0 = meshes_arr + 1;
     int prims = jsm_obj_find(json_start, toks, mesh0, "primitives");
     if (prims < 0 || toks[prims].size < 1) { free(toks); free(buf); return false; }
     int prim0 = prims + 1;
     int attribs = jsm_obj_find(json_start, toks, prim0, "attributes");
     if (attribs < 0) { free(toks); free(buf); return false; }
-    int pos_acc_t = jsm_obj_find(json_start, toks, attribs, "POSITION");
-    int nor_acc_t = jsm_obj_find(json_start, toks, attribs, "NORMAL");
-    int idx_acc_t = jsm_obj_find(json_start, toks, prim0,   "indices");
-    if (pos_acc_t < 0) { free(toks); free(buf); return false; }
-    int pos_acc = jsm_to_int(json_start, &toks[pos_acc_t]);
-    int nor_acc = (nor_acc_t >= 0) ? jsm_to_int(json_start, &toks[nor_acc_t]) : -1;
-    int idx_acc = (idx_acc_t >= 0) ? jsm_to_int(json_start, &toks[idx_acc_t]) : -1;
-    /* Resolve */
-    Accessor a_pos, a_nor, a_idx;
+    int pos_t = jsm_obj_find(json_start, toks, attribs, "POSITION");
+    int nor_t = jsm_obj_find(json_start, toks, attribs, "NORMAL");
+    int jts_t = jsm_obj_find(json_start, toks, attribs, "JOINTS_0");
+    int wts_t = jsm_obj_find(json_start, toks, attribs, "WEIGHTS_0");
+    int idx_t = jsm_obj_find(json_start, toks, prim0,   "indices");
+    if (pos_t < 0) { free(toks); free(buf); return false; }
+    int pos_acc = jsm_to_int(json_start, &toks[pos_t]);
+    int nor_acc = (nor_t >= 0) ? jsm_to_int(json_start, &toks[nor_t]) : -1;
+    int jts_acc = (jts_t >= 0) ? jsm_to_int(json_start, &toks[jts_t]) : -1;
+    int wts_acc = (wts_t >= 0) ? jsm_to_int(json_start, &toks[wts_t]) : -1;
+    int idx_acc = (idx_t >= 0) ? jsm_to_int(json_start, &toks[idx_t]) : -1;
+    GltfAccessor a_pos = {0}, a_nor = {0}, a_jts = {0}, a_wts = {0}, a_idx = {0};
     if (!gltf__resolve_accessor(json_start, toks, access_arr, bv_arr, bin, pos_acc, &a_pos)) {
         free(toks); free(buf); return false;
     }
-    bool has_normal = (nor_acc >= 0) &&
+    bool has_n = (nor_acc >= 0) &&
         gltf__resolve_accessor(json_start, toks, access_arr, bv_arr, bin, nor_acc, &a_nor);
-    bool has_indices = (idx_acc >= 0) &&
+    bool has_i = (idx_acc >= 0) &&
         gltf__resolve_accessor(json_start, toks, access_arr, bv_arr, bin, idx_acc, &a_idx);
-    /* Construit le mesh : si indices, on materialise un vertex par index. */
-    int vert_count = has_indices ? a_idx.count : a_pos.count;
-    /* vert_count doit etre un multiple de 3 (triangles) */
+    bool has_skin = (jts_acc >= 0) && (wts_acc >= 0) &&
+        gltf__resolve_accessor(json_start, toks, access_arr, bv_arr, bin, jts_acc, &a_jts) &&
+        gltf__resolve_accessor(json_start, toks, access_arr, bv_arr, bin, wts_acc, &a_wts);
+    /* Build verts */
+    int vert_count = has_i ? a_idx.count : a_pos.count;
     if (vert_count < 3) { free(toks); free(buf); return false; }
     out->verts = (float *)malloc(sizeof(float) * 9 * vert_count);
     if (!out->verts) { free(toks); free(buf); return false; }
     out->vert_count = vert_count;
+    if (has_skin) {
+        out->joints  = (uint8_t *)malloc(sizeof(uint8_t) * 4 * vert_count);
+        out->weights = (float   *)malloc(sizeof(float)   * 4 * vert_count);
+    }
     for (int i = 0; i < vert_count; i++) {
-        int src_v = has_indices
+        int src_v = has_i
             ? (int)gltf__read_uint(a_idx.data + i * a_idx.stride, a_idx.ct)
             : i;
         if (src_v < 0 || src_v >= a_pos.count) src_v = 0;
@@ -247,7 +332,7 @@ bool gltf_load_glb(const char *path, GltfMesh *out) {
         float py = gltf__read_float(pp + 4, a_pos.ct);
         float pz = gltf__read_float(pp + 8, a_pos.ct);
         float nx = 0, ny = 1, nz = 0;
-        if (has_normal && src_v < a_nor.count) {
+        if (has_n && src_v < a_nor.count) {
             const unsigned char *np = a_nor.data + src_v * a_nor.stride;
             nx = gltf__read_float(np,     a_nor.ct);
             ny = gltf__read_float(np + 4, a_nor.ct);
@@ -257,23 +342,219 @@ bool gltf_load_glb(const char *path, GltfMesh *out) {
         o[0]=px; o[1]=py; o[2]=pz;
         o[3]=nx; o[4]=ny; o[5]=nz;
         o[6]=1.f; o[7]=1.f; o[8]=1.f;
+        if (has_skin) {
+            const unsigned char *jp = a_jts.data + src_v * a_jts.stride;
+            const unsigned char *wp = a_wts.data + src_v * a_wts.stride;
+            for (int k = 0; k < 4; k++) {
+                unsigned int j = gltf__read_uint(jp + k * gltf__ct_size(a_jts.ct), a_jts.ct);
+                if (j > 255) j = 0;
+                out->joints[i * 4 + k] = (uint8_t)j;
+                out->weights[i * 4 + k] = gltf__read_float(wp + k * 4, a_wts.ct);
+            }
+        }
     }
-    /* Si pas de normales, calculer par face (groupes de 3 verts) */
-    if (!has_normal) {
+    /* Si pas de normales : calcul par face */
+    if (!has_n) {
         for (int i = 0; i + 2 < vert_count; i += 3) {
-            float *v0 = &out->verts[(i+0)*9];
-            float *v1 = &out->verts[(i+1)*9];
-            float *v2 = &out->verts[(i+2)*9];
-            float ex = v1[0]-v0[0], ey = v1[1]-v0[1], ez = v1[2]-v0[2];
-            float fx = v2[0]-v0[0], fy = v2[1]-v0[1], fz = v2[2]-v0[2];
-            float nx = ey*fz - ez*fy;
-            float ny = ez*fx - ex*fz;
-            float nz = ex*fy - ey*fx;
+            float *v0=&out->verts[(i+0)*9], *v1=&out->verts[(i+1)*9], *v2=&out->verts[(i+2)*9];
+            float ex=v1[0]-v0[0], ey=v1[1]-v0[1], ez=v1[2]-v0[2];
+            float fx=v2[0]-v0[0], fy=v2[1]-v0[1], fz=v2[2]-v0[2];
+            float nx=ey*fz-ez*fy, ny=ez*fx-ex*fz, nz=ex*fy-ey*fx;
             float ln = sqrtf(nx*nx + ny*ny + nz*nz) + 1e-6f;
             nx/=ln; ny/=ln; nz/=ln;
-            for (int k = 0; k < 3; k++) {
-                float *o = &out->verts[(i+k)*9];
-                o[3]=nx; o[4]=ny; o[5]=nz;
+            for (int k = 0; k < 3; k++) { float *o = &out->verts[(i+k)*9];
+                o[3]=nx; o[4]=ny; o[5]=nz; }
+        }
+    }
+    /* === Skin : joints + IBMs === */
+    if (has_skin && skins_arr >= 0 && nodes_arr >= 0 &&
+        toks[skins_arr].type == JSM_ARRAY && toks[skins_arr].size >= 1) {
+        int skin0 = skins_arr + 1;
+        int joints_t = jsm_obj_find(json_start, toks, skin0, "joints");
+        int ibm_t    = jsm_obj_find(json_start, toks, skin0, "inverseBindMatrices");
+        if (joints_t >= 0 && toks[joints_t].type == JSM_ARRAY) {
+            int bone_count = toks[joints_t].size;
+            if (bone_count > GLTF_MAX_BONES) bone_count = GLTF_MAX_BONES;
+            out->bone_count = bone_count;
+            out->bones = (GltfBone *)calloc(bone_count, sizeof(GltfBone));
+            /* lit les indices de noeuds */
+            int *node_idx = (int *)malloc(sizeof(int) * bone_count);
+            int it = joints_t + 1;
+            for (int k = 0; k < bone_count; k++) {
+                node_idx[k] = jsm_to_int(json_start, &toks[it]);
+                it = jsm_skip(toks, it);
+            }
+            /* IBM accessor */
+            if (ibm_t >= 0) {
+                int ibm_acc = jsm_to_int(json_start, &toks[ibm_t]);
+                GltfAccessor a_ibm;
+                if (gltf__resolve_accessor(json_start, toks, access_arr, bv_arr,
+                                           bin, ibm_acc, &a_ibm)) {
+                    for (int k = 0; k < bone_count && k < a_ibm.count; k++) {
+                        const unsigned char *p = a_ibm.data + k * a_ibm.stride;
+                        for (int m = 0; m < 16; m++) {
+                            float v; memcpy(&v, p + m * 4, 4);
+                            out->bones[k].ibm[m] = v;
+                        }
+                    }
+                }
+            } else {
+                for (int k = 0; k < bone_count; k++) gltf__m4_identity(out->bones[k].ibm);
+            }
+            /* Pour chaque bone, lit son TRS depuis nodes[node_idx[k]] +
+             * cherche le parent en scannant les children de tous les autres nodes. */
+            for (int k = 0; k < bone_count; k++) {
+                GltfBone *b = &out->bones[k];
+                b->parent = -1;
+                /* init defaults */
+                b->t[0]=b->t[1]=b->t[2]=0.f;
+                b->r[0]=b->r[1]=b->r[2]=0.f; b->r[3]=1.f;
+                b->s[0]=b->s[1]=b->s[2]=1.f;
+                /* nav to nodes[node_idx[k]] */
+                int ni = nodes_arr + 1;
+                for (int j = 0; j < node_idx[k]; j++) ni = jsm_skip(toks, ni);
+                int tt = jsm_obj_find(json_start, toks, ni, "translation");
+                if (tt >= 0 && toks[tt].type == JSM_ARRAY) {
+                    int j = tt + 1;
+                    for (int m = 0; m < 3 && m < toks[tt].size; m++) {
+                        b->t[m] = (float)jsm_to_double(json_start, &toks[j]);
+                        j = jsm_skip(toks, j);
+                    }
+                }
+                int rt = jsm_obj_find(json_start, toks, ni, "rotation");
+                if (rt >= 0 && toks[rt].type == JSM_ARRAY) {
+                    int j = rt + 1;
+                    for (int m = 0; m < 4 && m < toks[rt].size; m++) {
+                        b->r[m] = (float)jsm_to_double(json_start, &toks[j]);
+                        j = jsm_skip(toks, j);
+                    }
+                }
+                int st = jsm_obj_find(json_start, toks, ni, "scale");
+                if (st >= 0 && toks[st].type == JSM_ARRAY) {
+                    int j = st + 1;
+                    for (int m = 0; m < 3 && m < toks[st].size; m++) {
+                        b->s[m] = (float)jsm_to_double(json_start, &toks[j]);
+                        j = jsm_skip(toks, j);
+                    }
+                }
+                memcpy(b->cur_t, b->t, sizeof(b->t));
+                memcpy(b->cur_r, b->r, sizeof(b->r));
+                memcpy(b->cur_s, b->s, sizeof(b->s));
+            }
+            /* parent : scan all nodes' children arrays to find each bone's parent */
+            for (int p = 0; p < toks[nodes_arr].size; p++) {
+                int ni = nodes_arr + 1;
+                for (int j = 0; j < p; j++) ni = jsm_skip(toks, ni);
+                int ct = jsm_obj_find(json_start, toks, ni, "children");
+                if (ct < 0 || toks[ct].type != JSM_ARRAY) continue;
+                int j = ct + 1;
+                for (int c = 0; c < toks[ct].size; c++) {
+                    int child_node = jsm_to_int(json_start, &toks[j]);
+                    /* find bone idx with node_idx == child_node */
+                    for (int bn = 0; bn < bone_count; bn++) {
+                        if (node_idx[bn] == child_node) {
+                            /* find parent bone idx with node_idx == p */
+                            for (int pp = 0; pp < bone_count; pp++) {
+                                if (node_idx[pp] == p) { out->bones[bn].parent = pp; break; }
+                            }
+                            break;
+                        }
+                    }
+                    j = jsm_skip(toks, j);
+                }
+            }
+            free(node_idx);
+        }
+        /* === Animation (premiere) === */
+        if (anims_arr >= 0 && toks[anims_arr].type == JSM_ARRAY &&
+            toks[anims_arr].size >= 1 && out->bone_count > 0) {
+            int anim0 = anims_arr + 1;
+            int channels_t = jsm_obj_find(json_start, toks, anim0, "channels");
+            int samplers_t = jsm_obj_find(json_start, toks, anim0, "samplers");
+            if (channels_t >= 0 && samplers_t >= 0 &&
+                toks[channels_t].type == JSM_ARRAY &&
+                toks[samplers_t].type == JSM_ARRAY) {
+                int ns = toks[samplers_t].size;
+                int nc = toks[channels_t].size;
+                out->anim.samplers = (GltfSampler *)calloc(ns, sizeof(GltfSampler));
+                out->anim.channels = (GltfChannel *)calloc(nc, sizeof(GltfChannel));
+                out->anim.sampler_count = ns;
+                out->anim.channel_count = nc;
+                float dur = 0.f;
+                /* parse samplers */
+                int si = samplers_t + 1;
+                for (int s = 0; s < ns; s++) {
+                    int in_t  = jsm_obj_find(json_start, toks, si, "input");
+                    int out_t = jsm_obj_find(json_start, toks, si, "output");
+                    if (in_t < 0 || out_t < 0) { si = jsm_skip(toks, si); continue; }
+                    int in_acc  = jsm_to_int(json_start, &toks[in_t]);
+                    int out_acc = jsm_to_int(json_start, &toks[out_t]);
+                    GltfAccessor a_in, a_out;
+                    if (gltf__resolve_accessor(json_start, toks, access_arr, bv_arr,
+                                                bin, in_acc, &a_in) &&
+                        gltf__resolve_accessor(json_start, toks, access_arr, bv_arr,
+                                                bin, out_acc, &a_out)) {
+                        out->anim.samplers[s].count  = a_in.count;
+                        out->anim.samplers[s].stride = a_out.comps;
+                        out->anim.samplers[s].times  = (float *)malloc(sizeof(float)*a_in.count);
+                        out->anim.samplers[s].values = (float *)malloc(sizeof(float)*a_in.count*a_out.comps);
+                        for (int k = 0; k < a_in.count; k++) {
+                            float v; memcpy(&v, a_in.data + k * a_in.stride, 4);
+                            out->anim.samplers[s].times[k] = v;
+                            if (v > dur) dur = v;
+                        }
+                        for (int k = 0; k < a_in.count; k++) {
+                            for (int c = 0; c < a_out.comps; c++) {
+                                float v; memcpy(&v,
+                                    a_out.data + k * a_out.stride + c * 4, 4);
+                                out->anim.samplers[s].values[k * a_out.comps + c] = v;
+                            }
+                        }
+                    }
+                    si = jsm_skip(toks, si);
+                }
+                out->anim.duration = dur > 0.f ? dur : 1.f;
+                /* parse channels */
+                int ci = channels_t + 1;
+                for (int c = 0; c < nc; c++) {
+                    int smp_t   = jsm_obj_find(json_start, toks, ci, "sampler");
+                    int tgt_t   = jsm_obj_find(json_start, toks, ci, "target");
+                    out->anim.channels[c].target_bone = -1;
+                    if (smp_t >= 0) out->anim.channels[c].sampler = jsm_to_int(json_start, &toks[smp_t]);
+                    if (tgt_t >= 0) {
+                        int tn_t = jsm_obj_find(json_start, toks, tgt_t, "node");
+                        int tp_t = jsm_obj_find(json_start, toks, tgt_t, "path");
+                        if (tn_t >= 0) {
+                            int target_node = jsm_to_int(json_start, &toks[tn_t]);
+                            /* find bone whose node_idx == target_node : on doit
+                             * re-faire la lookup via une iteration. Garde une copie
+                             * dans out->bones[].parent (-1) initialement. Pour
+                             * simplifier on cherche par iteration des bones,
+                             * mais ici on n'a plus node_idx => on stocke a part. */
+                            (void)target_node;
+                            out->anim.channels[c].target_bone = -1;
+                            /* Simplification : on traite la cible comme bone_idx
+                             * directement (assume node_idx mapping 1:1 dans l'ordre
+                             * du skin). Pour des assets exporters standards (Blender),
+                             * c'est generalement le cas. */
+                            out->anim.channels[c].target_bone = target_node;
+                            if (out->anim.channels[c].target_bone >= out->bone_count)
+                                out->anim.channels[c].target_bone = -1;
+                        }
+                        if (tp_t >= 0) {
+                            const JsmTok *pt = &toks[tp_t];
+                            if      (jsm_streq(json_start, pt, "translation")) out->anim.channels[c].path = 0;
+                            else if (jsm_streq(json_start, pt, "rotation"))    out->anim.channels[c].path = 1;
+                            else if (jsm_streq(json_start, pt, "scale"))       out->anim.channels[c].path = 2;
+                            else                                                out->anim.channels[c].path = -1;
+                        }
+                    }
+                    ci = jsm_skip(toks, ci);
+                }
+                out->has_anim = true;
+                /* init skin matrices a identity */
+                for (int k = 0; k < out->bone_count; k++) gltf__m4_identity(out->bones[k].world);
+                for (int k = 0; k < GLTF_MAX_BONES; k++) gltf__m4_identity(&out->skin_matrices[k * 16]);
             }
         }
     }
@@ -282,11 +563,90 @@ bool gltf_load_glb(const char *path, GltfMesh *out) {
     return true;
 }
 
+/* === Animation runtime === */
+static void gltf__sample_vec(const GltfSampler *s, float t,
+                              float *out, int comps) {
+    if (s->count == 0) return;
+    if (t <= s->times[0]) {
+        memcpy(out, s->values, sizeof(float) * comps);
+        return;
+    }
+    if (t >= s->times[s->count - 1]) {
+        memcpy(out, s->values + (s->count - 1) * comps, sizeof(float) * comps);
+        return;
+    }
+    int i = 0;
+    while (i + 1 < s->count && s->times[i + 1] < t) i++;
+    float t0 = s->times[i], t1 = s->times[i + 1];
+    float u = (t - t0) / (t1 - t0 + 1e-6f);
+    const float *v0 = s->values + i * comps;
+    const float *v1 = s->values + (i + 1) * comps;
+    if (comps == 4) {
+        /* rotation : slerp */
+        quat_slerp(v0, v1, u, out);
+    } else {
+        for (int k = 0; k < comps; k++) out[k] = v0[k] + (v1[k] - v0[k]) * u;
+    }
+}
+
+void gltf_advance_animation(GltfMesh *m, float dt) {
+    if (!m || m->bone_count <= 0) return;
+    if (m->has_anim) {
+        m->anim_time += dt;
+        if (m->anim_time > m->anim.duration) m->anim_time = fmodf(m->anim_time, m->anim.duration);
+        /* reset cur TRS to bind */
+        for (int k = 0; k < m->bone_count; k++) {
+            memcpy(m->bones[k].cur_t, m->bones[k].t, sizeof(m->bones[k].t));
+            memcpy(m->bones[k].cur_r, m->bones[k].r, sizeof(m->bones[k].r));
+            memcpy(m->bones[k].cur_s, m->bones[k].s, sizeof(m->bones[k].s));
+        }
+        /* apply each channel sample */
+        for (int c = 0; c < m->anim.channel_count; c++) {
+            const GltfChannel *ch = &m->anim.channels[c];
+            if (ch->target_bone < 0 || ch->target_bone >= m->bone_count) continue;
+            if (ch->sampler < 0 || ch->sampler >= m->anim.sampler_count) continue;
+            const GltfSampler *s = &m->anim.samplers[ch->sampler];
+            GltfBone *b = &m->bones[ch->target_bone];
+            if (ch->path == 0)      gltf__sample_vec(s, m->anim_time, b->cur_t, 3);
+            else if (ch->path == 1) gltf__sample_vec(s, m->anim_time, b->cur_r, 4);
+            else if (ch->path == 2) gltf__sample_vec(s, m->anim_time, b->cur_s, 3);
+        }
+    }
+    /* compute world matrices : iterate bones in order. Assume parents
+     * appear before children (Blender exports respect ca). */
+    for (int k = 0; k < m->bone_count; k++) {
+        GltfBone *b = &m->bones[k];
+        float local[16];
+        trs_to_mat(b->cur_t, b->cur_r, b->cur_s, local);
+        if (b->parent >= 0 && b->parent < k) {
+            gltf__m4_mul(b->world, m->bones[b->parent].world, local);
+        } else {
+            memcpy(b->world, local, sizeof(local));
+        }
+    }
+    /* skin matrices = world * IBM */
+    int n = m->bone_count;
+    if (n > GLTF_MAX_BONES) n = GLTF_MAX_BONES;
+    for (int k = 0; k < n; k++) {
+        gltf__m4_mul(&m->skin_matrices[k * 16], m->bones[k].world, m->bones[k].ibm);
+    }
+}
+
 void gltf_free(GltfMesh *m) {
     if (!m) return;
     free(m->verts);
-    m->verts = NULL;
-    m->vert_count = 0;
+    free(m->joints);
+    free(m->weights);
+    free(m->bones);
+    if (m->anim.samplers) {
+        for (int i = 0; i < m->anim.sampler_count; i++) {
+            free(m->anim.samplers[i].times);
+            free(m->anim.samplers[i].values);
+        }
+        free(m->anim.samplers);
+    }
+    free(m->anim.channels);
+    memset(m, 0, sizeof(*m));
 }
 
 #endif

@@ -63,6 +63,8 @@ typedef struct GfxCtx {
     /* Sparkle shader + quad (billboard cam-facing avec circle alpha) */
     GLuint sparkle_prog;
     GLuint sparkle_vao, sparkle_vbo;
+    /* Skinning shader (skinned meshes glTF) : prog + uniforms */
+    GLuint skin_prog;
 
     /* UI batcher */
     GLuint ui_vao, ui_vbo;
@@ -181,6 +183,29 @@ bool gfx_mesh_upload(GfxCtx *gc, GfxMesh *out,
 void gfx_mesh_free  (GfxCtx *gc, GfxMesh *m);
 void gfx_mesh_draw  (GfxCtx *gc, const GfxMesh *m, m4 model,
                      float r, float g, float b);
+
+/* === Skinned mesh (glTF avec bones) ===
+ * Layout : 11 floats per vertex (pos + normal + color + joints idx
+ * en bytes packes + weights). Pour rester simple on stocke joints
+ * comme floats (la conversion uint8 -> float passe par la CPU au
+ * moment de l'upload, evite un VertexAttribIPointer separe). */
+typedef struct {
+    GLuint vao, vbo;
+    int    vert_count;
+} GfxSkinMesh;
+
+/* Construit le mesh skinne : combine verts (9 floats * vert_count) +
+ * joints (uint8 * 4 * vert_count) + weights (float * 4 * vert_count)
+ * en un seul interleave 17 floats * vert_count pour upload GPU. */
+bool gfx_skin_mesh_upload(GfxCtx *gc, GfxSkinMesh *out,
+                          const float *verts, int vert_count,
+                          const unsigned char *joints,
+                          const float *weights);
+void gfx_skin_mesh_free  (GfxCtx *gc, GfxSkinMesh *m);
+/* bone_matrices : pointeur sur GLTF_MAX_BONES * 16 floats (skin matrices). */
+void gfx_skin_mesh_draw  (GfxCtx *gc, const GfxSkinMesh *m, m4 model,
+                          const float *bone_matrices, int bone_count,
+                          float r, float g, float b);
 
 /* === SPARKLES 2D ===
  * Quad billboard toujours face camera, gradient circulaire alpha

@@ -575,6 +575,47 @@ static const char *VS_SPARKLE =
 "    gl_Position = u_proj * u_view * vec4(world, 1.0);\n"
 "}\n";
 
+/* === SKIN shader === Vertex skinning glTF. 4 bones par vertex
+ * (standard glTF), mat4 u_bones[GLTF_MAX_BONES] uniform.
+ * Layout vertex : pos 3f + normal 3f + color 3f + joints 4f + weights 4f
+ * = 17 floats per vertex. */
+static const char *VS_SKIN =
+"#version 330 core\n"
+"layout (location = 0) in vec3 a_pos;\n"
+"layout (location = 1) in vec3 a_normal;\n"
+"layout (location = 2) in vec3 a_color;\n"
+"layout (location = 3) in vec4 a_joints;\n"
+"layout (location = 4) in vec4 a_weights;\n"
+"uniform mat4 u_view;\n"
+"uniform mat4 u_proj;\n"
+"uniform mat4 u_model;\n"
+"uniform vec3 u_tint;\n"
+"uniform mat4 u_bones[64];\n"
+"uniform int  u_bone_count;\n"
+"out vec3 v_normal;\n"
+"out vec3 v_color;\n"
+"out vec3 v_world;\n"
+"void main() {\n"
+"    /* Somme ponderee des bones. Fallback identity si bone_count = 0. */\n"
+"    mat4 skin = mat4(0.0);\n"
+"    if (u_bone_count > 0) {\n"
+"        skin += u_bones[int(a_joints.x)] * a_weights.x;\n"
+"        skin += u_bones[int(a_joints.y)] * a_weights.y;\n"
+"        skin += u_bones[int(a_joints.z)] * a_weights.z;\n"
+"        skin += u_bones[int(a_joints.w)] * a_weights.w;\n"
+"    } else {\n"
+"        skin = mat4(1.0);\n"
+"    }\n"
+"    vec4 wp = u_model * skin * vec4(a_pos, 1.0);\n"
+"    v_world = wp.xyz;\n"
+"    v_normal = mat3(u_model) * mat3(skin) * a_normal;\n"
+"    v_color = a_color * u_tint;\n"
+"    gl_Position = u_proj * u_view * wp;\n"
+"}\n";
+
+/* FS skin = FS_BB (meme outputs + uniforms). On reutilise pour eviter
+ * la duplication. */
+
 static const char *FS_SPARKLE =
 "#version 330 core\n"
 "in vec2 v_uv;\n"
@@ -847,6 +888,7 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     gc->composite_prog = make_program(VS_POST, FS_COMPOSITE);
     gc->sky_prog       = make_program(VS_POST, FS_SKY);
     gc->sparkle_prog   = make_program(VS_SPARKLE, FS_SPARKLE);
+    gc->skin_prog      = make_program(VS_SKIN, FS_BB);
     if (!gc->terr_prog || !gc->bb_prog || !gc->ui_prog ||
         !gc->bright_prog || !gc->blur_prog || !gc->composite_prog ||
         !gc->sky_prog) {
@@ -1132,6 +1174,7 @@ void gfx_shutdown(GfxCtx *gc) {
     if (gc->sparkle_vao) pglDeleteVertexArrays(1, &gc->sparkle_vao);
     if (gc->sparkle_vbo) pglDeleteBuffers(1, &gc->sparkle_vbo);
     if (gc->sparkle_prog) pglDeleteProgram(gc->sparkle_prog);
+    if (gc->skin_prog)    pglDeleteProgram(gc->skin_prog);
     if (gc->ui_vao)    pglDeleteVertexArrays(1, &gc->ui_vao);
     if (gc->fbo_color) glDeleteTextures(1, &gc->fbo_color);
     if (gc->fbo_depth) pglDeleteRenderbuffers(1, &gc->fbo_depth);
@@ -1487,6 +1530,90 @@ void gfx_mesh_draw(GfxCtx *gc, const GfxMesh *m, m4 model,
                    float r, float g, float b) {
     if (!m || m->vert_count <= 0) return;
     draw_bb_mesh(gc, model, m->vao, m->vert_count, r, g, b);
+}
+
+/* === Skin mesh : interleave verts + joints + weights => 17 floats per vert === */
+bool gfx_skin_mesh_upload(GfxCtx *gc, GfxSkinMesh *out,
+                          const float *verts, int vert_count,
+                          const unsigned char *joints,
+                          const float *weights) {
+    (void)gc;
+    if (!out || !verts || !joints || !weights || vert_count <= 0) return false;
+    float *interleave = (float *)malloc(sizeof(float) * 17 * vert_count);
+    if (!interleave) return false;
+    for (int i = 0; i < vert_count; i++) {
+        float *o = &interleave[i * 17];
+        const float *iv = &verts[i * 9];
+        for (int k = 0; k < 9; k++) o[k] = iv[k];
+        for (int k = 0; k < 4; k++) o[9 + k] = (float)joints[i * 4 + k];
+        for (int k = 0; k < 4; k++) o[13 + k] = weights[i * 4 + k];
+    }
+    pglGenVertexArrays(1, &out->vao);
+    pglGenBuffers(1, &out->vbo);
+    pglBindVertexArray(out->vao);
+    pglBindBuffer(GL_ARRAY_BUFFER, out->vbo);
+    pglBufferData(GL_ARRAY_BUFFER,
+                  (GLsizeiptr)(vert_count * 17 * sizeof(float)),
+                  interleave, GL_STATIC_DRAW);
+    int s = 17 * sizeof(float);
+    pglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, s, (const void*)0);
+    pglVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, s, (const void*)(3 * sizeof(float)));
+    pglVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, s, (const void*)(6 * sizeof(float)));
+    pglVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, s, (const void*)(9 * sizeof(float)));
+    pglVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, s, (const void*)(13 * sizeof(float)));
+    pglEnableVertexAttribArray(0);
+    pglEnableVertexAttribArray(1);
+    pglEnableVertexAttribArray(2);
+    pglEnableVertexAttribArray(3);
+    pglEnableVertexAttribArray(4);
+    out->vert_count = vert_count;
+    free(interleave);
+    return true;
+}
+
+void gfx_skin_mesh_free(GfxCtx *gc, GfxSkinMesh *m) {
+    (void)gc;
+    if (!m) return;
+    if (m->vao) pglDeleteVertexArrays(1, &m->vao);
+    if (m->vbo) pglDeleteBuffers(1, &m->vbo);
+    m->vao = m->vbo = 0;
+    m->vert_count = 0;
+}
+
+void gfx_skin_mesh_draw(GfxCtx *gc, const GfxSkinMesh *m, m4 model,
+                        const float *bone_matrices, int bone_count,
+                        float r, float g, float b) {
+    if (!m || m->vert_count <= 0) return;
+    pglUseProgram(gc->skin_prog);
+    GLint loc;
+    loc = pglGetUniformLocation(gc->skin_prog, "u_view");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->view.m);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_proj");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->proj.m);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_model");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, model.m);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_tint");
+    pglUniform3f(loc, r, g, b);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_light_dir");
+    pglUniform3f(loc, gc->light_dir.x, gc->light_dir.y, gc->light_dir.z);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_player_pos");
+    pglUniform3f(loc, gc->player_world_pos.x, gc->player_world_pos.y, gc->player_world_pos.z);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_fog_color");
+    pglUniform3f(loc, gc->fog_color.x, gc->fog_color.y, gc->fog_color.z);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_sky_color");
+    pglUniform3f(loc, gc->sky_color.x, gc->sky_color.y, gc->sky_color.z);
+    loc = pglGetUniformLocation(gc->skin_prog, "u_cam_pos");
+    pglUniform3f(loc, gc->cam_pos.x, gc->cam_pos.y, gc->cam_pos.z);
+    /* upload bone matrices */
+    if (bone_count > 64) bone_count = 64;
+    loc = pglGetUniformLocation(gc->skin_prog, "u_bones");
+    if (loc >= 0 && bone_matrices && bone_count > 0) {
+        pglUniformMatrix4fv(loc, bone_count, GL_FALSE, bone_matrices);
+    }
+    loc = pglGetUniformLocation(gc->skin_prog, "u_bone_count");
+    pglUniform1i(loc, bone_count);
+    pglBindVertexArray(m->vao);
+    glDrawArrays(GL_TRIANGLES, 0, m->vert_count);
 }
 
 void gfx_cone_draw(GfxCtx *gc, v3 center, float radius, float height,

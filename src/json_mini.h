@@ -165,6 +165,7 @@ static int jsm__parse_object(const char *src, int len, int *pos,
 static int jsm__parse_array(const char *src, int len, int *pos,
                              JsmTok *toks, int max_toks, int *tok_idx,
                              int parent) {
+    (void)parent;
     JsmTok *arr = jsm__alloc(toks, max_toks, tok_idx);
     if (!arr) return -1;
     int self_idx = (int)(arr - toks);
