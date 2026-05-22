@@ -6,6 +6,8 @@
 #include "ui_common.h"
 #define OBJ_LOADER_IMPLEMENTATION
 #include "obj_loader.h"
+#define GLTF_LOADER_IMPLEMENTATION
+#include "gltf_loader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
