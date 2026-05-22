@@ -324,6 +324,9 @@ typedef enum {
     PU_SCROLL,      /* parchemin de lore */
     PU_FOOD,        /* nourriture (poulet/legume) - regen PV */
     PU_SHRINE,      /* pacte : bonus + malus permanent pour la run */
+    PU_MERCHANT,    /* etage 0 : ouvre le shop (trinkets) */
+    PU_ALTAR,       /* etage 0 : depose les ames -> eclats permanents */
+    PU_SLOTMACHINE, /* etage 0 : reroll archetype d un item (memes slot+rarete) */
 } PickupKind;
 
 typedef struct {

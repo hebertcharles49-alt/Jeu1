@@ -374,7 +374,70 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
             }
             sfx_play(g, SFX_PORTAL);
             pk->alive = false;
+            /* Boss kill -> direct au floor suivant. Plus de shop inter-
+             * etage : le marchand est sur l'etage 0 (pickup PU_MERCHANT). */
+            game_next_floor(g);
+            return;
+        }
+        case PU_MERCHANT:
+            /* batiment etage 0 : ouvre le shop trinkets. */
+            sfx_play(g, SFX_PORTAL);
             game_open_shop(g);
+            return;
+        case PU_ALTAR:
+            /* batiment etage 0 : depose toutes les ames volatiles
+             * (player.souls) vers les eclats permanents (meta.shards). */
+            if (g->player.souls > 0) {
+                int banked = g->player.souls;
+                g->meta.shards += banked;
+                g->player.souls = 0;
+                save_write(&g->meta);
+                sfx_play(g, SFX_COIN);
+                log_push(g, 0xFFD040FF,
+                         "Autel : +%d eclats banques", banked);
+            } else {
+                log_push(g, 0x808080FF, "Autel : aucune ame a deposer");
+                sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+            }
+            return;
+        case PU_SLOTMACHINE: {
+            /* batiment etage 0 : reroll l'archetype d'un item du sac
+             * (memes slot + rarete, archetype au sort). Cout 25 ames.
+             * On reroll le premier non-unique trouve. */
+            const int COST = 25;
+            if (g->player.souls < COST) {
+                log_push(g, 0x808080FF,
+                         "Machine : %d ames requises (tu as %d)",
+                         COST, g->player.souls);
+                sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                return;
+            }
+            int target = -1;
+            int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+            if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
+            for (int i = 0; i < cap; i++) {
+                Item *it = &g->player.inventory[i];
+                if (it->occupied && !it->is_unique &&
+                    it->kind == ITEM_KIND_EQUIP) { target = i; break; }
+            }
+            if (target < 0) {
+                log_push(g, 0x808080FF,
+                         "Machine : aucun equipement non-unique a reroll");
+                sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                return;
+            }
+            g->player.souls -= COST;
+            Item *old = &g->player.inventory[target];
+            EquipSlot slot = old->slot;
+            Rarity r2  = old->rarity;
+            int new_arch;
+            do { new_arch = rand() % 5; } while (new_arch == old->base_kind);
+            Item rerolled = item_make(slot, r2, new_arch);
+            g->player.inventory[target] = rerolled;
+            sfx_play(g, SFX_LEVELUP);
+            log_push(g, 0xFFD040FF,
+                     "Machine : nouvel archetype tire (%s)",
+                     slot_name(slot));
             return;
         }
         case PU_ITEM:
@@ -609,7 +672,9 @@ void update_player(Game *g) {
                         pk->kind == PU_SOUL || pk->kind == PU_FOOD ||
                         pk->kind == PU_HEART);
         bool is_hard = (pk->kind == PU_ITEM || pk->kind == PU_WEAPON ||
-                        pk->kind == PU_ELEMENT);
+                        pk->kind == PU_ELEMENT ||
+                        pk->kind == PU_MERCHANT || pk->kind == PU_ALTAR ||
+                        pk->kind == PU_SLOTMACHINE);
         if (is_soft) {
             float pull = 130.f, vmag = 220.f;
             if (d2 < pull * pull) {

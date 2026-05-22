@@ -2297,6 +2297,84 @@ static void draw_pickup_3d(Game *g, Pickup *pk) {
                          0.40f, 0.70f, 1.0f);  /* flamme bleue */
             return;
         }
+        case PU_MERCHANT: {
+            /* Marchand : etal en bois + parasol + or pulsant */
+            float pulse = 0.6f + 0.4f * sinf(g->time * 3.f);
+            /* socle / etal */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.18f, pos.z),
+                         v3_make(0.90f, 0.36f, 0.70f),
+                         0.45f, 0.30f, 0.18f);
+            /* dessus de l'etal (or) */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.42f, pos.z),
+                         v3_make(0.95f, 0.06f, 0.75f),
+                         0.85f * pulse, 0.65f * pulse, 0.20f);
+            /* poteau de parasol */
+            gfx_box_draw(g->renderer, v3_make(pos.x + 0.30f, 0.85f, pos.z),
+                         v3_make(0.06f, 0.55f, 0.06f),
+                         0.30f, 0.20f, 0.10f);
+            /* parasol rouge */
+            gfx_box_draw(g->renderer, v3_make(pos.x + 0.30f, 1.18f, pos.z),
+                         v3_make(0.85f, 0.10f, 0.70f),
+                         0.85f, 0.20f, 0.20f);
+            /* signe doree */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.62f, pos.z + 0.40f),
+                         v3_make(0.40f, 0.12f, 0.04f),
+                         1.0f, 0.85f, 0.25f);
+            return;
+        }
+        case PU_ALTAR: {
+            /* Autel : socle blanc + flamme doree pulsante (depots ames) */
+            float pulse = 0.6f + 0.4f * sinf(g->time * 2.5f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.12f, pos.z),
+                         v3_make(0.80f, 0.24f, 0.80f),
+                         0.85f, 0.82f, 0.75f);
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.38f, pos.z),
+                         v3_make(0.55f, 0.20f, 0.55f),
+                         0.92f, 0.90f, 0.82f);
+            /* coupole doree au sommet */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.58f, pos.z),
+                         v3_make(0.30f, 0.12f, 0.30f),
+                         1.0f, 0.80f, 0.25f);
+            /* flamme doree pulsante */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.78f + pulse * 0.08f, pos.z),
+                         v3_make(0.16f, 0.28f, 0.16f),
+                         1.0f * pulse, 0.85f * pulse, 0.30f);
+            /* halo doree au sol */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.02f, pos.z),
+                         v3_make(1.10f, 0.02f, 1.10f),
+                         0.95f * pulse, 0.75f * pulse, 0.25f);
+            return;
+        }
+        case PU_SLOTMACHINE: {
+            /* Machine a sous : box noir + rouleaux colores + clignotant */
+            int phase = (int)(g->time * 4.f);
+            float r1 = (phase % 3 == 0) ? 1.0f : 0.30f;
+            float g1 = ((phase + 1) % 3 == 0) ? 1.0f : 0.30f;
+            float b1 = ((phase + 2) % 3 == 0) ? 1.0f : 0.30f;
+            /* corps de la machine */
+            gfx_box_draw(g->renderer, v3_make(pos.x, 0.40f, pos.z),
+                         v3_make(0.70f, 0.80f, 0.55f),
+                         0.20f, 0.18f, 0.25f);
+            /* fenetre des rouleaux (3 carres animes) */
+            gfx_box_draw(g->renderer, v3_make(pos.x - 0.22f, 0.60f, pos.z + 0.30f),
+                         v3_make(0.16f, 0.20f, 0.04f),
+                         r1, 0.20f, 0.20f);
+            gfx_box_draw(g->renderer, v3_make(pos.x,         0.60f, pos.z + 0.30f),
+                         v3_make(0.16f, 0.20f, 0.04f),
+                         0.20f, g1, 0.20f);
+            gfx_box_draw(g->renderer, v3_make(pos.x + 0.22f, 0.60f, pos.z + 0.30f),
+                         v3_make(0.16f, 0.20f, 0.04f),
+                         0.20f, 0.20f, b1);
+            /* levier (rouge) sur le cote */
+            gfx_box_draw(g->renderer, v3_make(pos.x + 0.42f, 0.65f, pos.z),
+                         v3_make(0.10f, 0.30f, 0.10f),
+                         0.90f, 0.20f, 0.20f);
+            /* boule doree au sommet du levier */
+            gfx_box_draw(g->renderer, v3_make(pos.x + 0.42f, 0.85f, pos.z),
+                         v3_make(0.12f, 0.10f, 0.12f),
+                         1.0f, 0.85f, 0.25f);
+            return;
+        }
     }
     /* corps principal */
     gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);

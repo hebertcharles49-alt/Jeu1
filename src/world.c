@@ -108,8 +108,16 @@ void update_room_logic(Game *g) {
                     float py = cy + sinf(a) * rad_px;
                     pickup_spawn(g, PU_PORTAL, dest[k], px, py);
                 }
+                /* 3 batiments sur un anneau interieur, decales par rapport
+                 * aux portails. Marchand / Altar / Slot machine. */
+                float rad_inner = 60.f;
+                pickup_spawn(g, PU_MERCHANT,    0, cx,          cy - rad_inner);
+                pickup_spawn(g, PU_ALTAR,       0, cx + rad_inner * 0.866f, cy + rad_inner * 0.5f);
+                pickup_spawn(g, PU_SLOTMACHINE, 0, cx - rad_inner * 0.866f, cy + rad_inner * 0.5f);
                 log_push(g, 0xFFE090FF,
                          "Choisis ton chemin (7 portails autour de toi)");
+                log_push(g, 0xFFD040FF,
+                         "Marchand / Autel / Machine a sous au centre");
             }
             /* reset per-salle des charges uniques */
             p->phoenix_charge    = true;

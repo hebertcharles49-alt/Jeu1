@@ -376,7 +376,11 @@ void game_shutdown(Game *g) {
 }
 
 void game_to_hub(Game *g) {
-    int gained = g->player.souls + g->run_kills / 4 + g->floor_index * 5;
+    /* Les ames volatiles (player.souls) sont PERDUES en revenant au hub.
+     * Pour les sauvegarder, le joueur doit deposer a l'AUTEL etage 0
+     * pendant la run. Seul un petit bonus de fin de run (kills + floor)
+     * est crediter en eclats. */
+    int gained = g->run_kills / 4 + g->floor_index * 5;
     g->meta.shards += gained;
     g->meta.total_runs++;
     if (g->floor_index > g->meta.best_floor) g->meta.best_floor = g->floor_index;
