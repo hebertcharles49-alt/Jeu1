@@ -296,15 +296,40 @@ static void fire_sword(Game *g, Weapon *w, ComboFx fx) {
         }
         hits++;
     }
-    for (int i = 0; i < 14; i++) {
-        float t = i / 14.f;
+    /* Slash arc : 28 sparkles denses en arc de 1.8 rad. */
+    for (int i = 0; i < 28; i++) {
+        float t = i / 28.f;
         float a = atan2f(ay, ax) - 0.9f + t * 1.8f;
-        float s = reach * (0.6f + (rand() % 50) / 100.f);
+        float s = reach * (0.5f + (rand() % 60) / 100.f);
         particle_spawn_kind(g, p->x + cosf(a) * s, p->y + sinf(a) * s,
-                            cosf(a) * 60, sinf(a) * 60, 0.22f, fx.color, 2.f, 2);
+                            cosf(a) * 80, sinf(a) * 80,
+                            0.30f + (rand() % 15) * 0.01f,
+                            fx.color, 2.4f, 2);
     }
+    /* Bright flash a la position du joueur (point d'origine du swing) */
+    particle_spawn_kind(g, p->x + ax * 6.f, p->y + ay * 6.f, 0, 0,
+                        0.18f, 0xFFFFFFFF, 4.0f, 2);
     cue_swing(p, 0, ax, ay, 0.18f);
     sfx_play(g, SFX_SWORD_SLASH);
+    if (hits > 0) {
+        /* Shockwave sparkles a chaque hit : 8 sparkles radiaux par hit. */
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy *e = &g->enemies[i];
+            if (!e->alive) continue;
+            float dx = e->x - p->x, dy = e->y - p->y;
+            float d = sqrtf(dx * dx + dy * dy);
+            if (d > reach + e->r) continue;
+            float dot = (dx * ax + dy * ay) / (d + 0.001f);
+            if (dot < 0.4f) continue;
+            for (int k = 0; k < 8; k++) {
+                float ka = (k / 8.f) * 6.2831f;
+                float sp = 90.f + (rand() % 60);
+                particle_spawn_kind(g, e->x, e->y,
+                                    cosf(ka) * sp, sinf(ka) * sp,
+                                    0.4f, fx.color, 2.6f, 2);
+            }
+        }
+    }
     if (hits > 0) {
         /* impact metallique brillant. Pitch leg. up pour la perception
          * "tranchant", volume scale au nb de cibles touches. */
@@ -432,11 +457,20 @@ static void fire_axe(Game *g, Weapon *w, ComboFx fx) {
         int best = nearest_enemy(g, p->x, p->y, radius, NULL);
         if (best >= 0) chain_hit(g, best, dmg * 0.5f, fx.status, 3, fx.color);
     }
-    for (int i = 0; i < 36; i++) {
-        float a = (i / 36.f) * 6.2831f;
-        float s = radius * (0.4f + (rand() % 60) / 100.f);
+    /* Shockwave radiale dense : 60 sparkles + ring secondaire */
+    for (int i = 0; i < 60; i++) {
+        float a = (i / 60.f) * 6.2831f;
+        float s = radius * (0.3f + (rand() % 70) / 100.f);
         particle_spawn_kind(g, p->x + cosf(a) * s, p->y + sinf(a) * s,
-                            cosf(a) * 80, sinf(a) * 80, 0.45f, fx.color, 3.f, 2);
+                            cosf(a) * 100, sinf(a) * 100,
+                            0.55f, fx.color, 3.0f, 2);
+    }
+    /* burst central blanc/lumineux a l'impact (commit overhead) */
+    for (int i = 0; i < 12; i++) {
+        float a = (i / 12.f) * 6.2831f;
+        particle_spawn_kind(g, p->x, p->y,
+                            cosf(a) * 40, sinf(a) * 40 - 30,
+                            0.40f, 0xFFFFFFFF, 4.0f, 2);
     }
     /* axe : direction-aware (vise vers le curseur) pour le chop overhead */
     float aax = p->aim_x - p->x, aay = p->aim_y - p->y;

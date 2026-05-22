@@ -9,6 +9,25 @@
 #include <math.h>
 #include <stdlib.h>
 
+/* === Burst de sparkles sur la mort d'un projectile ===
+ * 8-12 particules additives de la couleur de l'element. Donne un
+ * "flash d'impact" visible meme sans AOE. Centre + radial. */
+static void projectile_impact_burst(Game *g, const Projectile *pr) {
+    uint32_t col = element_color(pr->primary);
+    int n = 8 + (rand() % 5);
+    for (int i = 0; i < n; i++) {
+        float a = (rand() % 360) * 0.01745f;
+        float s = 60.f + (rand() % 80);
+        particle_spawn_kind(g, pr->x, pr->y,
+                            cosf(a) * s, sinf(a) * s,
+                            0.45f + (rand() % 30) * 0.01f,
+                            col, 2.2f, 0);
+    }
+    /* eclat central plus gros */
+    particle_spawn_kind(g, pr->x, pr->y, 0, -10.f,
+                        0.30f, col | 0xFF, 3.5f, 0);
+}
+
 void update_projectiles(Game *g) {
     float dt = g->dt;
     Player *p = &g->player;
@@ -45,6 +64,7 @@ void update_projectiles(Game *g) {
                 else if (pr->primary == EL_FIRE)
                     surface_spawn(g, SURF_FIRE, pr->x, pr->y, 12.f, 0.f);
             }
+            projectile_impact_burst(g, pr);
             pr->alive = false;
             continue;
         }
@@ -76,6 +96,7 @@ void update_projectiles(Game *g) {
                 do_aoe_at(g, pr->x, pr->y, pr->aoe, pr->dmg * 0.7f, pr->primary, element_color(pr->primary));
                 sfx_play(g, SFX_EXPLODE);
             }
+            projectile_impact_burst(g, pr);
             pr->alive = false;
             continue;
         }
@@ -102,7 +123,10 @@ void update_projectiles(Game *g) {
                                   element_color(pr->primary));
                     }
                     if (pr->pierce > 0) pr->pierce--;
-                    else                pr->alive = false;
+                    else {
+                        projectile_impact_burst(g, pr);
+                        pr->alive = false;
+                    }
                     break;
                 }
             }
@@ -135,6 +159,7 @@ void update_projectiles(Game *g) {
                 } else if (p->invuln_t <= 0.f && p->dash_t <= 0.f) {
                     player_take_damage_from(g, pr->dmg, pr->x, pr->y);
                 }
+                projectile_impact_burst(g, pr);
                 pr->alive = false;
             }
         }

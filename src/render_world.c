@@ -2867,13 +2867,30 @@ static void draw_projectile_3d(Game *g, Projectile *pr) {
     if (pr->owner == 1 && pr->primary == EL_NONE) c = 0xFF80C0FF;
     float r = ((c>>24)&0xFF)/255.f, gg = ((c>>16)&0xFF)/255.f, b = ((c>>8)&0xFF)/255.f;
 
+    /* === Trail sparkle universel : chaque projectile laisse une trace
+     * de paillettes additives derriere lui. */
+    float vlen = sqrtf(pr->vx * pr->vx + pr->vy * pr->vy) + 0.001f;
+    float dirx = pr->vx / vlen, diry = pr->vy / vlen;
+    /* 3 sparkles backwise pour un trail dense */
+    for (int k = 1; k <= 3; k++) {
+        float t = -k * 0.07f;
+        v3 tp = v3_make(pos.x + dirx * t, pos.y, pos.z + diry * t);
+        gfx_sparkle_draw(g->renderer, tp, 0.30f - k * 0.06f,
+                          r, gg, b, 0.45f - k * 0.10f);
+    }
+    /* sparkle halo geant autour du projectile (glow) */
+    gfx_sparkle_draw(g->renderer, pos, 0.45f, r, gg, b, 0.70f);
+    /* spawn 1 sparkle persistant par tick pour trail world-anchored */
+    if ((rand() % 100) < 70) {
+        particle_spawn_kind(g, pr->x, pr->y,
+                            ((rand() % 30) - 15) * 0.8f,
+                            ((rand() % 30) - 15) * 0.8f,
+                            0.5f, c, 1.8f, 0);
+    }
+
     /* sprite : 1 = fleche (arc), 2 = orbe (baguette), 0 = generique */
     if (pr->sprite == 1) {
-        /* fleche : tige longue alignee sur le velocity vector, pointe
-         * legerement plus claire, fletching arriere. */
-        float vlen = sqrtf(pr->vx * pr->vx + pr->vy * pr->vy) + 0.001f;
-        float dirx = pr->vx / vlen;
-        float diry = pr->vy / vlen;
+        /* fleche : tige longue alignee sur velocity, pointe brillante. */
         /* corps : 3 segments le long de l'axe de vol */
         for (int si = 0; si < 3; si++) {
             float t = (si - 1.f) * 0.10f;     /* -0.10, 0, +0.10 */
@@ -2896,32 +2913,53 @@ static void draw_projectile_3d(Game *g, Projectile *pr) {
             v3_make(pos.x - dirx * 0.18f - px * 0.06f, pos.y, pos.z - diry * 0.18f - pz * 0.06f),
             v3_make(0.04f, 0.06f, 0.04f),
             0.85f, 0.65f, 0.40f);
+        /* sparkle pointe : flash sur la tete */
+        gfx_sparkle_draw(g->renderer,
+            v3_make(pos.x + dirx * 0.18f, pos.y, pos.z + diry * 0.18f),
+            0.20f, 1.f, 0.95f, 0.7f, 1.0f);
     } else if (pr->sprite == 2) {
-        /* orbe magique : noyau pulsant + halo plus large + sparkles. */
+        /* orbe magique : noyau pulsant + halo + sparkles concentriques. */
         float pulse = 0.5f + 0.5f * sinf(g->time * 12.f);
-        float core_sz = 0.16f + 0.05f * pulse;
-        float halo_sz = 0.28f + 0.04f * pulse;
-        /* halo translucide (couleur attenuee, plus gros) */
-        gfx_box_draw(g->renderer, pos,
-                     v3_make(halo_sz, halo_sz, halo_sz),
-                     r * 0.45f, gg * 0.45f, b * 0.45f);
+        float core_sz = 0.14f + 0.05f * pulse;
+        /* noyau cubique pour relief */
         gfx_box_draw(g->renderer, pos,
                      v3_make(core_sz, core_sz, core_sz),
                      r, gg, b);
-        /* sparkle trail derriere la trajectoire : 1 par frame */
-        if ((rand() % 100) < 60) {
-            float vlen = sqrtf(pr->vx * pr->vx + pr->vy * pr->vy) + 0.001f;
-            particle_spawn_kind(g,
-                pr->x - pr->vx / vlen * 6.f,
-                pr->y - pr->vy / vlen * 6.f,
-                (rand()/(float)RAND_MAX - 0.5f) * 40.f,
-                (rand()/(float)RAND_MAX - 0.5f) * 40.f,
-                0.40f, c, 1.8f, 0);
-        }
+        /* sparkle additive massive autour : pulse */
+        gfx_sparkle_draw(g->renderer, pos, 0.60f + 0.15f * pulse,
+                         r, gg, b, 0.85f);
+        gfx_sparkle_draw(g->renderer, pos, 0.30f + 0.08f * pulse,
+                         r * 1.2f, gg * 1.2f, b * 1.2f, 1.0f);
     } else {
-        /* generique : cube simple, scale par aoe */
-        float sz = (pr->aoe > 0.f) ? 0.30f : 0.18f;
+        /* generique : noyau + sparkle */
+        float sz = (pr->aoe > 0.f) ? 0.22f : 0.14f;
         gfx_box_draw(g->renderer, pos, v3_make(sz, sz, sz), r, gg, b);
+        gfx_sparkle_draw(g->renderer, pos, sz * 2.0f, r, gg, b, 0.8f);
+        /* AOE : sparkle ring */
+        if (pr->aoe > 0.f) {
+            float t = g->time * 3.f;
+            for (int k = 0; k < 6; k++) {
+                float a = t + k * 1.047f;     /* 60 deg */
+                v3 rp = v3_make(pos.x + cosf(a) * 0.18f, pos.y,
+                                pos.z + sinf(a) * 0.18f);
+                gfx_sparkle_draw(g->renderer, rp, 0.16f,
+                                 r, gg, b, 0.6f);
+            }
+        }
+    }
+    /* === LIGHTNING : zigzag visible (segments sparkles) ===
+     * Si l'element est foudre, on dessine 3-4 segments en zigzag
+     * autour de la trajectoire. */
+    if (pr->primary == EL_LIGHTNING) {
+        float px = -diry, pz = dirx;
+        for (int k = -2; k <= 2; k++) {
+            float t = k * 0.08f;
+            float zig = ((rand() % 100) - 50) * 0.003f;
+            v3 sp = v3_make(pos.x + dirx * t + px * zig, pos.y,
+                            pos.z + diry * t + pz * zig);
+            gfx_sparkle_draw(g->renderer, sp, 0.16f,
+                             1.f, 1.f, 0.7f, 0.9f);
+        }
     }
 }
 
