@@ -794,18 +794,51 @@ void draw_player_3d(Game *g) {
                  v3_make(pos.x + face_x * 0.02f, 1.05f + bob, pos.z + face_z * 0.02f),
                  v3_make(0.36f, 0.36f, 0.36f),
                  0.91f, 0.75f, 0.54f);
-    /* casque : surimpose la tete avec la couleur d'item rarete */
+    /* casque : surimpose la tete avec la couleur d'item rarete.
+     * Forme depend de la rarete pour casser le look cube-flat :
+     *   commun/magique : dome cubique simple (existant)
+     *   rare/epique    : dome + apex pyramidal au sommet
+     *   legendaire/unique : cone pointu type sorcier (octahedron gem inside) */
     if (eq_helm->occupied) {
         uint32_t cc = eq_helm->is_unique ? 0xFF8030FF : rarity_color(eq_helm->rarity);
         float trr = ((cc>>24)&0xFF)/255.f;
         float tgg = ((cc>>16)&0xFF)/255.f;
         float tbb = ((cc>>8)&0xFF)/255.f;
-        /* dome */
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x + face_x * 0.02f, 1.20f + bob, pos.z + face_z * 0.02f),
-                     v3_make(0.40f, 0.20f, 0.40f),
-                     trr, tgg, tbb);
-        /* visiere sombre devant */
+        Rarity hr = eq_helm->rarity;
+        if (eq_helm->is_unique || hr >= R_EPIC) {
+            /* cone sorcier (8 cotes) + gem octaedre integre */
+            gfx_cone_draw(g->renderer,
+                          v3_make(pos.x + face_x * 0.02f, 1.30f + bob,
+                                  pos.z + face_z * 0.02f),
+                          0.22f, 0.36f,
+                          trr, tgg, tbb);
+            /* gem au front */
+            gfx_octahedron_draw(g->renderer,
+                                v3_make(pos.x + face_x * 0.20f, 1.18f + bob,
+                                        pos.z + face_z * 0.20f),
+                                v3_make(0.10f, 0.10f, 0.10f),
+                                trr * 1.3f, tgg * 1.3f, tbb * 1.3f);
+        } else if (hr >= R_RARE) {
+            /* dome + apex pyramidal */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x + face_x * 0.02f, 1.20f + bob,
+                                 pos.z + face_z * 0.02f),
+                         v3_make(0.40f, 0.18f, 0.40f),
+                         trr, tgg, tbb);
+            gfx_pyramid_draw(g->renderer,
+                             v3_make(pos.x + face_x * 0.02f, 1.34f + bob,
+                                     pos.z + face_z * 0.02f),
+                             v3_make(0.22f, 0.20f, 0.22f),
+                             trr * 1.15f, tgg * 1.15f, tbb * 1.15f);
+        } else {
+            /* dome cubique simple */
+            gfx_box_draw(g->renderer,
+                         v3_make(pos.x + face_x * 0.02f, 1.20f + bob,
+                                 pos.z + face_z * 0.02f),
+                         v3_make(0.40f, 0.20f, 0.40f),
+                         trr, tgg, tbb);
+        }
+        /* visiere sombre devant (tous les helms) */
         gfx_box_draw(g->renderer,
                      v3_make(pos.x + face_x * 0.18f, 1.08f + bob,
                              pos.z + face_z * 0.18f),
@@ -1436,15 +1469,21 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                      v3_make(pos.x, 0.55f, pos.z),
                      v3_make(0.38f, 0.40f, 0.38f),
                      r, gg, b);
-        /* hood pointu */
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x, 0.95f, pos.z),
-                     v3_make(0.30f, 0.30f, 0.30f),
-                     r * 0.55f, gg * 0.55f, b * 0.55f);
-        gfx_box_draw(g->renderer,
-                     v3_make(pos.x, 1.15f, pos.z),
-                     v3_make(0.16f, 0.18f, 0.16f),
-                     r * 0.45f, gg * 0.45f, b * 0.45f);
+        /* tete (sphere approximee par octaedre) sous le chapeau */
+        gfx_octahedron_draw(g->renderer,
+                            v3_make(pos.x, 0.92f, pos.z),
+                            v3_make(0.28f, 0.28f, 0.28f),
+                            r * 0.75f, gg * 0.75f, b * 0.75f);
+        /* chapeau de sorcier : cone pointu */
+        gfx_cone_draw(g->renderer,
+                      v3_make(pos.x, 1.20f, pos.z),
+                      0.20f, 0.40f,
+                      r * 0.55f, gg * 0.55f, b * 0.55f);
+        /* gemme au sommet du chapeau */
+        gfx_octahedron_draw(g->renderer,
+                            v3_make(pos.x, 1.42f, pos.z),
+                            v3_make(0.10f, 0.10f, 0.10f),
+                            0.9f, 0.4f, 1.0f);
         /* yeux bleus brillants sous le hood */
         gfx_box_draw(g->renderer,
                      v3_make(pos.x - 0.08f, 0.95f, pos.z + 0.16f),
@@ -1543,10 +1582,13 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
         gfx_box_draw(g->renderer, v3_make(pos.x, h * 0.75f, pos.z),
                      v3_make(w * 0.80f, h * 0.40f, w * 0.80f),
                      r * 0.7f, gg * 0.7f, b * 0.7f);
-        /* hood */
-        gfx_box_draw(g->renderer, v3_make(pos.x, h + 0.28f, pos.z),
-                     v3_make(0.45f, 0.30f, 0.45f),
-                     r * 0.45f, gg * 0.45f, b * 0.50f);
+        /* hood en cone (couronne pointue) + capuche octaedre dessous */
+        gfx_octahedron_draw(g->renderer, v3_make(pos.x, h + 0.20f, pos.z),
+                            v3_make(0.45f, 0.30f, 0.45f),
+                            r * 0.45f, gg * 0.45f, b * 0.50f);
+        gfx_cone_draw(g->renderer, v3_make(pos.x, h + 0.55f, pos.z),
+                      0.18f, 0.35f,
+                      r * 0.55f, gg * 0.55f, b * 0.60f);
         /* yeux violets */
         float ep = 0.7f + 0.3f * sinf(g->time * 5.f);
         gfx_box_draw(g->renderer,
@@ -1562,10 +1604,10 @@ static void draw_enemy_3d(Game *g, Enemy *e) {
                      v3_make(pos.x + (w/2 + 0.18f), h * 0.45f, pos.z),
                      v3_make(0.06f, 0.75f, 0.06f),
                      0.35f, 0.25f, 0.15f);
-        gfx_box_draw(g->renderer,
+        gfx_octahedron_draw(g->renderer,
                      v3_make(pos.x + (w/2 + 0.18f), h * 0.95f, pos.z),
-                     v3_make(0.16f, 0.18f, 0.16f),
-                     0.90f, 0.88f, 0.78f);
+                     v3_make(0.18f, 0.20f, 0.18f),
+                     0.95f, 0.92f, 0.82f);
         /* ame qui flotte */
         if ((rand() % 100) < 30) {
             particle_spawn_kind(g, e->x, e->y - 4,

@@ -776,6 +776,150 @@ bool gfx_init(GfxCtx *gc, SDL_Window *win, int fbo_w, int fbo_h, int win_w, int 
     pglEnableVertexAttribArray(2);
 
     cube_mesh_init(gc);
+    /* === Pyramide 4 cotes (base [0,1]^2 a y=0, apex (0.5, 1, 0.5)) === */
+    {
+        /* 4 cotes triangulaires + base (2 tris) = 6 tris = 18 verts.
+         * Normales approx pour faces triangulaires inclinees. */
+        const float nx = 0.894f, ny = 0.447f;   /* slope ~63 deg */
+        static const float V[18 * 9] = {
+            /* +Z front */
+            0,0,1,  0,ny,nx, 1,1,1,
+            1,0,1,  0,ny,nx, 1,1,1,
+            0.5f,1,0.5f, 0,ny,nx, 1,1,1,
+            /* +X right */
+            1,0,1,  nx,ny,0, 0.9f,0.9f,0.9f,
+            1,0,0,  nx,ny,0, 0.9f,0.9f,0.9f,
+            0.5f,1,0.5f, nx,ny,0, 0.9f,0.9f,0.9f,
+            /* -Z back */
+            1,0,0,  0,ny,-nx, 0.85f,0.85f,0.85f,
+            0,0,0,  0,ny,-nx, 0.85f,0.85f,0.85f,
+            0.5f,1,0.5f, 0,ny,-nx, 0.85f,0.85f,0.85f,
+            /* -X left */
+            0,0,0,  -nx,ny,0, 0.95f,0.95f,0.95f,
+            0,0,1,  -nx,ny,0, 0.95f,0.95f,0.95f,
+            0.5f,1,0.5f, -nx,ny,0, 0.95f,0.95f,0.95f,
+            /* base (under) 2 triangles */
+            0,0,0, 0,-1,0, 0.5f,0.5f,0.5f,
+            1,0,0, 0,-1,0, 0.5f,0.5f,0.5f,
+            1,0,1, 0,-1,0, 0.5f,0.5f,0.5f,
+            0,0,0, 0,-1,0, 0.5f,0.5f,0.5f,
+            1,0,1, 0,-1,0, 0.5f,0.5f,0.5f,
+            0,0,1, 0,-1,0, 0.5f,0.5f,0.5f,
+        };
+        pglGenVertexArrays(1, &gc->pyr_vao);
+        pglGenBuffers(1, &gc->pyr_vbo);
+        pglBindVertexArray(gc->pyr_vao);
+        pglBindBuffer(GL_ARRAY_BUFFER, gc->pyr_vbo);
+        pglBufferData(GL_ARRAY_BUFFER, sizeof(V), V, GL_STATIC_DRAW);
+        pglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)0);
+        pglVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(3*sizeof(float)));
+        pglVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(6*sizeof(float)));
+        pglEnableVertexAttribArray(0); pglEnableVertexAttribArray(1); pglEnableVertexAttribArray(2);
+        gc->pyr_vert_count = 18;
+    }
+    /* === Octaedre (diamant) : centre (0.5,0.5,0.5), rayon 0.5 ===
+     * Apex top (0.5,1,0.5), bottom (0.5,0,0.5), 4 equateur
+     * (1,0.5,0.5) (0,0.5,0.5) (0.5,0.5,1) (0.5,0.5,0).
+     * 8 faces triangulaires. */
+    {
+        const float s = 0.577f;        /* 1/sqrt(3) pour normales unitaires */
+        static const float V[24 * 9] = {
+            /* TOP-4 triangles (apex haut) -- 4 faces */
+            /* +X+Z */
+            0.5f,1,0.5f, 0.577f,0.577f,0.577f, 1,1,1,
+            1.0f,0.5f,0.5f, 0.577f,0.577f,0.577f, 1,1,1,
+            0.5f,0.5f,1.0f, 0.577f,0.577f,0.577f, 1,1,1,
+            /* +X-Z */
+            0.5f,1,0.5f, 0.577f,0.577f,-0.577f, 0.95f,0.95f,0.95f,
+            0.5f,0.5f,0.0f, 0.577f,0.577f,-0.577f, 0.95f,0.95f,0.95f,
+            1.0f,0.5f,0.5f, 0.577f,0.577f,-0.577f, 0.95f,0.95f,0.95f,
+            /* -X-Z */
+            0.5f,1,0.5f, -0.577f,0.577f,-0.577f, 0.90f,0.90f,0.90f,
+            0.0f,0.5f,0.5f, -0.577f,0.577f,-0.577f, 0.90f,0.90f,0.90f,
+            0.5f,0.5f,0.0f, -0.577f,0.577f,-0.577f, 0.90f,0.90f,0.90f,
+            /* -X+Z */
+            0.5f,1,0.5f, -0.577f,0.577f,0.577f, 0.92f,0.92f,0.92f,
+            0.5f,0.5f,1.0f, -0.577f,0.577f,0.577f, 0.92f,0.92f,0.92f,
+            0.0f,0.5f,0.5f, -0.577f,0.577f,0.577f, 0.92f,0.92f,0.92f,
+            /* BOTTOM-4 triangles (apex bas) */
+            /* +X+Z */
+            0.5f,0,0.5f, 0.577f,-0.577f,0.577f, 0.65f,0.65f,0.65f,
+            0.5f,0.5f,1.0f, 0.577f,-0.577f,0.577f, 0.65f,0.65f,0.65f,
+            1.0f,0.5f,0.5f, 0.577f,-0.577f,0.577f, 0.65f,0.65f,0.65f,
+            /* +X-Z */
+            0.5f,0,0.5f, 0.577f,-0.577f,-0.577f, 0.62f,0.62f,0.62f,
+            1.0f,0.5f,0.5f, 0.577f,-0.577f,-0.577f, 0.62f,0.62f,0.62f,
+            0.5f,0.5f,0.0f, 0.577f,-0.577f,-0.577f, 0.62f,0.62f,0.62f,
+            /* -X-Z */
+            0.5f,0,0.5f, -0.577f,-0.577f,-0.577f, 0.60f,0.60f,0.60f,
+            0.5f,0.5f,0.0f, -0.577f,-0.577f,-0.577f, 0.60f,0.60f,0.60f,
+            0.0f,0.5f,0.5f, -0.577f,-0.577f,-0.577f, 0.60f,0.60f,0.60f,
+            /* -X+Z */
+            0.5f,0,0.5f, -0.577f,-0.577f,0.577f, 0.63f,0.63f,0.63f,
+            0.0f,0.5f,0.5f, -0.577f,-0.577f,0.577f, 0.63f,0.63f,0.63f,
+            0.5f,0.5f,1.0f, -0.577f,-0.577f,0.577f, 0.63f,0.63f,0.63f,
+        };
+        (void)s;
+        pglGenVertexArrays(1, &gc->oct_vao);
+        pglGenBuffers(1, &gc->oct_vbo);
+        pglBindVertexArray(gc->oct_vao);
+        pglBindBuffer(GL_ARRAY_BUFFER, gc->oct_vbo);
+        pglBufferData(GL_ARRAY_BUFFER, sizeof(V), V, GL_STATIC_DRAW);
+        pglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)0);
+        pglVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(3*sizeof(float)));
+        pglVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(6*sizeof(float)));
+        pglEnableVertexAttribArray(0); pglEnableVertexAttribArray(1); pglEnableVertexAttribArray(2);
+        gc->oct_vert_count = 24;
+    }
+    /* === Cone 8 cotes (radius 0.5, height 1) en [0,1]^2 base + apex (0.5,1,0.5) ===
+     * Genere dynamiquement : 8 triangles cote + 8 triangles base (radial). */
+    {
+        const int N = 8;
+        float V[N * 6 * 9];     /* 8 sides + 8 base, 3 verts each */
+        int n = 0;
+        for (int i = 0; i < N; i++) {
+            float a0 = (i     / (float)N) * 6.2831f;
+            float a1 = ((i+1) / (float)N) * 6.2831f;
+            float x0 = 0.5f + cosf(a0) * 0.5f;
+            float z0 = 0.5f + sinf(a0) * 0.5f;
+            float x1 = 0.5f + cosf(a1) * 0.5f;
+            float z1 = 0.5f + sinf(a1) * 0.5f;
+            /* normale moyenne : pointe vers l'exterieur, leg incline */
+            float nxa = cosf((a0 + a1) * 0.5f) * 0.89f;
+            float nza = sinf((a0 + a1) * 0.5f) * 0.89f;
+            float nya = 0.45f;
+            /* cote */
+            float *p = &V[n * 9]; n++;
+            p[0]=x0; p[1]=0; p[2]=z0; p[3]=nxa; p[4]=nya; p[5]=nza;
+            p[6]=1; p[7]=1; p[8]=1;
+            p = &V[n * 9]; n++;
+            p[0]=x1; p[1]=0; p[2]=z1; p[3]=nxa; p[4]=nya; p[5]=nza;
+            p[6]=1; p[7]=1; p[8]=1;
+            p = &V[n * 9]; n++;
+            p[0]=0.5f; p[1]=1; p[2]=0.5f; p[3]=nxa; p[4]=nya; p[5]=nza;
+            p[6]=1; p[7]=1; p[8]=1;
+            /* base radial (under) */
+            p = &V[n * 9]; n++;
+            p[0]=0.5f; p[1]=0; p[2]=0.5f; p[3]=0; p[4]=-1; p[5]=0;
+            p[6]=0.5f; p[7]=0.5f; p[8]=0.5f;
+            p = &V[n * 9]; n++;
+            p[0]=x1; p[1]=0; p[2]=z1; p[3]=0; p[4]=-1; p[5]=0;
+            p[6]=0.5f; p[7]=0.5f; p[8]=0.5f;
+            p = &V[n * 9]; n++;
+            p[0]=x0; p[1]=0; p[2]=z0; p[3]=0; p[4]=-1; p[5]=0;
+            p[6]=0.5f; p[7]=0.5f; p[8]=0.5f;
+        }
+        pglGenVertexArrays(1, &gc->cone_vao);
+        pglGenBuffers(1, &gc->cone_vbo);
+        pglBindVertexArray(gc->cone_vao);
+        pglBindBuffer(GL_ARRAY_BUFFER, gc->cone_vbo);
+        pglBufferData(GL_ARRAY_BUFFER, sizeof(V), V, GL_STATIC_DRAW);
+        pglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)0);
+        pglVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(3*sizeof(float)));
+        pglVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9*sizeof(float), (const void*)(6*sizeof(float)));
+        pglEnableVertexAttribArray(0); pglEnableVertexAttribArray(1); pglEnableVertexAttribArray(2);
+        gc->cone_vert_count = N * 6;
+    }
     ui_init(gc);
 
     /* offscreen FBO pour pixel-art look */
@@ -859,6 +1003,12 @@ void gfx_shutdown(GfxCtx *gc) {
     if (gc->ui_vbo)    pglDeleteBuffers(1, &gc->ui_vbo);
     if (gc->terr_vao)  pglDeleteVertexArrays(1, &gc->terr_vao);
     if (gc->cube_vao)  pglDeleteVertexArrays(1, &gc->cube_vao);
+    if (gc->pyr_vao)   pglDeleteVertexArrays(1, &gc->pyr_vao);
+    if (gc->pyr_vbo)   pglDeleteBuffers(1, &gc->pyr_vbo);
+    if (gc->oct_vao)   pglDeleteVertexArrays(1, &gc->oct_vao);
+    if (gc->oct_vbo)   pglDeleteBuffers(1, &gc->oct_vbo);
+    if (gc->cone_vao)  pglDeleteVertexArrays(1, &gc->cone_vao);
+    if (gc->cone_vbo)  pglDeleteBuffers(1, &gc->cone_vbo);
     if (gc->ui_vao)    pglDeleteVertexArrays(1, &gc->ui_vao);
     if (gc->fbo_color) glDeleteTextures(1, &gc->fbo_color);
     if (gc->fbo_depth) pglDeleteRenderbuffers(1, &gc->fbo_depth);
@@ -1095,6 +1245,66 @@ void gfx_box_draw(GfxCtx *gc, v3 center, v3 size, float r, float g, float b) {
     m4 s = m4_scale(size);
     m4 model = m4_mul(t, s);
     gfx_cube_draw(gc, model, r, g, b);
+}
+
+/* Helper interne : envoie tous les uniforms bb_prog et dessine un mesh
+ * arbitraire avec un model matrix. Factorise pyr/oct/cone qui sont
+ * tous des meshes en [0,1] avec attribs identiques au cube. */
+static void draw_bb_mesh(GfxCtx *gc, m4 model, GLuint vao, int vert_count,
+                         float r, float g, float b) {
+    pglUseProgram(gc->bb_prog);
+    GLint loc;
+    loc = pglGetUniformLocation(gc->bb_prog, "u_view");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->view.m);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_proj");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, gc->proj.m);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_model");
+    pglUniformMatrix4fv(loc, 1, GL_FALSE, model.m);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_light_dir");
+    pglUniform3f(loc, gc->light_dir.x, gc->light_dir.y, gc->light_dir.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_tint");
+    pglUniform3f(loc, r, g, b);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_player_pos");
+    pglUniform3f(loc, gc->player_world_pos.x, gc->player_world_pos.y, gc->player_world_pos.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_fog_color");
+    pglUniform3f(loc, gc->fog_color.x, gc->fog_color.y, gc->fog_color.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_sky_color");
+    pglUniform3f(loc, gc->sky_color.x, gc->sky_color.y, gc->sky_color.z);
+    loc = pglGetUniformLocation(gc->bb_prog, "u_cam_pos");
+    pglUniform3f(loc, gc->cam_pos.x, gc->cam_pos.y, gc->cam_pos.z);
+    pglBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, vert_count);
+}
+
+void gfx_pyramid_draw(GfxCtx *gc, v3 center, v3 size,
+                      float r, float g, float b) {
+    m4 t = m4_translate(v3_make(center.x - size.x * 0.5f,
+                                center.y - size.y * 0.5f,
+                                center.z - size.z * 0.5f));
+    m4 s = m4_scale(size);
+    m4 model = m4_mul(t, s);
+    draw_bb_mesh(gc, model, gc->pyr_vao, gc->pyr_vert_count, r, g, b);
+}
+
+void gfx_octahedron_draw(GfxCtx *gc, v3 center, v3 size,
+                         float r, float g, float b) {
+    m4 t = m4_translate(v3_make(center.x - size.x * 0.5f,
+                                center.y - size.y * 0.5f,
+                                center.z - size.z * 0.5f));
+    m4 s = m4_scale(size);
+    m4 model = m4_mul(t, s);
+    draw_bb_mesh(gc, model, gc->oct_vao, gc->oct_vert_count, r, g, b);
+}
+
+void gfx_cone_draw(GfxCtx *gc, v3 center, float radius, float height,
+                   float r, float g, float b) {
+    /* base diametre = 2*radius. Cone mesh en [0,1]^2 base, height 1. */
+    m4 t = m4_translate(v3_make(center.x - radius,
+                                center.y - height * 0.5f,
+                                center.z - radius));
+    m4 s = m4_scale(v3_make(2.f * radius, height, 2.f * radius));
+    m4 model = m4_mul(t, s);
+    draw_bb_mesh(gc, model, gc->cone_vao, gc->cone_vert_count, r, g, b);
 }
 
 void gfx_billboard_draw(GfxCtx *gc, v3 center, float w, float h,

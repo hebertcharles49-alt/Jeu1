@@ -54,6 +54,12 @@ typedef struct GfxCtx {
     /* cube mesh partage (entites) */
     GLuint cube_vao, cube_vbo;
     int    cube_vert_count;
+    /* meshes additionnels non-cubiques pour rendre les personnages
+     * plus organiques : pyramide 4-cotes, octaedre diamant. Memes
+     * attributs (pos, normal, color) que le cube, dessines via bb_prog. */
+    GLuint pyr_vao,  pyr_vbo;   int pyr_vert_count;
+    GLuint oct_vao,  oct_vbo;   int oct_vert_count;
+    GLuint cone_vao, cone_vbo;  int cone_vert_count;  /* 8 cotes */
 
     /* UI batcher */
     GLuint ui_vao, ui_vbo;
@@ -139,6 +145,18 @@ void gfx_cube_draw(GfxCtx *gc, m4 model, float r, float g, float b);
 
 /* dessine une box rectangulaire (taille xyz, position center) - colore */
 void gfx_box_draw(GfxCtx *gc, v3 center, v3 size, float r, float g, float b);
+
+/* === Primitives non-cubiques pour les personnages ===
+ * Pyramide : base carree au sol [0,1]^2, apex en (0.5, 1, 0.5).
+ *   gfx_pyramid_draw(center, size, height, r, g, b)
+ * Octaedre (diamant) : 8 faces triangulaires autour de (0.5, 0.5, 0.5),
+ * apex top/bottom + 4 equateur.
+ *   gfx_octahedron_draw(center, size, r, g, b)
+ * Cone 8-cotes : base ronde, apex pointu. Pour chapeaux, gemmes, etc.
+ *   gfx_cone_draw(center, radius, height, r, g, b) */
+void gfx_pyramid_draw   (GfxCtx *gc, v3 center, v3 size,    float r, float g, float b);
+void gfx_octahedron_draw(GfxCtx *gc, v3 center, v3 size,    float r, float g, float b);
+void gfx_cone_draw      (GfxCtx *gc, v3 center, float rad, float h, float r, float g, float b);
 
 /* ---------- billboards (particles, sprites alpha) ---------- */
 /* draw_quad_billboard : quad face camera positionne en world space */
