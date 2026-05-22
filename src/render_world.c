@@ -132,6 +132,136 @@ static float s_biome_r = 1.f, s_biome_g = 1.f, s_biome_b = 1.f;
 static float s_wall_tint = 1.f;
 static float s_wall_height = 0.f;       /* override de hauteur ; 0 = WALL_H */
 
+/* === Voxel grid 4x4x4 par tile (64 sub-voxels) ===
+ * Chaque tile T_WALL est decoupee en 64 mini-voxels (X*Y*Z = 4*4*4).
+ * On peut "carver" certains voxels pour creer du detail polygonal :
+ * murs casses, briques en relief, niches, etc. Indexation : grid[y][z][x].
+ * Face culling : un sub-voxel n'emet une face que si son voisin
+ * dans cette direction est vide / hors grille. */
+#define VG 4    /* resolution sub-voxel par axe */
+
+typedef uint8_t VoxGrid[VG][VG][VG];
+
+/* Genere le pattern d'un mur "carved" : par defaut tout plein,
+ * puis on retire des voxels selon le hash de la tile pour donner
+ * un look erode + casser les arretes parfaites. */
+static void gen_wall_voxels(VoxGrid g, int ix, int iz, bool damaged) {
+    /* fill all solid */
+    for (int y = 0; y < VG; y++)
+    for (int z = 0; z < VG; z++)
+    for (int x = 0; x < VG; x++) g[y][z][x] = 1;
+
+    /* Pattern de briques en relief : on creuse une rainure horizontale
+     * sur les coins exterieurs entre les rangees 1-2 et 2-3 (joints). */
+    /* (rien a faire en empty, juste decoratif via normales sur edges) */
+
+    /* Erosion legere sur les coins du haut : evite la silhouette
+     * carree parfaite. 30% chance par voxel-coin. */
+    int top = VG - 1;
+    int corners[4][2] = { {0,0}, {0,top}, {top,0}, {top,top} };
+    for (int c = 0; c < 4; c++) {
+        if (tile_hash01(ix, iz, 700 + c) < 0.30f) {
+            g[top][corners[c][1]][corners[c][0]] = 0;
+        }
+    }
+    /* Quelques voxels enleves au hasard sur les rangees du haut */
+    for (int k = 0; k < 4; k++) {
+        float roll = tile_hash01(ix, iz, 710 + k);
+        if (roll > 0.40f) continue;
+        int rx = (int)(tile_hash01(ix, iz, 720 + k) * VG);
+        int rz = (int)(tile_hash01(ix, iz, 730 + k) * VG);
+        int ry = top - (int)(tile_hash01(ix, iz, 740 + k) * 2);
+        if (rx < 0) rx = 0;
+        if (rx >= VG) rx = VG - 1;
+        if (rz < 0) rz = 0;
+        if (rz >= VG) rz = VG - 1;
+        if (ry < 0) ry = 0;
+        if (ry >= VG) ry = VG - 1;
+        g[ry][rz][rx] = 0;
+    }
+    /* Si tile abimee : carving plus aggressif (8-12 voxels en plus) */
+    if (damaged) {
+        int n_carve = 8 + (int)(tile_hash01(ix, iz, 750) * 5.f);
+        for (int k = 0; k < n_carve; k++) {
+            int rx = (int)(tile_hash01(ix, iz, 760 + k) * VG);
+            int rz = (int)(tile_hash01(ix, iz, 770 + k) * VG);
+            int ry = (int)(tile_hash01(ix, iz, 780 + k) * VG);
+            if (rx < 0) rx = 0;
+            if (rx >= VG) rx = VG - 1;
+            if (rz < 0) rz = 0;
+            if (rz >= VG) rz = VG - 1;
+            if (ry < 0) ry = 0;
+            if (ry >= VG) ry = VG - 1;
+            g[ry][rz][rx] = 0;
+        }
+    }
+}
+
+/* Emet le mesh d'une voxel grid avec face culling. Origin (ix*1, base_y, iz*1)
+ * dans le world ; chaque voxel fait (1/VG) sur chaque axe.
+ * Couleur de base modulee par ndotl du shader. Micro jitter de couleur
+ * par voxel pour casser le flat. */
+static void emit_voxel_grid_mesh(const VoxGrid g, int ix, int iz,
+                                  float base_y, float total_h,
+                                  float r, float g_, float b) {
+    float step_x = 1.f / (float)VG;
+    float step_z = 1.f / (float)VG;
+    float step_y = total_h / (float)VG;
+    for (int y = 0; y < VG; y++)
+    for (int z = 0; z < VG; z++)
+    for (int x = 0; x < VG; x++) {
+        if (!g[y][z][x]) continue;
+        /* couleur jitter par voxel */
+        float j = tile_hash01(ix * VG + x, iz * VG + z, 800 + y) - 0.5f;
+        float vr = r * (1.f + j * 0.10f);
+        float vg = g_ * (1.f + j * 0.10f);
+        float vb = b * (1.f + j * 0.10f);
+        float wx0 = (float)ix + x * step_x;
+        float wx1 = wx0 + step_x;
+        float wy0 = base_y + y * step_y;
+        float wy1 = wy0 + step_y;
+        float wz0 = (float)iz + z * step_z;
+        float wz1 = wz0 + step_z;
+        /* face -X : si voisin -X vide ou x==0 */
+        bool nx_neg = (x > 0)      && g[y][z][x-1];
+        bool nx_pos = (x < VG - 1) && g[y][z][x+1];
+        bool nz_neg = (z > 0)      && g[y][z-1][x];
+        bool nz_pos = (z < VG - 1) && g[y][z+1][x];
+        bool ny_neg = (y > 0)      && g[y-1][z][x];
+        bool ny_pos = (y < VG - 1) && g[y+1][z][x];
+        if (!nx_neg) {
+            mesh_push_quad(v3_make(wx0,wy0,wz1), v3_make(wx0,wy1,wz1),
+                           v3_make(wx0,wy1,wz0), v3_make(wx0,wy0,wz0),
+                           v3_make(-1,0,0), vr, vg, vb);
+        }
+        if (!nx_pos) {
+            mesh_push_quad(v3_make(wx1,wy0,wz0), v3_make(wx1,wy1,wz0),
+                           v3_make(wx1,wy1,wz1), v3_make(wx1,wy0,wz1),
+                           v3_make(1,0,0), vr, vg, vb);
+        }
+        if (!nz_neg) {
+            mesh_push_quad(v3_make(wx1,wy0,wz0), v3_make(wx0,wy0,wz0),
+                           v3_make(wx0,wy1,wz0), v3_make(wx1,wy1,wz0),
+                           v3_make(0,0,-1), vr*1.08f, vg*1.08f, vb*1.08f);
+        }
+        if (!nz_pos) {
+            mesh_push_quad(v3_make(wx0,wy0,wz1), v3_make(wx1,wy0,wz1),
+                           v3_make(wx1,wy1,wz1), v3_make(wx0,wy1,wz1),
+                           v3_make(0,0,1), vr*0.92f, vg*0.92f, vb*0.92f);
+        }
+        if (!ny_neg) {
+            mesh_push_quad(v3_make(wx0,wy0,wz0), v3_make(wx1,wy0,wz0),
+                           v3_make(wx1,wy0,wz1), v3_make(wx0,wy0,wz1),
+                           v3_make(0,-1,0), vr*0.75f, vg*0.75f, vb*0.75f);
+        }
+        if (!ny_pos) {
+            mesh_push_quad(v3_make(wx0,wy1,wz0), v3_make(wx0,wy1,wz1),
+                           v3_make(wx1,wy1,wz1), v3_make(wx1,wy1,wz0),
+                           v3_make(0,1,0), vr*1.12f, vg*1.12f, vb*1.12f);
+        }
+    }
+}
+
 /* Emet une face de mur subdivisee en briques (4 briques par face,
  * chaque brique a son micro-jitter de hauteur + couleur). Multiplie
  * la geometrie par ~4 par face pour briser le flat shading.
@@ -223,10 +353,8 @@ static void emit_wall_column(float x, float z) {
     float dmg_roll = tile_hash01(ix, iz, 7);  /* 10% chance "abime" */
     bool damaged = (dmg_roll < 0.10f);
 
-    float x0 = x, x1 = x + 1.f;
-    float z0 = z, z1 = z + 1.f;
     float base_h = (s_wall_height > 0.f) ? s_wall_height : WALL_H;
-    float y0 = 0.f, y1 = base_h + h_jitter;
+    float y1 = base_h + h_jitter;
     /* murs abimes : plus bas (60-80% hauteur) */
     if (damaged) y1 = base_h * (0.60f + dmg_roll * 2.0f);
     if (y1 < 0.40f) y1 = 0.40f;
@@ -235,50 +363,14 @@ static void emit_wall_column(float x, float z) {
     r *= s_biome_r * s_wall_tint * c_jitter_r;
     g *= s_biome_g * s_wall_tint * c_jitter_g;
     b *= s_biome_b * s_wall_tint * c_jitter_b;
-    /* 4 faces verticales : briques (running bond, mortier visible) */
-    emit_brick_face(x, z, y0, y1,  1, ix, iz, r, g, b);
-    emit_brick_face(x, z, y0, y1, -1, ix, iz, r, g, b);
-    emit_brick_face(x, z, y0, y1,  2, ix, iz, r, g, b);
-    emit_brick_face(x, z, y0, y1, -2, ix, iz, r, g, b);
-    /* top (lit) + bevel chamfer en bordure pour adoucir la silhouette */
-    float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
-    tr *= s_biome_r * s_wall_tint * c_jitter_r;
-    tg *= s_biome_g * s_wall_tint * c_jitter_g;
-    tb *= s_biome_b * s_wall_tint * c_jitter_b;
-    /* face top legerement rentree (0.92) : laisse place au bevel */
-    float ix_pad = 0.08f, iz_pad = 0.08f;
-    mesh_push_quad(v3_make(x0+ix_pad, y1, z0+iz_pad),
-                   v3_make(x0+ix_pad, y1, z1-iz_pad),
-                   v3_make(x1-ix_pad, y1, z1-iz_pad),
-                   v3_make(x1-ix_pad, y1, z0+iz_pad),
-                   v3_make(0,1,0), tr, tg, tb);
-    /* 4 chamfers en bordure du top : quad incline 45 deg */
-    float by = y1 - 0.10f;
-    float tr2 = tr * 0.92f, tg2 = tg * 0.92f, tb2 = tb * 0.92f;
-    /* bevel +X (top -> face droite) */
-    mesh_push_quad(v3_make(x1-ix_pad, y1, z0+iz_pad),
-                   v3_make(x1-ix_pad, y1, z1-iz_pad),
-                   v3_make(x1,        by, z1-iz_pad),
-                   v3_make(x1,        by, z0+iz_pad),
-                   v3_make(0.707f, 0.707f, 0), tr2, tg2, tb2);
-    /* bevel -X */
-    mesh_push_quad(v3_make(x0+ix_pad, y1, z1-iz_pad),
-                   v3_make(x0+ix_pad, y1, z0+iz_pad),
-                   v3_make(x0,        by, z0+iz_pad),
-                   v3_make(x0,        by, z1-iz_pad),
-                   v3_make(-0.707f, 0.707f, 0), tr2, tg2, tb2);
-    /* bevel +Z */
-    mesh_push_quad(v3_make(x0+ix_pad, y1, z1-iz_pad),
-                   v3_make(x1-ix_pad, y1, z1-iz_pad),
-                   v3_make(x1-ix_pad, by, z1),
-                   v3_make(x0+ix_pad, by, z1),
-                   v3_make(0, 0.707f, 0.707f), tr2, tg2, tb2);
-    /* bevel -Z */
-    mesh_push_quad(v3_make(x1-ix_pad, y1, z0+iz_pad),
-                   v3_make(x0+ix_pad, y1, z0+iz_pad),
-                   v3_make(x0+ix_pad, by, z0),
-                   v3_make(x1-ix_pad, by, z0),
-                   v3_make(0, 0.707f, -0.707f), tr2, tg2, tb2);
+    /* Genere la voxel grid 4x4x4 (eventuellement carvee) et emet
+     * le mesh avec face culling. Multiplie le poly count par ~10
+     * sur les murs vs le brick-pattern precedent. */
+    VoxGrid vg;
+    gen_wall_voxels(vg, ix, iz, damaged);
+    emit_voxel_grid_mesh(vg, ix, iz, 0.f, y1, r, g, b);
+    (void)wall_color_top; /* top color : geree par grid (voxel face up) */
+    (void)emit_brick_face; /* fallback ancien, plus utilise */
 
     /* === Cubes additionnels : casser la silhouette === */
     if (damaged) {
