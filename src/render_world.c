@@ -2494,6 +2494,60 @@ void render_world(Game *g) {
         built_gen = g->dungeon.gen_id;
     }
 
+    /* === ATMOSPHERE & GRADING par biome (style Valheim) ===
+     * Fog dense, color grading shadow/highlight assortis, sun direction
+     * legerement tiltee. Distinct par biome pour donner du caractere. */
+    {
+        int bi = (g->state == GS_RUN) ? biome_for_floor(g->floor_index) : -1;
+        v3 fog, sky, shadow, highlight;
+        float exposure = 1.10f;
+        switch (bi) {
+            case 0: /* Cimetiere / Tenebres : froid, gris-violet */
+                fog      = v3_make(0.10f, 0.09f, 0.16f);
+                sky      = v3_make(0.40f, 0.42f, 0.55f);
+                shadow   = v3_make(0.80f, 0.88f, 1.10f);
+                highlight= v3_make(1.05f, 1.00f, 0.92f);
+                break;
+            case 1: /* Forge / Feu : chaud, ocre-rouge */
+                fog      = v3_make(0.18f, 0.10f, 0.08f);
+                sky      = v3_make(0.65f, 0.45f, 0.30f);
+                shadow   = v3_make(0.95f, 0.80f, 0.70f);
+                highlight= v3_make(1.20f, 1.05f, 0.80f);
+                exposure = 1.15f;
+                break;
+            case 2: /* Marais / Eau : verdatre, brumeux */
+                fog      = v3_make(0.08f, 0.14f, 0.13f);
+                sky      = v3_make(0.45f, 0.60f, 0.55f);
+                shadow   = v3_make(0.78f, 0.95f, 0.85f);
+                highlight= v3_make(1.00f, 1.10f, 0.95f);
+                break;
+            case 3: /* Verger / Fae : doux, vert-or */
+                fog      = v3_make(0.14f, 0.16f, 0.10f);
+                sky      = v3_make(0.70f, 0.80f, 0.55f);
+                shadow   = v3_make(0.90f, 1.00f, 0.85f);
+                highlight= v3_make(1.10f, 1.10f, 0.85f);
+                exposure = 1.20f;
+                break;
+            case 4: /* Sanctuaire / Holy : ciel ouvert, cool blanc */
+                fog      = v3_make(0.20f, 0.22f, 0.28f);
+                sky      = v3_make(0.75f, 0.78f, 0.95f);
+                shadow   = v3_make(0.90f, 0.95f, 1.15f);
+                highlight= v3_make(1.05f, 1.05f, 1.10f);
+                exposure = 1.20f;
+                break;
+            default: /* HUB / arene archimage / etage 0 : nuit cosmique */
+                fog      = v3_make(0.06f, 0.05f, 0.12f);
+                sky      = v3_make(0.30f, 0.35f, 0.50f);
+                shadow   = v3_make(0.75f, 0.85f, 1.15f);
+                highlight= v3_make(1.10f, 1.05f, 0.95f);
+                break;
+        }
+        gfx_set_atmosphere(gc, fog, sky);
+        gfx_set_grading(gc, shadow, highlight, exposure, 0.65f);
+        /* Sun direction tiltee : matin tot 30 deg, biais selon biome */
+        gc->light_dir = v3_norm(v3_make(0.45f, 0.85f, 0.30f));
+    }
+
     /* camera : 3eme personne, isometrique-ish, lerp doux vers le joueur */
     v3 player_w = player_world_pos(p);
     static float scam_x = 0.f, scam_z = 0.f;

@@ -68,6 +68,23 @@ typedef struct GfxCtx {
     GLuint fbo_depth;
     int    fbo_w, fbo_h;
 
+    /* === POST-PROCESS chain (bloom + ACES + grading) ===
+     * bright : extract bright pixels from scene (threshold)
+     * blur_a / blur_b : ping-pong gaussian blur (half-res)
+     * fs_vao : fullscreen quad VBO
+     * shaders : bright_prog, blur_prog (H + V via uniform),
+     *           composite_prog (scene + bloom + ACES + grading) */
+    GLuint post_fbo[3];          /* 0=bright, 1=blur_a, 2=blur_b */
+    GLuint post_tex[3];          /* color textures matching fbos */
+    int    post_w, post_h;       /* half-res */
+    GLuint fs_vao, fs_vbo;
+    GLuint bright_prog, blur_prog, composite_prog;
+    /* grading uniforms (positionnees par gfx_set_grading depuis le
+     * world render). Tint shadows / highlights + exposure. */
+    v3     grade_shadow, grade_highlight;
+    float  grade_exposure;
+    float  bloom_intensity;
+
     /* viewport finale (fenetre) */
     int    win_w, win_h;
 
@@ -78,8 +95,11 @@ typedef struct GfxCtx {
     /* matrices courantes */
     m4 view, proj;
 
-    /* lighting */
+    /* lighting + atmosphere */
     v3 light_dir;
+    v3 fog_color;
+    v3 sky_color;
+    v3 player_world_pos;       /* relayee aux billboards via gfx_cube_draw */
 } GfxCtx;
 
 /* ---------- init / shutdown ---------- */
@@ -90,6 +110,14 @@ void gfx_shutdown(GfxCtx *gc);
 void gfx_frame_begin(GfxCtx *gc);
 void gfx_frame_end  (GfxCtx *gc);   /* blit FBO -> backbuffer + present (caller fait SDL_GL_SwapWindow) */
 void gfx_set_camera (GfxCtx *gc, m4 view, m4 proj);
+/* Post-process : positionne le grading par biome (shadow_tint /
+ * highlight_tint multiplicatif, exposure global). Lu par le shader
+ * composite a la fin de la frame. */
+void gfx_set_grading(GfxCtx *gc, v3 shadow, v3 highlight,
+                     float exposure, float bloom);
+/* Atmosphere : couleur du fog distance + couleur du ciel (ambient
+ * hemispherique). Set en debut de frame depuis render_world. */
+void gfx_set_atmosphere(GfxCtx *gc, v3 fog, v3 sky);
 /* Limite le viewport a un rect en coords FBO (internes). Utile pour
  * rendre une scene 3D dans une zone UI (paperdoll inventaire).
  * Reset_viewport restore le viewport plein FBO. clear_depth efface la
