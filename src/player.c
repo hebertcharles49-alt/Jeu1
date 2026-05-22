@@ -248,10 +248,20 @@ static void on_pickup_collect(Game *g, Pickup *pk) {
         case PU_WEAPON: {
             /* value packe : kind (8 bits bas) + rarity (8 bits suivants).
              * Depose en inventaire (ITEM_KIND_WEAPON). Le joueur equipe
-             * manuellement via E sur le slot inventaire. */
+             * manuellement via E sur le slot inventaire.
+             * Refuse les armes verrouillees (filet de securite, les drops
+             * sont deja filtres en amont mais le debug room peut en poser). */
             int kind   = pk->value & 0xFF;
             int rarity = (pk->value >> 8) & 0xFF;
             if (rarity < 0 || rarity >= R_COUNT) rarity = R_COMMON;
+            if (kind <= W_FISTS || kind >= W_COUNT) break;
+            if (!g->meta.weapon_unlocked[kind]) {
+                log_push(g, 0x808080FF, "%s verrouillee (FORGE)",
+                         weapon_name((WeaponKind)kind));
+                sfx_play_ex(g, SFX_SWING, 0.5f, 0.7f);
+                pk->alive = false;
+                return;
+            }
             Item it = (Item){0};
             it.occupied = true;
             it.kind = ITEM_KIND_WEAPON;

@@ -433,6 +433,16 @@ bool inventory_equip(Game *g, int inv_index) {
         WeaponKind wk = (WeaponKind)src->base_kind;
         Rarity     wr = src->rarity;
         if (wk <= W_FISTS || wk >= W_COUNT) return false;
+        /* Filet de securite : refuse l'equipement d'une arme verrouillee.
+         * Normalement les drops sont filtres en amont (enemies.c +
+         * player.c PU_CHEST), mais on ne fait pas confiance aux items
+         * en inventaire (e.g. import futur de save corrompue). */
+        if (!g->meta.weapon_unlocked[wk]) {
+            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                     "%s : verrouillee (FORGE)", weapon_name(wk));
+            g->inv_msg_t = 2.0f;
+            return false;
+        }
         /* Remplace l'arme active. L'ancienne (si pas poings) revient
          * en inventaire au meme slot. */
         Weapon *w = &p->weapons[p->active_weapon];
