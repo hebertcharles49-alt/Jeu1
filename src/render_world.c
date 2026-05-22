@@ -7,6 +7,8 @@
  */
 #include "ui_common.h"
 #include "gfx.h"
+#define STB_PERLIN_IMPLEMENTATION
+#include "stb_perlin.h"
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -343,10 +345,13 @@ static void emit_brick_face(float x, float z, float y0, float y1,
 
 static void emit_wall_column(float x, float z) {
     int ix = (int)x, iz = (int)z;
-    /* === jitter procedural par cube ===
-     * - hauteur : +/-0.15 pour casser l'alignement parfait
-     * - color : tint ±5% sur RGB indep pour casser l'uniformite */
-    float h_jitter = (tile_hash01(ix, iz, 1) - 0.5f) * 0.30f;
+    /* === jitter procedural par cube (perlin smooth pour cohesion) ===
+     * - hauteur : Perlin 3-octaves fbm -> variation continue
+     *   entre cubes voisins, pas saccadee comme avec hash random.
+     * - color : tint ±5% sur RGB indep (hash, micro-grain). */
+    float perlin_h = stb_perlin_fbm_noise3(ix * 0.18f, iz * 0.18f, 0.f,
+                                            2.0f, 0.5f, 3);
+    float h_jitter = perlin_h * 0.20f;
     float c_jitter_r = 1.f + (tile_hash01(ix, iz, 2) - 0.5f) * 0.10f;
     float c_jitter_g = 1.f + (tile_hash01(ix, iz, 3) - 0.5f) * 0.10f;
     float c_jitter_b = 1.f + (tile_hash01(ix, iz, 4) - 0.5f) * 0.10f;
