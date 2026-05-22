@@ -558,15 +558,6 @@ bool inventory_destroy(Game *g, int inv_index) {
         g->inv_msg_t = 2.0f;
         return false;
     }
-    /* unmark s'il etait marque pour fusion */
-    for (int i = 0; i < g->inv_marked_count; i++) {
-        if (g->inv_marked[i] == inv_index) {
-            for (int j = i; j < g->inv_marked_count - 1; j++)
-                g->inv_marked[j] = g->inv_marked[j + 1];
-            g->inv_marked_count--;
-            break;
-        }
-    }
     src->occupied = false;
     sfx_play(g, SFX_FUSE);
     snprintf(g->inv_msg, sizeof(g->inv_msg), "Detruit");
@@ -638,57 +629,15 @@ bool inventory_find_fusion_group(Game *g, int *out_a, int *out_b, int *out_c) {
  * Plus besoin de marquer manuellement dans le cas standard. */
 bool inventory_fuse(Game *g) {
     Player *p = &g->player;
-    int a, b, c;
-    if (g->inv_marked_count == 3) {
-        a = g->inv_marked[0]; b = g->inv_marked[1]; c = g->inv_marked[2];
-    } else {
-        if (!inventory_find_fusion_group(g, &a, &b, &c)) {
-            /* Diagnostic : scan le sac et trouve le groupe le plus
-             * proche d'un trio (par kind+sub+rarete). Aide l'utilisateur
-             * a comprendre ce qui manque. */
-            int inv_cap_d = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
-            if (inv_cap_d > INVENTORY_MAX_SLOTS) inv_cap_d = INVENTORY_MAX_SLOTS;
-            int best_cnt = 0;
-            const Item *best = NULL;
-            for (int i = 0; i < inv_cap_d; i++) {
-                Item *ii = &p->inventory[i];
-                if (!ii->occupied || ii->is_unique) continue;
-                if (ii->kind != ITEM_KIND_EQUIP && ii->kind != ITEM_KIND_WEAPON) continue;
-                if (ii->rarity >= R_LEGENDARY) continue;
-                int cnt = 1;
-                for (int j = 0; j < inv_cap_d; j++) {
-                    if (j == i) continue;
-                    Item *jj = &p->inventory[j];
-                    if (!jj->occupied || jj->is_unique) continue;
-                    if (jj->kind != ii->kind) continue;
-                    if (jj->rarity != ii->rarity) continue;
-                    if (jj->base_kind != ii->base_kind) continue;
-                    if (ii->kind == ITEM_KIND_EQUIP && jj->slot != ii->slot) continue;
-                    cnt++;
-                }
-                if (cnt > best_cnt) { best_cnt = cnt; best = ii; }
-            }
-            if (best && best_cnt >= 2) {
-                const char *what = (best->kind == ITEM_KIND_WEAPON)
-                    ? weapon_name((WeaponKind)best->base_kind)
-                    : slot_name(best->slot);
-                snprintf(g->inv_msg, sizeof(g->inv_msg),
-                         "%dx %s %s (besoin 3)",
-                         best_cnt, rarity_name(best->rarity), what);
-            } else {
-                snprintf(g->inv_msg, sizeof(g->inv_msg),
-                         "Rien a fusionner (3 items meme type+rarete)");
-            }
-            g->inv_msg_t = 3.5f;
-            return false;
-        }
-    }
-    Item *ia = &p->inventory[a];
-    Item *ib = &p->inventory[b];
-    Item *ic = &p->inventory[c];
+    /* Lecture depuis fusion_slots[3] (items physiquement deposes
+     * dans le fusionneur). Plus de marquage flottant. */
+    Item *ia = &g->fusion_slots[0];
+    Item *ib = &g->fusion_slots[1];
+    Item *ic = &g->fusion_slots[2];
     if (!ia->occupied || !ib->occupied || !ic->occupied) {
-        snprintf(g->inv_msg, sizeof(g->inv_msg), "Slots invalides");
-        g->inv_msg_t = 2.f;
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Depose 3 items dans le fusionneur");
+        g->inv_msg_t = 2.5f;
         return false;
     }
     /* Fusion : meme slot + meme rarete. Archetype peut differer. */
@@ -757,11 +706,24 @@ bool inventory_fuse(Game *g) {
         fused = item_make(ia->slot, newr, chosen_archetype);
         fused.stat_value *= 1.20f;
     }
-    ia->occupied = false;
-    ib->occupied = false;
-    ic->occupied = false;
-    p->inventory[a] = fused;
-    g->inv_marked_count = 0;
+    /* Vide les 3 slots fusion. Le resultat va au 1er slot bag libre. */
+    g->fusion_slots[0].occupied = false;
+    g->fusion_slots[1].occupied = false;
+    g->fusion_slots[2].occupied = false;
+    int inv_cap_o = INVENTORY_SLOTS + p->inv_capacity_bonus;
+    if (inv_cap_o > INVENTORY_MAX_SLOTS) inv_cap_o = INVENTORY_MAX_SLOTS;
+    int dst = -1;
+    for (int i = 0; i < inv_cap_o; i++)
+        if (!p->inventory[i].occupied) { dst = i; break; }
+    if (dst < 0) {
+        /* sac plein : on perd le resultat (rare, on log) */
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Sac plein -> resultat perdu");
+        g->inv_msg_t = 3.0f;
+        sfx_play(g, SFX_FUSE);
+        return true;
+    }
+    p->inventory[dst] = fused;
     sfx_play(g, SFX_FUSE);
     if (weap_fuse) {
         snprintf(g->inv_msg, sizeof(g->inv_msg), "Fusion arme -> %s %s",
@@ -839,32 +801,60 @@ static void talisman_cycle(Game *g, int weapon_idx, int talisman_idx) {
     sfx_play(g, SFX_PICKUP);
 }
 
-/* helper : marque / demarque un item du sac pour la fusion. Toggle. */
-static void fusion_toggle_mark(Game *g, int inv_idx) {
-    if (inv_idx < 0 || inv_idx >= INVENTORY_MAX_SLOTS) return;
-    if (!g->player.inventory[inv_idx].occupied) return;
-    for (int i = 0; i < g->inv_marked_count; i++) {
-        if (g->inv_marked[i] == inv_idx) {
-            for (int j = i; j < g->inv_marked_count - 1; j++)
-                g->inv_marked[j] = g->inv_marked[j + 1];
-            g->inv_marked_count--;
-            return;
+/* Helpers fusionneur : depose un item sac -> 1er slot fusion libre.
+ * Renvoie true si depose. */
+static bool fusion_deposit_from_bag(Game *g, int inv_idx) {
+    if (inv_idx < 0 || inv_idx >= INVENTORY_MAX_SLOTS) return false;
+    Item *it = &g->player.inventory[inv_idx];
+    if (!it->occupied) return false;
+    if (it->kind != ITEM_KIND_EQUIP && it->kind != ITEM_KIND_WEAPON) {
+        snprintf(g->inv_msg, sizeof(g->inv_msg),
+                 "Fusion : equipement ou arme uniquement");
+        g->inv_msg_t = 1.8f;
+        return false;
+    }
+    for (int s = 0; s < 3; s++) {
+        if (!g->fusion_slots[s].occupied) {
+            g->fusion_slots[s] = *it;
+            it->occupied = false;
+            return true;
         }
     }
-    if (g->inv_marked_count < 3) {
-        g->inv_marked[g->inv_marked_count++] = inv_idx;
-    } else {
-        snprintf(g->inv_msg, sizeof(g->inv_msg),
-                 "Fusionneur plein (3 max)");
-        g->inv_msg_t = 1.5f;
+    snprintf(g->inv_msg, sizeof(g->inv_msg), "Fusionneur plein (3 max)");
+    g->inv_msg_t = 1.5f;
+    return false;
+}
+
+/* Retourne un item du fusionneur vers le sac (1er slot libre). */
+static bool fusion_retrieve_to_bag(Game *g, int fusion_idx) {
+    if (fusion_idx < 0 || fusion_idx >= 3) return false;
+    Item *it = &g->fusion_slots[fusion_idx];
+    if (!it->occupied) return false;
+    int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+    if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
+    for (int i = 0; i < cap; i++) {
+        if (!g->player.inventory[i].occupied) {
+            g->player.inventory[i] = *it;
+            it->occupied = false;
+            return true;
+        }
     }
+    snprintf(g->inv_msg, sizeof(g->inv_msg), "Sac plein");
+    g->inv_msg_t = 1.5f;
+    return false;
+}
+
+static int fusion_count(const Game *g) {
+    int n = 0;
+    for (int i = 0; i < 3; i++) if (g->fusion_slots[i].occupied) n++;
+    return n;
 }
 
 /* keyboard + mouse navigation in inventory screen */
 void update_inventory_input(Game *g) {
     /* === FUSIONNEUR : clicks sur les 3 slots + bouton ===
-     * Layout en parallele avec render_inventory (cf constantes
-     * INV_FUSION_X / INV_FUSION_Y dans render_inventory.c). */
+     * Layout en parallele avec render_inventory. Items physiques
+     * deposes dans g->fusion_slots[]. Click sur slot occupied = retire. */
     {
         int fx0 = 10, fy0 = 250;        /* INV_FUSION_X / INV_FUSION_Y */
         int slot_sz = 30, slot_y = fy0 + 22;
@@ -872,16 +862,14 @@ void update_inventory_input(Game *g) {
         if (mouse_clicked(g)) {
             for (int s = 0; s < 3; s++) {
                 if (mouse_in_rect(g, slot_x[s], slot_y, slot_sz, slot_sz)) {
-                    if (s < g->inv_marked_count) {
-                        for (int j = s; j < g->inv_marked_count - 1; j++)
-                            g->inv_marked[j] = g->inv_marked[j + 1];
-                        g->inv_marked_count--;
+                    if (g->fusion_slots[s].occupied) {
+                        fusion_retrieve_to_bag(g, s);
                     }
                     return;
                 }
             }
             int bx = fx0 + 10, by = fy0 + 65, bw = (200 - 20), bh = 22;
-            if (mouse_in_rect(g, bx, by, bw, bh) && g->inv_marked_count == 3) {
+            if (mouse_in_rect(g, bx, by, bw, bh) && fusion_count(g) == 3) {
                 inventory_fuse(g);
                 return;
             }
@@ -898,46 +886,119 @@ void update_inventory_input(Game *g) {
         if (!inv_layout_rect(i, &x, &y, &w, &h)) continue;
         if (mouse_in_rect(g, x, y, w, h)) {
             g->inv_cursor = i;
-            /* Clic DROIT sur item du sac : toggle dans le fusionneur. */
-            if (mouse_right_clicked(g) && i < INV_CURSOR_EQUIP_BASE) {
-                fusion_toggle_mark(g, i);
-                return;
+            /* Clic DROIT : depose dans le fusionneur depuis le sac OU
+             * directement depuis un slot ARME equipee. */
+            if (mouse_right_clicked(g)) {
+                if (i < INV_CURSOR_EQUIP_BASE) {
+                    fusion_deposit_from_bag(g, i);
+                    return;
+                }
+                if (i >= INV_CURSOR_WEAPON_BASE && i < INV_CURSOR_TALISMAN_BASE) {
+                    int wi = i - INV_CURSOR_WEAPON_BASE;
+                    Weapon *w_ = &g->player.weapons[wi];
+                    if (w_->owned && w_->kind != W_FISTS) {
+                        /* trouve 1er fusion slot libre */
+                        int fs = -1;
+                        for (int s = 0; s < 3; s++)
+                            if (!g->fusion_slots[s].occupied) { fs = s; break; }
+                        if (fs < 0) {
+                            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                                     "Fusionneur plein (3 max)");
+                            g->inv_msg_t = 1.5f;
+                        } else {
+                            Item it = (Item){0};
+                            it.occupied = true;
+                            it.kind = ITEM_KIND_WEAPON;
+                            it.base_kind = (int)w_->kind;
+                            it.rarity = w_->rarity;
+                            snprintf(it.name, sizeof(it.name), "%s",
+                                     weapon_name(w_->kind));
+                            g->fusion_slots[fs] = it;
+                            /* remplace par FISTS */
+                            weapon_init_defaults(w_, W_FISTS);
+                            w_->owned = true;
+                            game_recompute_player_stats(g);
+                        }
+                        return;
+                    }
+                }
             }
             if (mouse_clicked(g)) {
                 if (i < INV_CURSOR_EQUIP_BASE) {
+                    /* Click sur item du sac : equipe directement */
                     inventory_equip(g, i);
                 } else if (i < INV_CURSOR_WEAPON_BASE) {
+                    /* Click sur slot equipement equipe -> retire dans le sac */
                     inventory_unequip(g, i - INV_CURSOR_EQUIP_BASE);
                 } else if (i < INV_CURSOR_TALISMAN_BASE) {
-                    /* slot arme : pas d'action click pour l'instant
-                     * (les armes ne se "deposent" pas dans le sac). */
+                    /* Click sur slot ARME equipee : retire l'arme dans le
+                     * sac et la remplace par FISTS. Filet : empeche de
+                     * retirer la seule arme equipable. */
+                    int wi = i - INV_CURSOR_WEAPON_BASE;
+                    Weapon *w_ = &g->player.weapons[wi];
+                    if (w_->owned && w_->kind != W_FISTS) {
+                        int cap_w = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
+                        if (cap_w > INVENTORY_MAX_SLOTS) cap_w = INVENTORY_MAX_SLOTS;
+                        int dst = -1;
+                        for (int s = 0; s < cap_w; s++)
+                            if (!g->player.inventory[s].occupied) { dst = s; break; }
+                        if (dst < 0) {
+                            snprintf(g->inv_msg, sizeof(g->inv_msg), "Sac plein");
+                            g->inv_msg_t = 1.5f;
+                        } else {
+                            Item back = (Item){0};
+                            back.occupied = true;
+                            back.kind = ITEM_KIND_WEAPON;
+                            back.base_kind = (int)w_->kind;
+                            back.rarity = w_->rarity;
+                            snprintf(back.name, sizeof(back.name), "%s",
+                                     weapon_name(w_->kind));
+                            g->player.inventory[dst] = back;
+                            weapon_init_defaults(w_, W_FISTS);
+                            w_->owned = true;
+                            game_recompute_player_stats(g);
+                            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                                     "Arme retiree dans le sac");
+                            g->inv_msg_t = 1.5f;
+                        }
+                    }
                 } else if (i < INV_CURSOR_TALISBAG_BASE) {
+                    /* talisman actif (sur arme) : cycle */
                     int rel = i - INV_CURSOR_TALISMAN_BASE;
                     talisman_cycle(g, rel / 3, rel % 3);
                 } else {
-                    /* talisbag : equipe le talisman sur arme active */
+                    /* talisbag : equipe le talisman sur arme active.
+                     * Path direct : weapon_attach_element + invalidate. */
                     int ti = i - INV_CURSOR_TALISBAG_BASE;
                     Item *t = &g->player.talisman_bag[ti];
-                    if (t->occupied) {
-                        /* reutilise la logique equip pour ITEM_KIND_ELEMENT
-                         * en routant via un slot fake : on swap dans le bag
-                         * principal temporairement, equip, puis le slot
-                         * fake est vide par inventory_equip. */
-                        Item saved = *t;
-                        *t = (Item){0};
-                        /* trouve un slot libre temporaire dans le sac */
-                        int tmp = -1;
-                        int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
-                        if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
-                        for (int s = 0; s < cap; s++)
-                            if (!g->player.inventory[s].occupied) { tmp = s; break; }
-                        if (tmp < 0) { *t = saved; }
-                        else {
-                            g->player.inventory[tmp] = saved;
-                            if (!inventory_equip(g, tmp)) {
-                                /* echec : remet dans le talisbag */
-                                *t = g->player.inventory[tmp];
-                                g->player.inventory[tmp] = (Item){0};
+                    if (t->occupied && t->kind == ITEM_KIND_ELEMENT) {
+                        Element e = (Element)t->base_kind;
+                        Weapon *w_ = &g->player.weapons[g->player.active_weapon];
+                        int cap_t = weapon_slot_count(w_->rarity);
+                        if (w_->element_count >= cap_t) {
+                            snprintf(g->inv_msg, sizeof(g->inv_msg),
+                                     "Slots talisman pleins sur l'arme");
+                            g->inv_msg_t = 2.0f;
+                        } else {
+                            bool dup = false;
+                            for (int k = 0; k < w_->element_count; k++)
+                                if (w_->elements[k] == e) { dup = true; break; }
+                            if (dup) {
+                                snprintf(g->inv_msg, sizeof(g->inv_msg),
+                                         "Element deja greffe sur cette arme");
+                                g->inv_msg_t = 2.0f;
+                            } else {
+                                weapon_attach_element(w_, e);
+                                if (!g->meta.element_discovered[e]) {
+                                    g->meta.element_discovered[e] = true;
+                                    save_write(&g->meta);
+                                }
+                                t->occupied = false;
+                                game_recompute_player_stats(g);
+                                snprintf(g->inv_msg, sizeof(g->inv_msg),
+                                         "Greffe : %s", element_name(e));
+                                g->inv_msg_t = 1.5f;
+                                sfx_play(g, SFX_LEVELUP);
                             }
                         }
                     }
@@ -1017,57 +1078,43 @@ nav_done:;
             talisman_cycle(g, rel / 3, rel % 3);
         } else if (g->inv_cursor >= INV_CURSOR_TALISBAG_BASE &&
                    g->inv_cursor < INV_CURSOR_TALISBAG_BASE + TALISMAN_BAG_SLOTS) {
+            /* equip direct depuis le talisbag (path symetrique au clic) */
             int ti = g->inv_cursor - INV_CURSOR_TALISBAG_BASE;
             Item *t = &g->player.talisman_bag[ti];
-            if (t->occupied) {
-                Item saved = *t;
-                *t = (Item){0};
-                int tmp = -1;
-                int cap = INVENTORY_SLOTS + g->player.inv_capacity_bonus;
-                if (cap > INVENTORY_MAX_SLOTS) cap = INVENTORY_MAX_SLOTS;
-                for (int s = 0; s < cap; s++)
-                    if (!g->player.inventory[s].occupied) { tmp = s; break; }
-                if (tmp < 0) { *t = saved; }
-                else {
-                    g->player.inventory[tmp] = saved;
-                    if (!inventory_equip(g, tmp)) {
-                        *t = g->player.inventory[tmp];
-                        g->player.inventory[tmp] = (Item){0};
+            if (t->occupied && t->kind == ITEM_KIND_ELEMENT) {
+                Element e = (Element)t->base_kind;
+                Weapon *w_ = &g->player.weapons[g->player.active_weapon];
+                int cap_t = weapon_slot_count(w_->rarity);
+                bool dup = false;
+                for (int k = 0; k < w_->element_count; k++)
+                    if (w_->elements[k] == e) { dup = true; break; }
+                if (w_->element_count < cap_t && !dup) {
+                    weapon_attach_element(w_, e);
+                    if (!g->meta.element_discovered[e]) {
+                        g->meta.element_discovered[e] = true;
+                        save_write(&g->meta);
                     }
+                    t->occupied = false;
+                    game_recompute_player_stats(g);
+                    sfx_play(g, SFX_LEVELUP);
                 }
             }
         }
     }
-    /* M = mark for fusion. Le sac peut etre etendu via trinkets, donc
-     * on borne sur INV_CURSOR_EQUIP_BASE (debut zone equipement) au lieu
-     * du 12 hardcode. */
+    /* M : depose l'item sous le curseur dans le fusionneur (raccourci
+     * clavier equivalent au clic droit). */
     if (g->keys[SDL_SCANCODE_M] && !g->keys_prev[SDL_SCANCODE_M]) {
-        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE &&
-            g->player.inventory[g->inv_cursor].occupied) {
-            int idx = g->inv_cursor;
-            /* toggle */
-            int found = -1;
-            for (int i = 0; i < g->inv_marked_count; i++)
-                if (g->inv_marked[i] == idx) { found = i; break; }
-            if (found >= 0) {
-                for (int i = found; i < g->inv_marked_count - 1; i++)
-                    g->inv_marked[i] = g->inv_marked[i + 1];
-                g->inv_marked_count--;
-            } else if (g->inv_marked_count < 3) {
-                g->inv_marked[g->inv_marked_count++] = idx;
-            } else {
-                snprintf(g->inv_msg, sizeof(g->inv_msg), "Deja 3 marques");
-                g->inv_msg_t = 1.5f;
-            }
+        if (g->inv_cursor < INV_CURSOR_EQUIP_BASE) {
+            fusion_deposit_from_bag(g, g->inv_cursor);
         }
     }
     /* F = fuse */
     if (g->keys[SDL_SCANCODE_F] && !g->keys_prev[SDL_SCANCODE_F]) {
         inventory_fuse(g);
     }
-    /* X = drop / clear marks */
+    /* X = retire tous les items du fusionneur (clear) -> retour au sac. */
     if (g->keys[SDL_SCANCODE_X] && !g->keys_prev[SDL_SCANCODE_X]) {
-        g->inv_marked_count = 0;
+        for (int s = 0; s < 3; s++) fusion_retrieve_to_bag(g, s);
     }
     /* DELETE = detruit l'item sous le curseur (sac uniquement). */
     if (g->keys[SDL_SCANCODE_DELETE] && !g->keys_prev[SDL_SCANCODE_DELETE]) {

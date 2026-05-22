@@ -494,6 +494,9 @@ void render_inventory(Game *g) {
     /* hint click droit pour le fusionneur */
     text_draw(g->renderer, bag_x + 50, bag_y - 9,
               "(clic droit -> fusionneur)", 0x808080FF);
+    /* auto-fuse hint reste : highlight les items du sac qui forment
+     * un trio detectable. Cosmetic seulement -- le user doit toujours
+     * deposer dans le fusionneur via click droit. */
     int fa = -1, fb = -1, fc = -1;
     bool has_auto_fuse = inventory_find_fusion_group(g, &fa, &fb, &fc);
     for (int i = 0; i < inv_cap; i++) {
@@ -501,11 +504,7 @@ void render_inventory(Game *g) {
         int sx = bag_x + col * cell;
         int sy = bag_y + row * cell;
         bool sel = (g->inv_cursor == i);
-        bool mk = false;
-        for (int m = 0; m < g->inv_marked_count; m++)
-            if (g->inv_marked[m] == i) mk = true;
-        if (g->inv_marked_count == 0 && has_auto_fuse &&
-            (i == fa || i == fb || i == fc)) mk = true;
+        bool mk = has_auto_fuse && (i == fa || i == fb || i == fc);
         render_item_slot(g, sx, sy, 24, &p->inventory[i], sel, mk, NULL);
     }
 
@@ -522,34 +521,31 @@ void render_inventory(Game *g) {
 
     /* ---- FUSIONNEUR (gauche, sous le talisbag) ----
      * 3 slots ou le joueur depose des items du sac (click droit).
-     * Validation : meme kind + meme rarete (sub_kind ignore). */
+     * Les items sont PHYSIQUEMENT retires du sac (fusion_slots[]). */
     {
         int fx0 = INV_FUSION_X, fy0 = INV_FUSION_Y;
         int fw = INV_FUSION_W, fh = 95;
         fill_rect(g->renderer, fx0, fy0, fw, fh, 0x140C18FF);
         rect_outline(g->renderer, fx0, fy0, fw, fh, 0x504850FF);
         text_draw(g->renderer, fx0 + 6, fy0 + 4, "FUSIONNEUR", 0xFFD040FF);
-        /* 3 slots horizontaux (32x32) avec "+" entre eux et "=" + zone resultat */
         int slot_sz = 30;
         int slot_y  = fy0 + 22;
         int slot_x[3] = { fx0 + 10, fx0 + 60, fx0 + 110 };
+        int n_in_fusion = 0;
+        for (int i = 0; i < 3; i++) if (g->fusion_slots[i].occupied) n_in_fusion++;
         for (int s = 0; s < 3; s++) {
-            uint32_t border = 0x303038FF;
-            if (s < g->inv_marked_count) border = 0xA0E0FFFF;
+            Item *fit = &g->fusion_slots[s];
+            uint32_t border = fit->occupied ? 0xA0E0FFFF : 0x303038FF;
             fill_rect(g->renderer, slot_x[s], slot_y, slot_sz, slot_sz, 0x080612FF);
             rect_outline(g->renderer, slot_x[s], slot_y, slot_sz, slot_sz, border);
-            if (s < g->inv_marked_count) {
-                int idx = g->inv_marked[s];
-                if (idx >= 0 && idx < INVENTORY_MAX_SLOTS) {
-                    Item *it = &p->inventory[idx];
-                    if (it->occupied) {
-                        uint32_t col = rarity_color(it->rarity);
-                        if (it->kind == ITEM_KIND_ELEMENT)
-                            col = element_color((Element)it->base_kind);
-                        fill_rect(g->renderer, slot_x[s] + 4, slot_y + 4,
-                                  slot_sz - 8, slot_sz - 8, col);
-                    }
-                }
+            if (fit->occupied) {
+                uint32_t col = rarity_color(fit->rarity);
+                if (fit->kind == ITEM_KIND_ELEMENT)
+                    col = element_color((Element)fit->base_kind);
+                fill_rect(g->renderer, slot_x[s] + 4, slot_y + 4,
+                          slot_sz - 8, slot_sz - 8, col);
+                rect_outline(g->renderer, slot_x[s] + 4, slot_y + 4,
+                             slot_sz - 8, slot_sz - 8, 0x000000FF);
             } else {
                 text_draw(g->renderer, slot_x[s] + 12, slot_y + 12, "?", 0x505058FF);
             }
@@ -558,12 +554,11 @@ void render_inventory(Game *g) {
         }
         /* Validation : meme kind / rarete (+ slot equip ou weapon kind) */
         bool valid = false;
-        if (g->inv_marked_count == 3) {
-            Item *a = &p->inventory[g->inv_marked[0]];
-            Item *b = &p->inventory[g->inv_marked[1]];
-            Item *c = &p->inventory[g->inv_marked[2]];
-            if (a->occupied && b->occupied && c->occupied &&
-                !a->is_unique && !b->is_unique && !c->is_unique &&
+        if (n_in_fusion == 3) {
+            Item *a = &g->fusion_slots[0];
+            Item *b = &g->fusion_slots[1];
+            Item *c = &g->fusion_slots[2];
+            if (!a->is_unique && !b->is_unique && !c->is_unique &&
                 a->kind == b->kind && b->kind == c->kind &&
                 a->rarity == b->rarity && b->rarity == c->rarity &&
                 a->rarity < R_LEGENDARY) {
@@ -573,20 +568,19 @@ void render_inventory(Game *g) {
                     a->base_kind == b->base_kind && b->base_kind == c->base_kind) valid = true;
             }
         }
-        /* Bouton Fusionner */
         int bx = fx0 + 10, by = fy0 + 65, bw = fw - 20, bh = 22;
-        uint32_t bcol = (g->inv_marked_count == 3 && valid)
+        uint32_t bcol = (n_in_fusion == 3 && valid)
                           ? 0x205020FF : 0x282030FF;
-        uint32_t bborder = (g->inv_marked_count == 3 && valid)
+        uint32_t bborder = (n_in_fusion == 3 && valid)
                              ? 0x80FF80FF : 0x404048FF;
         bool bhover = mouse_in_rect(g, bx, by, bw, bh);
-        if (bhover && g->inv_marked_count == 3 && valid) bcol = 0x308030FF;
+        if (bhover && n_in_fusion == 3 && valid) bcol = 0x308030FF;
         fill_rect(g->renderer, bx, by, bw, bh, bcol);
         rect_outline(g->renderer, bx, by, bw, bh, bborder);
-        const char *btxt = (g->inv_marked_count < 3) ? "Clique 3 items dans le sac"
+        const char *btxt = (n_in_fusion < 3) ? "Depose 3 items (clic droit)"
                          : (valid ? "FUSIONNER" : "Items incompatibles");
         text_draw(g->renderer, bx + 8, by + 7, btxt,
-                  (g->inv_marked_count == 3 && valid) ? 0xFFFFFFFF : 0x808080FF);
+                  (n_in_fusion == 3 && valid) ? 0xFFFFFFFF : 0x808080FF);
     }
 
     /* ---- HOVER PANEL (bottom-right, juste au dessus du comparateur)
@@ -799,28 +793,6 @@ void render_inventory(Game *g) {
         }
     }
 
-    /* ---- FUSION PREVIEW (bas-gauche) ---- */
-    int fpx = 10, fpy = INTERNAL_H - 60;
-    if (g->inv_marked_count > 0) {
-        text_drawf(g->renderer, fpx, fpy, 0x80FF80FF,
-                   "FUSION (%d/3 marques)", g->inv_marked_count);
-        if (g->inv_marked_count == 3) {
-            Item *base = &p->inventory[g->inv_marked[0]];
-            if (base->occupied && base->rarity < R_LEGENDARY) {
-                text_drawf(g->renderer, fpx, fpy + 10, 0x80FF80FF,
-                           "F = %s %s +20%%",
-                           rarity_name(base->rarity + 1), slot_name(base->slot));
-            } else if (base->occupied) {
-                text_draw(g->renderer, fpx, fpy + 10, "Deja max", 0xFFC080FF);
-            }
-        }
-    } else if (has_auto_fuse) {
-        Item *base = &p->inventory[fa];
-        text_draw(g->renderer, fpx, fpy, "FUSION DETECTEE", 0x80FF80FF);
-        text_drawf(g->renderer, fpx, fpy + 10, 0x80FF80FF,
-                   "F = %s %s", rarity_name(base->rarity + 1), slot_name(base->slot));
-    }
-
     /* ---- TRINKETS DE SHOP : panel top-left du top-row ----
      * Liste les recettes achetees au shop, par ordre d'acquisition. Une
      * cellule = un trinket. Couleur = couleur de rarete. */
@@ -858,16 +830,19 @@ void render_inventory(Game *g) {
                           ab, 0x000000FF);
             }
             if (hov) {
-                /* tooltip flottant : nom + desc */
+                /* tooltip flottant : nom + desc. Position SOUS le panneau
+                 * trinkets pour ne pas chevaucher le paperdoll a droite. */
                 const char *desc = shop_recipe_desc(rid);
                 int tw_n = text_width(nm);
                 int tw_d = desc ? text_width(desc) : 0;
                 int box_w = (tw_n > tw_d ? tw_n : tw_d) + 12;
                 int box_h = (desc && desc[0]) ? 24 : 14;
-                int bx = sx + cell_sz + 4;
-                int by = sy;
-                if (bx + box_w > INTERNAL_W - 4) bx = sx - box_w - 4;
-                if (by + box_h > INTERNAL_H - 12) by = INTERNAL_H - 12 - box_h;
+                /* clamp x dans la zone trinkets, y juste sous le panel */
+                int bx = tx;
+                int by = ty + th + 4;
+                if (bx + box_w > tx + tw) bx = tx + tw - box_w;
+                if (bx < 4) bx = 4;
+                if (by + box_h > INTERNAL_H - 12) by = ty - box_h - 4;
                 gfx_set_blend(g->renderer, true);
                 fill_rect(g->renderer, bx, by, box_w, box_h, 0x000000E0);
                 gfx_set_blend(g->renderer, false);

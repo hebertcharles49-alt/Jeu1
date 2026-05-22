@@ -766,7 +766,14 @@ typedef struct {
 
     /* inventory cursor: 0..11 inv, 12..17 equip */
     int           inv_cursor;
-    int           inv_marked[3];   /* items marked for fusion (inventory indices) */
+    /* Fusionneur : 3 slots dedies ou les items sont PHYSIQUEMENT
+     * deposes (retires du sac). Vide = occupied=false. Click sur
+     * un item du sac : depose dans le premier slot libre. Click sur
+     * un slot occupied : retourne l'item dans le sac. */
+    Item          fusion_slots[3];
+    /* inv_marked deprecated mais garde pour compat lecture. Le code
+     * a ete migre vers fusion_slots. */
+    int           inv_marked[3];
     int           inv_marked_count;
     char          inv_msg[64];
     float         inv_msg_t;

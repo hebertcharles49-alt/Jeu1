@@ -451,15 +451,6 @@ int shop_sell_item(Game *g, int inv_index) {
     int v = item_sell_value(it);
     if (v <= 0) return 0;
     g->player.coins += v;
-    /* unmark si fusion */
-    for (int i = 0; i < g->inv_marked_count; i++) {
-        if (g->inv_marked[i] == inv_index) {
-            for (int j = i; j < g->inv_marked_count - 1; j++)
-                g->inv_marked[j] = g->inv_marked[j + 1];
-            g->inv_marked_count--;
-            break;
-        }
-    }
     it->occupied = false;
     sfx_play(g, SFX_COIN);
     return v;

@@ -97,6 +97,12 @@ bool gltf_load_glb           (const char *path, GltfMesh *out);
 void gltf_advance_animation  (GltfMesh *m, float dt);
 void gltf_free               (GltfMesh *m);
 
+/* === Genere un humanoide rigué en code, sans fichier externe ===
+ * 7 bones (pelvis, spine, head, 2 bras, 2 jambes), 7 box primitives
+ * weighted chacune a 1 bone (rigid skinning). 1 animation : bras qui
+ * bougent + respiration. Sert de demo + test du pipeline complet. */
+bool gltf_make_test_humanoid (GltfMesh *out);
+
 #endif
 
 #ifdef GLTF_LOADER_IMPLEMENTATION
@@ -630,6 +636,202 @@ void gltf_advance_animation(GltfMesh *m, float dt) {
     for (int k = 0; k < n; k++) {
         gltf__m4_mul(&m->skin_matrices[k * 16], m->bones[k].world, m->bones[k].ibm);
     }
+}
+
+/* === Genere un humanoide rigué en code === */
+static void gltf__push_box_to_mesh(float *verts, int *iv,
+                                    float cx, float cy, float cz,
+                                    float sx, float sy, float sz,
+                                    int bone_idx,
+                                    float r, float g, float b) {
+    float x0 = cx - sx*0.5f, x1 = cx + sx*0.5f;
+    float y0 = cy - sy*0.5f, y1 = cy + sy*0.5f;
+    float z0 = cz - sz*0.5f, z1 = cz + sz*0.5f;
+    /* 6 faces * 2 tris * 3 verts = 36 verts */
+    struct { float p[3], n[3]; } F[36] = {
+        /* +X */
+        {{x1,y0,z0},{1,0,0}}, {{x1,y1,z0},{1,0,0}}, {{x1,y1,z1},{1,0,0}},
+        {{x1,y0,z0},{1,0,0}}, {{x1,y1,z1},{1,0,0}}, {{x1,y0,z1},{1,0,0}},
+        /* -X */
+        {{x0,y0,z1},{-1,0,0}}, {{x0,y1,z1},{-1,0,0}}, {{x0,y1,z0},{-1,0,0}},
+        {{x0,y0,z1},{-1,0,0}}, {{x0,y1,z0},{-1,0,0}}, {{x0,y0,z0},{-1,0,0}},
+        /* +Y */
+        {{x0,y1,z0},{0,1,0}}, {{x0,y1,z1},{0,1,0}}, {{x1,y1,z1},{0,1,0}},
+        {{x0,y1,z0},{0,1,0}}, {{x1,y1,z1},{0,1,0}}, {{x1,y1,z0},{0,1,0}},
+        /* -Y */
+        {{x0,y0,z1},{0,-1,0}}, {{x0,y0,z0},{0,-1,0}}, {{x1,y0,z0},{0,-1,0}},
+        {{x0,y0,z1},{0,-1,0}}, {{x1,y0,z0},{0,-1,0}}, {{x1,y0,z1},{0,-1,0}},
+        /* +Z */
+        {{x0,y0,z1},{0,0,1}}, {{x1,y0,z1},{0,0,1}}, {{x1,y1,z1},{0,0,1}},
+        {{x0,y0,z1},{0,0,1}}, {{x1,y1,z1},{0,0,1}}, {{x0,y1,z1},{0,0,1}},
+        /* -Z */
+        {{x1,y0,z0},{0,0,-1}}, {{x0,y0,z0},{0,0,-1}}, {{x0,y1,z0},{0,0,-1}},
+        {{x1,y0,z0},{0,0,-1}}, {{x0,y1,z0},{0,0,-1}}, {{x1,y1,z0},{0,0,-1}},
+    };
+    (void)bone_idx;
+    for (int i = 0; i < 36; i++) {
+        float *o = &verts[(*iv) * 9];
+        o[0]=F[i].p[0]; o[1]=F[i].p[1]; o[2]=F[i].p[2];
+        o[3]=F[i].n[0]; o[4]=F[i].n[1]; o[5]=F[i].n[2];
+        o[6]=r; o[7]=g; o[8]=b;
+        (*iv)++;
+    }
+}
+
+bool gltf_make_test_humanoid(GltfMesh *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    /* 7 bones : pelvis / spine / head / l_arm / r_arm / l_leg / r_leg.
+     * Hierarchie : pelvis -> spine -> head, pelvis -> *leg, spine -> *arm. */
+    const int N_BONES = 7;
+    enum { B_PELVIS, B_SPINE, B_HEAD, B_LARM, B_RARM, B_LLEG, B_RLEG };
+    out->bone_count = N_BONES;
+    out->bones = (GltfBone *)calloc(N_BONES, sizeof(GltfBone));
+    if (!out->bones) return false;
+    /* Bind pose : Y-up, base au sol y=0. */
+    static const struct { int parent; float t[3]; } BINDS[7] = {
+        { -1,     { 0.f, 0.55f, 0.f } },   /* PELVIS : centre */
+        { B_PELVIS, { 0.f, 0.40f, 0.f } }, /* SPINE relative au pelvis */
+        { B_SPINE,  { 0.f, 0.30f, 0.f } }, /* HEAD relative au spine */
+        { B_SPINE,  {-0.35f, 0.25f, 0.f } }, /* LARM relative au spine */
+        { B_SPINE,  { 0.35f, 0.25f, 0.f } }, /* RARM */
+        { B_PELVIS, {-0.15f,-0.10f, 0.f } }, /* LLEG */
+        { B_PELVIS, { 0.15f,-0.10f, 0.f } }, /* RLEG */
+    };
+    /* Calcule positions world du bind pose */
+    float world[N_BONES][3];
+    for (int i = 0; i < N_BONES; i++) {
+        GltfBone *b = &out->bones[i];
+        b->parent = BINDS[i].parent;
+        b->t[0] = BINDS[i].t[0]; b->t[1] = BINDS[i].t[1]; b->t[2] = BINDS[i].t[2];
+        b->r[0]=b->r[1]=b->r[2]=0.f; b->r[3]=1.f;
+        b->s[0]=b->s[1]=b->s[2]=1.f;
+        memcpy(b->cur_t, b->t, sizeof(b->t));
+        memcpy(b->cur_r, b->r, sizeof(b->r));
+        memcpy(b->cur_s, b->s, sizeof(b->s));
+        /* world = parent.world + t (rotation null in bind) */
+        if (b->parent >= 0) {
+            world[i][0] = world[b->parent][0] + b->t[0];
+            world[i][1] = world[b->parent][1] + b->t[1];
+            world[i][2] = world[b->parent][2] + b->t[2];
+        } else {
+            world[i][0] = b->t[0]; world[i][1] = b->t[1]; world[i][2] = b->t[2];
+        }
+        /* IBM = inverse de la translation world (en mat4 identity rotation) */
+        gltf__m4_identity(b->ibm);
+        b->ibm[12] = -world[i][0];
+        b->ibm[13] = -world[i][1];
+        b->ibm[14] = -world[i][2];
+        gltf__m4_identity(b->world);
+    }
+    /* === Geometrie : 7 box, chacune weighted a 1 bone === */
+    const int N_PARTS = 7;
+    out->vert_count = N_PARTS * 36;
+    out->verts   = (float *)malloc(sizeof(float) * 9 * out->vert_count);
+    out->joints  = (uint8_t *)calloc(out->vert_count * 4, sizeof(uint8_t));
+    out->weights = (float *)calloc(out->vert_count * 4, sizeof(float));
+    if (!out->verts || !out->joints || !out->weights) {
+        gltf_free(out); return false;
+    }
+    int iv = 0;
+    /* PELVIS box : autour de y=0.55 (offset world) */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_PELVIS][0], world[B_PELVIS][1], world[B_PELVIS][2],
+        0.30f, 0.20f, 0.20f, B_PELVIS, 0.45f, 0.30f, 0.55f);
+    /* SPINE box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_SPINE][0], world[B_SPINE][1], world[B_SPINE][2],
+        0.35f, 0.45f, 0.22f, B_SPINE, 0.55f, 0.40f, 0.65f);
+    /* HEAD box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_HEAD][0], world[B_HEAD][1], world[B_HEAD][2],
+        0.25f, 0.25f, 0.25f, B_HEAD, 0.92f, 0.75f, 0.55f);
+    /* LARM box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_LARM][0] - 0.10f, world[B_LARM][1] - 0.20f, world[B_LARM][2],
+        0.12f, 0.40f, 0.12f, B_LARM, 0.85f, 0.65f, 0.45f);
+    /* RARM box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_RARM][0] + 0.10f, world[B_RARM][1] - 0.20f, world[B_RARM][2],
+        0.12f, 0.40f, 0.12f, B_RARM, 0.85f, 0.65f, 0.45f);
+    /* LLEG box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_LLEG][0], world[B_LLEG][1] - 0.25f, world[B_LLEG][2],
+        0.14f, 0.50f, 0.14f, B_LLEG, 0.30f, 0.25f, 0.40f);
+    /* RLEG box */
+    gltf__push_box_to_mesh(out->verts, &iv,
+        world[B_RLEG][0], world[B_RLEG][1] - 0.25f, world[B_RLEG][2],
+        0.14f, 0.50f, 0.14f, B_RLEG, 0.30f, 0.25f, 0.40f);
+    /* Assign joint + weight : pour chaque part (36 verts contigus),
+     * weight 1.0 sur le bone correspondant */
+    static const int part_bone[7] = { B_PELVIS, B_SPINE, B_HEAD,
+                                       B_LARM, B_RARM, B_LLEG, B_RLEG };
+    for (int p = 0; p < N_PARTS; p++) {
+        for (int k = 0; k < 36; k++) {
+            int vi = p * 36 + k;
+            out->joints [vi * 4 + 0] = (uint8_t)part_bone[p];
+            out->weights[vi * 4 + 0] = 1.0f;
+        }
+    }
+    /* === Animation procedurale : "wave" + "breathe" sur 2 secondes ===
+     * 8 keyframes a t=0, 0.25, 0.5, ..., 2.0 (boucle).
+     * Channels : bras gauche rotation Z, bras droit rotation Z, spine
+     * scale Y (respire). */
+    out->has_anim = true;
+    out->anim.duration = 2.0f;
+    out->anim.sampler_count = 3;
+    out->anim.channel_count = 3;
+    out->anim.samplers = (GltfSampler *)calloc(3, sizeof(GltfSampler));
+    out->anim.channels = (GltfChannel *)calloc(3, sizeof(GltfChannel));
+    int n_keys = 9;
+    /* Sampler 0 : bras gauche rotation (quat) */
+    out->anim.samplers[0].count = n_keys;
+    out->anim.samplers[0].stride = 4;
+    out->anim.samplers[0].times = (float *)malloc(sizeof(float) * n_keys);
+    out->anim.samplers[0].values = (float *)malloc(sizeof(float) * n_keys * 4);
+    for (int i = 0; i < n_keys; i++) {
+        float t = i * (2.0f / (n_keys - 1));
+        out->anim.samplers[0].times[i] = t;
+        /* rotation Z entre -45 et +45 deg en sin */
+        float angle = sinf(t * 3.14159f) * 0.7f;
+        out->anim.samplers[0].values[i*4 + 0] = 0;
+        out->anim.samplers[0].values[i*4 + 1] = 0;
+        out->anim.samplers[0].values[i*4 + 2] = sinf(angle * 0.5f);
+        out->anim.samplers[0].values[i*4 + 3] = cosf(angle * 0.5f);
+    }
+    /* Sampler 1 : bras droit rotation (opposite phase) */
+    out->anim.samplers[1].count = n_keys;
+    out->anim.samplers[1].stride = 4;
+    out->anim.samplers[1].times = (float *)malloc(sizeof(float) * n_keys);
+    out->anim.samplers[1].values = (float *)malloc(sizeof(float) * n_keys * 4);
+    for (int i = 0; i < n_keys; i++) {
+        float t = i * (2.0f / (n_keys - 1));
+        out->anim.samplers[1].times[i] = t;
+        float angle = -sinf(t * 3.14159f) * 0.7f;
+        out->anim.samplers[1].values[i*4 + 0] = 0;
+        out->anim.samplers[1].values[i*4 + 1] = 0;
+        out->anim.samplers[1].values[i*4 + 2] = sinf(angle * 0.5f);
+        out->anim.samplers[1].values[i*4 + 3] = cosf(angle * 0.5f);
+    }
+    /* Sampler 2 : spine scale (breathe) */
+    out->anim.samplers[2].count = n_keys;
+    out->anim.samplers[2].stride = 3;
+    out->anim.samplers[2].times = (float *)malloc(sizeof(float) * n_keys);
+    out->anim.samplers[2].values = (float *)malloc(sizeof(float) * n_keys * 3);
+    for (int i = 0; i < n_keys; i++) {
+        float t = i * (2.0f / (n_keys - 1));
+        out->anim.samplers[2].times[i] = t;
+        float scale = 1.0f + 0.05f * sinf(t * 6.283f);
+        out->anim.samplers[2].values[i*3 + 0] = scale;
+        out->anim.samplers[2].values[i*3 + 1] = scale;
+        out->anim.samplers[2].values[i*3 + 2] = scale;
+    }
+    /* Channels */
+    out->anim.channels[0].target_bone = B_LARM; out->anim.channels[0].path = 1; out->anim.channels[0].sampler = 0;
+    out->anim.channels[1].target_bone = B_RARM; out->anim.channels[1].path = 1; out->anim.channels[1].sampler = 1;
+    out->anim.channels[2].target_bone = B_SPINE; out->anim.channels[2].path = 2; out->anim.channels[2].sampler = 2;
+    for (int k = 0; k < GLTF_MAX_BONES; k++) gltf__m4_identity(&out->skin_matrices[k * 16]);
+    return true;
 }
 
 void gltf_free(GltfMesh *m) {
