@@ -132,6 +132,85 @@ static float s_biome_r = 1.f, s_biome_g = 1.f, s_biome_b = 1.f;
 static float s_wall_tint = 1.f;
 static float s_wall_height = 0.f;       /* override de hauteur ; 0 = WALL_H */
 
+/* Emet une face de mur subdivisee en briques (4 briques par face,
+ * chaque brique a son micro-jitter de hauteur + couleur). Multiplie
+ * la geometrie par ~4 par face pour briser le flat shading.
+ *   face_dir : +1 = +X, -1 = -X, +2 = +Z, -2 = -Z (axe + signe)
+ *   y0, y1   : limites verticales de la face
+ *   x, z     : tile coords (origin du cube)
+ *   r,g,b    : couleur de base */
+static void emit_brick_face(float x, float z, float y0, float y1,
+                            int face_dir, int ix, int iz,
+                            float r, float g, float b) {
+    const int rows = 3;       /* 3 rangees de briques verticalement */
+    const int cols = 2;       /* 2 briques par rangee */
+    float h = (y1 - y0) / (float)rows;
+    float w_unit = 1.0f / (float)cols;
+    for (int ry = 0; ry < rows; ry++) {
+        /* offset horizontal alterne (running bond pattern) */
+        float row_off = (ry % 2) ? w_unit * 0.5f : 0.f;
+        for (int cx = 0; cx < cols + 1; cx++) {
+            float u0 = (float)cx * w_unit - row_off;
+            float u1 = u0 + w_unit;
+            if (u0 < 0.f) u0 = 0.f;
+            if (u1 > 1.f) u1 = 1.f;
+            if (u1 <= u0 + 0.01f) continue;
+            /* micro jitter de couleur par brique */
+            float jr = tile_hash01(ix * 17 + cx, iz * 23 + ry, 401) - 0.5f;
+            float jg = tile_hash01(ix * 17 + cx, iz * 23 + ry, 402) - 0.5f;
+            float jb = tile_hash01(ix * 17 + cx, iz * 23 + ry, 403) - 0.5f;
+            float br = r * (1.f + jr * 0.12f);
+            float bg = g * (1.f + jg * 0.12f);
+            float bb = b * (1.f + jb * 0.12f);
+            /* mortier sombre entre briques : ombre legere en bordure */
+            float by0 = y0 + ry * h + 0.015f;
+            float by1 = y0 + (ry + 1) * h - 0.015f;
+            float fx0 = x + u0 + 0.008f;
+            float fx1 = x + u1 - 0.008f;
+            float fz0 = z + u0 + 0.008f;
+            float fz1 = z + u1 - 0.008f;
+            v3 n;
+            float ax0, ax1, az0, az1;
+            switch (face_dir) {
+                case 1:   /* +X */
+                    n = v3_make(1, 0, 0);
+                    mesh_push_quad(v3_make(x+1.0001f, by0, fz0),
+                                   v3_make(x+1.0001f, by1, fz0),
+                                   v3_make(x+1.0001f, by1, fz1),
+                                   v3_make(x+1.0001f, by0, fz1),
+                                   n, br, bg, bb);
+                    break;
+                case -1:  /* -X */
+                    n = v3_make(-1, 0, 0);
+                    mesh_push_quad(v3_make(x-0.0001f, by0, fz1),
+                                   v3_make(x-0.0001f, by1, fz1),
+                                   v3_make(x-0.0001f, by1, fz0),
+                                   v3_make(x-0.0001f, by0, fz0),
+                                   n, br, bg, bb);
+                    break;
+                case 2:   /* +Z */
+                    n = v3_make(0, 0, 1);
+                    ax0 = fx0; ax1 = fx1; (void)az0; (void)az1;
+                    mesh_push_quad(v3_make(ax0, by0, z+1.0001f),
+                                   v3_make(ax1, by0, z+1.0001f),
+                                   v3_make(ax1, by1, z+1.0001f),
+                                   v3_make(ax0, by1, z+1.0001f),
+                                   n, br*0.92f, bg*0.92f, bb*0.92f);
+                    break;
+                case -2:  /* -Z */
+                    n = v3_make(0, 0, -1);
+                    ax0 = fx0; ax1 = fx1;
+                    mesh_push_quad(v3_make(ax1, by0, z-0.0001f),
+                                   v3_make(ax0, by0, z-0.0001f),
+                                   v3_make(ax0, by1, z-0.0001f),
+                                   v3_make(ax1, by1, z-0.0001f),
+                                   n, br*1.05f, bg*1.05f, bb*1.05f);
+                    break;
+            }
+        }
+    }
+}
+
 static void emit_wall_column(float x, float z) {
     int ix = (int)x, iz = (int)z;
     /* === jitter procedural par cube ===
@@ -156,25 +235,50 @@ static void emit_wall_column(float x, float z) {
     r *= s_biome_r * s_wall_tint * c_jitter_r;
     g *= s_biome_g * s_wall_tint * c_jitter_g;
     b *= s_biome_b * s_wall_tint * c_jitter_b;
-    /* +X face */
-    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x1,y1,z0), v3_make(x1,y1,z1), v3_make(x1,y0,z1),
-                   v3_make(1,0,0), r,g,b);
-    /* -X face */
-    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x0,y1,z1), v3_make(x0,y1,z0), v3_make(x0,y0,z0),
-                   v3_make(-1,0,0), r,g,b);
-    /* +Z face */
-    mesh_push_quad(v3_make(x0,y0,z1), v3_make(x1,y0,z1), v3_make(x1,y1,z1), v3_make(x0,y1,z1),
-                   v3_make(0,0,1), r*0.9f,g*0.9f,b*0.9f);
-    /* -Z face */
-    mesh_push_quad(v3_make(x1,y0,z0), v3_make(x0,y0,z0), v3_make(x0,y1,z0), v3_make(x1,y1,z0),
-                   v3_make(0,0,-1), r*1.1f,g*1.1f,b*1.1f);
-    /* top (lit) */
+    /* 4 faces verticales : briques (running bond, mortier visible) */
+    emit_brick_face(x, z, y0, y1,  1, ix, iz, r, g, b);
+    emit_brick_face(x, z, y0, y1, -1, ix, iz, r, g, b);
+    emit_brick_face(x, z, y0, y1,  2, ix, iz, r, g, b);
+    emit_brick_face(x, z, y0, y1, -2, ix, iz, r, g, b);
+    /* top (lit) + bevel chamfer en bordure pour adoucir la silhouette */
     float tr, tg, tb; wall_color_top(&tr, &tg, &tb);
     tr *= s_biome_r * s_wall_tint * c_jitter_r;
     tg *= s_biome_g * s_wall_tint * c_jitter_g;
     tb *= s_biome_b * s_wall_tint * c_jitter_b;
-    mesh_push_quad(v3_make(x0,y1,z0), v3_make(x0,y1,z1), v3_make(x1,y1,z1), v3_make(x1,y1,z0),
-                   v3_make(0,1,0), tr,tg,tb);
+    /* face top legerement rentree (0.92) : laisse place au bevel */
+    float ix_pad = 0.08f, iz_pad = 0.08f;
+    mesh_push_quad(v3_make(x0+ix_pad, y1, z0+iz_pad),
+                   v3_make(x0+ix_pad, y1, z1-iz_pad),
+                   v3_make(x1-ix_pad, y1, z1-iz_pad),
+                   v3_make(x1-ix_pad, y1, z0+iz_pad),
+                   v3_make(0,1,0), tr, tg, tb);
+    /* 4 chamfers en bordure du top : quad incline 45 deg */
+    float by = y1 - 0.10f;
+    float tr2 = tr * 0.92f, tg2 = tg * 0.92f, tb2 = tb * 0.92f;
+    /* bevel +X (top -> face droite) */
+    mesh_push_quad(v3_make(x1-ix_pad, y1, z0+iz_pad),
+                   v3_make(x1-ix_pad, y1, z1-iz_pad),
+                   v3_make(x1,        by, z1-iz_pad),
+                   v3_make(x1,        by, z0+iz_pad),
+                   v3_make(0.707f, 0.707f, 0), tr2, tg2, tb2);
+    /* bevel -X */
+    mesh_push_quad(v3_make(x0+ix_pad, y1, z1-iz_pad),
+                   v3_make(x0+ix_pad, y1, z0+iz_pad),
+                   v3_make(x0,        by, z0+iz_pad),
+                   v3_make(x0,        by, z1-iz_pad),
+                   v3_make(-0.707f, 0.707f, 0), tr2, tg2, tb2);
+    /* bevel +Z */
+    mesh_push_quad(v3_make(x0+ix_pad, y1, z1-iz_pad),
+                   v3_make(x1-ix_pad, y1, z1-iz_pad),
+                   v3_make(x1-ix_pad, by, z1),
+                   v3_make(x0+ix_pad, by, z1),
+                   v3_make(0, 0.707f, 0.707f), tr2, tg2, tb2);
+    /* bevel -Z */
+    mesh_push_quad(v3_make(x1-ix_pad, y1, z0+iz_pad),
+                   v3_make(x0+ix_pad, y1, z0+iz_pad),
+                   v3_make(x0+ix_pad, by, z0),
+                   v3_make(x1-ix_pad, by, z0),
+                   v3_make(0, 0.707f, -0.707f), tr2, tg2, tb2);
 
     /* === Cubes additionnels : casser la silhouette === */
     if (damaged) {
@@ -217,29 +321,63 @@ static int s_decor_biome = -1;
 
 static void emit_floor_top(float x, float z, TileKind t) {
     int ix = (int)x, iz = (int)z;
-    float x0 = x, x1 = x + 1.f;
-    float z0 = z, z1 = z + 1.f;
-    /* micro-jitter floor color (perturb organique) */
-    float floor_jitter = (tile_hash01(ix, iz, 100) - 0.5f) * 0.10f;
     float y = 0.f;
-    float r, g, b; tile_color_top(t, &r, &g, &b);
+    float base_r, base_g, base_b; tile_color_top(t, &base_r, &base_g, &base_b);
     float k = (t == T_FLOOR) ? 1.f : 0.5f;
-    r *= (1.f - k) + k * s_biome_r;
-    g *= (1.f - k) + k * s_biome_g;
-    b *= (1.f - k) + k * s_biome_b;
-    r = r + floor_jitter * 0.5f * r;
-    g = g + floor_jitter * 0.5f * g;
-    b = b + floor_jitter * 0.5f * b;
-    mesh_push_quad(v3_make(x0,y,z0), v3_make(x0,y,z1), v3_make(x1,y,z1), v3_make(x1,y,z0),
-                   v3_make(0,1,0), r,g,b);
+    base_r *= (1.f - k) + k * s_biome_r;
+    base_g *= (1.f - k) + k * s_biome_g;
+    base_b *= (1.f - k) + k * s_biome_b;
+    /* === Subdivise la tile en 2x2 sub-quads ===
+     * Chaque sub-quad a son propre jitter de couleur + un offset Y
+     * minuscule (vertex-lit). Multiplie le poly par 4 sur le sol
+     * sans rien casser. Pour les tiles non-FLOOR (rune, blood, etc)
+     * on garde 1 quad uniforme pour la lisibilite. */
+    if (t != T_FLOOR) {
+        mesh_push_quad(v3_make(x,   y, z), v3_make(x,   y, z+1.f),
+                       v3_make(x+1, y, z+1.f), v3_make(x+1, y, z),
+                       v3_make(0,1,0), base_r, base_g, base_b);
+    } else {
+        for (int sj = 0; sj < 2; sj++) {
+            for (int si = 0; si < 2; si++) {
+                float u0 = si * 0.5f, u1 = (si + 1) * 0.5f;
+                float v0 = sj * 0.5f, v1 = (sj + 1) * 0.5f;
+                float jit = tile_hash01(ix, iz, 100 + si * 7 + sj * 11) - 0.5f;
+                float r = base_r * (1.f + jit * 0.18f);
+                float g = base_g * (1.f + jit * 0.18f);
+                float b = base_b * (1.f + jit * 0.18f);
+                /* y offset infinitesimal pour eviter z-fighting si jamais */
+                float yy = y + 0.001f * (si + sj);
+                mesh_push_quad(v3_make(x+u0, yy, z+v0),
+                               v3_make(x+u0, yy, z+v1),
+                               v3_make(x+u1, yy, z+v1),
+                               v3_make(x+u1, yy, z+v0),
+                               v3_make(0,1,0), r, g, b);
+            }
+        }
+    }
 
     /* === Decoration vegetation / debris sur floor ===
      * Tile FLOOR seulement (pas RUNE/TORCH/BLOOD). Pas pres des bords
-     * de map (eviter clipping). Probabilite ~10-15% par tile. */
+     * de map (eviter clipping). 35% decoration majeure, 25% supplem
+     * petits cailloux pour densite. */
     if (t != T_FLOOR) return;
     if (ix <= 1 || iz <= 1 || ix >= MAP_W - 2 || iz >= MAP_H - 2) return;
+    /* Petits cailloux : 25% chance, partout sauf decoration majeure */
+    float pebble_roll = tile_hash01(ix, iz, 300);
+    if (pebble_roll < 0.25f) {
+        for (int p = 0; p < 2 + (int)(tile_hash01(ix, iz, 310) * 2.f); p++) {
+            float pdx = 0.2f + tile_hash01(ix, iz, 320 + p) * 0.6f;
+            float pdz = 0.2f + tile_hash01(ix, iz, 330 + p) * 0.6f;
+            float psz = 0.04f + tile_hash01(ix, iz, 340 + p) * 0.05f;
+            float pjit = tile_hash01(ix, iz, 350 + p);
+            mesh_push_box(x + pdx, psz * 0.5f, z + pdz, psz, psz, psz,
+                          (0.55f + pjit * 0.15f) * s_biome_r,
+                          (0.55f + pjit * 0.15f) * s_biome_g,
+                          (0.55f + pjit * 0.15f) * s_biome_b);
+        }
+    }
     float decor_roll = tile_hash01(ix, iz, 200);
-    if (decor_roll > 0.15f) return;
+    if (decor_roll > 0.35f) return;
     /* position aleatoire dans la tile, centre + offset */
     float dx = 0.3f + tile_hash01(ix, iz, 201) * 0.4f;
     float dz = 0.3f + tile_hash01(ix, iz, 202) * 0.4f;
