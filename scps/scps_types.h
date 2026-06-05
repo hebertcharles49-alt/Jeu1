@@ -18,8 +18,18 @@
 #define SCPS_H           256
 #define SCPS_N           (SCPS_W * SCPS_H)
 
-#define SCPS_MAX_PROV    160
-#define SCPS_MAX_REG      24
+/* Hiérarchie territoriale (doc §3) :
+ *   territoire (province) → 3-5 = région → 3-5 = pays
+ *   continent = masse continentale géographique (séparée par l'océan),
+ *   hébergeant ~4-7 pays. */
+#define SCPS_MAX_PROV      320
+#define SCPS_MAX_REG       110
+#define SCPS_MAX_COUNTRY    48
+#define SCPS_MAX_CONTINENT  16
+#define SCPS_REG_TARGET_MIN 3   /* territoires par région */
+#define SCPS_REG_TARGET_MAX 5
+#define SCPS_CTY_TARGET_MIN 3   /* régions par pays */
+#define SCPS_CTY_TARGET_MAX 5
 #define SCPS_RIVER_MAXLEN 768
 
 /* ---- Seuils de hauteur (0..1) ----------------------------------------- */
@@ -63,10 +73,12 @@ typedef struct {
     float    temperature;
     float    fertility;        /* potentiel de civilisation [0..1] */
 
-    /* Classification */
+    /* Classification — hiérarchie territoriale */
     Biome    biome;
-    int16_t  province;         /* -1 = mer / non assigné */
-    int16_t  region;           /* -1 = mer / non assigné */
+    int16_t  province;         /* territoire ; -1 = mer */
+    int16_t  region;           /* -1 = mer */
+    int16_t  country;          /* pays ; -1 = mer */
+    int16_t  continent;        /* masse continentale ; -1 = mer */
 
     /* Hydrologie */
     uint8_t  river;            /* débit accumulé en aval [0..255] */
@@ -79,8 +91,10 @@ typedef struct {
 
     /* Flags de rendu (précalculés) */
     bool     coast;            /* adjacent à la mer */
-    bool     border_prov;      /* sur frontière de province */
-    bool     border_reg;       /* sur frontière de région */
+    bool     border_prov;      /* frontière de territoire */
+    bool     border_reg;       /* frontière de région */
+    bool     border_country;   /* frontière de pays */
+    bool     border_continent; /* trait de côte du continent */
     float    shade;            /* hillshading [0..1] */
 } Cell;
 
@@ -106,6 +120,8 @@ typedef enum {
 typedef struct {
     int16_t  seed_x, seed_y;
     int16_t  region;
+    int16_t  country;
+    int16_t  continent;
     int      area;
     Biome    biome_dominant;
     float    lat;              /* latitude moyenne [0=éq., 1=pôle] */
@@ -127,14 +143,35 @@ typedef struct {
     char     name[24];         /* stub — sera enrichi plus tard */
 } Province;
 
-/* ---- Région (groupement de provinces, futur niveau politique) ---------- */
+/* ---- Région : 3-5 territoires contigus -------------------------------- */
 typedef struct {
     int      seed_x, seed_y;
     int      n_provinces;
-    int16_t  province_ids[SCPS_MAX_PROV]; /* indices dans World.provinces */
+    int16_t  province_ids[12];  /* cible 3-5, marge à 12 */
+    int16_t  country;
+    int16_t  continent;
+    uint32_t color;
+    char     name[32];          /* ID textuel pour l'instant (noms plus tard) */
+} Region;
+
+/* ---- Pays : 3-5 régions contiguës ------------------------------------- */
+typedef struct {
+    int      n_regions;
+    int16_t  region_ids[12];
+    int16_t  continent;
+    int      capital_prov;      /* province-capitale (plus fertile) */
     uint32_t color;
     char     name[32];
-} Region;
+} Country;
+
+/* ---- Continent : masse continentale géographique ---------------------- */
+typedef struct {
+    int      area;              /* cellules terrestres */
+    int      n_countries;
+    int16_t  country_ids[SCPS_MAX_COUNTRY];
+    uint32_t color;
+    char     name[32];
+} Continent;
 
 /* ---- Rivière tracée ---------------------------------------------------- */
 typedef struct {
@@ -148,14 +185,18 @@ typedef struct {
 #define SCPS_MAX_RIVERS 64
 
 typedef struct {
-    Cell     cell[SCPS_N];
-    Province province[SCPS_MAX_PROV];
-    int      n_provinces;
-    Region   region[SCPS_MAX_REG];
-    int      n_regions;
-    River    river[SCPS_MAX_RIVERS];
-    int      n_rivers;
-    uint32_t seed;
+    Cell      cell[SCPS_N];
+    Province  province[SCPS_MAX_PROV];
+    int       n_provinces;
+    Region    region[SCPS_MAX_REG];
+    int       n_regions;
+    Country   country[SCPS_MAX_COUNTRY];
+    int       n_countries;
+    Continent continent[SCPS_MAX_CONTINENT];
+    int       n_continents;
+    River     river[SCPS_MAX_RIVERS];
+    int       n_rivers;
+    uint32_t  seed;
 } World;
 
 /* ---- Accesseur sûr aux cellules --------------------------------------- */

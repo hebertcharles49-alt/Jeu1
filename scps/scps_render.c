@@ -16,8 +16,8 @@
 #include <string.h>
 
 const char *VIEW_NAMES[VIEW_COUNT] = {
-    "Terrain","Politique","Régions","Altimétrie","Fertilité",
-    "Humidité","Température","Ressources"
+    "Terrain","Territoires","Régions","Pays","Continents","Altimétrie",
+    "Fertilité","Humidité","Température","Ressources"
 };
 
 /* ---- Primitives couleur ---------------------------------------------- */
@@ -154,8 +154,15 @@ static uint32_t cell_color(const World *w, int cx, int cy,
 
     /* ---- Overlay régions --------------------------------------------- */
     if (mode == VIEW_REGIONS && c->region >= 0) {
-        uint32_t rcol = w->region[c->region].color;
-        terrain = alpha_over(terrain, rcol, 0.45f);
+        terrain = alpha_over(terrain, w->region[c->region].color, 0.45f);
+    }
+    /* ---- Overlay pays ------------------------------------------------ */
+    if (mode == VIEW_COUNTRIES && c->country >= 0) {
+        terrain = alpha_over(terrain, w->country[c->country].color, 0.52f);
+    }
+    /* ---- Overlay continents ------------------------------------------ */
+    if (mode == VIEW_CONTINENTS && c->continent >= 0) {
+        terrain = alpha_over(terrain, w->continent[c->continent].color, 0.50f);
     }
 
     /* ---- Rivières (overlay bleu) ------------------------------------- */
@@ -164,18 +171,22 @@ static uint32_t cell_color(const World *w, int cx, int cy,
         terrain = alpha_over(terrain, 0xFF3888D8u, rs * 0.72f);
     }
 
-    /* ---- Frontières -------------------------------------------------- */
-    bool draw_prov_border = (mode==VIEW_POLITICAL || mode==VIEW_REGIONS)
-                          && c->border_prov;
-    bool draw_reg_border  = (mode==VIEW_POLITICAL || mode==VIEW_REGIONS)
-                          && c->border_reg;
-
-    if (draw_reg_border) {
-        /* Frontière de région : ligne sombre épaisse */
-        terrain = lerp_color(terrain, 0xFF101820u, 0.70f);
-    } else if (draw_prov_border) {
-        /* Frontière de province : ligne sombre fine */
-        terrain = lerp_color(terrain, 0xFF202838u, 0.60f);
+    /* ---- Frontières (selon le niveau affiché) ------------------------ */
+    bool political = (mode==VIEW_POLITICAL||mode==VIEW_REGIONS||
+                      mode==VIEW_COUNTRIES||mode==VIEW_CONTINENTS);
+    if (political) {
+        if (mode==VIEW_CONTINENTS) {
+            /* pas de frontière interne, juste le trait de côte (géré ailleurs) */
+        } else if (mode==VIEW_COUNTRIES && c->border_country) {
+            terrain = lerp_color(terrain, 0xFF0C1018u, 0.78f);  /* frontière de pays */
+        } else if ((mode==VIEW_REGIONS||mode==VIEW_POLITICAL) && c->border_reg) {
+            terrain = lerp_color(terrain, 0xFF101820u, 0.70f);
+        } else if (mode==VIEW_POLITICAL && c->border_prov) {
+            terrain = lerp_color(terrain, 0xFF202838u, 0.55f);
+        }
+        /* En vue Pays, souligner aussi finement les régions internes */
+        if (mode==VIEW_COUNTRIES && c->border_reg && !c->border_country)
+            terrain = lerp_color(terrain, 0xFF202838u, 0.30f);
     }
 
     /* ---- Province sélectionnée : surligné jaune ---------------------- */

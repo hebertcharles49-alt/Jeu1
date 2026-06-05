@@ -93,7 +93,8 @@ static void print_province_info(const World *w, int prov_id) {
     printf("│  Altitude moy.   : %.2f\n", p->height_avg);
     printf("│  Latitude        : %.2f\n", p->lat);
     printf("│  Ressource       : %s\n", resource_name(p->resource));
-    printf("│  Région          : %d\n", (int)p->region);
+    printf("│  Hiérarchie      : région %d · pays %d · continent %d\n",
+           (int)p->region, (int)p->country, (int)p->continent);
     printf("│  SCPS — langue   : %.1f  parenté : %.1f  religion : %.1f\n",
            p->langue, p->parente, p->religion);
     printf("│          subsistance: %.1f  valeurs : %.1f\n",
@@ -237,14 +238,16 @@ int main(int argc, char **argv) {
                 case SDLK_ESCAPE:
                 case SDLK_q:     running = false; break;
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
-                case SDLK_1:     mode=VIEW_TERRAIN;   dirty=true; break;
-                case SDLK_2:     mode=VIEW_POLITICAL; dirty=true; break;
-                case SDLK_3:     mode=VIEW_REGIONS;   dirty=true; break;
-                case SDLK_4:     mode=VIEW_HEIGHT;    dirty=true; break;
-                case SDLK_5:     mode=VIEW_FERTILITY;   dirty=true; break;
-                case SDLK_6:     mode=VIEW_MOISTURE;    dirty=true; break;
-                case SDLK_7:     mode=VIEW_TEMPERATURE; dirty=true; break;
-                case SDLK_8:     mode=VIEW_RESOURCES;   dirty=true; break;
+                case SDLK_1:     mode=VIEW_TERRAIN;     dirty=true; break;
+                case SDLK_2:     mode=VIEW_POLITICAL;   dirty=true; break;
+                case SDLK_3:     mode=VIEW_REGIONS;     dirty=true; break;
+                case SDLK_4:     mode=VIEW_COUNTRIES;   dirty=true; break;
+                case SDLK_5:     mode=VIEW_CONTINENTS;  dirty=true; break;
+                case SDLK_6:     mode=VIEW_HEIGHT;      dirty=true; break;
+                case SDLK_7:     mode=VIEW_FERTILITY;   dirty=true; break;
+                case SDLK_8:     mode=VIEW_MOISTURE;    dirty=true; break;
+                case SDLK_9:     mode=VIEW_TEMPERATURE; dirty=true; break;
+                case SDLK_0:     mode=VIEW_RESOURCES;   dirty=true; break;
                 case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
                 case SDLK_r: {
                     seed ^= (uint32_t)time(NULL) * 2654435761u;

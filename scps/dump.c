@@ -54,8 +54,10 @@ int main(int argc, char **argv) {
         { VIEW_MOISTURE,    "out_moisture.ppm"    },
         { VIEW_TEMPERATURE, "out_temperature.ppm" },
         { VIEW_FERTILITY,   "out_fertility.ppm"   },
-        { VIEW_POLITICAL,   "out_political.ppm"   },
+        { VIEW_POLITICAL,   "out_territoires.ppm" },
         { VIEW_REGIONS,     "out_regions.ppm"     },
+        { VIEW_COUNTRIES,   "out_pays.ppm"        },
+        { VIEW_CONTINENTS,  "out_continents.ppm"  },
         { VIEW_RESOURCES,   "out_resources.ppm"   },
     };
     printf("[dump] graine %u → 6 vues %dx%d\n", seed, W, H);

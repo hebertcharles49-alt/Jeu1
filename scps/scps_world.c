@@ -498,7 +498,7 @@ static void compute_fertility(float *height, float *moisture, float *temperature
  * ====================================================================== */
 #define WARP1         18.f   /* amplitude 1er warp (grandes déformations) */
 #define WARP2         10.f   /* amplitude 2e warp  (sinuosités fines)     */
-#define MIN_PROV_DIST 26
+#define MIN_PROV_DIST 12     /* serré → ~240 territoires (place pour 4 niveaux) */
 
 static int g_pseedx[SCPS_MAX_PROV];
 static int g_pseedy[SCPS_MAX_PROV];
@@ -591,63 +591,247 @@ static void assign_provinces(World *w, float *height, float seed_f) {
 }
 
 /* ========================================================================
- * RÉGIONS — Voronoï de second niveau
+ * CONTINENTS — masses continentales géographiques (remplissage par diffusion)
+ *
+ * Une « plaque de jeu » : composante connexe de terre (4-connexité). Les
+ * grandes masses deviennent des continents distincts (doc §3) ; les petites
+ * îles sont versées dans un bucket « archipel ».
  * ====================================================================== */
-static int g_rseedx[SCPS_MAX_REG];
-static int g_rseedy[SCPS_MAX_REG];
+static void compute_continents(World *w, const float *height) {
+    int16_t *comp=(int16_t*)malloc(SCPS_N*sizeof(int16_t));
+    int     *stack=(int*)malloc(SCPS_N*sizeof(int));
+    if (!comp||!stack){ free(comp); free(stack); return; }
+    for (int i=0;i<SCPS_N;i++) comp[i] = (height[i]<SEA_LEVEL)? -1 : -2;
 
-static void assign_regions(World *w, float *height, float seed_f) {
-    /* Germes des régions : un sous-ensemble espacé des germes de provinces */
-    int step=w->n_provinces/SCPS_MAX_REG+1, n=0;
-    for (int p=0;p<w->n_provinces&&n<SCPS_MAX_REG;p+=step) {
-        g_rseedx[n]=w->province[p].seed_x;
-        g_rseedy[n]=w->province[p].seed_y;
-        n++;
-    }
-    if (n<2) n=2;
-    w->n_regions=n;
-
-    /* Double warp pour les régions (échelle plus grande) */
-    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
-        int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL){w->cell[i].region=-1;continue;}
-        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-        float rw1=WARP1*1.6f, rw2=WARP2*1.4f;
-        float wx1=stb_perlin_fbm_noise3(nx*2.f+0.f,ny*2.f+0.f,seed_f+50.f,2.f,0.5f,4)*rw1;
-        float wy1=stb_perlin_fbm_noise3(nx*2.f+7.3f,ny*2.f+3.9f,seed_f+60.f,2.f,0.5f,4)*rw1;
-        float px2=(nx+wx1/SCPS_W)*2.5f, py2=(ny+wy1/SCPS_H)*2.5f;
-        float wx2=stb_perlin_fbm_noise3(px2+4.1f,py2+6.8f,seed_f+70.f,2.f,0.5f,3)*rw2;
-        float wy2=stb_perlin_fbm_noise3(px2+9.5f,py2+1.2f,seed_f+80.f,2.f,0.5f,3)*rw2;
-        float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
-        float best=1e30f; int bestr=0;
-        for (int r=0;r<n;r++) {
-            float dx=qx-g_rseedx[r],dy=qy-g_rseedy[r];
-            float d=dx*dx+dy*dy;
-            if (d<best){best=d;bestr=r;}
+    /* Flood fill : composantes brutes + aire */
+    enum { MAXTMP=2048 };
+    int tarea[MAXTMP]; int ntmp=0;
+    for (int s=0;s<SCPS_N && ntmp<MAXTMP;s++) {
+        if (comp[s]!=-2) continue;
+        int id=ntmp++, a=0, sp=0;
+        stack[sp++]=s; comp[s]=id;
+        while (sp>0) {
+            int c=stack[--sp]; a++;
+            int cx=c%SCPS_W, cy=c/SCPS_W;
+            for (int d=0;d<8;d+=2) {              /* 4-connexité */
+                int nx=cx+DDX[d], ny=cy+DDY[d];
+                if (nx<0||nx>=SCPS_W||ny<0||ny>=SCPS_H) continue;
+                int ni=scps_idx(nx,ny);
+                if (comp[ni]==-2){ comp[ni]=id; stack[sp++]=ni; }
+            }
         }
-        w->cell[i].region=(int16_t)bestr;
+        tarea[id]=a;
     }
 
-    /* Initialiser régions */
-    for (int r=0;r<n;r++) {
-        w->region[r].seed_x=g_rseedx[r];
-        w->region[r].seed_y=g_rseedy[r];
-        w->region[r].n_provinces=0;
+    /* Classe les composantes par aire ; les plus grandes = continents. */
+    int order[MAXTMP];
+    for (int i=0;i<ntmp;i++) order[i]=i;
+    for (int i=0;i<ntmp;i++) for (int j=i+1;j<ntmp;j++)
+        if (tarea[order[j]]>tarea[order[i]]){ int t=order[i];order[i]=order[j];order[j]=t; }
+
+    int remap[MAXTMP];
+    int keep = ntmp<SCPS_MAX_CONTINENT ? ntmp : SCPS_MAX_CONTINENT;
+    bool has_bucket = ntmp>SCPS_MAX_CONTINENT;
+    if (has_bucket) keep = SCPS_MAX_CONTINENT-1;   /* dernier slot = archipel */
+    for (int i=0;i<ntmp;i++) {
+        int tid=order[i];
+        remap[tid] = (i<keep) ? i : (has_bucket ? SCPS_MAX_CONTINENT-1 : keep-1);
+    }
+    int ncont = has_bucket ? SCPS_MAX_CONTINENT : keep;
+    if (ncont<1) ncont=1;
+    w->n_continents=ncont;
+
+    for (int c=0;c<ncont;c++) {
+        w->continent[c].area=0; w->continent[c].n_countries=0;
+        w->continent[c].color=province_palette(c*5+11);
+        snprintf(w->continent[c].name,sizeof(w->continent[c].name),
+                 (has_bucket&&c==ncont-1)?"Archipel":"Continent %d",c+1);
+    }
+    for (int i=0;i<SCPS_N;i++) {
+        if (comp[i]<0){ w->cell[i].continent=-1; continue; }
+        int c=remap[comp[i]];
+        w->cell[i].continent=(int16_t)c;
+        w->continent[c].area++;
+    }
+    free(comp); free(stack);
+}
+
+/* ========================================================================
+ * HIÉRARCHIE — territoires → régions → pays (agglomération par contiguïté)
+ *
+ * Croissance gloutonne : on amorce un groupe sur un membre libre, puis on
+ * agrège ses voisins contigus jusqu'à atteindre une taille cible (3-5).
+ * Les groupes trop petits fusionnent ensuite dans un voisin. La contiguïté
+ * étant terrestre, un groupe ne franchit jamais l'océan → régions et pays
+ * restent automatiquement à l'intérieur d'un continent.
+ * ====================================================================== */
+
+/* Adjacence de provinces : matrice booléenne compacte. */
+static bool *build_prov_adjacency(World *w) {
+    int np=w->n_provinces;
+    bool *adj=(bool*)calloc((size_t)np*np,sizeof(bool));
+    if (!adj) return NULL;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int p=w->cell[scps_idx(x,y)].province;
+        if (p<0) continue;
+        if (x+1<SCPS_W){ int q=w->cell[scps_idx(x+1,y)].province;
+            if (q>=0&&q!=p){ adj[p*np+q]=adj[q*np+p]=true; } }
+        if (y+1<SCPS_H){ int q=w->cell[scps_idx(x,y+1)].province;
+            if (q>=0&&q!=p){ adj[p*np+q]=adj[q*np+p]=true; } }
+    }
+    return adj;
+}
+
+/* Agglomère n éléments (graphe adj n×n) en groupes de taille [tmin..tmax].
+ * Écrit le numéro de groupe de chaque élément dans grp[], renvoie le nombre
+ * de groupes. cont[] = continent de chaque élément (ne pas franchir). */
+static int agglomerate(const bool *adj, int n, const int16_t *cont,
+                       int tmin, int tmax, int *grp) {
+    for (int i=0;i<n;i++) grp[i]=-1;
+    int ng=0;
+    int *frontier=(int*)malloc((size_t)n*sizeof(int));
+    if (!frontier) return 0;
+
+    for (int s=0;s<n;s++) {
+        if (grp[s]>=0) continue;
+        int gid=ng++, target=tmin+(int)(rng_f()*(tmax-tmin+1)); if(target<tmin)target=tmin;
+        int size=0, fn=0;
+        grp[s]=gid; frontier[fn++]=s; size++;
+        /* BFS gloutonne limitée à la taille cible et au continent */
+        for (int f=0; f<fn && size<target; f++) {
+            int a=frontier[f];
+            for (int b=0;b<n && size<target;b++) {
+                if (grp[b]>=0 || !adj[a*n+b]) continue;
+                if (cont && cont[b]!=cont[s]) continue;
+                grp[b]=gid; frontier[fn++]=b; size++;
+            }
+        }
+    }
+    free(frontier);
+
+    /* Fusion des groupes sous-dimensionnés dans un voisin du même continent */
+    int *gsize=(int*)calloc(ng,sizeof(int));
+    for (int i=0;i<n;i++) gsize[grp[i]]++;
+    for (int g=0; g<ng; g++) {
+        if (gsize[g]>=tmin || gsize[g]==0) continue;
+        /* cherche un groupe voisin */
+        int target_g=-1;
+        for (int i=0;i<n && target_g<0;i++) {
+            if (grp[i]!=g) continue;
+            for (int j=0;j<n;j++) {
+                if (!adj[i*n+j]) continue;
+                int gj=grp[j];
+                if (gj!=g && (!cont||cont[j]==cont[i])) { target_g=gj; break; }
+            }
+        }
+        if (target_g>=0) {
+            for (int i=0;i<n;i++) if (grp[i]==g) grp[i]=target_g;
+            gsize[target_g]+=gsize[g]; gsize[g]=0;
+        }
+    }
+    /* Renumérotation compacte */
+    int *remap=(int*)malloc(ng*sizeof(int));
+    int m=0;
+    for (int g=0; g<ng; g++) remap[g]=(gsize[g]>0)?m++:-1;
+    for (int i=0;i<n;i++) grp[i]=remap[grp[i]];
+    free(gsize); free(remap);
+    return m;
+}
+
+static void build_hierarchy(World *w) {
+    int np=w->n_provinces;
+    if (np<1){ w->n_regions=w->n_countries=0; return; }
+
+    /* Continent de chaque province (majorité de ses cellules — déjà posé sur
+     * les cellules ; on relit la cellule-germe pour faire simple). */
+    for (int p=0;p<np;p++) {
+        int cx=w->province[p].seed_x, cy=w->province[p].seed_y;
+        int16_t c=w->cell[scps_idx(cx,cy)].continent;
+        if (c<0) c=0;
+        w->province[p].continent=c;
+    }
+
+    bool *padj=build_prov_adjacency(w);
+    if (!padj){ w->n_regions=w->n_countries=0; return; }
+
+    int16_t *pcont=(int16_t*)malloc(np*sizeof(int16_t));
+    int     *pgrp =(int*)malloc(np*sizeof(int));
+    for (int p=0;p<np;p++) pcont[p]=w->province[p].continent;
+
+    /* --- Niveau 1 : territoires → régions --- */
+    int nreg=agglomerate(padj,np,pcont,SCPS_REG_TARGET_MIN,SCPS_REG_TARGET_MAX,pgrp);
+    if (nreg>SCPS_MAX_REG) nreg=SCPS_MAX_REG;
+    for (int r=0;r<nreg;r++){ w->region[r].n_provinces=0; }
+    for (int p=0;p<np;p++) {
+        int r=pgrp[p]; if(r<0||r>=SCPS_MAX_REG) r=0;
+        w->province[p].region=(int16_t)r;
+        Region *rg=&w->region[r];
+        rg->continent=w->province[p].continent;
+        if (rg->n_provinces<12) rg->province_ids[rg->n_provinces++]=(int16_t)p;
+    }
+    w->n_regions=nreg;
+
+    /* --- Adjacence de régions (héritée de l'adjacence des provinces) --- */
+    bool *radj=(bool*)calloc((size_t)nreg*nreg,sizeof(bool));
+    int16_t *rcont=(int16_t*)malloc(nreg*sizeof(int16_t));
+    int     *rgrp =(int*)malloc(nreg*sizeof(int));
+    for (int r=0;r<nreg;r++) rcont[r]=w->region[r].continent;
+    for (int p=0;p<np;p++) for (int q=0;q<np;q++) {
+        if (!padj[p*np+q]) continue;
+        int rp=w->province[p].region, rq=w->province[q].region;
+        if (rp!=rq && rp<nreg && rq<nreg){ radj[rp*nreg+rq]=radj[rq*nreg+rp]=true; }
+    }
+
+    /* --- Niveau 2 : régions → pays --- */
+    int ncty=agglomerate(radj,nreg,rcont,SCPS_CTY_TARGET_MIN,SCPS_CTY_TARGET_MAX,rgrp);
+    if (ncty>SCPS_MAX_COUNTRY) ncty=SCPS_MAX_COUNTRY;
+    for (int c=0;c<ncty;c++){ w->country[c].n_regions=0; w->country[c].capital_prov=-1; }
+    for (int r=0;r<nreg;r++) {
+        int c=rgrp[r]; if(c<0||c>=SCPS_MAX_COUNTRY) c=0;
+        w->region[r].country=(int16_t)c;
+        Country *ct=&w->country[c];
+        ct->continent=w->region[r].continent;
+        if (ct->n_regions<12) ct->region_ids[ct->n_regions++]=(int16_t)r;
+    }
+    w->n_countries=ncty;
+
+    /* Propage pays → provinces ; rattache les pays aux continents. */
+    for (int p=0;p<np;p++) {
+        int r=w->province[p].region;
+        w->province[p].country=(r<nreg)?w->region[r].country:0;
+    }
+    for (int c=0;c<ncty;c++) {
+        int ci=w->country[c].continent; if(ci<0||ci>=w->n_continents)ci=0;
+        Continent *cont=&w->continent[ci];
+        if (cont->n_countries<SCPS_MAX_COUNTRY)
+            cont->country_ids[cont->n_countries++]=(int16_t)c;
+        w->country[c].color=province_palette(c*9+5);
+        snprintf(w->country[c].name,sizeof(w->country[c].name),"Pays %d",c+1);
+    }
+    for (int r=0;r<nreg;r++) {
         w->region[r].color=province_palette(r*7+3);
         snprintf(w->region[r].name,sizeof(w->region[r].name),"Région %d",r+1);
     }
 
-    /* Affecter les provinces aux régions */
-    for (int p=0;p<w->n_provinces;p++) {
-        int cx=w->province[p].seed_x, cy=w->province[p].seed_y;
-        if (cx<0||cx>=SCPS_W||cy<0||cy>=SCPS_H) continue;
-        int r=w->cell[scps_idx(cx,cy)].region;
-        if (r<0) r=0;
-        w->province[p].region=(int16_t)r;
-        Region *rg=&w->region[r];
-        if (rg->n_provinces<SCPS_MAX_PROV)
-            rg->province_ids[rg->n_provinces++]=(int16_t)p;
+    /* Capitale de pays = province la plus fertile (proxy) — via aire faute
+     * de fertilité stockée sur la province ; on prend la plus vaste. */
+    for (int p=0;p<np;p++) {
+        int c=w->province[p].country; if(c<0||c>=ncty)continue;
+        int cap=w->country[c].capital_prov;
+        if (cap<0 || w->province[p].area>w->province[cap].area)
+            w->country[c].capital_prov=p;
     }
+
+    /* Propage région/pays/continent sur les cellules (pour le rendu). */
+    for (int i=0;i<SCPS_N;i++) {
+        int p=w->cell[i].province;
+        if (p<0){ w->cell[i].region=w->cell[i].country=-1; continue; }
+        w->cell[i].region =w->province[p].region;
+        w->cell[i].country=w->province[p].country;
+    }
+
+    free(padj); free(pcont); free(pgrp);
+    free(radj); free(rcont); free(rgrp);
 }
 
 /* ========================================================================
@@ -665,7 +849,7 @@ static void compute_render_flags(World *w, float *height) {
         }
     }
 
-    /* Frontières (compare province/region avec voisins E et S) */
+    /* Frontières par niveau (compare avec voisins E et S) */
     for (int y=0;y<SCPS_H-1;y++) for (int x=0;x<SCPS_W-1;x++) {
         Cell *c  =&w->cell[scps_idx(x,y)];
         Cell *ce =&w->cell[scps_idx(x+1,y)];
@@ -674,6 +858,9 @@ static void compute_render_flags(World *w, float *height) {
                       ||(c->province!=cs->province && (c->province>=0||cs->province>=0));
         c->border_reg =(c->region!=ce->region && (c->region>=0||ce->region>=0))
                       ||(c->region!=cs->region && (c->region>=0||cs->region>=0));
+        c->border_country=(c->country!=ce->country && (c->country>=0||ce->country>=0))
+                         ||(c->country!=cs->country && (c->country>=0||cs->country>=0));
+        c->border_continent=(c->continent!=ce->continent)||(c->continent!=cs->continent);
     }
 
     /* Hillshading — lumière NW (convention cartographique standard)
@@ -1094,13 +1281,17 @@ void world_generate(World *w, uint32_t seed) {
     printf("[scps] fertilité...    "); fflush(stdout);
     compute_fertility(height,moisture,temp,w->cell); printf("ok\n");
 
-    printf("[scps] provinces...    "); fflush(stdout);
+    printf("[scps] territoires...  "); fflush(stdout);
     assign_provinces(w,height,seed_f);
-    printf("ok (%d prov.)\n",w->n_provinces);
+    printf("ok (%d terr.)\n",w->n_provinces);
 
-    printf("[scps] régions...      "); fflush(stdout);
-    assign_regions(w,height,seed_f);
-    printf("ok (%d rég.)\n",w->n_regions);
+    printf("[scps] continents...   "); fflush(stdout);
+    compute_continents(w,height);
+    printf("ok (%d cont.)\n",w->n_continents);
+
+    printf("[scps] hiérarchie...   "); fflush(stdout);
+    build_hierarchy(w);
+    printf("ok (%d rég. %d pays)\n",w->n_regions,w->n_countries);
 
     printf("[scps] flags rendu...  "); fflush(stdout);
     compute_render_flags(w,height);       printf("ok\n");

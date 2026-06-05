@@ -12,8 +12,10 @@
 /* ---- Modes de vue ---------------------------------------------------- */
 typedef enum {
     VIEW_TERRAIN = 0,   /* Terrain physique (biomes + hillshading) */
-    VIEW_POLITICAL,     /* Provinces colorées + terrain en fond */
+    VIEW_POLITICAL,     /* Territoires (provinces) colorés + terrain */
     VIEW_REGIONS,       /* Régions colorées */
+    VIEW_COUNTRIES,     /* Pays colorés */
+    VIEW_CONTINENTS,    /* Continents (masses géographiques) */
     VIEW_HEIGHT,        /* Altimétrie (niveaux de gris) */
     VIEW_FERTILITY,     /* Potentiel de civilisation (heatmap) */
     VIEW_MOISTURE,      /* Précipitations / humidité (bleu=humide) */
