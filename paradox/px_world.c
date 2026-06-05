@@ -78,9 +78,14 @@ static void plates_init(void) {
     }
 }
 
-/* Score de frontière [0..1] et indices des deux plaques les plus proches */
-static float plate_boundary(int px, int py, int *pa, int *pb) {
-    float x=(float)px, y=(float)py;
+/* Score de frontière [0..1] et indices des deux plaques les plus proches.
+ * Coordonnées domain-warpées pour éviter les frontières rectilignes. */
+static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
+    float nx=(float)px/PX_W, ny=(float)py/PX_H;
+    /* Warp dédié aux plaques — fréquence plus basse que celui des provinces */
+    float wx=stb_perlin_fbm_noise3(nx*1.5f+0.f,ny*1.5f+0.f,seed_f+800.f,2.f,0.5f,4)*28.f;
+    float wy=stb_perlin_fbm_noise3(nx*1.5f+6.1f,ny*1.5f+3.4f,seed_f+810.f,2.f,0.5f,4)*28.f;
+    float x=(float)px+wx, y=(float)py+wy;
     float d1=1e30f, d2=1e30f;
     *pa=0; *pb=1;
     for (int i=0;i<N_PLATES;i++) {
@@ -104,7 +109,7 @@ static void step_geology(float *height, float seed_f) {
     /* Frontières de plaques → chaînes de montagnes */
     for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
         int pa,pb;
-        float bs=plate_boundary(x,y,&pa,&pb);
+        float bs=plate_boundary(x,y,&pa,&pb,seed_f);
         if (bs<0.04f) continue;
         float dot=g_plates[pa].dx*g_plates[pb].dx+g_plates[pa].dy*g_plates[pb].dy;
         float conv=(1.f-dot)*0.5f;
@@ -194,14 +199,37 @@ static void gen_climate(float *height, float *moisture, float *temperature,
         float lat=fabsf(ny-0.5f)*2.f;
         float h=height[px_idx(x,y)];
 
-        float alt_cold=clampf((h-0.50f)*2.2f,0.f,1.f);
-        float tn=stb_perlin_fbm_noise3(nx*4.f,ny*3.f,seed_f+500.f,2.f,0.5f,4)*0.07f;
-        temperature[px_idx(x,y)]=clampf(1.f-lat-alt_cold+tn,0.f,1.f);
+        /* ---- Température ------------------------------------------------
+         * Base latitude + variation continentale grande échelle (±0.20) +
+         * régionale (±0.14) + locale (±0.06) → aucune bande horizontale.  */
+        float alt_cold   = clampf((h-0.50f)*2.2f,0.f,1.f);
+        float t_continen = stb_perlin_fbm_noise3(nx*1.8f,ny*1.5f,seed_f+510.f,2.f,0.5f,4)*0.20f;
+        float t_regional = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.14f;
+        float t_local    = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.06f;
+        temperature[px_idx(x,y)] = clampf(
+            1.f - lat - alt_cold + t_continen + t_regional + t_local, 0.f,1.f);
 
-        float trop   =clampf(1.f-lat*2.6f,0.f,1.f);
-        float subtrop=clampf(1.f-fabsf(lat-0.28f)*5.5f,0.f,1.f)*(-0.42f);
-        float mn=stb_perlin_fbm_noise3(nx*5.f,ny*4.f,seed_f+700.f,2.f,0.5f,5)*0.18f;
-        moisture[px_idx(x,y)]=clampf(0.42f+trop*0.36f+subtrop+mn,0.f,1.f);
+        /* ---- Humidité ---------------------------------------------------
+         * ITCZ + sécheresse subtropicale + ombre orographique (côté sous-
+         * le-vent des montagnes) + variation grande échelle.              */
+        float trop    = clampf(1.f-lat*2.6f,0.f,1.f);
+        float subtrop = clampf(1.f-fabsf(lat-0.28f)*5.5f,0.f,1.f)*(-0.42f);
+
+        /* Ombre pluviométrique : cherche un obstacle montagneux à l'ouest */
+        float orographic=0.f;
+        for (int look=1; look<=14; look++) {
+            int lx=clampi(x-look,0,PX_W-1);
+            float mh=height[px_idx(lx,y)];
+            if (mh>MOUNTAIN_H) {
+                orographic=-0.28f*(mh-MOUNTAIN_H)/(1.f-MOUNTAIN_H)*14.f/(float)look;
+                break;
+            }
+        }
+
+        float m_large = stb_perlin_fbm_noise3(nx*1.5f,ny*1.2f,seed_f+710.f,2.f,0.5f,4)*0.22f;
+        float m_local = stb_perlin_fbm_noise3(nx*5.5f,ny*4.5f,seed_f+700.f,2.f,0.5f,5)*0.14f;
+        moisture[px_idx(x,y)] = clampf(
+            0.42f+trop*0.36f+subtrop+orographic+m_large+m_local, 0.f,1.f);
     }
 }
 
@@ -299,14 +327,17 @@ static void compute_fertility(float *height, float *moisture, float *temperature
 }
 
 /* ========================================================================
- * PROVINCES — Voronoï domain-warped + coût de terrain
+ * PROVINCES — Voronoï double domain-warped + coût de terrain
  *
- * Le domain-warping déplace les coordonnées de requête par un champ FBM
- * avant le calcul de distance → frontières organiques, non mécaniques.
- * Le coût de terrain (rivières, montagnes) fait "migrer" naturellement
- * les frontières vers ces obstacles géographiques.
+ * Double domain-warp (technique Inigo Quilez) :
+ *   q = warp1(p)         — grandes sinuosités
+ *   r = warp2(q)         — enroule les sinuosités sur elles-mêmes
+ *   distance(r, seed)    — Voronoï sur les coordonnées doublement warpées
+ * → frontières vraiment organiques, sans aucune droite résiduelle.
+ * Le coût de terrain fait converger les frontières vers les obstacles.
  * ====================================================================== */
-#define WARP_STRENGTH 22.f
+#define WARP1         18.f   /* amplitude 1er warp (grandes déformations) */
+#define WARP2         10.f   /* amplitude 2e warp  (sinuosités fines)     */
 #define MIN_PROV_DIST 26
 
 static int g_pseedx[PX_MAX_PROV];
@@ -352,11 +383,16 @@ static void assign_provinces(World *w, float *height, float seed_f) {
         int i=px_idx(x,y);
         if (height[i]<SEA_LEVEL){w->cell[i].province=-1;continue;}
 
-        /* Domain warp : décalage FBM des coordonnées de requête */
+        /* Double domain warp -------------------------------------------- */
         float nx=(float)x/PX_W, ny=(float)y/PX_H;
-        float wx=stb_perlin_fbm_noise3(nx*3.f+0.f,ny*3.f+0.f,seed_f+10.f,2.f,0.5f,3)*WARP_STRENGTH;
-        float wy=stb_perlin_fbm_noise3(nx*3.f+5.2f,ny*3.f+1.3f,seed_f+20.f,2.f,0.5f,3)*WARP_STRENGTH;
-        float qx=(float)x+wx, qy=(float)y+wy;
+        /* Passage 1 : grandes déformations */
+        float wx1=stb_perlin_fbm_noise3(nx*2.5f+0.0f,ny*2.5f+0.0f,seed_f+10.f,2.f,0.5f,4)*WARP1;
+        float wy1=stb_perlin_fbm_noise3(nx*2.5f+5.2f,ny*2.5f+1.3f,seed_f+20.f,2.f,0.5f,4)*WARP1;
+        /* Passage 2 : warp du warp → sinuosités enroulées */
+        float px2=(nx+wx1/PX_W)*3.f, py2=(ny+wy1/PX_H)*3.f;
+        float wx2=stb_perlin_fbm_noise3(px2+8.3f,py2+2.8f,seed_f+30.f,2.f,0.5f,3)*WARP2;
+        float wy2=stb_perlin_fbm_noise3(px2+3.7f,py2+9.1f,seed_f+40.f,2.f,0.5f,3)*WARP2;
+        float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
 
         float cost=terrain_cost(&w->cell[i]);
         float best=1e30f; int bestp=0;
@@ -411,15 +447,18 @@ static void assign_regions(World *w, float *height, float seed_f) {
     if (n<2) n=2;
     w->n_regions=n;
 
-    /* Domain warp plus faible pour les régions */
-    float warp=WARP_STRENGTH*1.8f;
+    /* Double warp pour les régions (échelle plus grande) */
     for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
         int i=px_idx(x,y);
         if (height[i]<SEA_LEVEL){w->cell[i].region=-1;continue;}
         float nx=(float)x/PX_W, ny=(float)y/PX_H;
-        float wx=stb_perlin_fbm_noise3(nx*2.f,ny*2.f,seed_f+30.f,2.f,0.5f,3)*warp;
-        float wy=stb_perlin_fbm_noise3(nx*2.f+3.7f,ny*2.f+2.1f,seed_f+40.f,2.f,0.5f,3)*warp;
-        float qx=(float)x+wx, qy=(float)y+wy;
+        float rw1=WARP1*1.6f, rw2=WARP2*1.4f;
+        float wx1=stb_perlin_fbm_noise3(nx*2.f+0.f,ny*2.f+0.f,seed_f+50.f,2.f,0.5f,4)*rw1;
+        float wy1=stb_perlin_fbm_noise3(nx*2.f+7.3f,ny*2.f+3.9f,seed_f+60.f,2.f,0.5f,4)*rw1;
+        float px2=(nx+wx1/PX_W)*2.5f, py2=(ny+wy1/PX_H)*2.5f;
+        float wx2=stb_perlin_fbm_noise3(px2+4.1f,py2+6.8f,seed_f+70.f,2.f,0.5f,3)*rw2;
+        float wy2=stb_perlin_fbm_noise3(px2+9.5f,py2+1.2f,seed_f+80.f,2.f,0.5f,3)*rw2;
+        float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
         float best=1e30f; int bestr=0;
         for (int r=0;r<n;r++) {
             float dx=qx-g_rseedx[r],dy=qy-g_rseedy[r];
@@ -611,11 +650,16 @@ void world_generate(World *w, uint32_t seed) {
     gen_climate(height,moisture,temp,seed_f); printf("ok\n");
 
     printf("[paradox] biomes...       "); fflush(stdout);
-    for (int i=0;i<PX_N;i++) {
+    /* Jitter haute fréquence sur t et m pour briser les lignes de seuil */
+    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
+        int i=px_idx(x,y);
+        float nx2=(float)x/PX_W, ny2=(float)y/PX_H;
+        float jt=stb_perlin_noise3(nx2*16.f,ny2*15.f,seed_f+900.f,0,0,0)*0.045f;
+        float jm=stb_perlin_noise3(nx2*15.f,ny2*16.f,seed_f+901.f,0,0,0)*0.035f;
         w->cell[i].height     =height[i];
         w->cell[i].moisture   =moisture[i];
         w->cell[i].temperature=temp[i];
-        w->cell[i].biome=assign_biome(height[i],moisture[i],temp[i]);
+        w->cell[i].biome=assign_biome(height[i],moisture[i]+jm,temp[i]+jt);
     }
     printf("ok\n");
 
