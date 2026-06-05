@@ -572,50 +572,97 @@ static void compute_fertility(float *height, float *moisture, float *temperature
 }
 
 /* ========================================================================
- * PROVINCES — Voronoï double domain-warped + coût de terrain
+ * TERRITOIRES — Voronoï GÉODÉSIQUE (frontières naturelles)
  *
- * Double domain-warp (technique Inigo Quilez) :
- *   q = warp1(p)         — grandes sinuosités
- *   r = warp2(q)         — enroule les sinuosités sur elles-mêmes
- *   distance(r, seed)    — Voronoï sur les coordonnées doublement warpées
- * → frontières vraiment organiques, sans aucune droite résiduelle.
- * Le coût de terrain fait converger les frontières vers les obstacles.
+ * Les germes (pondérés par la fertilité) croissent en bassins via un
+ * Dijkstra multi-source sur un champ de coût de franchissement élevé sur
+ * les fleuves, les crêtes et les fortes pentes. Là où deux bassins se
+ * rencontrent, la frontière tombe sur l'obstacle → fleuves et montagnes
+ * deviennent des frontières naturelles, sans les tracer à la main.
  * ====================================================================== */
-#define WARP1         18.f   /* amplitude 1er warp (grandes déformations) */
-#define WARP2         10.f   /* amplitude 2e warp  (sinuosités fines)     */
 #define MIN_PROV_DIST 9      /* serré → territoires nombreux (place pour 4 niveaux) */
 
 static int g_pseedx[SCPS_MAX_PROV];
 static int g_pseedy[SCPS_MAX_PROV];
 
 static int pick_seeds(Cell *cells, int want) {
-    /* Distribution pondérée par la fertilité, avec espacement minimum */
+    /* Distribution pondérée par la fertilité, avec espacement minimum.
+     * Somme préfixe (une passe) + recherche dichotomique → chaque tirage est
+     * en O(log N) au lieu de O(N) : indispensable quand l'espacement serré
+     * sature la terre et multiplie les tentatives. */
+    static float pref[SCPS_N];
     float total=0.f;
-    for (int i=0;i<SCPS_N;i++) total+=cells[i].fertility;
-    if (total<1.f) total=1.f;
-    int n=0, tries=0;
-    while (n<want && tries<SCPS_N*4) {
-        tries++;
+    for (int i=0;i<SCPS_N;i++){ total+=cells[i].fertility; pref[i]=total; }
+    if (total<1e-6f) return 0;
+
+    int n=0, fails=0;
+    const int MAXFAILS=4000;     /* arrêt quand la terre est saturée */
+    while (n<want && fails<MAXFAILS) {
         float r=rng_f()*total;
-        float s=0.f; int chosen=0;
-        for (int i=0;i<SCPS_N;i++){s+=cells[i].fertility;if(s>=r){chosen=i;break;}}
-        int cx=chosen%SCPS_W, cy=chosen/SCPS_W;
+        int lo=0, hi=SCPS_N-1;            /* plus petit i avec pref[i] >= r */
+        while (lo<hi){ int mid=(lo+hi)>>1; if (pref[mid]<r) lo=mid+1; else hi=mid; }
+        int cx=lo%SCPS_W, cy=lo/SCPS_W;
         bool ok=true;
         for (int k=0;k<n&&ok;k++){
             int dx=cx-g_pseedx[k],dy=cy-g_pseedy[k];
             if (dx*dx+dy*dy<MIN_PROV_DIST*MIN_PROV_DIST) ok=false;
         }
-        if (ok){g_pseedx[n]=cx;g_pseedy[n]=cy;n++;}
+        if (ok){ g_pseedx[n]=cx; g_pseedy[n]=cy; n++; fails=0; }
+        else fails++;
     }
     return n;
 }
 
-static float terrain_cost(const Cell *c) {
-    float cost=1.f;
-    if (c->river>90)  cost+=2.8f*(c->river/255.f);
-    if (c->height>MOUNTAIN_H)       cost+=5.f;
-    else if (c->height>MOUNTAIN_H-0.09f) cost+=2.5f;
-    return cost;
+/* Coût de FRANCHISSEMENT d'une cellule. Élevé sur les obstacles naturels →
+ * l'expansion géodésique y ralentit et la frontière entre deux territoires
+ * s'y immobilise. C'est ainsi que « les frontières naturelles priment » :
+ *   - rivières : barrière croissante avec le débit (fleuve ≫ ruisseau) ;
+ *   - crêtes  : reliefs quasi infranchissables ;
+ *   - pente   : les versants raides coûtent cher ;
+ *   - bruit   : sinuosité résiduelle là où il n'y a aucun obstacle. */
+static void build_cross_cost(const World *w, const float *height,
+                             float *ccost, float seed_f) {
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL){ ccost[i]=1e30f; continue; }  /* mer : infranchie */
+        float cost=1.0f;
+        float r=w->cell[i].river/255.f;
+        if (r>0.06f) cost += 13.0f*powf((r-0.06f)/0.94f,1.15f);  /* rivière/fleuve */
+        if (height[i]>MOUNTAIN_H)            cost += 18.0f;        /* crête */
+        else if (height[i]>MOUNTAIN_H-0.08f) cost += 7.0f;        /* piémont */
+        float hx=fabsf(height[scps_idx(clampi(x+1,0,SCPS_W-1),y)]
+                      -height[scps_idx(clampi(x-1,0,SCPS_W-1),y)]);
+        float hy=fabsf(height[scps_idx(x,clampi(y+1,0,SCPS_H-1))]
+                      -height[scps_idx(x,clampi(y-1,0,SCPS_H-1))]);
+        cost += (hx+hy)*24.0f;                                    /* pente */
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        cost += 0.45f*(0.5f+0.5f*stb_perlin_fbm_noise3(nx*9.f,ny*9.f,seed_f+90.f,2.f,0.5f,3));
+        ccost[i]=cost;
+    }
+}
+
+/* Tas-min binaire (coût, cellule) pour le Dijkstra multi-source. */
+typedef struct { float c; int cell; } HNode;
+static HNode *g_heap=NULL; static int g_hn=0, g_hcap=0;
+static void heap_clear(void){ g_hn=0; }
+static void heap_push(float c,int cell){
+    if (g_hn>=g_hcap){ g_hcap=g_hcap?g_hcap*2:4096;
+        g_heap=(HNode*)realloc(g_heap,(size_t)g_hcap*sizeof(HNode)); }
+    int i=g_hn++; g_heap[i].c=c; g_heap[i].cell=cell;
+    while(i>0){ int p=(i-1)/2; if(g_heap[p].c<=g_heap[i].c)break;
+        HNode t=g_heap[p];g_heap[p]=g_heap[i];g_heap[i]=t; i=p; }
+}
+static HNode heap_pop(void){
+    HNode top=g_heap[0]; g_heap[0]=g_heap[--g_hn];
+    int i=0;
+    for(;;){
+        int l=2*i+1,r=l+1,m=i;
+        if(l<g_hn&&g_heap[l].c<g_heap[m].c)m=l;
+        if(r<g_hn&&g_heap[r].c<g_heap[m].c)m=r;
+        if(m==i)break;
+        HNode t=g_heap[m];g_heap[m]=g_heap[i];g_heap[i]=t; i=m;
+    }
+    return top;
 }
 
 static void assign_provinces(World *w, float *height, float seed_f) {
@@ -623,31 +670,35 @@ static void assign_provinces(World *w, float *height, float seed_f) {
     if (n<4) n=4;
     w->n_provinces=n;
 
-    /* Voronoï domain-warped + coût de terrain */
-    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
-        int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL){w->cell[i].province=-1;continue;}
+    /* ---- Voronoï GÉODÉSIQUE : expansion multi-source (Dijkstra) sur le
+     * coût de franchissement. Les bassins de chaque germe croissent jusqu'à
+     * se heurter sur fleuves et crêtes → frontières naturelles. ---------- */
+    float *ccost=(float*)malloc(SCPS_N*sizeof(float));
+    float *dist =(float*)malloc(SCPS_N*sizeof(float));
+    if (!ccost||!dist){ free(ccost); free(dist); return; }
+    build_cross_cost(w,height,ccost,seed_f);
 
-        /* Double domain warp -------------------------------------------- */
-        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-        /* Passage 1 : grandes déformations */
-        float wx1=stb_perlin_fbm_noise3(nx*2.5f+0.0f,ny*2.5f+0.0f,seed_f+10.f,2.f,0.5f,4)*WARP1;
-        float wy1=stb_perlin_fbm_noise3(nx*2.5f+5.2f,ny*2.5f+1.3f,seed_f+20.f,2.f,0.5f,4)*WARP1;
-        /* Passage 2 : warp du warp → sinuosités enroulées */
-        float px2=(nx+wx1/SCPS_W)*3.f, py2=(ny+wy1/SCPS_H)*3.f;
-        float wx2=stb_perlin_fbm_noise3(px2+8.3f,py2+2.8f,seed_f+30.f,2.f,0.5f,3)*WARP2;
-        float wy2=stb_perlin_fbm_noise3(px2+3.7f,py2+9.1f,seed_f+40.f,2.f,0.5f,3)*WARP2;
-        float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
-
-        float cost=terrain_cost(&w->cell[i]);
-        float best=1e30f; int bestp=0;
-        for (int p=0;p<n;p++) {
-            float dx=qx-g_pseedx[p], dy=qy-g_pseedy[p];
-            float d=(dx*dx+dy*dy)*cost;
-            if (d<best){best=d;bestp=p;}
-        }
-        w->cell[i].province=(int16_t)bestp;
+    for (int i=0;i<SCPS_N;i++){ dist[i]=1e30f; w->cell[i].province=-1; }
+    heap_clear();
+    for (int p=0;p<n;p++){
+        int i=scps_idx(g_pseedx[p],g_pseedy[p]);
+        dist[i]=0.f; w->cell[i].province=(int16_t)p; heap_push(0.f,i);
     }
+    while (g_hn>0){
+        HNode top=heap_pop();
+        int i=top.cell;
+        if (top.c>dist[i]) continue;              /* entrée périmée */
+        int x=i%SCPS_W, y=i/SCPS_W, pid=w->cell[i].province;
+        for (int d=0;d<8;d++){
+            int nx2=x+DDX[d], ny2=y+DDY[d];
+            if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H) continue;
+            int j=scps_idx(nx2,ny2);
+            if (ccost[j]>1e29f) continue;         /* mer : non franchie */
+            float nd=dist[i]+ccost[j]*DDIST[d];
+            if (nd<dist[j]){ dist[j]=nd; w->cell[j].province=(int16_t)pid; heap_push(nd,j); }
+        }
+    }
+    free(ccost); free(dist);
 
     /* Stats de province */
     int biome_cnt[SCPS_MAX_PROV][BIO_COUNT]={0};

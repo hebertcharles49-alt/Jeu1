@@ -82,6 +82,31 @@ int main(int argc, char **argv) {
         write_ppm(views[i].file, buf, W, H);
     }
 
+    /* Gros plan : le 1er continent, terrain et frontières, pour vérifier que
+     * les frontières épousent fleuves et crêtes. */
+    if (w->n_continents>0) {
+        /* centre du plus grand continent */
+        long sx=0,sy=0,cnt=0;
+        for (int yy=0;yy<H;yy++) for (int xx=0;xx<W;xx++)
+            if (w->cell[yy*W+xx].continent==0){ sx+=xx; sy+=yy; cnt++; }
+        int cx=cnt?(int)(sx/cnt):W/2, cy=cnt?(int)(sy/cnt):H/2;
+        int ZW=480, ZH=360; float zs=3.2f;
+        uint32_t *zb=(uint32_t*)malloc((size_t)ZW*ZH*4);
+        RenderParams zp=rp; zp.cam_scale=zs;
+        zp.cam_ox=cx-ZW/(2*zs); zp.cam_oy=cy-ZH/(2*zs);
+        render_map(w, zb, ZW, ZH, &zp, VIEW_TERRAIN);
+        write_ppm("out_zoom_terrain.ppm", zb, ZW, ZH);
+        /* Surimpose UNIQUEMENT les traits de frontière sur le terrain brut :
+         * on voit alors si les frontières suivent fleuves et crêtes. */
+        for (int sy=0; sy<ZH; sy++) for (int sx=0; sx<ZW; sx++) {
+            int wx=(int)(sx/zs+zp.cam_ox), wy=(int)(sy/zs+zp.cam_oy);
+            if (wx<0||wx>=W||wy<0||wy>=H) continue;
+            if (w->cell[wy*W+wx].border_prov) zb[sy*ZW+sx]=0xFF101010u; /* trait noir */
+        }
+        write_ppm("out_zoom_borders.ppm", zb, ZW, ZH);
+        free(zb);
+    }
+
     free(buf);
     free(w);
     return 0;
