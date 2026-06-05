@@ -37,7 +37,8 @@ int main(int argc, char **argv) {
 
     World *w = (World*)malloc(sizeof(World));
     if (!w) return 1;
-    world_generate(w, seed);
+    WorldParams params = worldparams_default(seed);
+    world_generate(w, &params);
 
     int W = SCPS_W, H = SCPS_H;
     uint32_t *buf = (uint32_t*)malloc((size_t)W*H*4);

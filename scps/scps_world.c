@@ -98,16 +98,77 @@ static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
     return 1.f - clampf((d2-d1)/(r*0.28f),0.f,1.f);
 }
 
-static void step_geology(float *height, float seed_f) {
+/* Masque continental : N noyaux attracteurs → N masses de terre séparées
+ * par l'océan. Bords de carte forcés vers l'océan. Coordonnées warpées →
+ * littoraux organiques. Renvoie un facteur [0..1] (0 = pleine mer). */
+typedef struct { float cx, cy, r; } ContSeed;
+static ContSeed g_conts[8];
+static int      g_ncont = 3;
+
+static void continents_init(int n, float seed_f) {
+    if (n<1) n=1;
+    if (n>8) n=8;
+    g_ncont=n;
+    /* Centres répartis horizontalement (chambres d'évolution, doc §3),
+     * jitter vertical pour casser l'alignement. */
+    for (int i=0;i<n;i++) {
+        float u=(i+0.5f)/n;
+        g_conts[i].cx = (0.10f + 0.80f*u) * SCPS_W
+                      + (rng_f()-0.5f)*0.08f*SCPS_W;
+        g_conts[i].cy = (0.32f + 0.36f*rng_f()) * SCPS_H;
+        /* Rayon < espacement des centres → masses denses mais séparées */
+        g_conts[i].r  = (0.70f/sqrtf((float)n)) * SCPS_H;
+    }
+    (void)seed_f;
+}
+
+static float continental_mask(int x, int y, float seed_f) {
+    float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+    /* Domain warp pour des côtes sinueuses */
+    float wx=stb_perlin_fbm_noise3(nx*1.6f, ny*1.6f, seed_f+1200.f,2.f,0.5f,4)*0.16f;
+    float wy=stb_perlin_fbm_noise3(nx*1.6f+4.f,ny*1.6f+2.f,seed_f+1210.f,2.f,0.5f,4)*0.16f;
+    float fx=(nx+wx)*SCPS_W, fy=(ny+wy)*SCPS_H;
+
+    float best=0.f;
+    for (int i=0;i<g_ncont;i++) {
+        float dx=fx-g_conts[i].cx, dy=fy-g_conts[i].cy;
+        float d=sqrtf(dx*dx+dy*dy)/g_conts[i].r;      /* 0 au centre, 1 au bord */
+        float lobe=1.f-clampf(d,0.f,1.f);
+        lobe=lobe*lobe*(3.f-2.f*lobe);                 /* smoothstep */
+        if (lobe>best) best=lobe;
+    }
+    /* Bordure de carte → océan (évite les continents collés au cadre) */
+    float edge = clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1)
+               * clampf(nx*8.f,0,1)*clampf((1.f-nx)*8.f,0,1);
+    return best*edge;
+}
+
+static void step_geology(float *height, float seed_f, const WorldParams *P) {
     plates_init();
+    continents_init(P->n_continents, seed_f);
+
+    /* land_bias : décale la mer (0.5 neutre). mountains : amplitude. */
+    float land_bias = (P->land_amount-0.5f)*0.5f;
+    float mtn_amp   = 0.6f + P->mountains*0.9f;
+
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
-        float base = stb_perlin_fbm_noise3(nx*4.f,ny*3.2f,seed_f,2.f,0.5f,7);
-        height[scps_idx(x,y)] = base - 0.20f*lat*lat;
+        /* Détail de terrain (haute fréquence) modulé par le masque continental */
+        float detail = stb_perlin_fbm_noise3(nx*4.5f,ny*3.6f,seed_f,2.f,0.5f,7);
+        float mask    = continental_mask(x,y,seed_f);
+        /* Mer profonde hors masque ; terre détaillée dans le masque.
+         * Plateau interne (smoothstep du masque) → continents pleins, peu de
+         * mer intérieure, tout en laissant l'océan entre les masses. */
+        float plat = clampf((mask-0.18f)/0.34f,0.f,1.f);
+        plat = plat*plat*(3.f-2.f*plat);
+        float h = (plat*0.42f - 0.06f) + detail*0.42f*mask + land_bias;
+        height[scps_idx(x,y)] = h - 0.16f*lat*lat;
     }
-    /* Frontières de plaques → chaînes de montagnes */
+    /* Frontières de plaques → chaînes de montagnes (sur la terre seulement) */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        float mask=continental_mask(x,y,seed_f);
+        if (mask<0.15f) continue;                       /* pas de montagnes en mer */
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
         if (bs<0.04f) continue;
@@ -119,7 +180,7 @@ static void step_geology(float *height, float seed_f) {
         if (bump>0.f) {
             float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
             float r=stb_perlin_ridge_noise3(nx2*10.f,ny2*8.f,seed_f+50.f,2.f,0.5f,1.f,5);
-            height[scps_idx(x,y)] += bump*(0.5f+0.5f*r);
+            height[scps_idx(x,y)] += bump*(0.5f+0.5f*r)*mtn_amp*mask;
         }
     }
     normalize_f(height,SCPS_N);
@@ -146,7 +207,7 @@ static void step_architecture(float *height, float seed_f) {
  * COUCHE 3 — ÉROSION
  * D8 flow + accumulation → rivières + creusement
  * ====================================================================== */
-static void step_erosion(float *height, Cell *cells) {
+static void step_erosion(float *height, Cell *cells, float erosion) {
     int8_t *fdir  = (int8_t*)malloc(SCPS_N*sizeof(int8_t));
     float  *accum = (float *)malloc(SCPS_N*sizeof(float));
     if (!fdir||!accum) { free(fdir);free(accum);return; }
@@ -210,13 +271,14 @@ static void step_erosion(float *height, Cell *cells) {
     for (int i=0;i<SCPS_N;i++) if(accum[i]>max_a)max_a=accum[i];
     float lmax=logf(1.f+max_a);
 
+    float carve = 0.03f + erosion*0.07f;    /* intensité de creusement (param) */
     for (int i=0;i<SCPS_N;i++) {
         cells[i].flow_dir=fdir[i];          /* conservé pour le tracé aval */
         /* Échelle log : un fleuve de 5000 cellules amont reste lisible face
          * à un ruisseau de 5. */
         float rs=logf(1.f+accum[i])/lmax;
         cells[i].river=(uint8_t)(clampf(rs,0.f,1.f)*255.f);
-        if (rs>0.45f && height[i]>SEA_LEVEL) height[i]-=(rs-0.45f)*0.06f; /* creuse le lit */
+        if (rs>0.45f && height[i]>SEA_LEVEL) height[i]-=(rs-0.45f)*carve; /* creuse le lit */
     }
     normalize_f(height,SCPS_N);
     free(fdir); free(accum);
@@ -285,8 +347,11 @@ static int wind_dir_x(float lat) {
 }
 
 static void gen_climate(World *w, float *height, float *moisture,
-                        float *temperature, const float *odist, float seed_f) {
+                        float *temperature, const float *odist, float seed_f,
+                        const WorldParams *P) {
     Cell *cells = w->cell;
+    float t_bias = (P->temperature-0.5f)*0.6f;   /* slider température */
+    float m_bias = (P->humidity   -0.5f)*0.6f;   /* slider humidité   */
 
     /* ---- 1. Température --------------------------------------------- */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
@@ -299,7 +364,7 @@ static void gen_climate(World *w, float *height, float *moisture,
         float t_reg  = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.10f;
         float t_loc  = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.05f;
         float cont_heat = odist[i]*(1.f-lat)*0.10f;  /* déserts continentaux brûlants */
-        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat+t_cont+t_reg+t_loc,0.f,1.f);
+        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat+t_cont+t_reg+t_loc+t_bias,0.f,1.f);
     }
 
     /* ---- 2. Advection d'humidité ----------------------------------- */
@@ -360,7 +425,7 @@ static void gen_climate(World *w, float *height, float *moisture,
                 + 0.48f*rain[i]      /* advection : continentalité + ombre pluvio. */
                 + 0.22f*tropical     /* pluies de convection tropicale */
                 + 0.20f*coastal      /* proximité de l'océan */
-                + fbm;
+                + fbm + m_bias;      /* slider humidité */
 
         /* Corridor riparien : "pas d'eau sans montagne" — le fleuve né en
          * altitude verdit sa vallée jusque dans le désert (effet Nil). */
@@ -374,6 +439,13 @@ static void gen_climate(World *w, float *height, float *moisture,
 /* ========================================================================
  * BIOMES (Whittaker adapté fantasy)
  * ====================================================================== */
+/* Diagramme de Whittaker réglé pour un monde SAUVAGE :
+ *   - la forêt domine partout où il y a assez d'eau (seuils bas) ;
+ *   - la savane est réduite à une étroite frange chaude semi-aride ;
+ *   - AUCUNE terre cultivée naturelle : les flatlands fertiles naissent en
+ *     prairie/bois ; la « terre cultivée » est un défrichage civilisationnel
+ *     (donc absent tant qu'aucune culture n'a défriché — cf. doc).
+ *   - prairies/plaines restreintes aux marges semi-sèches. */
 static Biome assign_biome(float h, float m, float t) {
     if (h<SEA_LEVEL-0.14f) return BIO_DEEP_OCEAN;
     if (h<SEA_LEVEL-0.04f) return BIO_OCEAN;
@@ -382,29 +454,42 @@ static Biome assign_biome(float h, float m, float t) {
     if (h>=PEAK_H)          return (t<0.16f)?BIO_GLACIER:BIO_PEAK;
     if (h>=MOUNTAIN_H)      return BIO_MOUNTAINS;
     if (h>=MOUNTAIN_H-0.09f)return (t<0.30f)?BIO_HIGHLANDS:BIO_HILLS;
-    if (t<0.17f)  return (m>0.40f)?BIO_FOREST:BIO_GLACIER;
+
+    /* --- Froid (boréal) : taïga dès qu'un peu d'humidité --- */
+    if (t<0.17f) {
+        if (m>0.28f) return BIO_FOREST;          /* forêt boréale */
+        if (m>0.16f) return BIO_WOODS;
+        return BIO_GLACIER;
+    }
+    /* --- Frais (tempéré froid) : forêt très étendue --- */
     if (t<0.33f) {
-        if (m>0.58f) return BIO_FOREST;
-        if (m>0.35f) return BIO_WOODS;
+        if (m>0.40f) return BIO_FOREST;
+        if (m>0.22f) return BIO_WOODS;
+        if (m>0.12f) return BIO_STEPPE;
         return BIO_STEPPE;
     }
-    if (t<0.52f) {
-        if (m>0.66f) return BIO_FOREST;
-        if (m>0.48f) return BIO_WOODS;
-        if (m>0.32f) return BIO_GRASSLAND;
-        if (m>0.16f) return BIO_PLAINS;
-        return BIO_STEPPE;
+    /* --- Tempéré : forêt domine, prairie en marge sèche --- */
+    if (t<0.55f) {
+        if (m>0.44f) return BIO_FOREST;
+        if (m>0.30f) return BIO_WOODS;
+        if (m>0.18f) return BIO_GRASSLAND;
+        if (m>0.10f) return BIO_PLAINS;
+        return BIO_DRYLANDS;
     }
-    if (t<0.70f) {
-        if (m>0.62f) return (h<SEA_LEVEL+0.07f)?BIO_MARSH:BIO_JUNGLE;
-        if (m>0.42f) return BIO_FARMLAND;
-        if (m>0.26f) return BIO_SAVANNA;
-        if (m>0.12f) return BIO_DRYLANDS;
+    /* --- Chaud : jungle/forêt si humide, frange savane étroite --- */
+    if (t<0.72f) {
+        if (m>0.58f) return (h<SEA_LEVEL+0.07f)?BIO_MARSH:BIO_JUNGLE;
+        if (m>0.40f) return BIO_FOREST;          /* forêt tropicale humide */
+        if (m>0.26f) return BIO_WOODS;
+        if (m>0.16f) return BIO_SAVANNA;         /* frange étroite */
+        if (m>0.08f) return BIO_DRYLANDS;
         return (h<SEA_LEVEL+0.06f)?BIO_COASTAL_DESERT:BIO_DESERT;
     }
-    if (m>0.66f) return BIO_JUNGLE;
-    if (m>0.40f) return BIO_SAVANNA;
-    if (m>0.18f) return BIO_DRYLANDS;
+    /* --- Torride --- */
+    if (m>0.60f) return BIO_JUNGLE;
+    if (m>0.42f) return BIO_FOREST;
+    if (m>0.24f) return BIO_SAVANNA;
+    if (m>0.12f) return BIO_DRYLANDS;
     return (h<SEA_LEVEL+0.06f)?BIO_COASTAL_DESERT:BIO_DESERT;
 }
 
@@ -498,7 +583,7 @@ static void compute_fertility(float *height, float *moisture, float *temperature
  * ====================================================================== */
 #define WARP1         18.f   /* amplitude 1er warp (grandes déformations) */
 #define WARP2         10.f   /* amplitude 2e warp  (sinuosités fines)     */
-#define MIN_PROV_DIST 12     /* serré → ~240 territoires (place pour 4 niveaux) */
+#define MIN_PROV_DIST 9      /* serré → territoires nombreux (place pour 4 niveaux) */
 
 static int g_pseedx[SCPS_MAX_PROV];
 static int g_pseedy[SCPS_MAX_PROV];
@@ -1238,11 +1323,29 @@ static void gen_resources(World *w) {
 /* ========================================================================
  * POINT D'ENTRÉE
  * ====================================================================== */
-void world_generate(World *w, uint32_t seed) {
+WorldParams worldparams_default(uint32_t seed) {
+    WorldParams p;
+    p.seed         = seed;
+    p.n_continents = 3;      /* doc §3 */
+    p.land_amount  = 0.5f;
+    p.world_age    = 0.5f;
+    p.erosion      = 0.5f;
+    p.mountains    = 0.5f;
+    p.temperature  = 0.5f;
+    p.humidity     = 0.5f;
+    return p;
+}
+
+void world_generate(World *w, const WorldParams *P) {
+    WorldParams def;
+    if (!P){ def=worldparams_default((uint32_t)0); P=&def; }
     memset(w,0,sizeof(*w));
-    w->seed=seed;
-    rng_seed(seed);
-    float seed_f=(float)(seed&0xFFFF)/(float)0x10000;
+    w->seed=P->seed;
+    rng_seed(P->seed);
+    float seed_f=(float)(P->seed&0xFFFF)/(float)0x10000;
+
+    /* world_age → nombre d'itérations d'érosion thermique (vieux = usé) */
+    int thermal_iters = 2 + (int)(P->world_age*14.f);
 
     float *height =  (float*)malloc(SCPS_N*sizeof(float));
     float *moisture= (float*)malloc(SCPS_N*sizeof(float));
@@ -1251,22 +1354,22 @@ void world_generate(World *w, uint32_t seed) {
     if (!height||!moisture||!temp||!odist){fprintf(stderr,"scps: OOM\n");goto end;}
 
     printf("[scps] géologie...     "); fflush(stdout);
-    step_geology(height,seed_f);          printf("ok\n");
+    step_geology(height,seed_f,P);        printf("ok\n");
 
     printf("[scps] architecture... "); fflush(stdout);
     step_architecture(height,seed_f);     printf("ok\n");
 
     printf("[scps] altération...   "); fflush(stdout);
-    step_thermal_erosion(height,6);       printf("ok\n");
+    step_thermal_erosion(height,thermal_iters); printf("ok\n");
 
     printf("[scps] érosion...      "); fflush(stdout);
-    step_erosion(height,w->cell);         printf("ok\n");
+    step_erosion(height,w->cell,P->erosion); printf("ok\n");
 
     printf("[scps] continentalité..."); fflush(stdout);
     compute_ocean_distance(height,odist);  printf("ok\n");
 
     printf("[scps] climat (vent)... "); fflush(stdout);
-    gen_climate(w,height,moisture,temp,odist,seed_f); printf("ok\n");
+    gen_climate(w,height,moisture,temp,odist,seed_f,P); printf("ok\n");
 
     printf("[scps] biomes...       "); fflush(stdout);
     /* Jitter haute fréquence sur t et m pour briser les lignes de seuil */

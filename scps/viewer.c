@@ -145,10 +145,12 @@ int main(int argc, char **argv) {
     if (!world) { fprintf(stderr,"OOM\n"); return 1; }
 
     uint32_t  seed     = (uint32_t)time(NULL);
+    WorldParams params = worldparams_default(seed);
     ViewMode  mode     = VIEW_TERRAIN;
     int       selected = -1;
     bool      dirty    = true;
     bool      running  = true;
+    bool      regen    = false;   /* demande de régénération du monde */
 
     /* Caméra : ajuste pour montrer toute la carte */
     Cam cam;
@@ -166,8 +168,10 @@ int main(int argc, char **argv) {
     int   pan_sx = 0, pan_sy = 0;
 
     printf("[scps] Génération (graine %u)…\n", seed);
-    world_generate(world, seed);
-    printf("[scps] Prêt. TAB=vue  R=regénère  clic=province  molette=zoom\n");
+    world_generate(world, &params);
+    printf("[scps] Prêt. TAB/1-0=vues  R=regénère  clic=territoire\n");
+    printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
+    printf("       l=terres m=montagnes t=température h=humidité (Maj=baisse)\n");
 
     while (running) {
         SDL_Event ev;
@@ -249,18 +253,45 @@ int main(int argc, char **argv) {
                 case SDLK_9:     mode=VIEW_TEMPERATURE; dirty=true; break;
                 case SDLK_0:     mode=VIEW_RESOURCES;   dirty=true; break;
                 case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
-                case SDLK_r: {
+                case SDLK_r:
                     seed ^= (uint32_t)time(NULL) * 2654435761u;
-                    printf("\n[scps] Regénération (graine %u)…\n", seed);
-                    world_generate(world, seed);
-                    selected = -1;
-                    dirty = true;
+                    params.seed = seed;
+                    regen = true;
                     break;
+
+                /* --- Réglages de génération (Maj = diminuer) --- */
+                case SDLK_c: {  /* nombre de continents 1..6 */
+                    bool dn = (ev.key.keysym.mod & KMOD_SHIFT);
+                    params.n_continents += dn?-1:1;
+                    if (params.n_continents<1) params.n_continents=6;
+                    if (params.n_continents>6) params.n_continents=1;
+                    regen=true; break;
                 }
+                #define ADJ(field) { bool dn=(ev.key.keysym.mod&KMOD_SHIFT); \
+                    params.field += dn?-0.25f:0.25f; \
+                    if(params.field<-0.001f)params.field=1.f; \
+                    else if(params.field>1.001f)params.field=0.f; \
+                    regen=true; }
+                case SDLK_g:  ADJ(world_age)   break;  /* âge du monde   */
+                case SDLK_e:  ADJ(erosion)     break;  /* érosion        */
+                case SDLK_l:  ADJ(land_amount) break;  /* quantité terre */
+                case SDLK_m:  ADJ(mountains)   break;  /* relief         */
+                case SDLK_t:  ADJ(temperature) break;  /* température    */
+                case SDLK_h:  ADJ(humidity)    break;  /* humidité       */
+                #undef ADJ
                 default: break;
                 }
                 break;
             }
+        }
+
+        if (regen) {
+            printf("\n[scps] Génération — graine %u · continents %d · âge %.2f"
+                   " · érosion %.2f · terres %.2f · relief %.2f · temp %.2f · humid %.2f\n",
+                   params.seed, params.n_continents, params.world_age, params.erosion,
+                   params.land_amount, params.mountains, params.temperature, params.humidity);
+            world_generate(world, &params);
+            selected = -1; dirty = true; regen = false;
         }
 
         if (dirty && pb.pixels) {

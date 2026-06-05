@@ -37,6 +37,22 @@
 #define MOUNTAIN_H    0.67f
 #define PEAK_H        0.82f
 
+/* ---- Paramètres de génération (futurs « sliders » façon Civ) -----------
+ * Toutes les valeurs continues sont normalisées : 0.5 = neutre/défaut,
+ * sauf indication. Le générateur lit ces réglages ; l'UI viendra les
+ * piloter. (La taille de carte reste fixe pour l'instant — un passage en
+ * allocation dynamique sera nécessaire pour la rendre réglable.) */
+typedef struct {
+    uint32_t seed;
+    int      n_continents;   /* 1..8  — masses continentales visées        */
+    float    land_amount;    /* 0..1  — 0.5 neutre ; haut = plus de terres */
+    float    world_age;      /* 0..1  — vieux = relief usé (érosion therm.) */
+    float    erosion;        /* 0..1  — intensité du creusement hydraulique */
+    float    mountains;      /* 0..1  — amplitude du relief                 */
+    float    temperature;    /* 0..1  — 0.5 neutre ; haut = monde chaud     */
+    float    humidity;       /* 0..1  — 0.5 neutre ; haut = monde humide    */
+} WorldParams;
+
 /* ---- Biomes ------------------------------------------------------------ */
 typedef enum {
     BIO_DEEP_OCEAN = 0,
