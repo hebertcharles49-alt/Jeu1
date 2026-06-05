@@ -32,6 +32,10 @@ else
 endif
 
 CFLAGS += $(SDL_CFLAGS)
+# Génération automatique des dépendances d'en-têtes (.d) : un .o est
+# recompilé quand un .h qu'il inclut change. Évite les objets périmés
+# (ex. struct modifiée dans un header → ABI désynchronisée → crash).
+CFLAGS += -MMD -MP
 
 all: $(TARGET)
 
@@ -80,3 +84,9 @@ clean:
 	       scps_viewer scps_viewer.exe scps_dump out_*.ppm
 
 .PHONY: all run scps run_scps clean
+
+# Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore
+# leur absence au premier build.
+-include $(OBJS:.o=.d)
+-include $(SCPS_OBJS:.o=.d)
+-include $(OBJDIR)/scps_dump.d
