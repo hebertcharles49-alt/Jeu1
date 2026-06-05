@@ -1133,94 +1133,104 @@ static void step_weathering(World *w, const float *height, float seed_f) {
  *   - le poisson/sel des côtes ; etc.
  * ====================================================================== */
 static void gen_resources(World *w) {
-    /* Accès à la mer + fertilité moyenne par province (proxy « richesse ») */
-    float fert_sum[SCPS_MAX_PROV]={0};
-    int   fert_cnt[SCPS_MAX_PROV]={0};
-    bool  coastal [SCPS_MAX_PROV]={0};
+    /* Agrégats par province : côte, fertilité/humidité/température moyennes,
+     * débit fluvial maximal (pour le poisson de fleuve). */
+    static float moist_s[SCPS_MAX_PROV], temp_s[SCPS_MAX_PROV];
+    static int   cnt[SCPS_MAX_PROV], rivmax[SCPS_MAX_PROV];
+    static bool  coastal[SCPS_MAX_PROV];
+    for (int p=0;p<w->n_provinces;p++){ moist_s[p]=temp_s[p]=0.f;
+        cnt[p]=0; rivmax[p]=0; coastal[p]=false; }
     for (int i=0;i<SCPS_N;i++) {
         int p=w->cell[i].province;
         if (p<0) continue;
-        fert_sum[p]+=w->cell[i].fertility;
-        fert_cnt[p]++;
+        moist_s[p]+=w->cell[i].moisture;
+        temp_s[p]+=w->cell[i].temperature;
+        cnt[p]++;
         if (w->cell[i].coast) coastal[p]=true;
+        if (w->cell[i].river>rivmax[p]) rivmax[p]=w->cell[i].river;
     }
 
     for (int p=0;p<w->n_provinces;p++) {
         Province *pr=&w->province[p];
         pr->coastal = coastal[p];
-        float fert  = (fert_cnt[p]>0)?fert_sum[p]/fert_cnt[p]:0.f;
-        float lat   = pr->lat, H = pr->height_avg;
+        int   n     = cnt[p]>0?cnt[p]:1;
+        float moist = moist_s[p]/n, tmp = temp_s[p]/n;
+        float H     = pr->height_avg;
         Biome B     = pr->biome_dominant;
-        bool  trop  = lat<0.34f, temp = (lat>=0.34f&&lat<0.66f), cold = lat>=0.66f;
-        bool  warm  = lat<0.50f;
-        bool  relief= biome_is_relief(B) || H>0.60f;
-        bool  mtn   = (B==BIO_MOUNTAINS||B==BIO_PEAK||H>0.68f);
+        bool  warm  = tmp>0.55f, cold = tmp<0.34f;
+        bool  bigriver = rivmax[p]>150;
+
+        bool flat       = (B==BIO_PLAINS||B==BIO_FARMLAND||B==BIO_GRASSLAND||
+                           B==BIO_STEPPE||B==BIO_SAVANNA||B==BIO_DRYLANDS);
+        bool humid_flat = (B==BIO_PLAINS||B==BIO_FARMLAND||B==BIO_GRASSLAND)&&moist>0.45f;
+        bool pastoral   = (B==BIO_GRASSLAND||B==BIO_STEPPE||B==BIO_SAVANNA);
+        bool arid       = (B==BIO_DRYLANDS||B==BIO_DESERT||B==BIO_COASTAL_DESERT||
+                           B==BIO_SAVANNA)||moist<0.30f;
+        bool forested   = (B==BIO_FOREST||B==BIO_WOODS||B==BIO_JUNGLE||B==BIO_MANGROVE);
+        bool hills      = (B==BIO_HILLS||B==BIO_HIGHLANDS);
+        bool mtn        = (B==BIO_MOUNTAINS||B==BIO_PEAK||H>0.70f);
+        bool relief     = biome_is_relief(B)||H>0.58f;
+        bool mesa       = arid && (hills||H>0.55f);
 
         float wt[RES_COUNT]; for (int r=0;r<RES_COUNT;r++) wt[r]=0.f;
         #define ADD(R,V) wt[R]+=(V)
 
-        /* --- Relief : minéraux --- */
+        /* --- Agricole & élevage --- */
+        if (B==BIO_FARMLAND)       ADD(RES_GRAIN,     3.6f);   /* terres cultivées */
+        if (B==BIO_PLAINS)         ADD(RES_GRAIN,     2.6f);
+        if (B==BIO_GRASSLAND)      ADD(RES_GRAIN,     2.0f);   /* arable aussi */
+        if (humid_flat)            ADD(RES_GRAIN,     0.8f);
+        if (flat && !arid)         ADD(RES_LIVESTOCK, 1.6f);
+        if (pastoral)            { ADD(RES_LIVESTOCK, 2.2f); ADD(RES_WOOL, 1.8f); }
+        if (hills)               { ADD(RES_WOOL,      2.0f); ADD(RES_LIVESTOCK, 1.0f); }
+        if (flat && arid && warm)  ADD(RES_COTTON,    2.6f);   /* flatlands arides */
+
+        /* --- Poisson : côte ou fleuve à fort débit (sans voler la terre
+         *     productive : poids modéré, gagne surtout les côtes pauvres) --- */
+        if (coastal[p])            ADD(RES_FISH, 1.4f);
+        if (bigriver)              ADD(RES_FISH, 1.7f);
+
+        /* --- Fourrure : régions froides et sauvages --- */
+        if (cold && (forested||B==BIO_BOG||B==BIO_GLACIER||B==BIO_STEPPE))
+                                   ADD(RES_FUR, 3.0f);
+
+        /* --- Sel : déserts et côtes --- */
+        if (arid)                  ADD(RES_SALT, 1.8f);
+        if (coastal[p])            ADD(RES_SALT, 0.8f);
+
+        /* --- Sucre : côtes arides chaudes --- */
+        if (coastal[p] && arid && warm) ADD(RES_SUGAR, 2.6f);
+
+        /* --- Bois : régions boisées --- */
+        if (forested)              ADD(RES_WOOD, 3.6f);
+
+        /* --- Herbes médicinales : zones humides d'altitude --- */
+        if (B==BIO_BOG)            ADD(RES_MED_HERBS, 2.6f);
+        if ((hills||H>0.55f) && moist>0.55f) ADD(RES_MED_HERBS, 1.4f);
+
+        /* --- Minéraux de relief --- */
         if (relief) {
-            ADD(RES_GOLD,  mtn?3.0f:0.8f);   /* l'or, surtout en montagne */
-            ADD(RES_COPPER,2.0f); ADD(RES_IRON,2.0f);
-            ADD(RES_COAL,  1.8f); ADD(RES_GEMS, mtn?1.6f:0.6f);
-            if (B==BIO_HILLS||B==BIO_HIGHLANDS){ ADD(RES_WOOL,2.0f); ADD(RES_LIVESTOCK,1.0f); }
+            ADD(RES_COPPER, mtn?2.0f:1.4f);
+            ADD(RES_IRON,   mtn?2.0f:1.4f);
+            ADD(RES_COAL,   1.6f);
+            ADD(RES_GOLD,   mtn?2.6f:0.6f);            /* l'or, surtout en montagne */
+            ADD(RES_PRECIOUS_METAL, mtn?1.2f:0.2f);    /* mithril, adamantium */
+            ADD(RES_SULFUR, mtn?1.4f:0.4f);            /* volcanique */
         }
-        /* --- Agricole --- */
-        if (B==BIO_FARMLAND||B==BIO_PLAINS){
-            ADD(RES_GRAIN,3.0f); ADD(RES_LIVESTOCK,1.2f);
-            if (warm){ ADD(RES_COTTON,2.0f); ADD(RES_TOBACCO,1.5f); }
-            if (temp){ ADD(RES_WINE,1.8f);  ADD(RES_SILK,0.8f); }
-        }
-        if (B==BIO_GRASSLAND||B==BIO_STEPPE){
-            ADD(RES_LIVESTOCK,3.0f); ADD(RES_WOOL,2.0f); ADD(RES_GRAIN,1.0f);
-        }
-        if (B==BIO_SAVANNA){
-            ADD(RES_IVORY,2.5f); ADD(RES_LIVESTOCK,1.5f);
-            ADD(RES_SLAVES,1.0f); ADD(RES_COTTON,1.0f);
-        }
-        /* --- Aride --- */
-        if (B==BIO_DRYLANDS||B==BIO_DESERT||B==BIO_COASTAL_DESERT){
-            ADD(RES_INCENSE,2.5f); ADD(RES_SALT,1.8f); ADD(RES_GOLD,0.5f);
-        }
-        /* --- Forêt --- */
-        if (B==BIO_FOREST||B==BIO_WOODS){
-            if (cold) ADD(RES_FUR,3.0f);
-            ADD(RES_NAVAL_SUPPLIES, coastal[p]?2.5f:1.2f);
-            if (temp) ADD(RES_SILK,0.8f);
-        }
-        /* --- Jungle / tropical humide --- */
-        if (B==BIO_JUNGLE){
-            ADD(RES_SPICES,2.5f); ADD(RES_TROPICAL_WOOD,2.0f); ADD(RES_DYES,1.5f);
-            ADD(RES_COCOA,1.5f); ADD(RES_COFFEE,1.2f); ADD(RES_CLOVES,1.0f);
-            ADD(RES_SLAVES,0.8f);
-        }
-        if (B==BIO_MANGROVE){ ADD(RES_TROPICAL_WOOD,1.8f); ADD(RES_FISH,1.5f); }
-        if (B==BIO_MARSH||B==BIO_BOG){ ADD(RES_FISH,1.4f); ADD(RES_SALT,1.0f); }
-        /* --- Côte --- */
-        if (coastal[p]){
-            ADD(RES_FISH,2.5f); ADD(RES_SALT,1.0f);
-            if (trop) ADD(RES_SUGAR,1.6f);
-        }
-        /* --- Bandes climatiques --- */
-        if (trop){ ADD(RES_SUGAR,0.8f); ADD(RES_COFFEE,0.8f); ADD(RES_COCOA,0.6f);
-                   ADD(RES_TEA,(H>0.55f)?2.0f:0.3f); }
-        if (temp){ ADD(RES_WINE,1.0f); ADD(RES_GRAIN,0.5f); }
-        if (cold){ ADD(RES_FUR,0.8f); ADD(RES_FISH,0.6f); }
-        /* --- Manufacturé : centres riches / carrefours --- */
-        if (fert>0.45f||coastal[p]){
-            ADD(RES_CLOTH, fert*1.6f);
-            ADD(RES_PAPER, fert*0.8f);
-            ADD(RES_GLASS, 0.4f);
-            ADD(RES_CHINAWARE, coastal[p]?0.6f:0.2f);
-        }
+        if (mesa) { ADD(RES_COPPER,1.5f); ADD(RES_IRON,1.5f); }  /* mesas */
+
+        /* --- Salpêtre : arides et grottes de montagne (→ poudre, doc §9) --- */
+        if (B==BIO_DESERT||B==BIO_DRYLANDS) ADD(RES_SALTPETER, 1.6f);
+        if (mtn)                            ADD(RES_SALTPETER, 0.6f);
         #undef ADD
 
-        /* Tirage pondéré */
-        float tot=0.f; for (int r=1;r<RES_COUNT;r++) tot+=wt[r];
-        if (tot<1e-4f){ pr->resource=RES_GRAIN; continue; }
+        /* Tirage pondéré — UNIQUEMENT parmi les ressources BRUTES.
+         * Les biens de production (≥ RES_PROD_FIRST) seront posés plus tard
+         * par les chaînes de transformation. */
+        float tot=0.f; for (int r=1;r<RES_PROD_FIRST;r++) tot+=wt[r];
+        if (tot<1e-4f){ pr->resource = forested?RES_WOOD:RES_GRAIN; continue; }
         float roll=rng_f()*tot, acc=0.f; Resource chosen=RES_GRAIN;
-        for (int r=1;r<RES_COUNT;r++){ acc+=wt[r]; if(acc>=roll){chosen=(Resource)r;break;} }
+        for (int r=1;r<RES_PROD_FIRST;r++){ acc+=wt[r]; if(acc>=roll){chosen=(Resource)r;break;} }
         pr->resource=chosen;
     }
 }
@@ -1358,27 +1368,31 @@ const char *biome_name(Biome b) {
 const char *resource_name(Resource r) {
     static const char *N[RES_COUNT]={
         "—",
-        "Céréales","Bétail","Laine","Vin","Poisson",
-        "Fourrure","Fournitures navales",
-        "Sel","Cuivre","Fer","Charbon","Gemmes","Or",
-        "Ivoire","Esclaves","Épices","Thé","Cacao","Café",
-        "Coton","Sucre","Tabac","Teintures","Soie",
-        "Bois tropical","Encens","Clous de girofle",
-        "Étoffe","Porcelaine","Verre","Papier",
+        /* brutes agricoles */
+        "Céréales","Bétail","Laine","Poisson","Fourrure",
+        "Sel","Coton","Sucre","Bois","Herbes médicinales",
+        /* brutes minérales */
+        "Cuivre","Fer","Charbon","Soufre","Salpêtre",
+        "Or","Métaux précieux",
+        /* production */
+        "Étoffe","Fournitures navales","Vin",
+        "Bien précieux","Étoffe précieuse","Papier",
     };
     return (r>=0&&r<RES_COUNT)?N[(int)r]:"?";
 }
 
 uint32_t resource_color(Resource r) {
     static const uint32_t C[RES_COUNT]={
-        0xFF404040u,                          /* NONE */
-        0xFFE8C84Cu,0xFFB07840u,0xFFE0D0B0u,0xFF902848u,0xFF4078A0u, /* grain..fish */
-        0xFF7B4A28u,0xFF386848u,                                     /* fur, naval */
-        0xFFF0F0F0u,0xFFB87333u,0xFF8090A0u,0xFF303030u,0xFF50E0D0u,0xFFFFD000u, /* salt..gold */
-        0xFFEAE0D0u,0xFF602860u,0xFFC04020u,0xFF60A040u,0xFF6B4030u,0xFF7B5038u, /* ivory..coffee */
-        0xFFF0F0E0u,0xFFE0A040u,0xFF906030u,0xFFD040A0u,0xFFE8E0F0u, /* cotton..silk */
-        0xFF386020u,0xFFD8C060u,0xFF905030u,                          /* trop wood, incense, cloves */
-        0xFFC0A0D0u,0xFF60C0C0u,0xFF80C0E0u,0xFFF0E8D0u,             /* cloth..paper */
+        0xFF404040u,                                              /* NONE */
+        /* agricoles */
+        0xFFE8C84Cu,0xFFB07840u,0xFFE0D0B0u,0xFF4078A0u,0xFF7B4A28u, /* grain,livestock,wool,fish,fur */
+        0xFFF0F0F0u,0xFFF0E0E0u,0xFFE0A040u,0xFF386020u,0xFF80B070u, /* salt,cotton,sugar,wood,herbs */
+        /* minéraux */
+        0xFFB87333u,0xFF8090A0u,0xFF303030u,0xFFD8D040u,0xFFC8B090u, /* copper,iron,coal,sulfur,saltpeter */
+        0xFFFFD000u,0xFF80E0E0u,                                     /* gold, precious metal */
+        /* production */
+        0xFFC8B0C0u,0xFF386848u,0xFF902848u,                          /* cloth,naval,wine */
+        0xFF60C0C0u,0xFFE8E0F0u,0xFFF0E8D0u,                          /* precious ware,cloth,paper */
     };
     return (r>=0&&r<RES_COUNT)?C[(int)r]:0xFFFF00FFu;
 }

@@ -60,7 +60,22 @@ int main(int argc, char **argv) {
         { VIEW_CONTINENTS,  "out_continents.ppm"  },
         { VIEW_RESOURCES,   "out_resources.ppm"   },
     };
-    printf("[dump] graine %u → 6 vues %dx%d\n", seed, W, H);
+    /* Histogramme des ressources (vérification du placement causal) */
+    int rescount[RES_COUNT]; for (int r=0;r<RES_COUNT;r++) rescount[r]=0;
+    for (int p=0;p<w->n_provinces;p++) rescount[w->province[p].resource]++;
+    printf("[dump] ressources :");
+    for (int r=1;r<RES_COUNT;r++) if (rescount[r])
+        printf(" %s=%d", resource_name((Resource)r), rescount[r]);
+    printf("\n");
+
+    /* Histogramme des biomes dominants de province (diagnostic) */
+    int bc[BIO_COUNT]; for (int b=0;b<BIO_COUNT;b++) bc[b]=0;
+    for (int p=0;p<w->n_provinces;p++) bc[w->province[p].biome_dominant]++;
+    printf("[dump] biomes dom.:");
+    for (int b=0;b<BIO_COUNT;b++) if (bc[b]) printf(" %s=%d", biome_name((Biome)b), bc[b]);
+    printf("\n");
+
+    printf("[dump] graine %u → vues %dx%d\n", seed, W, H);
     for (size_t i = 0; i < sizeof(views)/sizeof(views[0]); i++) {
         render_map(w, buf, W, H, &rp, views[i].m);
         write_ppm(views[i].file, buf, W, H);

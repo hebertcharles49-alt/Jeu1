@@ -98,21 +98,42 @@ typedef struct {
     float    shade;            /* hillshading [0..1] */
 } Cell;
 
-/* ---- Ressources / biens commerciaux (style EU4) ----------------------- */
+/* ---- Ressources / biens commerciaux ----------------------------------
+ * Deux familles :
+ *   BRUTES      — posées par la géographie (ce générateur les attribue).
+ *   PRODUCTION  — fabriquées à partir des brutes (chaînes à venir : le
+ *                 générateur ne les pose PAS encore, cf. doc §9).
+ * Tout ce qui est < RES_PROD_FIRST est une ressource brute. */
 typedef enum {
     RES_NONE = 0,
-    /* Agricole & élevage */
-    RES_GRAIN, RES_LIVESTOCK, RES_WOOL, RES_WINE, RES_FISH,
-    /* Forêt & froid */
-    RES_FUR, RES_NAVAL_SUPPLIES,
-    /* Minéral (montagnes / collines) */
-    RES_SALT, RES_COPPER, RES_IRON, RES_COAL, RES_GEMS, RES_GOLD,
-    /* Tropical & colonial */
-    RES_IVORY, RES_SLAVES, RES_SPICES, RES_TEA, RES_COCOA, RES_COFFEE,
-    RES_COTTON, RES_SUGAR, RES_TOBACCO, RES_DYES, RES_SILK,
-    RES_TROPICAL_WOOD, RES_INCENSE, RES_CLOVES,
-    /* Manufacturé (centres urbains / carrefours) */
-    RES_CLOTH, RES_CHINAWARE, RES_GLASS, RES_PAPER,
+    /* --- Brutes : agricole & élevage --- */
+    RES_GRAIN,          /* flatlands humides            */
+    RES_LIVESTOCK,      /* flatlands pastoraux          */
+    RES_WOOL,           /* flatlands/collines pastoraux */
+    RES_FISH,           /* côte ou fleuve à fort débit  */
+    RES_FUR,            /* régions froides, sauvages    */
+    RES_SALT,           /* déserts et côtes             */
+    RES_COTTON,         /* flatlands arides             */
+    RES_SUGAR,          /* côtes arides                 */
+    RES_WOOD,           /* régions boisées              */
+    RES_MED_HERBS,      /* herbes médicinales — wetland d'altitude */
+    /* --- Brutes : minéral & stratégique --- */
+    RES_COPPER,         /* montagnes, collines, mesas   */
+    RES_IRON,           /* montagnes, collines, mesas   */
+    RES_COAL,           /* gisements de relief          */
+    RES_SULFUR,         /* volcanique / montagne        */
+    RES_SALTPETER,      /* arides / grottes (→ poudre)  */
+    RES_GOLD,           /* montagnes (parfois artefact) */
+    RES_PRECIOUS_METAL, /* mithril, adamantium — profond/rare */
+
+    /* === Frontière : tout ce qui suit est un bien de PRODUCTION === */
+    RES_PROD_FIRST,
+    RES_CLOTH = RES_PROD_FIRST, /* production               */
+    RES_NAVAL_SUPPLIES,         /* production (bois+goudron) */
+    RES_WINE,                   /* production               */
+    RES_PRECIOUS_WARE,          /* bien précieux des 4 races (porcelaine, bière…) */
+    RES_PRECIOUS_CLOTH,         /* étoffe précieuse des 4 races */
+    RES_PAPER,                  /* transformation           */
     RES_COUNT
 } Resource;
 
