@@ -16,6 +16,8 @@ typedef enum {
     VIEW_REGIONS,       /* Régions colorées */
     VIEW_HEIGHT,        /* Altimétrie (niveaux de gris) */
     VIEW_FERTILITY,     /* Potentiel de civilisation (heatmap) */
+    VIEW_MOISTURE,      /* Précipitations / humidité (bleu=humide) */
+    VIEW_TEMPERATURE,   /* Température (rouge=chaud) */
     VIEW_COUNT
 } ViewMode;
 

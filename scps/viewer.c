@@ -240,7 +240,9 @@ int main(int argc, char **argv) {
                 case SDLK_2:     mode=VIEW_POLITICAL; dirty=true; break;
                 case SDLK_3:     mode=VIEW_REGIONS;   dirty=true; break;
                 case SDLK_4:     mode=VIEW_HEIGHT;    dirty=true; break;
-                case SDLK_5:     mode=VIEW_FERTILITY; dirty=true; break;
+                case SDLK_5:     mode=VIEW_FERTILITY;   dirty=true; break;
+                case SDLK_6:     mode=VIEW_MOISTURE;    dirty=true; break;
+                case SDLK_7:     mode=VIEW_TEMPERATURE; dirty=true; break;
                 case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
                 case SDLK_r: {
                     seed ^= (uint32_t)time(NULL) * 2654435761u;

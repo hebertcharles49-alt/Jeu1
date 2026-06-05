@@ -70,8 +70,13 @@ $(SCPS_TARGET): $(SCPS_OBJS)
 run_scps: scps
 	./$(SCPS_TARGET)
 
+# Générateur d'images headless (sans SDL) — vérification de la génération
+SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o $(OBJDIR)/scps_dump.o
+scps_dump: $(SCPS_DUMP_OBJS)
+	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
-	       scps_viewer scps_viewer.exe
+	       scps_viewer scps_viewer.exe scps_dump out_*.ppm
 
 .PHONY: all run scps run_scps clean

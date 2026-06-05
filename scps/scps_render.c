@@ -16,7 +16,8 @@
 #include <string.h>
 
 const char *VIEW_NAMES[VIEW_COUNT] = {
-    "Terrain","Politique","Régions","Altimétrie","Fertilité"
+    "Terrain","Politique","Régions","Altimétrie","Fertilité",
+    "Humidité","Température"
 };
 
 /* ---- Primitives couleur ---------------------------------------------- */
@@ -102,6 +103,15 @@ static uint32_t cell_color(const World *w, int cx, int cy,
 
     /* ---- Fertilité --------------------------------------------------- */
     if (mode == VIEW_FERTILITY) return heatmap(c->fertility);
+
+    /* ---- Humidité (ocre sec → bleu humide) --------------------------- */
+    if (mode == VIEW_MOISTURE) {
+        float m = c->moisture;
+        return rgba(0.85f-0.62f*m, 0.72f-0.12f*m, 0.32f+0.60f*m, 1.f);
+    }
+
+    /* ---- Température (bleu froid → rouge chaud) ----------------------- */
+    if (mode == VIEW_TEMPERATURE) return heatmap(c->temperature);
 
     /* ---- Terrain de base + hillshading ------------------------------- */
     uint32_t base = biome_base_color(c->biome);

@@ -164,73 +164,211 @@ static void step_erosion(float *height, Cell *cells) {
         fdir[scps_idx(x,y)]=(int8_t)best;
     }
 
-    /* Accumulation de flux (passes amont→aval) */
-    for (int i=0;i<SCPS_N;i++) accum[i]=1.f;
-    for (int pass=0;pass<56;pass++)
-        for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
-            int d=fdir[scps_idx(x,y)]; if(d<0)continue;
-            int nx2=x+DDX[d],ny2=y+DDY[d];
-            if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
-            accum[scps_idx(nx2,ny2)]+=accum[scps_idx(x,y)]*0.88f;
+    /* Accumulation de flux EN ORDRE TOPOLOGIQUE (haut → bas).
+     * Chaque cellule verse son aire de drainage à son exutoire exactement
+     * une fois → accum[i] = nombre de cellules en amont (aire de bassin).
+     * (L'ancienne version sommait sur 56 passes, faisant exploser accum le
+     *  long des longues chaînes ; le seuil de normalisation annulait alors
+     *  presque tous les débits.) */
+    int *order=(int*)malloc(SCPS_N*sizeof(int));
+    if (!order){ free(fdir); free(accum); return; }
+    for (int i=0;i<SCPS_N;i++){ order[i]=i; accum[i]=1.f; }
+
+    /* Tri des indices par hauteur décroissante (tri par dénombrement sur
+     * 1024 niveaux : O(N), suffisant pour ordonner amont→aval). */
+    {
+        const int NB=1024;
+        int *cnt=(int*)calloc(NB+1,sizeof(int));
+        int *tmp=(int*)malloc(SCPS_N*sizeof(int));
+        if (cnt && tmp) {
+            for (int i=0;i<SCPS_N;i++){
+                int b=(int)(clampf(height[i],0.f,1.f)*(NB-1));
+                cnt[NB-b]++;            /* NB-b : hauteur décroissante */
+            }
+            for (int b=1;b<=NB;b++) cnt[b]+=cnt[b-1];
+            for (int i=0;i<SCPS_N;i++){
+                int b=(int)(clampf(height[i],0.f,1.f)*(NB-1));
+                tmp[cnt[NB-1-b]++]=i;
+            }
+            memcpy(order,tmp,SCPS_N*sizeof(int));
         }
+        free(cnt); free(tmp);
+    }
+
+    /* Verse l'aire de drainage vers l'aval, une passe en ordre topologique */
+    for (int k=0;k<SCPS_N;k++) {
+        int i=order[k];
+        int d=fdir[i]; if(d<0)continue;
+        int x=i%SCPS_W, y=i/SCPS_W;
+        int nx2=x+DDX[d],ny2=y+DDY[d];
+        if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
+        accum[scps_idx(nx2,ny2)]+=accum[i];
+    }
+    free(order);
 
     float max_a=1.f;
     for (int i=0;i<SCPS_N;i++) if(accum[i]>max_a)max_a=accum[i];
+    float lmax=logf(1.f+max_a);
 
     for (int i=0;i<SCPS_N;i++) {
-        cells[i].river=0;
-        float a=accum[i]/max_a;
-        float rs=0.f;
-        if (a>0.003f) rs=clampf(logf(1.f+a*400.f)/logf(401.f),0.f,1.f);
-        cells[i].river=(uint8_t)(rs*255.f);
-        if (rs>0.06f && height[i]>SEA_LEVEL) height[i]-=rs*0.045f;
+        cells[i].flow_dir=fdir[i];          /* conservé pour le tracé aval */
+        /* Échelle log : un fleuve de 5000 cellules amont reste lisible face
+         * à un ruisseau de 5. */
+        float rs=logf(1.f+accum[i])/lmax;
+        cells[i].river=(uint8_t)(clampf(rs,0.f,1.f)*255.f);
+        if (rs>0.45f && height[i]>SEA_LEVEL) height[i]-=(rs-0.45f)*0.06f; /* creuse le lit */
     }
     normalize_f(height,SCPS_N);
     free(fdir); free(accum);
 }
 
 /* ========================================================================
- * CLIMAT
+ * CONTINENTALITÉ — distance à l'océan (chamfer, deux passes)
+ * Sortie [0..1] : 0 = côte/mer, 1 = intérieur profond.
+ * Pilote l'assèchement et l'amplitude thermique loin des côtes.
  * ====================================================================== */
-static void gen_climate(float *height, float *moisture, float *temperature,
-                         float seed_f) {
+#define OCEAN_DIST_SCALE 70.f   /* cellules pour saturer à 1.0 */
+
+static void compute_ocean_distance(const float *height, float *odist) {
+    const float BIG=1e9f;
+    for (int i=0;i<SCPS_N;i++)
+        odist[i] = (height[i]<SEA_LEVEL) ? 0.f : BIG;
+
+    /* Passe avant (haut-gauche → bas-droite) */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (odist[i]==0.f) continue;
+        float m=odist[i];
+        if (x>0)            { float v=odist[i-1]+1.f;      if(v<m)m=v; }
+        if (y>0)            { float v=odist[i-SCPS_W]+1.f; if(v<m)m=v; }
+        if (x>0&&y>0)       { float v=odist[i-SCPS_W-1]+1.414f; if(v<m)m=v; }
+        if (x<SCPS_W-1&&y>0){ float v=odist[i-SCPS_W+1]+1.414f; if(v<m)m=v; }
+        odist[i]=m;
+    }
+    /* Passe arrière (bas-droite → haut-gauche) */
+    for (int y=SCPS_H-1;y>=0;y--) for (int x=SCPS_W-1;x>=0;x--) {
+        int i=scps_idx(x,y);
+        if (odist[i]==0.f) continue;
+        float m=odist[i];
+        if (x<SCPS_W-1)             { float v=odist[i+1]+1.f;      if(v<m)m=v; }
+        if (y<SCPS_H-1)             { float v=odist[i+SCPS_W]+1.f; if(v<m)m=v; }
+        if (x<SCPS_W-1&&y<SCPS_H-1) { float v=odist[i+SCPS_W+1]+1.414f; if(v<m)m=v; }
+        if (x>0&&y<SCPS_H-1)        { float v=odist[i+SCPS_W-1]+1.414f; if(v<m)m=v; }
+        odist[i]=m;
+    }
+    for (int i=0;i<SCPS_N;i++)
+        odist[i]=clampf(odist[i]/OCEAN_DIST_SCALE,0.f,1.f);
+}
+
+/* ========================================================================
+ * CLIMAT — simulation atmosphérique causale
+ *
+ * 1. Température : latitude − altitude + continentalité (intérieurs chauds
+ *    aux basses latitudes) + bruit multi-échelle.
+ * 2. Humidité : ADVECTION par le vent. Les cellules atmosphériques portent
+ *    la vapeur depuis l'océan ; l'air qui monte sur un relief précipite
+ *    (pluie orographique au vent) et redescend asséché (ombre pluvio. =
+ *    désert sous le vent). La vapeur s'épuise vers l'intérieur des terres.
+ * 3. Corridors ripariens : un fleuve verdit sa vallée même en plein désert.
+ * ====================================================================== */
+
+/* Vent zonal dominant par bande de latitude (cellules de Hadley/Ferrel) :
+ *   tropiques (alizés)    → est→ouest (-x)
+ *   moyennes lat (ouest)  → ouest→est (+x)
+ *   polaires (easterlies) → est→ouest (-x)
+ * La bascule alizés↔westerlies vers 30° engendre la ceinture sèche
+ * subtropicale (Sahara, Atacama, outback) — fait physique, pas artefact. */
+static int wind_dir_x(float lat) {
+    if (lat < 0.33f) return -1;
+    if (lat < 0.66f) return +1;
+    return -1;
+}
+
+static void gen_climate(World *w, float *height, float *moisture,
+                        float *temperature, const float *odist, float seed_f) {
+    Cell *cells = w->cell;
+
+    /* ---- 1. Température --------------------------------------------- */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
-        float h=height[scps_idx(x,y)];
+        float h=height[i];
+        float alt_cold = clampf((h-0.50f)*2.2f,0.f,1.f);
+        float t_cont = stb_perlin_fbm_noise3(nx*1.8f,ny*1.5f,seed_f+510.f,2.f,0.5f,4)*0.15f;
+        float t_reg  = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.10f;
+        float t_loc  = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.05f;
+        float cont_heat = odist[i]*(1.f-lat)*0.10f;  /* déserts continentaux brûlants */
+        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat+t_cont+t_reg+t_loc,0.f,1.f);
+    }
 
-        /* ---- Température ------------------------------------------------
-         * Base latitude + variation continentale grande échelle (±0.20) +
-         * régionale (±0.14) + locale (±0.06) → aucune bande horizontale.  */
-        float alt_cold   = clampf((h-0.50f)*2.2f,0.f,1.f);
-        float t_continen = stb_perlin_fbm_noise3(nx*1.8f,ny*1.5f,seed_f+510.f,2.f,0.5f,4)*0.20f;
-        float t_regional = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.14f;
-        float t_local    = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.06f;
-        temperature[scps_idx(x,y)] = clampf(
-            1.f - lat - alt_cold + t_continen + t_regional + t_local, 0.f,1.f);
+    /* ---- 2. Advection d'humidité ----------------------------------- */
+    float *rain=(float*)calloc(SCPS_N,sizeof(float));
+    if(!rain) return;
+    const float HUM_CAP=1.0f, EVAP=0.16f, RAIN_K=0.05f, ORO_K=4.5f;
 
-        /* ---- Humidité ---------------------------------------------------
-         * ITCZ + sécheresse subtropicale + ombre orographique (côté sous-
-         * le-vent des montagnes) + variation grande échelle.              */
-        float trop    = clampf(1.f-lat*2.6f,0.f,1.f);
-        float subtrop = clampf(1.f-fabsf(lat-0.28f)*5.5f,0.f,1.f)*(-0.42f);
-
-        /* Ombre pluviométrique : cherche un obstacle montagneux à l'ouest */
-        float orographic=0.f;
-        for (int look=1; look<=14; look++) {
-            int lx=clampi(x-look,0,SCPS_W-1);
-            float mh=height[scps_idx(lx,y)];
-            if (mh>MOUNTAIN_H) {
-                orographic=-0.28f*(mh-MOUNTAIN_H)/(1.f-MOUNTAIN_H)*14.f/(float)look;
-                break;
+    for (int y=0;y<SCPS_H;y++) {
+        float lat=fabsf((float)y/SCPS_H-0.5f)*2.f;
+        int dir=wind_dir_x(lat);
+        float humidity=0.f;
+        /* Deux balayages : le 1er amorce l'humidité (air venu du large par
+         * enroulement), le 2nd enregistre la précipitation. */
+        for (int pass=0;pass<2;pass++)
+        for (int k=0;k<SCPS_W;k++) {
+            int x = (dir>0) ? k : (SCPS_W-1-k);
+            int i=scps_idx(x,y);
+            float h=height[i];
+            if (h<SEA_LEVEL) {
+                /* Océan : évaporation (eau chaude → plus de vapeur) */
+                float t=temperature[i];
+                humidity += EVAP*(0.4f+0.6f*t)*(HUM_CAP-humidity);
+                if(humidity>HUM_CAP)humidity=HUM_CAP;
+            } else {
+                int xu=clampi(x-dir,0,SCPS_W-1);
+                float rise=h-height[scps_idx(xu,y)];
+                if(rise<0.f)rise=0.f;
+                float oro = humidity*rise*ORO_K;   /* soulèvement orographique */
+                float base= humidity*RAIN_K;        /* pluie de fond */
+                float p=base+oro; if(p>humidity)p=humidity;
+                humidity-=p;
+                if(pass==1) rain[i]=p;
             }
         }
-
-        float m_large = stb_perlin_fbm_noise3(nx*1.5f,ny*1.2f,seed_f+710.f,2.f,0.5f,4)*0.22f;
-        float m_local = stb_perlin_fbm_noise3(nx*5.5f,ny*4.5f,seed_f+700.f,2.f,0.5f,5)*0.14f;
-        moisture[scps_idx(x,y)] = clampf(
-            0.42f+trop*0.36f+subtrop+orographic+m_large+m_local, 0.f,1.f);
     }
+    /* Normaliser la pluie sur les terres */
+    float rmax=1e-6f;
+    for (int i=0;i<SCPS_N;i++)
+        if(height[i]>=SEA_LEVEL && rain[i]>rmax) rmax=rain[i];
+    for (int i=0;i<SCPS_N;i++) rain[i]=clampf(rain[i]/rmax,0.f,1.f);
+
+    /* ---- 3. Composition de l'humidité ------------------------------ */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float lat=fabsf(ny-0.5f)*2.f;
+
+        cells[i].ocean_dist=odist[i];
+        cells[i].rainfall  =rain[i];
+
+        if (height[i]<SEA_LEVEL){ moisture[i]=1.f; continue; }
+
+        float tropical=clampf(1.f-lat*2.6f,0.f,1.f);  /* mousson équatoriale */
+        float coastal =1.f-odist[i];                   /* humidité côtière */
+        float fbm=stb_perlin_fbm_noise3(nx*4.f,ny*3.f,seed_f+700.f,2.f,0.5f,4)*0.08f;
+
+        float m = 0.08f
+                + 0.48f*rain[i]      /* advection : continentalité + ombre pluvio. */
+                + 0.22f*tropical     /* pluies de convection tropicale */
+                + 0.20f*coastal      /* proximité de l'océan */
+                + fbm;
+
+        /* Corridor riparien : "pas d'eau sans montagne" — le fleuve né en
+         * altitude verdit sa vallée jusque dans le désert (effet Nil). */
+        m += (cells[i].river/255.f)*0.30f;
+
+        moisture[i]=clampf(m,0.f,1.f);
+    }
+    free(rain);
 }
 
 /* ========================================================================
@@ -291,17 +429,36 @@ static void fill_lakes(float *height, Cell *cells) {
  * ====================================================================== */
 static void compute_fertility(float *height, float *moisture, float *temperature,
                                Cell *cells) {
-    /* Proximité de rivière — fenêtre 9×9 */
-    float *rprox=(float*)calloc(SCPS_N,sizeof(float)); if(!rprox)return;
+    /* Irrigation : un gros fleuve (fort débit accumulé = il a drainé de
+     * nombreuses régions en amont) irrigue une plaine alluviale plus large
+     * et plus riche. La portée du rayon croît avec le débit. */
+    float *irrig=(float*)calloc(SCPS_N,sizeof(float)); if(!irrig)return;
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float best=0.f;
-        for (int dy=-4;dy<=4;dy++) for (int dx=-4;dx<=4;dx++) {
+        for (int dy=-5;dy<=5;dy++) for (int dx=-5;dx<=5;dx++) {
             int nx2=clampi(x+dx,0,SCPS_W-1), ny2=clampi(y+dy,0,SCPS_H-1);
-            float r=cells[scps_idx(nx2,ny2)].river/255.f;
-            float dist=sqrtf((float)(dx*dx+dy*dy))+1.f;
-            if (r/dist>best) best=r/dist;
+            float r=cells[scps_idx(nx2,ny2)].river/255.f;   /* débit ∈ [0..1] */
+            if (r<0.02f) continue;
+            /* La portée d'irrigation s'élargit avec le débit du fleuve */
+            float reach=1.f+r*4.f;
+            float dist=sqrtf((float)(dx*dx+dy*dy));
+            float v=r*clampf(1.f-dist/reach,0.f,1.f);
+            if (v>best) best=v;
         }
-        rprox[scps_idx(x,y)]=best;
+        irrig[scps_idx(x,y)]=best;
+    }
+
+    /* Bonus de delta : embouchure (fleuve qui rencontre la mer) = limon */
+    float *delta=(float*)calloc(SCPS_N,sizeof(float));
+    if(delta) for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL || cells[i].river<70) continue;
+        for (int d=0;d<8;d++){
+            int nx2=clampi(x+DDX[d],0,SCPS_W-1),ny2=clampi(y+DDY[d],0,SCPS_H-1);
+            if (height[scps_idx(nx2,ny2)]<SEA_LEVEL){
+                delta[i]=cells[i].river/255.f; break;
+            }
+        }
     }
 
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
@@ -317,13 +474,16 @@ static void compute_fertility(float *height, float *moisture, float *temperature
         slope/=4.f;
         float t=temperature[i], m=moisture[i];
         float t_score=1.f-fabsf(t-0.55f)*1.9f;
-        float f=0.32f*m+0.26f*clampf(t_score,0.f,1.f)
-               +0.28f*clampf(rprox[i]*2.8f,0.f,1.f)
+        float coastal=1.f-cells[i].ocean_dist;     /* accès commerce/pêche */
+        float f=0.26f*m+0.22f*clampf(t_score,0.f,1.f)
+               +0.34f*clampf(irrig[i]*2.4f,0.f,1.f)  /* plaine alluviale */
+               +(delta?delta[i]*0.35f:0.f)           /* delta limoneux */
+               +0.08f*coastal
                -0.55f*clampf((h-MOUNTAIN_H)/0.18f,0.f,1.f)
                -3.5f*slope;
         cells[i].fertility=clampf(f,0.f,1.f);
     }
-    free(rprox);
+    free(irrig); free(delta);
 }
 
 /* ========================================================================
@@ -582,44 +742,59 @@ static void gen_scps(World *w) {
  * ====================================================================== */
 static void trace_rivers(World *w, float *height) {
     int n=0;
-    for (int y=3;y<SCPS_H-3&&n<SCPS_MAX_RIVERS;y+=5)
-    for (int x=3;x<SCPS_W-3&&n<SCPS_MAX_RIVERS;x+=5) {
+    /* Cellules déjà couvertes par un fleuve, pour éviter de retracer dix fois
+     * le même cours d'eau depuis des sources voisines. */
+    uint8_t *traced=(uint8_t*)calloc(SCPS_N,sizeof(uint8_t));
+    bool    *seen  =(bool*)   calloc(SCPS_N,sizeof(bool));
+    if (!traced||!seen){ free(traced); free(seen); w->n_rivers=0; return; }
+
+    for (int y=2;y<SCPS_H-2&&n<SCPS_MAX_RIVERS;y+=3)
+    for (int x=2;x<SCPS_W-2&&n<SCPS_MAX_RIVERS;x+=3) {
         int i=scps_idx(x,y);
-        if (height[i]<MOUNTAIN_H-0.08f) continue;
-        if (w->cell[i].river<50) continue;
+        /* Source = cellule d'altitude (le débit y est nul par construction ;
+         * il grossit en descendant). On ne filtre PAS sur le débit ici. */
+        if (height[i]<MOUNTAIN_H-0.10f) continue;
+        if (traced[i]) continue;
 
         River *rv=&w->river[n];
         rv->len=0; rv->flow_max=0.f;
-        bool *seen=(bool*)calloc(SCPS_N,sizeof(bool));
-        if (!seen) break;
+        memset(seen,0,SCPS_N*sizeof(bool));
 
         int cx=x,cy=y;
         for (int s=0;s<SCPS_RIVER_MAXLEN;s++) {
             if (cx<0||cx>=SCPS_W||cy<0||cy>=SCPS_H) break;
             int ci=scps_idx(cx,cy);
-            if (seen[ci]) break;
+            if (seen[ci]) break;          /* anti-boucle */
             seen[ci]=true;
             rv->x[rv->len]=(int16_t)cx;
             rv->y[rv->len]=(int16_t)cy;
             rv->len++;
             float fl=w->cell[ci].river/255.f;
             if (fl>rv->flow_max) rv->flow_max=fl;
-            if (height[ci]<SEA_LEVEL) break;
-            int dir=(int)w->cell[ci].river; /* reuse: flow_dir stored elsewhere? */
-            /* Cherche le voisin le plus bas */
-            float mh=height[ci]; int best=-1;
-            for (int d=0;d<8;d++){
-                int nx2=cx+DDX[d],ny2=cy+DDY[d];
-                if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
-                if (height[scps_idx(nx2,ny2)]<mh){mh=height[scps_idx(nx2,ny2)];best=d;}
+            if (height[ci]<SEA_LEVEL) break;   /* atteint la mer */
+
+            /* Descente : voisin le plus bas (D8 stocké, sinon recherche) */
+            int dir=w->cell[ci].flow_dir;
+            if (dir<0) {
+                float mh=height[ci]; int best=-1;
+                for (int d=0;d<8;d++){
+                    int nx2=cx+DDX[d],ny2=cy+DDY[d];
+                    if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
+                    if (height[scps_idx(nx2,ny2)]<mh){mh=height[scps_idx(nx2,ny2)];best=d;}
+                }
+                if (best<0) break;          /* cuvette : fin du cours */
+                dir=best;
             }
-            if (best<0) break;
-            cx+=DDX[best]; cy+=DDY[best];
-            (void)dir;
+            cx+=DDX[dir]; cy+=DDY[dir];
         }
-        free(seen);
-        if (rv->len>10) n++;
+
+        /* On retient le fleuve s'il est long ET devient un vrai cours d'eau */
+        if (rv->len>14 && rv->flow_max>0.30f) {
+            for (int s=0;s<rv->len;s++) traced[scps_idx(rv->x[s],rv->y[s])]=1;
+            n++;
+        }
     }
+    free(traced); free(seen);
     w->n_rivers=n;
 }
 
@@ -635,7 +810,8 @@ void world_generate(World *w, uint32_t seed) {
     float *height =  (float*)malloc(SCPS_N*sizeof(float));
     float *moisture= (float*)malloc(SCPS_N*sizeof(float));
     float *temp    = (float*)malloc(SCPS_N*sizeof(float));
-    if (!height||!moisture||!temp){fprintf(stderr,"scps: OOM\n");goto end;}
+    float *odist   = (float*)malloc(SCPS_N*sizeof(float));
+    if (!height||!moisture||!temp||!odist){fprintf(stderr,"scps: OOM\n");goto end;}
 
     printf("[scps] géologie...     "); fflush(stdout);
     step_geology(height,seed_f);          printf("ok\n");
@@ -646,8 +822,11 @@ void world_generate(World *w, uint32_t seed) {
     printf("[scps] érosion...      "); fflush(stdout);
     step_erosion(height,w->cell);         printf("ok\n");
 
-    printf("[scps] climat...       "); fflush(stdout);
-    gen_climate(height,moisture,temp,seed_f); printf("ok\n");
+    printf("[scps] continentalité..."); fflush(stdout);
+    compute_ocean_distance(height,odist);  printf("ok\n");
+
+    printf("[scps] climat (vent)... "); fflush(stdout);
+    gen_climate(w,height,moisture,temp,odist,seed_f); printf("ok\n");
 
     printf("[scps] biomes...       "); fflush(stdout);
     /* Jitter haute fréquence sur t et m pour briser les lignes de seuil */
@@ -688,7 +867,7 @@ void world_generate(World *w, uint32_t seed) {
     printf("ok (%d riv.)\n",w->n_rivers);
 
 end:
-    free(height); free(moisture); free(temp);
+    free(height); free(moisture); free(temp); free(odist);
 }
 
 /* ========================================================================

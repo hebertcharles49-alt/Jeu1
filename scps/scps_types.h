@@ -67,8 +67,13 @@ typedef struct {
     int16_t  region;           /* -1 = mer / non assigné */
 
     /* Hydrologie */
-    uint8_t  river;            /* intensité de flux [0..255] */
+    uint8_t  river;            /* débit accumulé en aval [0..255] */
+    int8_t   flow_dir;         /* direction D8 vers l'aval (-1 = exutoire) */
     bool     lake;
+
+    /* Géographie dérivée */
+    float    ocean_dist;       /* continentalité [0=côte .. 1=intérieur profond] */
+    float    rainfall;         /* précipitation simulée par advection [0..1] */
 
     /* Flags de rendu (précalculés) */
     bool     coast;            /* adjacent à la mer */

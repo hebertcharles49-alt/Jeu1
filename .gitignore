@@ -14,3 +14,6 @@ SDL2.dll
 .vs/
 scps_viewer
 scps_viewer.exe
+scps_dump
+out_*.ppm
+out_*.png
