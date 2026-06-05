@@ -47,7 +47,31 @@ $(TARGET): $(OBJS)
 run: $(TARGET)
 	./$(TARGET)
 
-clean:
-	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe
+# ---- Moteur Paradox (visualiseur de carte procédurale) ------------------
+PARADOX_SRCS := paradox/worldgen.c paradox/viewer.c
+PARADOX_OBJS := $(PARADOX_SRCS:paradox/%.c=$(OBJDIR)/paradox_%.o)
+PARADOX_LDFLAGS := $(SDL_LIBS) -lm
+ifdef WIN
+  PARADOX_TARGET := paradox_viewer.exe
+  PARADOX_LDFLAGS += -lopengl32 -mwindows -static-libgcc \
+                     -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
+else
+  PARADOX_TARGET := paradox_viewer
+endif
 
-.PHONY: all run clean
+paradox: $(PARADOX_TARGET)
+
+$(OBJDIR)/paradox_%.o: paradox/%.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -Isrc -c $< -o $@
+
+$(PARADOX_TARGET): $(PARADOX_OBJS)
+	$(CC) $(PARADOX_OBJS) -o $@ $(PARADOX_LDFLAGS)
+
+run_paradox: paradox
+	./$(PARADOX_TARGET)
+
+clean:
+	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
+	       paradox_viewer paradox_viewer.exe
+
+.PHONY: all run paradox run_paradox clean
