@@ -48,7 +48,7 @@ run: $(TARGET)
 	./$(TARGET)
 
 # ---- Moteur Paradox (visualiseur de carte procédurale) ------------------
-PARADOX_SRCS := paradox/worldgen.c paradox/viewer.c
+PARADOX_SRCS := paradox/px_world.c paradox/px_render.c paradox/viewer.c
 PARADOX_OBJS := $(PARADOX_SRCS:paradox/%.c=$(OBJDIR)/paradox_%.o)
 PARADOX_LDFLAGS := $(SDL_LIBS) -lm
 ifdef WIN
