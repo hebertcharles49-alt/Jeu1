@@ -17,7 +17,7 @@
 
 const char *VIEW_NAMES[VIEW_COUNT] = {
     "Terrain","Politique","Régions","Altimétrie","Fertilité",
-    "Humidité","Température"
+    "Humidité","Température","Ressources"
 };
 
 /* ---- Primitives couleur ---------------------------------------------- */
@@ -112,6 +112,15 @@ static uint32_t cell_color(const World *w, int cx, int cy,
 
     /* ---- Température (bleu froid → rouge chaud) ----------------------- */
     if (mode == VIEW_TEMPERATURE) return heatmap(c->temperature);
+
+    /* ---- Ressources (couleur du bien commercial × hillshading) ------- */
+    if (mode == VIEW_RESOURCES) {
+        if (c->province < 0) return shade_color(biome_base_color(c->biome), c->shade);
+        uint32_t rc = resource_color(w->province[c->province].resource);
+        uint32_t col = shade_color(rc, 0.55f + 0.45f*c->shade);
+        if (c->border_prov) col = lerp_color(col, 0xFF101820u, 0.55f);
+        return col;
+    }
 
     /* ---- Terrain de base + hillshading ------------------------------- */
     uint32_t base = biome_base_color(c->biome);

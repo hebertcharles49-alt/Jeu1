@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
         { VIEW_FERTILITY,   "out_fertility.ppm"   },
         { VIEW_POLITICAL,   "out_political.ppm"   },
         { VIEW_REGIONS,     "out_regions.ppm"     },
+        { VIEW_RESOURCES,   "out_resources.ppm"   },
     };
     printf("[dump] graine %u → 6 vues %dx%d\n", seed, W, H);
     for (size_t i = 0; i < sizeof(views)/sizeof(views[0]); i++) {

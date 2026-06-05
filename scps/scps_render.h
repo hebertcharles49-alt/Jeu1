@@ -18,6 +18,7 @@ typedef enum {
     VIEW_FERTILITY,     /* Potentiel de civilisation (heatmap) */
     VIEW_MOISTURE,      /* Précipitations / humidité (bleu=humide) */
     VIEW_TEMPERATURE,   /* Température (rouge=chaud) */
+    VIEW_RESOURCES,     /* Bien commercial par province */
     VIEW_COUNT
 } ViewMode;
 

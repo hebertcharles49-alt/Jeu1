@@ -84,6 +84,24 @@ typedef struct {
     float    shade;            /* hillshading [0..1] */
 } Cell;
 
+/* ---- Ressources / biens commerciaux (style EU4) ----------------------- */
+typedef enum {
+    RES_NONE = 0,
+    /* Agricole & élevage */
+    RES_GRAIN, RES_LIVESTOCK, RES_WOOL, RES_WINE, RES_FISH,
+    /* Forêt & froid */
+    RES_FUR, RES_NAVAL_SUPPLIES,
+    /* Minéral (montagnes / collines) */
+    RES_SALT, RES_COPPER, RES_IRON, RES_COAL, RES_GEMS, RES_GOLD,
+    /* Tropical & colonial */
+    RES_IVORY, RES_SLAVES, RES_SPICES, RES_TEA, RES_COCOA, RES_COFFEE,
+    RES_COTTON, RES_SUGAR, RES_TOBACCO, RES_DYES, RES_SILK,
+    RES_TROPICAL_WOOD, RES_INCENSE, RES_CLOVES,
+    /* Manufacturé (centres urbains / carrefours) */
+    RES_CLOTH, RES_CHINAWARE, RES_GLASS, RES_PAPER,
+    RES_COUNT
+} Resource;
+
 /* ---- Province (entité politique de base) ------------------------------- */
 typedef struct {
     int16_t  seed_x, seed_y;
@@ -92,6 +110,10 @@ typedef struct {
     Biome    biome_dominant;
     float    lat;              /* latitude moyenne [0=éq., 1=pôle] */
     float    height_avg;
+    bool     coastal;          /* touche la mer */
+
+    /* Économie */
+    Resource resource;         /* bien commercial principal */
 
     /* Fiche SCPS — axes [0..10] (doc §2.2) */
     float    langue;           /* horloge phylogénétique */

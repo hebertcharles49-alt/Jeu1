@@ -17,6 +17,10 @@ void world_generate(World *w, uint32_t seed);
 uint32_t biome_base_color(Biome b);
 const char *biome_name(Biome b);
 
+/* Utilitaires ressource */
+const char *resource_name(Resource r);
+uint32_t    resource_color(Resource r);
+
 /* Palette de provinces — couleur ARGB stable par id */
 uint32_t province_palette(int id);
 
