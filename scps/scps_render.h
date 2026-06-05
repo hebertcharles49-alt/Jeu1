@@ -1,13 +1,13 @@
 /*
- * px_render.h — API de rendu de la carte
+ * scps_render.h — API de rendu de la carte
  *
- * Point d'extension : ajouter des ViewMode ici, implémenter dans px_render.c.
+ * Point d'extension : ajouter des ViewMode ici, implémenter dans scps_render.c.
  * Le renderer ne modifie jamais le World — lecture seule.
  */
-#ifndef PX_RENDER_H
-#define PX_RENDER_H
+#ifndef SCPS_RENDER_H
+#define SCPS_RENDER_H
 
-#include "px_types.h"
+#include "scps_types.h"
 
 /* ---- Modes de vue ---------------------------------------------------- */
 typedef enum {
@@ -41,4 +41,4 @@ void render_map(const World      *w,
                 const RenderParams *p,
                 ViewMode          mode);
 
-#endif /* PX_RENDER_H */
+#endif /* SCPS_RENDER_H */

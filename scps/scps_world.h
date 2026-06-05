@@ -1,14 +1,14 @@
 /*
- * px_world.h — API de génération de monde
+ * scps_world.h — API de génération de monde
  *
  * Point d'extension : pour ajouter une couche de génération, implémenter
- * une fonction `step_XXX(World*)` dans px_world.c et l'appeler dans
+ * une fonction `step_XXX(World*)` dans scps_world.c et l'appeler dans
  * world_generate() entre les étapes existantes.
  */
-#ifndef PX_WORLD_H
-#define PX_WORLD_H
+#ifndef SCPS_WORLD_H
+#define SCPS_WORLD_H
 
-#include "px_types.h"
+#include "scps_types.h"
 
 /* Génère un monde complet depuis une graine. Bloquant, ~200ms. */
 void world_generate(World *w, uint32_t seed);
@@ -20,4 +20,4 @@ const char *biome_name(Biome b);
 /* Palette de provinces — couleur ARGB stable par id */
 uint32_t province_palette(int id);
 
-#endif /* PX_WORLD_H */
+#endif /* SCPS_WORLD_H */

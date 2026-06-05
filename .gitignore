@@ -12,5 +12,5 @@ SDL2.dll
 *.pdb
 *.ilk
 .vs/
-paradox_viewer
-paradox_viewer.exe
+scps_viewer
+scps_viewer.exe

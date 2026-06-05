@@ -1,5 +1,5 @@
 /*
- * px_types.h — structures de données du moteur Paradox
+ * scps_types.h — structures de données du moteur SCPS
  *
  * Hiérarchie de données :
  *   World  →  Region[]  →  Province[]  →  Cell[]
@@ -7,20 +7,20 @@
  * Extension future : ajouter des champs dans Province/Region/World
  * sans toucher aux signatures des modules (world, render, diplo, eco…).
  */
-#ifndef PX_TYPES_H
-#define PX_TYPES_H
+#ifndef SCPS_TYPES_H
+#define SCPS_TYPES_H
 
 #include <stdint.h>
 #include <stdbool.h>
 
 /* ---- Dimensions -------------------------------------------------------- */
-#define PX_W           512
-#define PX_H           256
-#define PX_N           (PX_W * PX_H)
+#define SCPS_W           512
+#define SCPS_H           256
+#define SCPS_N           (SCPS_W * SCPS_H)
 
-#define PX_MAX_PROV    160
-#define PX_MAX_REG      24
-#define PX_RIVER_MAXLEN 768
+#define SCPS_MAX_PROV    160
+#define SCPS_MAX_REG      24
+#define SCPS_RIVER_MAXLEN 768
 
 /* ---- Seuils de hauteur (0..1) ----------------------------------------- */
 #define SEA_LEVEL     0.43f
@@ -102,44 +102,44 @@ typedef struct {
 typedef struct {
     int      seed_x, seed_y;
     int      n_provinces;
-    int16_t  province_ids[PX_MAX_PROV]; /* indices dans World.provinces */
+    int16_t  province_ids[SCPS_MAX_PROV]; /* indices dans World.provinces */
     uint32_t color;
     char     name[32];
 } Region;
 
 /* ---- Rivière tracée ---------------------------------------------------- */
 typedef struct {
-    int16_t x[PX_RIVER_MAXLEN];
-    int16_t y[PX_RIVER_MAXLEN];
+    int16_t x[SCPS_RIVER_MAXLEN];
+    int16_t y[SCPS_RIVER_MAXLEN];
     int     len;
     float   flow_max;
 } River;
 
 /* ---- Monde -------------------------------------------------------------- */
-#define PX_MAX_RIVERS 64
+#define SCPS_MAX_RIVERS 64
 
 typedef struct {
-    Cell     cell[PX_N];
-    Province province[PX_MAX_PROV];
+    Cell     cell[SCPS_N];
+    Province province[SCPS_MAX_PROV];
     int      n_provinces;
-    Region   region[PX_MAX_REG];
+    Region   region[SCPS_MAX_REG];
     int      n_regions;
-    River    river[PX_MAX_RIVERS];
+    River    river[SCPS_MAX_RIVERS];
     int      n_rivers;
     uint32_t seed;
 } World;
 
 /* ---- Accesseur sûr aux cellules --------------------------------------- */
-static inline Cell *px_cell(World *w, int x, int y) {
-    if (x < 0) x = 0; else if (x >= PX_W) x = PX_W-1;
-    if (y < 0) y = 0; else if (y >= PX_H) y = PX_H-1;
-    return &w->cell[y * PX_W + x];
+static inline Cell *scps_cell(World *w, int x, int y) {
+    if (x < 0) x = 0; else if (x >= SCPS_W) x = SCPS_W-1;
+    if (y < 0) y = 0; else if (y >= SCPS_H) y = SCPS_H-1;
+    return &w->cell[y * SCPS_W + x];
 }
-static inline const Cell *px_cellc(const World *w, int x, int y) {
-    if (x < 0) x = 0; else if (x >= PX_W) x = PX_W-1;
-    if (y < 0) y = 0; else if (y >= PX_H) y = PX_H-1;
-    return &w->cell[y * PX_W + x];
+static inline const Cell *scps_cellc(const World *w, int x, int y) {
+    if (x < 0) x = 0; else if (x >= SCPS_W) x = SCPS_W-1;
+    if (y < 0) y = 0; else if (y >= SCPS_H) y = SCPS_H-1;
+    return &w->cell[y * SCPS_W + x];
 }
-static inline int px_idx(int x, int y) { return y * PX_W + x; }
+static inline int scps_idx(int x, int y) { return y * SCPS_W + x; }
 
-#endif /* PX_TYPES_H */
+#endif /* SCPS_TYPES_H */

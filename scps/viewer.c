@@ -1,5 +1,5 @@
 /*
- * viewer.c — visualiseur SDL2 du moteur Paradox
+ * viewer.c — visualiseur SDL2 du moteur SCPS
  *
  * Contrôles :
  *   Clic gauche      — sélectionne la province sous la souris
@@ -11,13 +11,13 @@
  *
  * Architecture :
  *   viewer.c  = shell applicatif fin
- *   px_world  = génération  (indépendant du rendu)
- *   px_render = rendu       (indépendant de SDL)
- *   → px_diplo, px_economy... viendront se brancher sur World
+ *   scps_world  = génération  (indépendant du rendu)
+ *   scps_render = rendu       (indépendant de SDL)
+ *   → scps_diplo, scps_economy... viendront se brancher sur World
  */
 #include <SDL.h>
-#include "px_world.h"
-#include "px_render.h"
+#include "scps_world.h"
+#include "scps_render.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -52,11 +52,11 @@ static void cam_pan(Cam *c, float dpx, float dpy) {
 
 static void cam_fit(Cam *c, int win_w, int win_h) {
     /* Ajuste pour montrer toute la carte dans la fenêtre */
-    float sx = (float)win_w / PX_W;
-    float sy = (float)win_h / PX_H;
+    float sx = (float)win_w / SCPS_W;
+    float sy = (float)win_h / SCPS_H;
     c->scale = (sx < sy) ? sx : sy;
-    c->ox = (PX_W - win_w / c->scale) * 0.5f;
-    c->oy = (PX_H - win_h / c->scale) * 0.5f;
+    c->ox = (SCPS_W - win_w / c->scale) * 0.5f;
+    c->oy = (SCPS_H - win_h / c->scale) * 0.5f;
 }
 
 /* ---- Pixel buffer ---------------------------------------------------- */
@@ -105,8 +105,8 @@ static void print_province_info(const World *w, int prov_id) {
 static void status_line(const World *w, ViewMode mode, uint32_t seed,
                         int cx, int cy, int selected) {
     printf("\r[%s] graine=%u  ", VIEW_NAMES[mode], seed);
-    if (cx >= 0 && cx < PX_W && cy >= 0 && cy < PX_H) {
-        const Cell *c = px_cellc(w, cx, cy);
+    if (cx >= 0 && cx < SCPS_W && cy >= 0 && cy < SCPS_H) {
+        const Cell *c = scps_cellc(w, cx, cy);
         printf("(%3d,%3d) %-18s h=%.2f m=%.2f t=%.2f  prov=%d",
                cx, cy, biome_name(c->biome),
                c->height, c->moisture, c->temperature,
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
     }
 
     SDL_Window *win = SDL_CreateWindow(
-        "Paradox — Moteur de carte",
+        "SCPS — Moteur de carte",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WIN_W, WIN_H,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
@@ -163,9 +163,9 @@ int main(int argc, char **argv) {
     bool  panning = false;
     int   pan_sx = 0, pan_sy = 0;
 
-    printf("[paradox] Génération (graine %u)…\n", seed);
+    printf("[scps] Génération (graine %u)…\n", seed);
     world_generate(world, seed);
-    printf("[paradox] Prêt. TAB=vue  R=regénère  clic=province  molette=zoom\n");
+    printf("[scps] Prêt. TAB=vue  R=regénère  clic=province  molette=zoom\n");
 
     while (running) {
         SDL_Event ev;
@@ -202,8 +202,8 @@ int main(int argc, char **argv) {
                     /* Sélectionner la province au clic */
                     int cx = (int)(ev.button.x / cam.scale + cam.ox);
                     int cy = (int)(ev.button.y / cam.scale + cam.oy);
-                    if (cx>=0&&cx<PX_W&&cy>=0&&cy<PX_H) {
-                        int p = (int)px_cellc(world, cx, cy)->province;
+                    if (cx>=0&&cx<SCPS_W&&cy>=0&&cy<SCPS_H) {
+                        int p = (int)scps_cellc(world, cx, cy)->province;
                         if (p != selected) {
                             selected = p;
                             if (p >= 0) print_province_info(world, p);
@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
                 case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
                 case SDLK_r: {
                     seed ^= (uint32_t)time(NULL) * 2654435761u;
-                    printf("\n[paradox] Regénération (graine %u)…\n", seed);
+                    printf("\n[scps] Regénération (graine %u)…\n", seed);
                     world_generate(world, seed);
                     selected = -1;
                     dirty = true;

@@ -1,5 +1,5 @@
 /*
- * px_render.c — rendu EU4-style
+ * scps_render.c — rendu EU4-style
  *
  * Pipeline par pixel :
  *   1. Eau       : gradient profondeur (côte clair → profond sombre)
@@ -10,8 +10,8 @@
  *   6. Frontières: ligne sombre entre provinces (1px) / régions (2px)
  *   7. Sélection : surligné jaune sur la province active
  */
-#include "px_render.h"
-#include "px_world.h"
+#include "scps_render.h"
+#include "scps_world.h"
 #include <math.h>
 #include <string.h>
 
@@ -82,7 +82,7 @@ static uint32_t heatmap(float v) {
 /* ---- Rendu d'une cellule individuelle -------------------------------- */
 static uint32_t cell_color(const World *w, int cx, int cy,
                             ViewMode mode, int selected_prov) {
-    const Cell *c = px_cellc(w, cx, cy);
+    const Cell *c = scps_cellc(w, cx, cy);
     float h = c->height;
 
     /* ---- Eau --------------------------------------------------------- */
@@ -188,7 +188,7 @@ void render_map(const World *w, uint32_t *pixels, int pw, int ph,
             int cx = (int)wx, cy = (int)wy;
 
             uint32_t col;
-            if (cx < 0 || cx >= PX_W || cy < 0 || cy >= PX_H) {
+            if (cx < 0 || cx >= SCPS_W || cy < 0 || cy >= SCPS_H) {
                 /* Hors carte : fond sombre */
                 col = 0xFF080C10u;
             } else {

@@ -1,5 +1,5 @@
 /*
- * px_world.c — pipeline de génération de monde en 4+N couches
+ * scps_world.c — pipeline de génération de monde en 4+N couches
  *
  * Ordre causal (doc §3) :
  *   1. Géologie   : FBM + plaques tectoniques → relief de base
@@ -17,7 +17,7 @@
  */
 #define STB_PERLIN_IMPLEMENTATION
 #include "../src/stb_perlin.h"
-#include "px_world.h"
+#include "scps_world.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -69,8 +69,8 @@ static Plate g_plates[N_PLATES];
 
 static void plates_init(void) {
     for (int i=0;i<N_PLATES;i++) {
-        g_plates[i].cx = rng_f()*PX_W;
-        g_plates[i].cy = rng_f()*PX_H;
+        g_plates[i].cx = rng_f()*SCPS_W;
+        g_plates[i].cy = rng_f()*SCPS_H;
         g_plates[i].oceanic = (rng_f()<0.38f)?1:0;
         float a = rng_f()*6.2832f;
         g_plates[i].dx = cosf(a);
@@ -81,7 +81,7 @@ static void plates_init(void) {
 /* Score de frontière [0..1] et indices des deux plaques les plus proches.
  * Coordonnées domain-warpées pour éviter les frontières rectilignes. */
 static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
-    float nx=(float)px/PX_W, ny=(float)py/PX_H;
+    float nx=(float)px/SCPS_W, ny=(float)py/SCPS_H;
     /* Warp dédié aux plaques — fréquence plus basse que celui des provinces */
     float wx=stb_perlin_fbm_noise3(nx*1.5f+0.f,ny*1.5f+0.f,seed_f+800.f,2.f,0.5f,4)*28.f;
     float wy=stb_perlin_fbm_noise3(nx*1.5f+6.1f,ny*1.5f+3.4f,seed_f+810.f,2.f,0.5f,4)*28.f;
@@ -94,20 +94,20 @@ static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
         if (d<d1){d2=d1;*pb=*pa;d1=d;*pa=i;}
         else if(d<d2){d2=d;*pb=i;}
     }
-    float r=sqrtf((float)(PX_W*PX_H)/N_PLATES);
+    float r=sqrtf((float)(SCPS_W*SCPS_H)/N_PLATES);
     return 1.f - clampf((d2-d1)/(r*0.28f),0.f,1.f);
 }
 
 static void step_geology(float *height, float seed_f) {
     plates_init();
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        float nx=(float)x/PX_W, ny=(float)y/PX_H;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
         float base = stb_perlin_fbm_noise3(nx*4.f,ny*3.2f,seed_f,2.f,0.5f,7);
-        height[px_idx(x,y)] = base - 0.20f*lat*lat;
+        height[scps_idx(x,y)] = base - 0.20f*lat*lat;
     }
     /* Frontières de plaques → chaînes de montagnes */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
         if (bs<0.04f) continue;
@@ -117,12 +117,12 @@ static void step_geology(float *height, float seed_f) {
         if (!g_plates[pa].oceanic && !g_plates[pb].oceanic) bump=bs*conv*0.80f;
         else if (g_plates[pa].oceanic != g_plates[pb].oceanic) bump=bs*conv*0.45f;
         if (bump>0.f) {
-            float nx2=(float)x/PX_W, ny2=(float)y/PX_H;
+            float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
             float r=stb_perlin_ridge_noise3(nx2*10.f,ny2*8.f,seed_f+50.f,2.f,0.5f,1.f,5);
-            height[px_idx(x,y)] += bump*(0.5f+0.5f*r);
+            height[scps_idx(x,y)] += bump*(0.5f+0.5f*r);
         }
     }
-    normalize_f(height,PX_N);
+    normalize_f(height,SCPS_N);
 }
 
 /* ========================================================================
@@ -130,16 +130,16 @@ static void step_geology(float *height, float seed_f) {
  * Crêtes, falaises, vallées encaissées
  * ====================================================================== */
 static void step_architecture(float *height, float seed_f) {
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        float nx=(float)x/PX_W, ny=(float)y/PX_H;
-        float h=height[px_idx(x,y)];
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float h=height[scps_idx(x,y)];
         float mtn_frac = clampf((h-0.48f)/0.4f,0.f,1.f);
         float low_frac = clampf((0.62f-h)/0.4f,0.f,1.f);
         float r = stb_perlin_ridge_noise3(nx*12.f,ny*9.f,seed_f+200.f,2.f,0.5f,1.f,5);
         float v = stb_perlin_fbm_noise3  (nx*8.f, ny*6.f,seed_f+300.f,2.f,0.5f,4);
-        height[px_idx(x,y)] += r*0.14f*mtn_frac + v*0.07f*low_frac;
+        height[scps_idx(x,y)] += r*0.14f*mtn_frac + v*0.07f*low_frac;
     }
-    normalize_f(height,PX_N);
+    normalize_f(height,SCPS_N);
 }
 
 /* ========================================================================
@@ -147,37 +147,37 @@ static void step_architecture(float *height, float seed_f) {
  * D8 flow + accumulation → rivières + creusement
  * ====================================================================== */
 static void step_erosion(float *height, Cell *cells) {
-    int8_t *fdir  = (int8_t*)malloc(PX_N*sizeof(int8_t));
-    float  *accum = (float *)malloc(PX_N*sizeof(float));
+    int8_t *fdir  = (int8_t*)malloc(SCPS_N*sizeof(int8_t));
+    float  *accum = (float *)malloc(SCPS_N*sizeof(float));
     if (!fdir||!accum) { free(fdir);free(accum);return; }
 
     /* D8 : direction vers le voisin le plus bas */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        float h=height[px_idx(x,y)];
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        float h=height[scps_idx(x,y)];
         int best=-1; float drop=0.f;
         for (int d=0;d<8;d++) {
             int nx2=x+DDX[d],ny2=y+DDY[d];
-            if (nx2<0||nx2>=PX_W||ny2<0||ny2>=PX_H) continue;
-            float dh=(h-height[px_idx(nx2,ny2)])/DDIST[d];
+            if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H) continue;
+            float dh=(h-height[scps_idx(nx2,ny2)])/DDIST[d];
             if (dh>drop){drop=dh;best=d;}
         }
-        fdir[px_idx(x,y)]=(int8_t)best;
+        fdir[scps_idx(x,y)]=(int8_t)best;
     }
 
     /* Accumulation de flux (passes amont→aval) */
-    for (int i=0;i<PX_N;i++) accum[i]=1.f;
+    for (int i=0;i<SCPS_N;i++) accum[i]=1.f;
     for (int pass=0;pass<56;pass++)
-        for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-            int d=fdir[px_idx(x,y)]; if(d<0)continue;
+        for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+            int d=fdir[scps_idx(x,y)]; if(d<0)continue;
             int nx2=x+DDX[d],ny2=y+DDY[d];
-            if (nx2<0||nx2>=PX_W||ny2<0||ny2>=PX_H)continue;
-            accum[px_idx(nx2,ny2)]+=accum[px_idx(x,y)]*0.88f;
+            if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
+            accum[scps_idx(nx2,ny2)]+=accum[scps_idx(x,y)]*0.88f;
         }
 
     float max_a=1.f;
-    for (int i=0;i<PX_N;i++) if(accum[i]>max_a)max_a=accum[i];
+    for (int i=0;i<SCPS_N;i++) if(accum[i]>max_a)max_a=accum[i];
 
-    for (int i=0;i<PX_N;i++) {
+    for (int i=0;i<SCPS_N;i++) {
         cells[i].river=0;
         float a=accum[i]/max_a;
         float rs=0.f;
@@ -185,7 +185,7 @@ static void step_erosion(float *height, Cell *cells) {
         cells[i].river=(uint8_t)(rs*255.f);
         if (rs>0.06f && height[i]>SEA_LEVEL) height[i]-=rs*0.045f;
     }
-    normalize_f(height,PX_N);
+    normalize_f(height,SCPS_N);
     free(fdir); free(accum);
 }
 
@@ -194,10 +194,10 @@ static void step_erosion(float *height, Cell *cells) {
  * ====================================================================== */
 static void gen_climate(float *height, float *moisture, float *temperature,
                          float seed_f) {
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        float nx=(float)x/PX_W, ny=(float)y/PX_H;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
-        float h=height[px_idx(x,y)];
+        float h=height[scps_idx(x,y)];
 
         /* ---- Température ------------------------------------------------
          * Base latitude + variation continentale grande échelle (±0.20) +
@@ -206,7 +206,7 @@ static void gen_climate(float *height, float *moisture, float *temperature,
         float t_continen = stb_perlin_fbm_noise3(nx*1.8f,ny*1.5f,seed_f+510.f,2.f,0.5f,4)*0.20f;
         float t_regional = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.14f;
         float t_local    = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.06f;
-        temperature[px_idx(x,y)] = clampf(
+        temperature[scps_idx(x,y)] = clampf(
             1.f - lat - alt_cold + t_continen + t_regional + t_local, 0.f,1.f);
 
         /* ---- Humidité ---------------------------------------------------
@@ -218,8 +218,8 @@ static void gen_climate(float *height, float *moisture, float *temperature,
         /* Ombre pluviométrique : cherche un obstacle montagneux à l'ouest */
         float orographic=0.f;
         for (int look=1; look<=14; look++) {
-            int lx=clampi(x-look,0,PX_W-1);
-            float mh=height[px_idx(lx,y)];
+            int lx=clampi(x-look,0,SCPS_W-1);
+            float mh=height[scps_idx(lx,y)];
             if (mh>MOUNTAIN_H) {
                 orographic=-0.28f*(mh-MOUNTAIN_H)/(1.f-MOUNTAIN_H)*14.f/(float)look;
                 break;
@@ -228,7 +228,7 @@ static void gen_climate(float *height, float *moisture, float *temperature,
 
         float m_large = stb_perlin_fbm_noise3(nx*1.5f,ny*1.2f,seed_f+710.f,2.f,0.5f,4)*0.22f;
         float m_local = stb_perlin_fbm_noise3(nx*5.5f,ny*4.5f,seed_f+700.f,2.f,0.5f,5)*0.14f;
-        moisture[px_idx(x,y)] = clampf(
+        moisture[scps_idx(x,y)] = clampf(
             0.42f+trop*0.36f+subtrop+orographic+m_large+m_local, 0.f,1.f);
     }
 }
@@ -274,13 +274,13 @@ static Biome assign_biome(float h, float m, float t) {
  * LACS
  * ====================================================================== */
 static void fill_lakes(float *height, Cell *cells) {
-    for (int y=1;y<PX_H-1;y++) for (int x=1;x<PX_W-1;x++) {
-        int i=px_idx(x,y);
+    for (int y=1;y<SCPS_H-1;y++) for (int x=1;x<SCPS_W-1;x++) {
+        int i=scps_idx(x,y);
         if (height[i]<SEA_LEVEL+0.015f) continue;
         bool dep=true;
         for (int d=0;d<8;d+=2) {
             int nx2=x+DDX[d],ny2=y+DDY[d];
-            if (height[px_idx(nx2,ny2)]<height[i]){dep=false;break;}
+            if (height[scps_idx(nx2,ny2)]<height[i]){dep=false;break;}
         }
         if (dep) { cells[i].lake=true; height[i]=SEA_LEVEL+0.005f; }
     }
@@ -292,27 +292,27 @@ static void fill_lakes(float *height, Cell *cells) {
 static void compute_fertility(float *height, float *moisture, float *temperature,
                                Cell *cells) {
     /* Proximité de rivière — fenêtre 9×9 */
-    float *rprox=(float*)calloc(PX_N,sizeof(float)); if(!rprox)return;
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
+    float *rprox=(float*)calloc(SCPS_N,sizeof(float)); if(!rprox)return;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float best=0.f;
         for (int dy=-4;dy<=4;dy++) for (int dx=-4;dx<=4;dx++) {
-            int nx2=clampi(x+dx,0,PX_W-1), ny2=clampi(y+dy,0,PX_H-1);
-            float r=cells[px_idx(nx2,ny2)].river/255.f;
+            int nx2=clampi(x+dx,0,SCPS_W-1), ny2=clampi(y+dy,0,SCPS_H-1);
+            float r=cells[scps_idx(nx2,ny2)].river/255.f;
             float dist=sqrtf((float)(dx*dx+dy*dy))+1.f;
             if (r/dist>best) best=r/dist;
         }
-        rprox[px_idx(x,y)]=best;
+        rprox[scps_idx(x,y)]=best;
     }
 
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y);
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
         float h=height[i];
         if (h<SEA_LEVEL){cells[i].fertility=0.f;continue;}
         /* Pente */
         float slope=0.f;
         for (int d=0;d<4;d++) {
-            int nx2=clampi(x+DDX[d*2],0,PX_W-1),ny2=clampi(y+DDY[d*2],0,PX_H-1);
-            slope+=fabsf(h-height[px_idx(nx2,ny2)]);
+            int nx2=clampi(x+DDX[d*2],0,SCPS_W-1),ny2=clampi(y+DDY[d*2],0,SCPS_H-1);
+            slope+=fabsf(h-height[scps_idx(nx2,ny2)]);
         }
         slope/=4.f;
         float t=temperature[i], m=moisture[i];
@@ -340,21 +340,21 @@ static void compute_fertility(float *height, float *moisture, float *temperature
 #define WARP2         10.f   /* amplitude 2e warp  (sinuosités fines)     */
 #define MIN_PROV_DIST 26
 
-static int g_pseedx[PX_MAX_PROV];
-static int g_pseedy[PX_MAX_PROV];
+static int g_pseedx[SCPS_MAX_PROV];
+static int g_pseedy[SCPS_MAX_PROV];
 
 static int pick_seeds(Cell *cells, int want) {
     /* Distribution pondérée par la fertilité, avec espacement minimum */
     float total=0.f;
-    for (int i=0;i<PX_N;i++) total+=cells[i].fertility;
+    for (int i=0;i<SCPS_N;i++) total+=cells[i].fertility;
     if (total<1.f) total=1.f;
     int n=0, tries=0;
-    while (n<want && tries<PX_N*4) {
+    while (n<want && tries<SCPS_N*4) {
         tries++;
         float r=rng_f()*total;
         float s=0.f; int chosen=0;
-        for (int i=0;i<PX_N;i++){s+=cells[i].fertility;if(s>=r){chosen=i;break;}}
-        int cx=chosen%PX_W, cy=chosen/PX_W;
+        for (int i=0;i<SCPS_N;i++){s+=cells[i].fertility;if(s>=r){chosen=i;break;}}
+        int cx=chosen%SCPS_W, cy=chosen/SCPS_W;
         bool ok=true;
         for (int k=0;k<n&&ok;k++){
             int dx=cx-g_pseedx[k],dy=cy-g_pseedy[k];
@@ -374,22 +374,22 @@ static float terrain_cost(const Cell *c) {
 }
 
 static void assign_provinces(World *w, float *height, float seed_f) {
-    int n=pick_seeds(w->cell, PX_MAX_PROV);
+    int n=pick_seeds(w->cell, SCPS_MAX_PROV);
     if (n<4) n=4;
     w->n_provinces=n;
 
     /* Voronoï domain-warped + coût de terrain */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y);
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
         if (height[i]<SEA_LEVEL){w->cell[i].province=-1;continue;}
 
         /* Double domain warp -------------------------------------------- */
-        float nx=(float)x/PX_W, ny=(float)y/PX_H;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         /* Passage 1 : grandes déformations */
         float wx1=stb_perlin_fbm_noise3(nx*2.5f+0.0f,ny*2.5f+0.0f,seed_f+10.f,2.f,0.5f,4)*WARP1;
         float wy1=stb_perlin_fbm_noise3(nx*2.5f+5.2f,ny*2.5f+1.3f,seed_f+20.f,2.f,0.5f,4)*WARP1;
         /* Passage 2 : warp du warp → sinuosités enroulées */
-        float px2=(nx+wx1/PX_W)*3.f, py2=(ny+wy1/PX_H)*3.f;
+        float px2=(nx+wx1/SCPS_W)*3.f, py2=(ny+wy1/SCPS_H)*3.f;
         float wx2=stb_perlin_fbm_noise3(px2+8.3f,py2+2.8f,seed_f+30.f,2.f,0.5f,3)*WARP2;
         float wy2=stb_perlin_fbm_noise3(px2+3.7f,py2+9.1f,seed_f+40.f,2.f,0.5f,3)*WARP2;
         float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
@@ -405,15 +405,15 @@ static void assign_provinces(World *w, float *height, float seed_f) {
     }
 
     /* Stats de province */
-    int biome_cnt[PX_MAX_PROV][BIO_COUNT]={0};
-    int area[PX_MAX_PROV]={0};
-    float lat_s[PX_MAX_PROV]={0};
-    float h_s[PX_MAX_PROV]={0};
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y); int p=w->cell[i].province;
+    int biome_cnt[SCPS_MAX_PROV][BIO_COUNT]={0};
+    int area[SCPS_MAX_PROV]={0};
+    float lat_s[SCPS_MAX_PROV]={0};
+    float h_s[SCPS_MAX_PROV]={0};
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y); int p=w->cell[i].province;
         if (p<0)continue;
         area[p]++;
-        lat_s[p]+=fabsf((float)y/PX_H-0.5f)*2.f;
+        lat_s[p]+=fabsf((float)y/SCPS_H-0.5f)*2.f;
         h_s[p]+=height[i];
         biome_cnt[p][(int)w->cell[i].biome]++;
     }
@@ -433,13 +433,13 @@ static void assign_provinces(World *w, float *height, float seed_f) {
 /* ========================================================================
  * RÉGIONS — Voronoï de second niveau
  * ====================================================================== */
-static int g_rseedx[PX_MAX_REG];
-static int g_rseedy[PX_MAX_REG];
+static int g_rseedx[SCPS_MAX_REG];
+static int g_rseedy[SCPS_MAX_REG];
 
 static void assign_regions(World *w, float *height, float seed_f) {
     /* Germes des régions : un sous-ensemble espacé des germes de provinces */
-    int step=w->n_provinces/PX_MAX_REG+1, n=0;
-    for (int p=0;p<w->n_provinces&&n<PX_MAX_REG;p+=step) {
+    int step=w->n_provinces/SCPS_MAX_REG+1, n=0;
+    for (int p=0;p<w->n_provinces&&n<SCPS_MAX_REG;p+=step) {
         g_rseedx[n]=w->province[p].seed_x;
         g_rseedy[n]=w->province[p].seed_y;
         n++;
@@ -448,14 +448,14 @@ static void assign_regions(World *w, float *height, float seed_f) {
     w->n_regions=n;
 
     /* Double warp pour les régions (échelle plus grande) */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y);
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
         if (height[i]<SEA_LEVEL){w->cell[i].region=-1;continue;}
-        float nx=(float)x/PX_W, ny=(float)y/PX_H;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float rw1=WARP1*1.6f, rw2=WARP2*1.4f;
         float wx1=stb_perlin_fbm_noise3(nx*2.f+0.f,ny*2.f+0.f,seed_f+50.f,2.f,0.5f,4)*rw1;
         float wy1=stb_perlin_fbm_noise3(nx*2.f+7.3f,ny*2.f+3.9f,seed_f+60.f,2.f,0.5f,4)*rw1;
-        float px2=(nx+wx1/PX_W)*2.5f, py2=(ny+wy1/PX_H)*2.5f;
+        float px2=(nx+wx1/SCPS_W)*2.5f, py2=(ny+wy1/SCPS_H)*2.5f;
         float wx2=stb_perlin_fbm_noise3(px2+4.1f,py2+6.8f,seed_f+70.f,2.f,0.5f,3)*rw2;
         float wy2=stb_perlin_fbm_noise3(px2+9.5f,py2+1.2f,seed_f+80.f,2.f,0.5f,3)*rw2;
         float qx=(float)x+wx1+wx2, qy=(float)y+wy1+wy2;
@@ -480,12 +480,12 @@ static void assign_regions(World *w, float *height, float seed_f) {
     /* Affecter les provinces aux régions */
     for (int p=0;p<w->n_provinces;p++) {
         int cx=w->province[p].seed_x, cy=w->province[p].seed_y;
-        if (cx<0||cx>=PX_W||cy<0||cy>=PX_H) continue;
-        int r=w->cell[px_idx(cx,cy)].region;
+        if (cx<0||cx>=SCPS_W||cy<0||cy>=SCPS_H) continue;
+        int r=w->cell[scps_idx(cx,cy)].region;
         if (r<0) r=0;
         w->province[p].region=(int16_t)r;
         Region *rg=&w->region[r];
-        if (rg->n_provinces<PX_MAX_PROV)
+        if (rg->n_provinces<SCPS_MAX_PROV)
             rg->province_ids[rg->n_provinces++]=(int16_t)p;
     }
 }
@@ -495,21 +495,21 @@ static void assign_regions(World *w, float *height, float seed_f) {
  * ====================================================================== */
 static void compute_render_flags(World *w, float *height) {
     /* Côtes : cellule terrestre adjacente à la mer */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        Cell *c=&w->cell[px_idx(x,y)];
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        Cell *c=&w->cell[scps_idx(x,y)];
         c->coast=false;
-        if (height[px_idx(x,y)]<SEA_LEVEL) continue;
+        if (height[scps_idx(x,y)]<SEA_LEVEL) continue;
         for (int d=0;d<4;d++) {
-            int nx2=clampi(x+DDX[d*2],0,PX_W-1),ny2=clampi(y+DDY[d*2],0,PX_H-1);
-            if (height[px_idx(nx2,ny2)]<SEA_LEVEL){c->coast=true;break;}
+            int nx2=clampi(x+DDX[d*2],0,SCPS_W-1),ny2=clampi(y+DDY[d*2],0,SCPS_H-1);
+            if (height[scps_idx(nx2,ny2)]<SEA_LEVEL){c->coast=true;break;}
         }
     }
 
     /* Frontières (compare province/region avec voisins E et S) */
-    for (int y=0;y<PX_H-1;y++) for (int x=0;x<PX_W-1;x++) {
-        Cell *c  =&w->cell[px_idx(x,y)];
-        Cell *ce =&w->cell[px_idx(x+1,y)];
-        Cell *cs =&w->cell[px_idx(x,y+1)];
+    for (int y=0;y<SCPS_H-1;y++) for (int x=0;x<SCPS_W-1;x++) {
+        Cell *c  =&w->cell[scps_idx(x,y)];
+        Cell *ce =&w->cell[scps_idx(x+1,y)];
+        Cell *cs =&w->cell[scps_idx(x,y+1)];
         c->border_prov=(c->province!=ce->province && (c->province>=0||ce->province>=0))
                       ||(c->province!=cs->province && (c->province>=0||cs->province>=0));
         c->border_reg =(c->region!=ce->region && (c->region>=0||ce->region>=0))
@@ -520,12 +520,12 @@ static void compute_render_flags(World *w, float *height) {
      * Normale de surface calculée depuis les gradients de hauteur. */
     static const float LX=-0.6f, LY=-0.6f, LZ=0.5f; /* direction lumière (normalisée) */
     static const float LLEN=0.9165f;                  /* ||L|| */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y);
-        float he=height[px_idx(clampi(x+1,0,PX_W-1),y)];
-        float hw=height[px_idx(clampi(x-1,0,PX_W-1),y)];
-        float hs=height[px_idx(x,clampi(y+1,0,PX_H-1))];
-        float hn=height[px_idx(x,clampi(y-1,0,PX_H-1))];
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        float he=height[scps_idx(clampi(x+1,0,SCPS_W-1),y)];
+        float hw=height[scps_idx(clampi(x-1,0,SCPS_W-1),y)];
+        float hs=height[scps_idx(x,clampi(y+1,0,SCPS_H-1))];
+        float hn=height[scps_idx(x,clampi(y-1,0,SCPS_H-1))];
         float gx=(he-hw)*5.f, gy=(hs-hn)*5.f;
         float nlen=sqrtf(gx*gx+gy*gy+1.f);
         float dot=((-gx)*LX+(-gy)*LY+(1.f/nlen)*LZ)/(nlen*LLEN);
@@ -552,9 +552,9 @@ static float subsistance_for_biome(Biome b) {
 
 static void gen_scps(World *w) {
     /* Familles linguistiques : 3 proto-langues réparties sur la carte */
-    int famx[3]={PX_W/6, PX_W/2, PX_W*5/6};
-    int famy[3]={PX_H/2, PX_H/4, PX_H*3/4};
-    float maxr=sqrtf((float)(PX_W*PX_W+PX_H*PX_H))/2.f;
+    int famx[3]={SCPS_W/6, SCPS_W/2, SCPS_W*5/6};
+    int famy[3]={SCPS_H/2, SCPS_H/4, SCPS_H*3/4};
+    float maxr=sqrtf((float)(SCPS_W*SCPS_W+SCPS_H*SCPS_H))/2.f;
 
     for (int p=0;p<w->n_provinces;p++) {
         Province *pr=&w->province[p];
@@ -582,21 +582,21 @@ static void gen_scps(World *w) {
  * ====================================================================== */
 static void trace_rivers(World *w, float *height) {
     int n=0;
-    for (int y=3;y<PX_H-3&&n<PX_MAX_RIVERS;y+=5)
-    for (int x=3;x<PX_W-3&&n<PX_MAX_RIVERS;x+=5) {
-        int i=px_idx(x,y);
+    for (int y=3;y<SCPS_H-3&&n<SCPS_MAX_RIVERS;y+=5)
+    for (int x=3;x<SCPS_W-3&&n<SCPS_MAX_RIVERS;x+=5) {
+        int i=scps_idx(x,y);
         if (height[i]<MOUNTAIN_H-0.08f) continue;
         if (w->cell[i].river<50) continue;
 
         River *rv=&w->river[n];
         rv->len=0; rv->flow_max=0.f;
-        bool *seen=(bool*)calloc(PX_N,sizeof(bool));
+        bool *seen=(bool*)calloc(SCPS_N,sizeof(bool));
         if (!seen) break;
 
         int cx=x,cy=y;
-        for (int s=0;s<PX_RIVER_MAXLEN;s++) {
-            if (cx<0||cx>=PX_W||cy<0||cy>=PX_H) break;
-            int ci=px_idx(cx,cy);
+        for (int s=0;s<SCPS_RIVER_MAXLEN;s++) {
+            if (cx<0||cx>=SCPS_W||cy<0||cy>=SCPS_H) break;
+            int ci=scps_idx(cx,cy);
             if (seen[ci]) break;
             seen[ci]=true;
             rv->x[rv->len]=(int16_t)cx;
@@ -610,8 +610,8 @@ static void trace_rivers(World *w, float *height) {
             float mh=height[ci]; int best=-1;
             for (int d=0;d<8;d++){
                 int nx2=cx+DDX[d],ny2=cy+DDY[d];
-                if (nx2<0||nx2>=PX_W||ny2<0||ny2>=PX_H)continue;
-                if (height[px_idx(nx2,ny2)]<mh){mh=height[px_idx(nx2,ny2)];best=d;}
+                if (nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
+                if (height[scps_idx(nx2,ny2)]<mh){mh=height[scps_idx(nx2,ny2)];best=d;}
             }
             if (best<0) break;
             cx+=DDX[best]; cy+=DDY[best];
@@ -632,28 +632,28 @@ void world_generate(World *w, uint32_t seed) {
     rng_seed(seed);
     float seed_f=(float)(seed&0xFFFF)/(float)0x10000;
 
-    float *height =  (float*)malloc(PX_N*sizeof(float));
-    float *moisture= (float*)malloc(PX_N*sizeof(float));
-    float *temp    = (float*)malloc(PX_N*sizeof(float));
-    if (!height||!moisture||!temp){fprintf(stderr,"paradox: OOM\n");goto end;}
+    float *height =  (float*)malloc(SCPS_N*sizeof(float));
+    float *moisture= (float*)malloc(SCPS_N*sizeof(float));
+    float *temp    = (float*)malloc(SCPS_N*sizeof(float));
+    if (!height||!moisture||!temp){fprintf(stderr,"scps: OOM\n");goto end;}
 
-    printf("[paradox] géologie...     "); fflush(stdout);
+    printf("[scps] géologie...     "); fflush(stdout);
     step_geology(height,seed_f);          printf("ok\n");
 
-    printf("[paradox] architecture... "); fflush(stdout);
+    printf("[scps] architecture... "); fflush(stdout);
     step_architecture(height,seed_f);     printf("ok\n");
 
-    printf("[paradox] érosion...      "); fflush(stdout);
+    printf("[scps] érosion...      "); fflush(stdout);
     step_erosion(height,w->cell);         printf("ok\n");
 
-    printf("[paradox] climat...       "); fflush(stdout);
+    printf("[scps] climat...       "); fflush(stdout);
     gen_climate(height,moisture,temp,seed_f); printf("ok\n");
 
-    printf("[paradox] biomes...       "); fflush(stdout);
+    printf("[scps] biomes...       "); fflush(stdout);
     /* Jitter haute fréquence sur t et m pour briser les lignes de seuil */
-    for (int y=0;y<PX_H;y++) for (int x=0;x<PX_W;x++) {
-        int i=px_idx(x,y);
-        float nx2=(float)x/PX_W, ny2=(float)y/PX_H;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
         float jt=stb_perlin_noise3(nx2*16.f,ny2*15.f,seed_f+900.f,0,0,0)*0.045f;
         float jm=stb_perlin_noise3(nx2*15.f,ny2*16.f,seed_f+901.f,0,0,0)*0.035f;
         w->cell[i].height     =height[i];
@@ -664,26 +664,26 @@ void world_generate(World *w, uint32_t seed) {
     printf("ok\n");
 
     fill_lakes(height,w->cell);
-    for (int i=0;i<PX_N;i++) w->cell[i].height=height[i];
+    for (int i=0;i<SCPS_N;i++) w->cell[i].height=height[i];
 
-    printf("[paradox] fertilité...    "); fflush(stdout);
+    printf("[scps] fertilité...    "); fflush(stdout);
     compute_fertility(height,moisture,temp,w->cell); printf("ok\n");
 
-    printf("[paradox] provinces...    "); fflush(stdout);
+    printf("[scps] provinces...    "); fflush(stdout);
     assign_provinces(w,height,seed_f);
     printf("ok (%d prov.)\n",w->n_provinces);
 
-    printf("[paradox] régions...      "); fflush(stdout);
+    printf("[scps] régions...      "); fflush(stdout);
     assign_regions(w,height,seed_f);
     printf("ok (%d rég.)\n",w->n_regions);
 
-    printf("[paradox] flags rendu...  "); fflush(stdout);
+    printf("[scps] flags rendu...  "); fflush(stdout);
     compute_render_flags(w,height);       printf("ok\n");
 
-    printf("[paradox] SCPS...         "); fflush(stdout);
+    printf("[scps] SCPS...         "); fflush(stdout);
     gen_scps(w);                          printf("ok\n");
 
-    printf("[paradox] rivières...     "); fflush(stdout);
+    printf("[scps] rivières...     "); fflush(stdout);
     trace_rivers(w,height);
     printf("ok (%d riv.)\n",w->n_rivers);
 
