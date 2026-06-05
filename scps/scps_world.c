@@ -799,6 +799,142 @@ static void trace_rivers(World *w, float *height) {
 }
 
 /* ========================================================================
+ * ALTÉRATION — « 10 000 ans de météo de merde »
+ *
+ * Deux temps :
+ *   A. Érosion thermique (avant l'hydrologie) : le talus s'éboule, les
+ *      reliefs s'arrondissent → monde ancien, usé, lissé.
+ *   B. Reconquête écologique (après les biomes) : laissé à l'abandon, le
+ *      monde se gorge d'eau et se couvre de végétation — marais, tourbières,
+ *      mangroves, bois envahissants. Impression de « terre inconnue », pas
+ *      civilisée.
+ * ====================================================================== */
+
+/* A. Érosion thermique : éboulement du talus au-delà d'une pente seuil. */
+static void step_thermal_erosion(float *height, int iters) {
+    float *delta=(float*)malloc(SCPS_N*sizeof(float));
+    if(!delta) return;
+    const float TALUS=0.010f, RATE=0.30f;
+    for (int it=0; it<iters; it++) {
+        memset(delta,0,SCPS_N*sizeof(float));
+        for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+            int i=scps_idx(x,y);
+            float h=height[i];
+            int bj=-1; float bd=0.f;
+            for (int d=0;d<8;d++) {
+                int nx2=x+DDX[d],ny2=y+DDY[d];
+                if(nx2<0||nx2>=SCPS_W||ny2<0||ny2>=SCPS_H)continue;
+                float diff=h-height[scps_idx(nx2,ny2)];
+                if (diff>bd){bd=diff;bj=scps_idx(nx2,ny2);}
+            }
+            if (bj>=0 && bd>TALUS) {
+                float move=(bd-TALUS)*RATE*0.5f;
+                delta[i]-=move; delta[bj]+=move;
+            }
+        }
+        for (int i=0;i<SCPS_N;i++) height[i]+=delta[i];
+    }
+    free(delta);
+    normalize_f(height,SCPS_N);
+}
+
+/* Biome déterminé par le relief : ne doit pas être lissé (sinon les crêtes
+ * fines disparaissent). */
+static bool biome_is_relief(Biome b) {
+    return b==BIO_HIGHLANDS||b==BIO_HILLS||b==BIO_MOUNTAINS||
+           b==BIO_PEAK||b==BIO_GLACIER;
+}
+
+/* B. Reconquête écologique. */
+static void step_weathering(World *w, const float *height, float seed_f) {
+    Cell *c=w->cell;
+
+    /* B1. Reconquête forestière : prairies/plaines/savanes tempérées et
+     *     humides repassent en bois/forêt (la végétation reprend ses droits). */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        Biome b=c[i].biome;
+        if (b!=BIO_GRASSLAND&&b!=BIO_PLAINS&&b!=BIO_FARMLAND&&b!=BIO_SAVANNA) continue;
+        float t=c[i].temperature, m=c[i].moisture;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float overgrow=stb_perlin_fbm_noise3(nx*6.f,ny*5.f,seed_f+1300.f,2.f,0.5f,4);
+        if (m>0.40f && t>0.28f && t<0.74f && overgrow>-0.05f)
+            c[i].biome=(m>0.60f)?BIO_FOREST:BIO_WOODS;
+    }
+
+    /* B2. Zones humides : mangrove (côte tropicale), marais (chaud) /
+     *     tourbière (froid) dans les bas-fonds plats et gorgés d'eau. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        float t=c[i].temperature, m=c[i].moisture;
+        bool near_sea=false, near_lake=false;
+        float minh=height[i], maxh=height[i];
+        for (int d=0;d<8;d++) {
+            int j=scps_idx(clampi(x+DDX[d],0,SCPS_W-1),clampi(y+DDY[d],0,SCPS_H-1));
+            float hh=height[j];
+            if (hh<SEA_LEVEL) near_sea=true;
+            if (c[j].lake)    near_lake=true;
+            if (hh<minh) minh=hh;
+            if (hh>maxh) maxh=hh;
+        }
+        float relief=maxh-minh;                    /* faible = plat */
+        bool wet=(m>0.55f)||(c[i].river>60)||near_lake;
+
+        if (near_sea && t>0.63f && m>0.50f && height[i]<SEA_LEVEL+0.022f) {
+            c[i].biome=BIO_MANGROVE;               /* palétuviers tropicaux */
+        } else if (relief<0.03f && wet &&
+                   (height[i]<SEA_LEVEL+0.06f || near_lake || c[i].river>90)) {
+            c[i].biome=(t<0.32f)?BIO_BOG:BIO_MARSH;
+        }
+    }
+
+    /* B3. Despeckle : 2 passes de filtre majoritaire pour fondre les pixels
+     *     isolés en taches cohérentes (le monde « se lisse »). Les biomes de
+     *     relief sont préservés. */
+    Biome *snap=(Biome*)malloc(SCPS_N*sizeof(Biome));
+    if (!snap) return;
+    for (int pass=0;pass<2;pass++) {
+        for (int i=0;i<SCPS_N;i++) snap[i]=c[i].biome;
+        for (int y=1;y<SCPS_H-1;y++) for (int x=1;x<SCPS_W-1;x++) {
+            int i=scps_idx(x,y);
+            if (height[i]<SEA_LEVEL || biome_is_relief(snap[i])) continue;
+            int cnt[BIO_COUNT]={0}, self=0;
+            for (int d=0;d<8;d++) {
+                int j=scps_idx(x+DDX[d],y+DDY[d]);
+                if (height[j]<SEA_LEVEL || biome_is_relief(snap[j])) continue;
+                cnt[(int)snap[j]]++;
+                if (snap[j]==snap[i]) self++;
+            }
+            if (self<=1) {                         /* pixel isolé → mode voisin */
+                int bb=(int)snap[i], bc=-1;
+                for (int b=0;b<BIO_COUNT;b++) if(cnt[b]>bc){bc=cnt[b];bb=b;}
+                if (bc>0) c[i].biome=(Biome)bb;
+            }
+        }
+    }
+    free(snap);
+
+    /* Télémétrie : part des terres reconquises par les milieux sauvages */
+    int marsh=0,bog=0,mang=0,wood=0,land=0;
+    for (int i=0;i<SCPS_N;i++){
+        if (height[i]<SEA_LEVEL) continue;
+        land++;
+        switch (c[i].biome){
+            case BIO_MARSH: marsh++; break;
+            case BIO_BOG:   bog++;   break;
+            case BIO_MANGROVE: mang++; break;
+            case BIO_WOODS: case BIO_FOREST: wood++; break;
+            default: break;
+        }
+    }
+    if (land<1) land=1;
+    printf("(marais %d%% bois %d%% mangrove %d%%) ",
+           (marsh+bog)*100/land, wood*100/land, mang*100/land);
+}
+
+/* ========================================================================
  * POINT D'ENTRÉE
  * ====================================================================== */
 void world_generate(World *w, uint32_t seed) {
@@ -818,6 +954,9 @@ void world_generate(World *w, uint32_t seed) {
 
     printf("[scps] architecture... "); fflush(stdout);
     step_architecture(height,seed_f);     printf("ok\n");
+
+    printf("[scps] altération...   "); fflush(stdout);
+    step_thermal_erosion(height,6);       printf("ok\n");
 
     printf("[scps] érosion...      "); fflush(stdout);
     step_erosion(height,w->cell);         printf("ok\n");
@@ -844,6 +983,9 @@ void world_generate(World *w, uint32_t seed) {
 
     fill_lakes(height,w->cell);
     for (int i=0;i<SCPS_N;i++) w->cell[i].height=height[i];
+
+    printf("[scps] reconquête...   "); fflush(stdout);
+    step_weathering(w,height,seed_f);     printf("ok\n");
 
     printf("[scps] fertilité...    "); fflush(stdout);
     compute_fertility(height,moisture,temp,w->cell); printf("ok\n");
@@ -897,6 +1039,8 @@ uint32_t biome_base_color(Biome b) {
         0xFF685848u, /* MOUNTAINS      */
         0xFFACA090u, /* PEAK           */
         0xFFDCECF8u, /* GLACIER        */
+        0xFF2E6848u, /* MANGROVE       */
+        0xFF566848u, /* BOG            */
     };
     return (b>=0&&b<BIO_COUNT)?C[(int)b]:0xFFFF00FFu;
 }
@@ -908,6 +1052,7 @@ const char *biome_name(Biome b) {
         "Savane","Terres sèches","Désert","Désert côtier",
         "Forêt","Bois","Jungle","Marais",
         "Hauts plateaux","Collines","Montagnes","Sommets","Glacier",
+        "Mangrove","Tourbière",
     };
     return (b>=0&&b<BIO_COUNT)?N[(int)b]:"?";
 }

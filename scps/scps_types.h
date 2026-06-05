@@ -50,6 +50,8 @@ typedef enum {
     BIO_MOUNTAINS,
     BIO_PEAK,
     BIO_GLACIER,
+    BIO_MANGROVE,      /* côte tropicale ennoyée (ajouté par l'altération) */
+    BIO_BOG,           /* tourbière froide / lande humide */
     BIO_COUNT
 } Biome;
 
