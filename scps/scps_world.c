@@ -1671,6 +1671,40 @@ static void build_hierarchy(World *w) {
             w->country[c].capital_prov=p;
     }
 
+    /* --- Rôles politiques de départ -------------------------------------- *
+     * Le monde commence presque vide. On classe les pays par poids (nombre
+     * de régions × aire de la capitale) :
+     *   - le plus gros = JOUEUR ;
+     *   - les ~25% suivants = ANTAGONISTES (IA expansionnistes) ;
+     *   - une fraction négligeable du reste = CITÉS-ÉTATS (peuplées, figées) ;
+     *   - tout le reste = terres VIERGES, colonisables. */
+    {
+        for (int c=0;c<ncty;c++) w->country[c].role=POLITY_UNCLAIMED;
+        /* tri indirect par poids décroissant */
+        int ord[SCPS_MAX_COUNTRY];
+        for (int c=0;c<ncty;c++) ord[c]=c;
+        for (int a=0;a<ncty;a++) for (int b=a+1;b<ncty;b++) {
+            int ca=ord[a], cb=ord[b];
+            int capa=w->country[ca].capital_prov, capb=w->country[cb].capital_prov;
+            float wa=w->country[ca].n_regions*100.f+(capa>=0?w->province[capa].area:0);
+            float wb=w->country[cb].n_regions*100.f+(capb>=0?w->province[capb].area:0);
+            if (wb>wa){ ord[a]=cb; ord[b]=ca; }
+        }
+        if (ncty>0) {
+            w->country[ord[0]].role=POLITY_PLAYER;
+            int n_antag = (ncty>=8)? (ncty/4) : (ncty>=3?1:0);
+            for (int i=1;i<=n_antag && i<ncty;i++)
+                w->country[ord[i]].role=POLITY_ANTAGONIST;
+            /* cités-états : ~15% des pays restants, mini-pays côtiers/riches */
+            int rest_start=1+n_antag;
+            int n_city = (ncty-rest_start)*15/100;
+            for (int i=0;i<n_city;i++) {
+                int idx=rest_start+i;
+                if (idx<ncty) w->country[ord[idx]].role=POLITY_CITY_STATE;
+            }
+        }
+    }
+
     /* Propage région/pays/continent sur les cellules (pour le rendu). */
     for (int i=0;i<SCPS_N;i++) {
         int p=w->cell[i].province;

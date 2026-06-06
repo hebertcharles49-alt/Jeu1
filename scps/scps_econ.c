@@ -124,6 +124,16 @@ static int region_ensure_building(RegionEconomy *re, BuildingType t) {
     return i;
 }
 
+/* Injecte une population répartie en strates dans une région (peuplement
+ * initial ou arrivée de colons). N'écrase pas les manufactures/prix. */
+static void econ_seed_population(RegionEconomy *re, float total_pop) {
+    for (int c=0;c<CLASS_COUNT;c++) {
+        re->strata[c].pop         = total_pop*CLASS_SHARE[c];
+        re->strata[c].wealth      = re->strata[c].pop * (c==CLASS_ELITE?6.f:c==CLASS_BOURGEOIS?2.f:0.5f);
+        re->strata[c].satisfaction= 0.5f;
+    }
+}
+
 void econ_init(WorldEconomy *e, const World *w) {
     memset(e,0,sizeof(*e));
     e->n_regions=w->n_regions;
@@ -172,20 +182,26 @@ void econ_init(WorldEconomy *e, const World *w) {
         }
         if (area_sum<1.f || reg_cap[rid]<=0.f) { re->active=false; continue; }
         re->active=true;
+        re->colonized=false;
+        re->owner=-1;
 
-        /* Population proportionnelle à la capacité dans le pays.
-         * Sans pays connu : fallback ~12 hab/cellule fertile. */
+        /* Capacité d'accueil : pop cible à terme (sert au peuplement initial
+         * de la capitale et de plafond souple à la croissance). */
         int cid=rg->country;
         float total_pop;
         if (cid>=0 && cid<SCPS_MAX_COUNTRY && cty_cap[cid]>0.f)
             total_pop = cty_target[cid] * reg_cap[rid] / cty_cap[cid];
         else
             total_pop = 40.f + reg_cap[rid]*12.f;
+        re->cap_pop = total_pop;
 
+        /* Population : laissée à ZÉRO par défaut. Le monde démarre vide ;
+         * seules la capitale du joueur et quelques cités-états seront
+         * peuplées (voir plus bas). Tout le reste est colonisable. */
         for (int c=0;c<CLASS_COUNT;c++) {
-            re->strata[c].pop        = total_pop*CLASS_SHARE[c];
-            re->strata[c].wealth     = re->strata[c].pop * (c==CLASS_ELITE?6.f:c==CLASS_BOURGEOIS?2.f:0.5f);
-            re->strata[c].satisfaction=0.5f;
+            re->strata[c].pop         = 0.f;
+            re->strata[c].wealth      = 0.f;
+            re->strata[c].satisfaction= 0.5f;
         }
         re->food_sat=0.5f; re->society_sat=0.5f;
 
@@ -224,9 +240,9 @@ void econ_init(WorldEconomy *e, const World *w) {
         /* L'atelier de luxe a besoin de tissu : présent si on file la laine. */
         if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
 
-        /* Niveau initial des manufactures : dimensionné sur les bourgeois
-         * (ce sont eux qui investissent). */
-        float invest = re->strata[CLASS_BOURGEOIS].pop;
+        /* Niveau initial des manufactures : dimensionné sur la capacité
+         * d'accueil (l'infrastructure latente du site). */
+        float invest = re->cap_pop*CLASS_SHARE[CLASS_BOURGEOIS];
         for (int i=0;i<re->n_bld;i++)
             re->bld[i].level = 0.5f + invest*0.01f;
 
@@ -235,6 +251,48 @@ void econ_init(WorldEconomy *e, const World *w) {
             re->price[r]=BASE_PRICE[r];
             re->stock[r]=0.f;
         }
+    }
+
+    /* ---- Adjacence de régions (terre, 4-connexe) pour la colonisation ---- */
+    static const int DX4[4]={1,-1,0,0}, DY4[4]={0,0,1,-1};
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int ra=w->cell[scps_idx(x,y)].region;
+        if (ra<0) continue;
+        for (int d=0;d<4;d++) {
+            int nx=x+DX4[d], ny=y+DY4[d];
+            if (nx<0||nx>=SCPS_W||ny<0||ny>=SCPS_H) continue;
+            int rb=w->cell[scps_idx(nx,ny)].region;
+            if (rb<0||rb==ra) continue;
+            e->adj[ra][rb]=1; e->adj[rb][ra]=1;
+        }
+    }
+
+    /* ---- Peuplement initial : monde quasi vide -------------------------- *
+     * Seule la région-CAPITALE des polités actives (JOUEUR et ANTAGONISTES)
+     * est remplie à sa capacité — le reste de leur territoire est à coloniser.
+     * Une poignée de CITÉS-ÉTATS sont peuplées à ~2000 (figées). Tout le reste
+     * du monde est vierge et colonisable. */
+    for (int cid=0; cid<w->n_countries; cid++) {
+        const Country *ct=&w->country[cid];
+        PolityRole role=ct->role;
+        if (role!=POLITY_PLAYER && role!=POLITY_ANTAGONIST && role!=POLITY_CITY_STATE)
+            continue;
+        int cap_prov=ct->capital_prov;
+        if (cap_prov<0||cap_prov>=w->n_provinces) continue;
+        int cap_reg=w->province[cap_prov].region;
+        if (cap_reg<0||cap_reg>=e->n_regions) continue;
+        RegionEconomy *re=&e->region[cap_reg];
+        if (!re->active) continue;
+
+        /* « Remplie » = à la capacité d'accueil du site (la subsistance locale
+         * a été dimensionnée sur cap_pop, donc la région se nourrit). Le pays
+         * grandira au-delà en colonisant ses voisines. */
+        float seed_pop = (role==POLITY_CITY_STATE)
+            ? fminf(re->cap_pop, 2000.f)       /* cité-état : ~2000, figée */
+            : re->cap_pop;                      /* joueur/antagoniste : capitale pleine */
+        econ_seed_population(re, seed_pop);
+        re->colonized=true;
+        re->owner=(int16_t)cid;
     }
 }
 
@@ -247,7 +305,7 @@ void econ_tick(WorldEconomy *e) {
 
     for (int rid=0; rid<e->n_regions; rid++) {
         RegionEconomy *re=&e->region[rid];
-        if (!re->active) continue;
+        if (!re->active || !re->colonized) continue;
 
         float supply[RES_COUNT]={0}, demand[RES_COUNT]={0};
         float labor_avail = re->strata[CLASS_LABORER].pop;
@@ -423,6 +481,63 @@ void econ_tick(WorldEconomy *e) {
          * limité) : 15% s'évapore, évite l'accumulation infinie. */
         for (int r=0;r<RES_COUNT;r++) re->stock[r]*=0.85f;
     }
+}
+
+/* ====================================================================== */
+/* COLONISATION — expansion du joueur et des antagonistes                 */
+/* ====================================================================== */
+
+#define COLONY_MIN_POP   500.f   /* pop minimale d'une région pour essaimer  */
+#define COLONY_COST_POP  250.f   /* colons détachés (quittent la mère)       */
+#define COLONY_SEED_POP  280.f   /* pop installée dans la nouvelle région    */
+#define COLONY_FOOD_GATE 0.35f   /* seuil de subsistance pour essaimer        */
+
+int econ_colonize_tick(WorldEconomy *e, const World *w) {
+    int founded=0;
+
+    /* Chaque pays expansionniste (joueur/antagoniste) tente AU PLUS une
+     * fondation par tick : on cherche une région vierge adjacente à l'une de
+     * ses régions peuplées et viables, puis on y détache des colons. */
+    for (int cid=0; cid<w->n_countries; cid++) {
+        PolityRole role=w->country[cid].role;
+        if (role!=POLITY_PLAYER && role!=POLITY_ANTAGONIST) continue;
+
+        /* Meilleure source : région du pays la plus peuplée et rassasiée. */
+        int best_src=-1, best_dst=-1; float best_score=-1.f;
+        for (int rs=0; rs<e->n_regions; rs++) {
+            RegionEconomy *src=&e->region[rs];
+            if (!src->colonized || src->owner!=cid) continue;
+            float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
+            if (spop<COLONY_MIN_POP || src->food_sat<COLONY_FOOD_GATE) continue;
+
+            for (int rd=0; rd<e->n_regions; rd++) {
+                if (!e->adj[rs][rd]) continue;
+                RegionEconomy *dst=&e->region[rd];
+                if (!dst->active || dst->colonized) continue;
+                /* score : capacité d'accueil de la cible × surplus de la mère */
+                float score = dst->cap_pop*0.001f + (spop-COLONY_MIN_POP)*0.0005f
+                            + src->food_sat;
+                if (score>best_score){ best_score=score; best_src=rs; best_dst=rd; }
+            }
+        }
+
+        if (best_src<0 || best_dst<0) continue;
+
+        /* Détache les colons de la région mère (au prorata des strates). */
+        RegionEconomy *src=&e->region[best_src];
+        float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
+        float take=fminf(COLONY_COST_POP, spop*0.25f);
+        for (int c=0;c<CLASS_COUNT;c++)
+            src->strata[c].pop -= take*(src->strata[c].pop/fmaxf(spop,EPS));
+
+        /* Installe la colonie. */
+        RegionEconomy *dst=&e->region[best_dst];
+        econ_seed_population(dst, COLONY_SEED_POP);
+        dst->colonized=true;
+        dst->owner=(int16_t)cid;
+        founded++;
+    }
+    return founded;
 }
 
 /* ====================================================================== */

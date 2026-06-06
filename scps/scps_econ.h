@@ -87,7 +87,10 @@ typedef struct {
     float      satisfaction;         /* satisfaction générale [0..1] */
     float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */
     float      society_sat;          /* satisfaction sociale [0..1] (cloth+wine+…) */
-    bool       active;               /* région terrestre peuplée */
+    float      cap_pop;              /* capacité d'accueil (pop cible à terme) */
+    bool       active;               /* terre habitable (colonisable) */
+    bool       colonized;            /* effectivement peuplée/settlée */
+    int16_t    owner;                /* pays qui contrôle la région (-1 = vierge) */
 } RegionEconomy;
 
 /* Conteneur — possédé par l'appelant, séparé du World pour ne pas alourdir
@@ -96,6 +99,10 @@ typedef struct {
     RegionEconomy region[SCPS_MAX_REG];
     int           n_regions;
     int           tick;
+
+    /* Adjacence de régions (terre, 4-connexe) — calculée à l'init, sert à
+     * la colonisation (expansion vers une région vierge voisine). */
+    uint8_t       adj[SCPS_MAX_REG][SCPS_MAX_REG];
 } WorldEconomy;
 
 /* ---- API -------------------------------------------------------------- */
@@ -106,6 +113,12 @@ void econ_init(WorldEconomy *e, const World *w);
 
 /* Avance la simulation d'un pas (un « tour »). */
 void econ_tick(WorldEconomy *e);
+
+/* Pas de colonisation : le joueur et les antagonistes essaiment depuis leurs
+ * régions peuplées vers une région vierge voisine. Les cités-états ne
+ * colonisent pas. À appeler après econ_tick(). Renvoie le nb de régions
+ * nouvellement colonisées ce tick. */
+int econ_colonize_tick(WorldEconomy *e, const World *w);
 
 /* Affiche un tableau récapitulatif d'une région sur stdout. */
 void econ_print_region(const WorldEconomy *e, const World *w, int region_id);

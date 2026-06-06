@@ -197,14 +197,27 @@ typedef struct {
     char     name_orc[32];      /* orque — rauque */
 } Region;
 
+/* ---- Rôle politique d'un pays ----------------------------------------- *
+ * Au démarrage, le monde est essentiellement VIDE : seul le joueur et une
+ * poignée de cités-états sont peuplés. Tout le reste est colonisable. Mais
+ * seuls le JOUEUR et les ANTAGONISTES (IA expansionnistes) peuvent coloniser ;
+ * les cités-états restent figées sur leur capitale (commerce, pas conquête). */
+typedef enum {
+    POLITY_PLAYER = 0,   /* le joueur — capitale peuplée au départ */
+    POLITY_ANTAGONIST,   /* IA majeure — peuplée, colonise */
+    POLITY_CITY_STATE,   /* cité-état — figée, ne colonise pas */
+    POLITY_UNCLAIMED     /* terres vierges colonisables (pays sans départ) */
+} PolityRole;
+
 /* ---- Pays : 3-5 régions contiguës ------------------------------------- */
 typedef struct {
-    int      n_regions;
-    int16_t  region_ids[12];
-    int16_t  continent;
-    int      capital_prov;      /* province-capitale (plus fertile) */
-    uint32_t color;
-    char     name[32];
+    int        n_regions;
+    int16_t    region_ids[12];
+    int16_t    continent;
+    int        capital_prov;      /* province-capitale (plus fertile) */
+    PolityRole role;              /* joueur / antagoniste / cité-état / vierge */
+    uint32_t   color;
+    char       name[32];
 } Country;
 
 /* ---- Continent : masse continentale géographique ---------------------- */

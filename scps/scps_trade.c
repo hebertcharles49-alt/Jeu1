@@ -29,7 +29,7 @@ static void gather_region_geo(RegionGeo *geo, const World *w,
 
     for (int rid=0; rid<w->n_regions; rid++) {
         const Region *rg=&w->region[rid];
-        if (e->region[rid].active) {
+        if (e->region[rid].colonized) {
             for (int c=0;c<CLASS_COUNT;c++)
                 geo[rid].pop += e->region[rid].strata[c].pop;
         }
@@ -105,9 +105,9 @@ void trade_network_build(TradeNetwork *net, const World *w,
      *    quasi-complet et les traversées irréalistes d'un bout à l'autre). */
     #define MAX_SEA_DIST 160.f
     for (int ra=0;ra<w->n_regions;ra++) {
-        if (!geo[ra].coastal||!e->region[ra].active) continue;
+        if (!geo[ra].coastal||!e->region[ra].colonized) continue;
         for (int rb=ra+1;rb<w->n_regions;rb++) {
-            if (!geo[rb].coastal||!e->region[rb].active) continue;
+            if (!geo[rb].coastal||!e->region[rb].colonized) continue;
             if (w->region[ra].continent!=w->region[rb].continent) continue;
             float dx=(float)(w->region[ra].seed_x-w->region[rb].seed_x);
             float dy=(float)(w->region[ra].seed_y-w->region[rb].seed_y);
@@ -143,7 +143,7 @@ void trade_network_build(TradeNetwork *net, const World *w,
     for (int ra=0;ra<w->n_regions;ra++) {
         for (int rb=ra+1;rb<w->n_regions;rb++) {
             if (!adj[ra][rb]) continue;
-            if (!e->region[ra].active||!e->region[rb].active) continue;
+            if (!e->region[ra].colonized||!e->region[rb].colonized) continue;
             if (net->n_links>=TRADE_MAX_LINKS) break;
             TradeLink *lk=&net->link[net->n_links++];
             lk->ra=(int16_t)ra; lk->rb=(int16_t)rb;
