@@ -34,6 +34,7 @@ typedef struct {
     float   transport_cost;   /* fraction de la valeur par unité transportée */
     float   capacity;         /* unités max/tick/bien */
     bool    sea_route;        /* route maritime (bi-côtière) */
+    bool    river_route;      /* route fluviale (longe un fleuve commun) */
 } TradeLink;
 
 /* Enregistrement d'un flux de commerce sur un tick.

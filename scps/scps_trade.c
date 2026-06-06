@@ -116,7 +116,30 @@ void trade_network_build(TradeNetwork *net, const World *w,
         }
     }
 
-    /* 3. Conversion matrice → liste de liens. */
+    /* 3. Routes fluviales : scan des rivières significatives (flow_max ≥ 0.25).
+     *    Chaque transition de région le long d'un fleuve crée un lien fluvial
+     *    au coût 0.20 (entre maritime 0.12 et terrestre 0.32). */
+    static bool river_adj[SCPS_MAX_REG][SCPS_MAX_REG];
+    memset(river_adj, 0, sizeof(river_adj));
+    for (int k=0; k<w->n_rivers; k++) {
+        const River *rv=&w->river[k];
+        if (rv->flow_max < 0.25f) continue;
+        int prev_reg=-1;
+        for (int s=0; s<rv->len; s++) {
+            int idx=scps_idx(rv->x[s], rv->y[s]);
+            int cur_reg=w->cell[idx].region;
+            if (cur_reg<0){ prev_reg=-1; continue; }
+            if (cur_reg!=prev_reg && prev_reg>=0) {
+                int ra2=(prev_reg<cur_reg)?prev_reg:cur_reg;
+                int rb2=(prev_reg<cur_reg)?cur_reg:prev_reg;
+                river_adj[ra2][rb2]=true;
+                adj[ra2][rb2]=true;   /* garantit la présence dans la liste */
+            }
+            prev_reg=cur_reg;
+        }
+    }
+
+    /* 4. Conversion matrice → liste de liens. */
     for (int ra=0;ra<w->n_regions;ra++) {
         for (int rb=ra+1;rb<w->n_regions;rb++) {
             if (!adj[ra][rb]) continue;
@@ -124,13 +147,18 @@ void trade_network_build(TradeNetwork *net, const World *w,
             if (net->n_links>=TRADE_MAX_LINKS) break;
             TradeLink *lk=&net->link[net->n_links++];
             lk->ra=(int16_t)ra; lk->rb=(int16_t)rb;
-            lk->transport_cost=link_cost(ra,rb,geo);
-            lk->capacity      =link_capacity(ra,rb,geo);
-            lk->sea_route     =(geo[ra].coastal&&geo[rb].coastal);
+            lk->river_route = river_adj[ra][rb];
+            lk->sea_route   = (!lk->river_route && geo[ra].coastal && geo[rb].coastal);
+            /* Coût fluvial fixe (priorité sur calcul terrestre). */
+            if (lk->river_route)
+                lk->transport_cost = 0.20f;
+            else
+                lk->transport_cost = link_cost(ra, rb, geo);
+            lk->capacity = link_capacity(ra, rb, geo);
         }
     }
 
-    /* 4. Index de voisinage (tri par ra). */
+    /* 5. Index de voisinage (tri par ra). */
     memset(net->neighbor_start,0,sizeof(net->neighbor_start));
     memset(net->neighbor_count,0,sizeof(net->neighbor_count));
     for (int i=0;i<net->n_links;i++){
@@ -281,7 +309,7 @@ void trade_print_region(const TradeNetwork *net, const WorldEconomy *e,
                w->region[partner].name[0]?w->region[partner].name:"—",
                lk->transport_cost*100.f,
                lk->capacity,
-               lk->sea_route?"[mer]":"[terre]");
+               lk->sea_route?"[mer]":lk->river_route?"[fleuve]":"[terre]");
     }
     printf("└────────────────────────────────────────────\n");
 }

@@ -85,6 +85,8 @@ typedef struct {
     float      tech;                 /* recherche cumulée */
     float      gdp;                  /* valeur produite au dernier tick */
     float      satisfaction;         /* satisfaction générale [0..1] */
+    float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */
+    float      society_sat;          /* satisfaction sociale [0..1] (cloth+wine+…) */
     bool       active;               /* région terrestre peuplée */
 } RegionEconomy;
 

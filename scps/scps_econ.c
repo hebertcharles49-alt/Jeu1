@@ -86,10 +86,16 @@ static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
 #define TAX_RATE     0.15f   /* part de la valeur produite captée par les élites */
 #define WAGE_SHARE   0.55f   /* part de la valeur → salaires (laborers) */
 /* le reste (1 - TAX - WAGE) = profit bourgeois */
-#define GROWTH_RATE  0.04f   /* amplitude de croissance/décroissance de pop */
 #define TECH_RATE    0.010f  /* conversion richesse élite → tech */
 #define PRICE_INERTIA 0.65f  /* lissage du prix (0=instantané,1=figé) */
 #define EPS          1e-4f
+
+/* Démographie calibrée : doublement en ~30 ans à food_sat=1, society_sat=0.5
+ *   net = BIRTH_RATE*food_sat - DEATH_RATE + SOCIETY_BONUS*society_sat
+ *   typique : 0.034 - 0.015 + 0.004 = 0.023 → ln(2)/0.023 ≈ 30 ticks */
+#define BIRTH_RATE    0.034f
+#define DEATH_RATE    0.015f
+#define SOCIETY_BONUS 0.008f
 
 static inline float clampf(float v,float lo,float hi){return v<lo?lo:(v>hi?hi:v);}
 
@@ -123,30 +129,65 @@ void econ_init(WorldEconomy *e, const World *w) {
     e->n_regions=w->n_regions;
     e->tick=0;
 
+    /* ---- Passe 1 : capacité de chaque région (fertilité × surface) ------- */
+    float reg_cap[SCPS_MAX_REG]={0};
+    float cty_cap[SCPS_MAX_COUNTRY]={0};
     for (int rid=0; rid<w->n_regions; rid++) {
-        RegionEconomy *re=&e->region[rid];
         const Region *rg=&w->region[rid];
-
-        /* ---- Population : fonction de la fertilité cumulée des provinces. */
-        float fert_sum=0.f, area_sum=0.f;
+        float cap=0.f, area=0.f;
         for (int k=0;k<rg->n_provinces;k++) {
             int pid=rg->province_ids[k];
             if (pid<0||pid>=w->n_provinces) continue;
             const Province *pv=&w->province[pid];
-            /* fertilité moyenne approximée par la subsistance + surface */
-            fert_sum += pv->area * (0.25f + 0.75f*clampf(pv->subsistance/10.f,0.f,1.f));
-            area_sum += pv->area;
+            cap  += pv->area * (0.25f + 0.75f*clampf(pv->subsistance/10.f,0.f,1.f));
+            area += pv->area;
         }
-        if (area_sum<1.f) { re->active=false; continue; }
+        if (area<1.f) continue;
+        reg_cap[rid]=cap;
+        int cid=rg->country;
+        if (cid>=0 && cid<SCPS_MAX_COUNTRY) cty_cap[cid]+=cap;
+    }
+
+    /* ---- Passe 2 : cible par pays (4000 majeur ≥4 régions, 2000 satellite) */
+    float cty_target[SCPS_MAX_COUNTRY]={0};
+    int   cty_nreg  [SCPS_MAX_COUNTRY]={0};
+    for (int rid=0; rid<w->n_regions; rid++) {
+        int cid=w->region[rid].country;
+        if (cid>=0 && cid<SCPS_MAX_COUNTRY) cty_nreg[cid]++;
+    }
+    for (int cid=0; cid<SCPS_MAX_COUNTRY; cid++)
+        if (cty_cap[cid]>0.f)
+            cty_target[cid] = (cty_nreg[cid]>=4) ? 4000.f : 2000.f;
+
+    /* ---- Passe 3 : peuplement de chaque région --------------------------- */
+    for (int rid=0; rid<w->n_regions; rid++) {
+        RegionEconomy *re=&e->region[rid];
+        const Region *rg=&w->region[rid];
+
+        float area_sum=0.f;
+        for (int k=0;k<rg->n_provinces;k++) {
+            int pid=rg->province_ids[k];
+            if (pid<0||pid>=w->n_provinces) continue;
+            area_sum += w->province[pid].area;
+        }
+        if (area_sum<1.f || reg_cap[rid]<=0.f) { re->active=false; continue; }
         re->active=true;
 
-        /* Échelle : ~12 hab par cellule fertile (chiffre de jeu). */
-        float total_pop = 40.f + fert_sum*12.f;
+        /* Population proportionnelle à la capacité dans le pays.
+         * Sans pays connu : fallback ~12 hab/cellule fertile. */
+        int cid=rg->country;
+        float total_pop;
+        if (cid>=0 && cid<SCPS_MAX_COUNTRY && cty_cap[cid]>0.f)
+            total_pop = cty_target[cid] * reg_cap[rid] / cty_cap[cid];
+        else
+            total_pop = 40.f + reg_cap[rid]*12.f;
+
         for (int c=0;c<CLASS_COUNT;c++) {
             re->strata[c].pop        = total_pop*CLASS_SHARE[c];
             re->strata[c].wealth     = re->strata[c].pop * (c==CLASS_ELITE?6.f:c==CLASS_BOURGEOIS?2.f:0.5f);
             re->strata[c].satisfaction=0.5f;
         }
+        re->food_sat=0.5f; re->society_sat=0.5f;
 
         /* ---- Capacité d'extraction : héritée des ressources brutes des
          *      provinces. Chaque province « pose » sa ressource dominante. */
@@ -162,15 +203,13 @@ void econ_init(WorldEconomy *e, const World *w) {
             re->raw_cap[r] += 1.5f + pv->area*0.05f;
         }
 
-        /* Subsistance locale : partout, les paysans cultivent vivres et bois
-         * de feu pour leur propre région (il n'y a pas encore de commerce
-         * inter-régional). Dimensionnée pour nourrir ~90% de la population —
-         * la satisfaction reflète alors l'accès aux biens supérieurs, pas
-         * une famine universelle. */
-        float subsist = total_pop/100.f;
-        re->raw_cap[RES_GRAIN] += subsist*0.95f;
-        re->raw_cap[RES_WOOD]  += subsist*0.40f;
-        if (coastal) re->raw_cap[RES_FISH] += subsist*0.30f;
+        /* Subsistance locale : vivres et bois de feu dimensionnés pour couvrir
+         * ~90% de la population, laissant la satisfaction refléter les biens
+         * supérieurs et non une famine universelle. */
+        float subsist = total_pop / 100.f;
+        re->raw_cap[RES_GRAIN] += subsist * 0.95f;
+        re->raw_cap[RES_WOOD]  += subsist * 0.40f;
+        if (coastal) re->raw_cap[RES_FISH] += subsist * 0.30f;
 
         /* ---- Manufactures : implantées là où l'intrant est extrait dans
          *      la région (cohérence géographique de la chaîne de prod). */
@@ -327,11 +366,39 @@ void econ_tick(WorldEconomy *e) {
         }
 
         /* ---- 6. MISE À JOUR : démographie, tech, satisfaction générale - */
+        /* Satisfaction alimentaire : grain + fish (besoins laborers) */
+        {
+            float food_need=0.f, food_met=0.f;
+            float soc_need=0.f,  soc_met=0.f;
+            for (int c=0;c<CLASS_COUNT;c++) {
+                float units=re->strata[c].pop/100.f;
+                for (int r=0;r<RES_COUNT;r++) {
+                    float nd=NEED[c][r]*units;
+                    if (nd<=0.f) continue;
+                    bool is_food=(r==RES_GRAIN||r==RES_FISH||r==RES_LIVESTOCK);
+                    float sat=clampf(re->strata[c].satisfaction,0.f,1.f);
+                    if (is_food){ food_need+=nd; food_met+=nd*sat; }
+                    else        { soc_need +=nd; soc_met +=nd*sat; }
+                }
+            }
+            re->food_sat   = (food_need>0.f)?clampf(food_met/food_need,0.f,1.f):0.5f;
+            re->society_sat= (soc_need >0.f)?clampf(soc_met /soc_need ,0.f,1.f):0.5f;
+        }
+
+        /* Croissance calibrée : doublement ~30 ans à food_sat=1, soc=0.5
+         *   net = BIRTH_RATE*food_sat - DEATH_RATE + SOCIETY_BONUS*society_sat
+         * + pic de famine si food_sat < 0.35 */
+        float food_s = re->food_sat;
+        float soc_s  = re->society_sat;
+        float net_growth = BIRTH_RATE*food_s - DEATH_RATE + SOCIETY_BONUS*soc_s;
+        if (food_s < 0.35f)
+            net_growth -= (0.35f - food_s) * 0.12f;   /* pic de mortalité famine */
+        net_growth = clampf(net_growth, -0.10f, 0.06f);
+
         float satsum=0.f, popsum=0.f;
         for (int c=0;c<CLASS_COUNT;c++) {
             PopStratum *st=&re->strata[c];
-            /* croissance pilotée par la satisfaction (0.5 = stable) */
-            st->pop *= 1.f + (st->satisfaction-0.5f)*GROWTH_RATE;
+            st->pop *= 1.f + net_growth;
             if (st->pop<1.f) st->pop=1.f;
             satsum+=st->satisfaction*st->pop; popsum+=st->pop;
         }
