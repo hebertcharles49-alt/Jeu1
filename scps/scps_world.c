@@ -304,24 +304,62 @@ typedef struct { float cx,cy,r,peak; } Volcano;
 static Volcano g_volc[MAX_VOLC];
 static int     g_nvolc=0;
 
-static void volcanoes_init(const float *height) {
-    g_nvolc=0;
-    int want=3+(int)(rng_f()*6.f);
-    for (int tries=0; tries<600&&g_nvolc<want; tries++) {
-        int x=(int)(rng_f()*SCPS_W), y=(int)(rng_f()*SCPS_H);
-        float h=height[scps_idx(x,y)];
-        if (h<SEA_LEVEL+0.04f) continue;
-        bool ok=true;
-        for (int v=0;v<g_nvolc&&ok;v++) {
-            float dx=x-g_volc[v].cx, dy=y-g_volc[v].cy;
-            if (dx*dx+dy*dy<28.f*28.f) ok=false;
+/* Place les volcans le long des arcs de subduction (plaque océanique plonge
+ * sous plaque continentale). L'offset d'arc (14-26 cellules vers l'intérieur
+ * de la plaque continentale) reproduit la géographie réelle : Andes, Japon,
+ * Cascades. Aucun volcan aléatoire — tout découle de la géologie. */
+static void volcanoes_init(const float *height, float seed_f) {
+    g_nvolc = 0;
+    int want = 4 + (int)(rng_f() * 5.f);   /* 4-8 volcans */
+
+    /* 1. Collecte des points de frontière de subduction */
+    typedef struct { short x, y; int cont_plate; } SubPt;
+    SubPt *sub = (SubPt*)malloc(SCPS_N * sizeof(SubPt));
+    if (!sub) return;
+    int nsub = 0;
+
+    for (int y=1; y<SCPS_H-1; y++) for (int x=1; x<SCPS_W-1; x++) {
+        int pa, pb;
+        float bs = plate_boundary(x, y, &pa, &pb, seed_f);
+        if (bs < 0.12f) continue;
+        bool oa = g_plates[pa].oceanic, ob = g_plates[pb].oceanic;
+        if (oa == ob) continue;                 /* collision crust/crust ou dorsale */
+        /* Convergence : les plaques s'approchent */
+        float dot = g_plates[pa].dx*g_plates[pb].dx + g_plates[pa].dy*g_plates[pb].dy;
+        if (dot >= 0.f) continue;
+        sub[nsub].x = (short)x;
+        sub[nsub].y = (short)y;
+        sub[nsub].cont_plate = oa ? pb : pa;   /* plaque continentale (dessus) */
+        nsub++;
+    }
+
+    /* 2. Tire want positions décalées vers l'intérieur de la plaque cont. */
+    for (int tries = 0; tries < want*60 && g_nvolc < want && nsub > 0; tries++) {
+        int idx = (int)(rng_f() * nsub) % nsub;
+        SubPt sp = sub[idx];
+        float dx = g_plates[sp.cont_plate].cx - sp.x;
+        float dy = g_plates[sp.cont_plate].cy - sp.y;
+        float d  = sqrtf(dx*dx+dy*dy); if (d < 1.f) d = 1.f;
+        float arc    = 14.f + rng_f() * 12.f;   /* profondeur d'arc volcanique */
+        float jitter = (rng_f() - 0.5f) * 10.f; /* jitter le long de la chaîne */
+        float tx = -dy/d, ty = dx/d;             /* tangente à la frontière */
+        int vx = (int)(sp.x + dx/d*arc + tx*jitter);
+        int vy = (int)(sp.y + dy/d*arc + ty*jitter);
+        if (vx < 2 || vx >= SCPS_W-2 || vy < 2 || vy >= SCPS_H-2) continue;
+        if (height[scps_idx(vx,vy)] < SEA_LEVEL + 0.02f) continue;
+        bool ok = true;
+        for (int v = 0; v < g_nvolc && ok; v++) {
+            float ddx = vx - g_volc[v].cx, ddy = vy - g_volc[v].cy;
+            if (ddx*ddx + ddy*ddy < 30.f*30.f) ok = false;
         }
         if (!ok) continue;
-        g_volc[g_nvolc].cx=(float)x; g_volc[g_nvolc].cy=(float)y;
-        g_volc[g_nvolc].r=8.f+rng_f()*16.f;
-        g_volc[g_nvolc].peak=0.07f+rng_f()*0.13f;
+        g_volc[g_nvolc].cx   = (float)vx;
+        g_volc[g_nvolc].cy   = (float)vy;
+        g_volc[g_nvolc].r    = 9.f + rng_f() * 14.f;
+        g_volc[g_nvolc].peak = 0.08f + rng_f() * 0.12f;
         g_nvolc++;
     }
+    free(sub);
 }
 
 static void volcanoes_inject(float *height) {
@@ -399,30 +437,49 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
         float h = (plat*0.42f - 0.06f) + detail*0.42f*sqrtf(clampf(mask,0.f,1.f)) + land_bias;
         height[scps_idx(x,y)] = h - 0.16f*lat*lat;
     }
-    /* Frontières de plaques → chaînes de montagnes (sur la terre seulement) */
+    /* Frontières de plaques → chaînes de montagnes DIRECTIONNELLES.
+     *
+     * La clé : projeter les coordonnées dans le REPÈRE DE LA FRONTIÈRE avant
+     * d'appeler le ridge noise. La tangente tx/ty = direction ALONG la chaîne ;
+     * le ridge noise est anisotrope (fréquence forte ⊥ chaîne, faible ∥) →
+     * les crêtes courent le long de la suture, pas dans tous les sens.
+     * Les contreforts (R2) sont warpés par R1 → branchent sur la dorsale.
+     */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float mask=continental_mask(x,y,seed_f);
-        if (mask<0.15f) continue;                       /* pas de montagnes en mer */
+        if (mask<0.15f) continue;
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
         if (bs<0.04f) continue;
         float dot=g_plates[pa].dx*g_plates[pb].dx+g_plates[pa].dy*g_plates[pb].dy;
         float conv=(1.f-dot)*0.5f;
         float bump=0.f;
-        if (!g_plates[pa].oceanic && !g_plates[pb].oceanic) bump=bs*conv*1.05f;
-        else if (g_plates[pa].oceanic != g_plates[pb].oceanic) bump=bs*conv*0.60f;
-        if (bump>0.f) {
-            float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
-            /* Chaîne primaire : ridge + ridge secondaire warpé → dorsale nervurée */
-            float r1=stb_perlin_ridge_noise3(nx2*8.f, ny2*6.f, seed_f+50.f,2.f,0.5f,1.f,6);
-            float r2=stb_perlin_ridge_noise3(nx2*16.f+r1*2.f,ny2*12.f+r1*2.f,
-                                             seed_f+55.f,2.f,0.5f,1.f,5);
-            height[scps_idx(x,y)] += bump*(r1*0.65f+r2*0.35f)*mtn_amp*mask;
-        }
+        if (!g_plates[pa].oceanic && !g_plates[pb].oceanic) bump=bs*conv*1.10f;
+        else if (g_plates[pa].oceanic != g_plates[pb].oceanic) bump=bs*conv*0.65f;
+        if (bump<=0.f) continue;
+
+        /* Tangente à la frontière = perpendiculaire au vecteur inter-centres */
+        float pdx=g_plates[pb].cx-g_plates[pa].cx;
+        float pdy=g_plates[pb].cy-g_plates[pa].cy;
+        float plen=sqrtf(pdx*pdx+pdy*pdy); if(plen<1.f)plen=1.f;
+        float tx=-pdy/plen, ty=pdx/plen;       /* le long de la chaîne */
+        float lx=(float)x*tx+(float)y*ty;      /* coord. ∥ chaîne */
+        float ly=(float)x*(-ty)+(float)y*tx;   /* coord. ⊥ chaîne */
+
+        /* R1 : dorsale primaire — fréquence faible ∥ (longues crêtes),
+         *      fréquence forte ⊥ (flancs raides) */
+        float r1=stb_perlin_ridge_noise3(lx*0.022f, ly*0.055f,
+                                         seed_f+50.f,2.f,0.5f,1.f,6);
+        /* R2 : contreforts secondaires warpés par R1 → perpendiculaires à la
+         *      dorsale, insérés entre les cols */
+        float r2=stb_perlin_ridge_noise3(lx*0.045f+r1*1.8f, ly*0.028f+r1*1.8f,
+                                         seed_f+55.f,2.f,0.5f,1.f,5);
+        height[scps_idx(x,y)] += bump*(r1*0.68f+r2*0.32f)*mtn_amp*mask;
     }
     normalize_f(height,SCPS_N);
     step_ocean_features(height, seed_f);
-    volcanoes_init(height);
+    /* Volcans tectoniques : placés le long des zones de subduction */
+    volcanoes_init(height, seed_f);
 }
 
 /* ========================================================================
@@ -446,26 +503,27 @@ static void step_architecture(float *height, float seed_f) {
         float mtn = clampf((h-0.46f)/0.38f,0.f,1.f);
         float low = clampf((0.60f-h)/0.38f,0.f,1.f);
 
-        /* R1 — dorsale primaire (basse fréquence, fort signal) */
+        /* R1 — structure topologique basse fréquence, sert uniquement de warp
+         * pour R2/R3 : PAS de contribution directe à la hauteur (évite les
+         * chaînes indépendantes non tectoniques). */
         float r1=stb_perlin_ridge_noise3(nx*5.5f, ny*4.0f, seed_f+200.f,2.f,0.5f,1.f,6);
 
-        /* R2 — contreforts secondaires : coords warpées par r1 → branchent
-         * sur la dorsale sans la quitter */
+        /* R2 — détail de flanc warped par R1 : texture sur relief existant */
         float r2=stb_perlin_ridge_noise3(nx*11.f+r1*2.2f, ny*8.5f+r1*2.2f,
                                          seed_f+210.f,2.f,0.5f,1.f,5);
 
-        /* R3 — éperons tertiaires warpés par r2 → ramifications fines */
+        /* R3 — micro-éperons warpés par R2 */
         float r3=stb_perlin_ridge_noise3(nx*22.f+r2*1.6f, ny*17.f+r2*1.6f,
                                          seed_f+220.f,2.f,0.5f,1.f,4);
 
-        /* Vallées / bassins versants (complément des crêtes) */
+        /* Vallées / bassins versants */
         float v=stb_perlin_fbm_noise3(nx*9.f+r1*0.8f, ny*7.f+r1*0.8f,
                                       seed_f+300.f,2.f,0.5f,5);
 
-        /* Zones montagneuses : réseau de crêtes complet */
-        float mtn_add = r1*0.26f + r2*0.15f + r3*0.08f;
-        /* Zones basses : modelé de vallées seulement */
-        float low_add = v*0.07f;
+        /* Texture pure : R2+R3 ajoutent du détail aux montagnes existantes,
+         * R1 n'est pas additionné (il ne crée pas de montagnes seul). */
+        float mtn_add = r2*0.11f + r3*0.05f;
+        float low_add = v*0.06f;
         height[scps_idx(x,y)] += mtn_add*mtn + low_add*low;
     }
     volcanoes_inject(height);
