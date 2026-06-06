@@ -130,7 +130,8 @@ static void continents_init(int n, float seed_f) {
     if (n<1) n=1;
     if (n>MAX_CONTSHAPE) n=MAX_CONTSHAPE;
     g_ncont=n; g_nislet=0;
-    float R0=(0.52f/sqrtf((float)n))*SCPS_H;
+    float R0=(0.78f/sqrtf((float)n))*SCPS_H;  /* +50% : masses plus vastes →
+                                                 place pour les mers intérieures */
 
     for (int i=0;i<n;i++) {
         ContShape *cs=&g_cshape[i];
