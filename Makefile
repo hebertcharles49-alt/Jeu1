@@ -97,9 +97,14 @@ TECH_DEMO_OBJS := $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_tech_demo.o
 tech_demo: $(TECH_DEMO_OBJS)
 	$(CC) $(TECH_DEMO_OBJS) -o $@ -lm
 
+# Banc d'essai des pools culturels (console, autonome)
+CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_culture_demo.o
+culture_demo: $(CULTURE_DEMO_OBJS)
+	$(CC) $(CULTURE_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
-	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo out_*.ppm montage.bmp
+	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo culture_demo out_*.ppm montage.bmp
 
 .PHONY: all run scps run_scps clean
 
@@ -114,3 +119,5 @@ clean:
 -include $(OBJDIR)/scps_econ_demo.d
 -include $(OBJDIR)/scps_scps_tech.d
 -include $(OBJDIR)/scps_tech_demo.d
+-include $(OBJDIR)/scps_scps_culture.d
+-include $(OBJDIR)/scps_culture_demo.d
