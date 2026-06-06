@@ -83,9 +83,12 @@ static void plates_init(void) {
  * Coordonnées domain-warpées pour éviter les frontières rectilignes. */
 static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
     float nx=(float)px/SCPS_W, ny=(float)py/SCPS_H;
-    /* Warp dédié aux plaques — fréquence plus basse que celui des provinces */
-    float wx=stb_perlin_fbm_noise3(nx*1.5f+0.f,ny*1.5f+0.f,seed_f+800.f,2.f,0.5f,4)*28.f;
-    float wy=stb_perlin_fbm_noise3(nx*1.5f+6.1f,ny*1.5f+3.4f,seed_f+810.f,2.f,0.5f,4)*28.f;
+    /* Warp dédié aux plaques — deux octaves (grossière + fine) pour dissoudre
+     * le motif polygonal Voronoï dans les chaînes (arcs sinueux, pas droits) */
+    float wx=stb_perlin_fbm_noise3(nx*1.5f+0.f,ny*1.5f+0.f,seed_f+800.f,2.f,0.5f,4)*28.f
+            +stb_perlin_fbm_noise3(nx*4.2f+1.f,ny*4.2f+2.f,seed_f+820.f,2.f,0.5f,4)*11.f;
+    float wy=stb_perlin_fbm_noise3(nx*1.5f+6.1f,ny*1.5f+3.4f,seed_f+810.f,2.f,0.5f,4)*28.f
+            +stb_perlin_fbm_noise3(nx*4.2f+3.f,ny*4.2f+5.f,seed_f+830.f,2.f,0.5f,4)*11.f;
     float x=(float)px+wx, y=(float)py+wy;
     float d1=1e30f, d2=1e30f;
     *pa=0; *pb=1;
@@ -203,8 +206,16 @@ static void continents_init(int n, float seed_f) {
 
 static float continental_mask(int x, int y, float seed_f) {
     float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-    float wx=stb_perlin_fbm_noise3(nx*1.6f,ny*1.6f,seed_f+1200.f,2.f,0.5f,4)*0.16f;
-    float wy=stb_perlin_fbm_noise3(nx*1.6f+4.f,ny*1.6f+2.f,seed_f+1210.f,2.f,0.5f,4)*0.16f;
+    /* Domain warping multi-échelle (Inigo Quilez, 2nd ordre) :
+     *   q = fbm(p) ; r = fbm(p + q) ; on interroge le masque en p + (q,r).
+     * Deux échelles superposées → l'iso-contour côtier devient fractal
+     * (baies, péninsules, détroits) au lieu d'une ellipse lisse. */
+    float qx=stb_perlin_fbm_noise3(nx*1.6f,     ny*1.6f,     seed_f+1200.f,2.f,0.5f,5);
+    float qy=stb_perlin_fbm_noise3(nx*1.6f+5.2f,ny*1.6f+1.3f,seed_f+1210.f,2.f,0.5f,5);
+    float rx=stb_perlin_fbm_noise3(nx*3.4f+qx*1.6f,     ny*3.4f+qy*1.6f,     seed_f+1220.f,2.f,0.5f,5);
+    float ry=stb_perlin_fbm_noise3(nx*3.4f+qx*1.6f+3.7f,ny*3.4f+qy*1.6f+2.1f,seed_f+1230.f,2.f,0.5f,5);
+    float wx=qx*0.15f+rx*0.085f;
+    float wy=qy*0.15f+ry*0.085f;
     float fx=(nx+wx)*SCPS_W, fy=(ny+wy)*SCPS_H;
 
     float best=0.f;
@@ -368,7 +379,9 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
          * mer intérieure, tout en laissant l'océan entre les masses. */
         float plat = clampf((mask-0.18f)/0.34f,0.f,1.f);
         plat = plat*plat*(3.f-2.f*plat);
-        float h = (plat*0.42f - 0.06f) + detail*0.42f*mask + land_bias;
+        /* sqrt(mask) au lieu de mask : le détail de relief ne s'annule plus
+         * brutalement à la côte → littoraux moins convexes, plus découpés. */
+        float h = (plat*0.42f - 0.06f) + detail*0.42f*sqrtf(clampf(mask,0.f,1.f)) + land_bias;
         height[scps_idx(x,y)] = h - 0.16f*lat*lat;
     }
     /* Frontières de plaques → chaînes de montagnes (sur la terre seulement) */
@@ -491,6 +504,40 @@ static void step_erosion(float *height, Cell *cells, float erosion) {
     }
     normalize_f(height,SCPS_N);
     free(fdir); free(accum);
+}
+
+/* ========================================================================
+ * CÔTES FRACTALES — détail haute fréquence sur la seule bande littorale
+ *
+ * Appliquée APRÈS l'érosion (sinon l'érosion thermique relisse le détail).
+ * On ne touche QUE les cellules proches du niveau de la mer : on y injecte
+ * un bruit fractal multi-octave, domain-warpé, d'amplitude suffisante pour
+ * faire franchir le rivage localement → criques, caps, détroits et petites
+ * îles satellites. Le large et l'intérieur ne bougent pas (fenêtre nulle). */
+static void step_coastline(float *height, float seed_f) {
+    const float BAND=0.060f;          /* demi-épaisseur de la bande côtière */
+    float *out=(float*)malloc(SCPS_N*sizeof(float));
+    if (!out) return;
+    memcpy(out,height,SCPS_N*sizeof(float));
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        float d=height[i]-SEA_LEVEL;
+        if (d<-BAND || d>BAND) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        /* Domain warp local pour casser tout alignement résiduel */
+        float wx=stb_perlin_fbm_noise3(nx*7.f,ny*7.f,seed_f+2400.f,2.f,0.5f,3)*0.035f;
+        float wy=stb_perlin_fbm_noise3(nx*7.f+3.f,ny*7.f+1.f,seed_f+2410.f,2.f,0.5f,3)*0.035f;
+        float px=nx+wx, py=ny+wy;
+        /* fBm sur trois octaves franches (côte fractale auto-similaire) */
+        float n = stb_perlin_fbm_noise3(px*10.f,py*10.f,seed_f+2420.f,2.f,0.5f,3)*0.55f
+                + stb_perlin_fbm_noise3(px*21.f,py*21.f,seed_f+2430.f,2.f,0.5f,3)*0.30f
+                + stb_perlin_fbm_noise3(px*40.f,py*40.f,seed_f+2440.f,2.f,0.5f,2)*0.15f;
+        /* Fenêtre : maximale au rivage, nulle aux bords de la bande */
+        float wnd=1.f-(d<0?-d:d)/BAND; wnd*=wnd;
+        out[i]=height[i]+n*0.052f*wnd;
+    }
+    memcpy(height,out,SCPS_N*sizeof(float));
+    free(out);
 }
 
 /* ========================================================================
@@ -1803,6 +1850,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] érosion...      "); fflush(stdout);
     step_erosion(height,w->cell,P->erosion); printf("ok\n");
+
+    printf("[scps] côtes fract...  "); fflush(stdout);
+    step_coastline(height,seed_f);        printf("ok\n");
 
     printf("[scps] continentalité..."); fflush(stdout);
     compute_ocean_distance(height,odist);  printf("ok\n");
