@@ -98,7 +98,9 @@ typedef struct {
     /* Coercition temporaire (relocalisation forcée) — décroît chaque tick */
     float      coercion;             /* [0..1] : 0=libre, 1=état d'urgence */
 
+    float      habitability;          /* habitabilité moyenne [0..1] — héritée des provinces */
     bool       active;               /* terre habitable (colonisable) */
+    bool       impassable;           /* zone morte : infranchissable pour colonisation et commerce */
     bool       colonized;            /* effectivement peuplée/settlée */
     int16_t    owner;                /* pays qui contrôle la région (-1 = vierge) */
 } RegionEconomy;

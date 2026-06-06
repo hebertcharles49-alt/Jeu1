@@ -155,23 +155,31 @@ void econ_init(WorldEconomy *e, const World *w) {
     e->n_regions=w->n_regions;
     e->tick=0;
 
-    /* ---- Passe 1 : capacité de chaque région (fertilité × surface) ------- */
+    /* ---- Passe 1 : capacité et habitabilité de chaque région ------------- *
+     * reg_hab = habitabilité moyenne pondérée par la surface (province).
+     * reg_cap = capacité brute, MULTIPLIÉE par reg_hab → les zones glaciaires
+     * et les déserts hyperarides ont cap_pop ≈ 0, reflétant la réalité.     */
     float reg_cap[SCPS_MAX_REG]={0};
+    float reg_hab[SCPS_MAX_REG]={0};
     float cty_cap[SCPS_MAX_COUNTRY]={0};
     for (int rid=0; rid<w->n_regions; rid++) {
         const Region *rg=&w->region[rid];
-        float cap=0.f, area=0.f;
+        float cap=0.f, area=0.f, hab_w=0.f;
         for (int k=0;k<rg->n_provinces;k++) {
             int pid=rg->province_ids[k];
             if (pid<0||pid>=w->n_provinces) continue;
             const Province *pv=&w->province[pid];
-            cap  += pv->area * (0.25f + 0.75f*clampf(pv->subsistance/10.f,0.f,1.f));
-            area += pv->area;
+            float a = (float)pv->area;
+            cap  += a * (0.25f + 0.75f*clampf(pv->subsistance/10.f,0.f,1.f));
+            hab_w += pv->habitability * a;
+            area += a;
         }
         if (area<1.f) continue;
-        reg_cap[rid]=cap;
+        float hab = hab_w / area;   /* habitabilité pondérée par surface */
+        reg_hab[rid] = hab;
+        reg_cap[rid] = cap * hab;   /* la capacité est nulle pour les zones mortes */
         int cid=rg->country;
-        if (cid>=0 && cid<SCPS_MAX_COUNTRY) cty_cap[cid]+=cap;
+        if (cid>=0 && cid<SCPS_MAX_COUNTRY) cty_cap[cid]+=reg_cap[rid];
     }
 
     /* ---- Passe 2 : cible par pays (4000 majeur ≥4 régions, 2000 satellite) */
@@ -196,8 +204,33 @@ void econ_init(WorldEconomy *e, const World *w) {
             if (pid<0||pid>=w->n_provinces) continue;
             area_sum += w->province[pid].area;
         }
-        if (area_sum<1.f || reg_cap[rid]<=0.f) { re->active=false; continue; }
+        /* Zones mortes / infranchissables : glacier, pic, volcan, désert hyperaride.
+         * Deux critères combinés :
+         *  a) fraction de la surface à habitabilité nulle (hab_base=0 : GLACIER/PEAK/VOLCANO) ≥ 35%
+         *  b) habitabilité moyenne de la région < 12%
+         * Le critère (a) détecte les barrières même quand une vallée habitable
+         * dilue la moyenne. Le critère (b) attrape les déserts hyperarides sans pic. */
+        float dead_area=0.f;
+        for (int k=0;k<rg->n_provinces;k++){
+            int pid=rg->province_ids[k];
+            if (pid<0||pid>=w->n_provinces) continue;
+            if (w->province[pid].habitability < 0.01f)
+                dead_area += (float)w->province[pid].area;
+        }
+        bool mostly_dead = (area_sum>0.f && dead_area/area_sum >= 0.35f);
+        bool very_low    = (reg_hab[rid] < 0.12f);
+        bool is_impass   = mostly_dead || very_low;
+
+        re->habitability = reg_hab[rid];
+        if (area_sum<1.f || reg_cap[rid]<=0.f || is_impass) {
+            re->active     = false;
+            re->impassable = is_impass;
+            re->colonized  = false;
+            re->owner      = -1;
+            continue;
+        }
         re->active=true;
+        re->impassable=false;
         re->colonized=false;
         re->owner=-1;
 
@@ -269,7 +302,11 @@ void econ_init(WorldEconomy *e, const World *w) {
         }
     }
 
-    /* ---- Adjacence de régions (terre, 4-connexe) pour la colonisation ---- */
+    /* ---- Adjacence de régions (terre, 4-connexe) pour la colonisation ---- *
+     * On ne trace un lien que si AUCUNE des deux régions n'est infranchissable.
+     * Cela rend les glaciers et déserts hyperarides des barrières naturelles :
+     * une civilisation ne peut pas coloniser « de l'autre côté » d'une zone morte
+     * sans contourner par une région habitable adjacente.                     */
     static const int DX4[4]={1,-1,0,0}, DY4[4]={0,0,1,-1};
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int ra=w->cell[scps_idx(x,y)].region;
@@ -279,7 +316,10 @@ void econ_init(WorldEconomy *e, const World *w) {
             if (nx<0||nx>=SCPS_W||ny<0||ny>=SCPS_H) continue;
             int rb=w->cell[scps_idx(nx,ny)].region;
             if (rb<0||rb==ra) continue;
-            e->adj[ra][rb]=1; e->adj[rb][ra]=1;
+            /* Ne créer un lien que si les deux régions sont franchissables */
+            if (!e->region[ra].impassable && !e->region[rb].impassable) {
+                e->adj[ra][rb]=1; e->adj[rb][ra]=1;
+            }
         }
     }
 
@@ -724,9 +764,12 @@ void econ_print_region(const WorldEconomy *e, const World *w, int region_id) {
     if (region_id<0||region_id>=e->n_regions) return;
     const RegionEconomy *re=&e->region[region_id];
     const Region *rg=&w->region[region_id];
-    printf("\n┌─ Région #%d  « %s »  (tick %d) %s\n",
+    const char *status = re->impassable ? "[INFRANCHISSABLE]"
+                       : re->active    ? ""
+                       :                 "[inactive]";
+    printf("\n┌─ Région #%d  « %s »  (tick %d) %s  hab=%.0f%%\n",
            region_id, rg->name[0]?rg->name:"—", e->tick,
-           re->active?"":"[inactive]");
+           status, re->habitability*100.f);
     if (!re->active) return;
 
     printf("│ Population & classes\n");
@@ -776,8 +819,11 @@ void econ_print_summary(const WorldEconomy *e, const World *w) {
         satw+=re->satisfaction*rp;
         if (re->gdp>best_gdp){ best_gdp=re->gdp; best=rid; }
     }
+    int impass=0;
+    for (int rid=0;rid<e->n_regions;rid++) if (e->region[rid].impassable) impass++;
     printf("\n══ SOMMAIRE MONDE  (tick %d) ══\n", e->tick);
-    printf("  régions actives : %d / %d\n", active, e->n_regions);
+    printf("  régions actives : %d / %d  (dont %d infranchissables)\n",
+           active, e->n_regions, impass);
     printf("  population tot. : %.0f\n", pop);
     printf("  satisf. moyenne : %.0f%%\n", pop>0?100.f*satw/pop:0.f);
     printf("  PIB cumulé      : %.0f\n", gdp);

@@ -2164,6 +2164,51 @@ static void gen_resources(World *w) {
         float roll=rng_f()*tot, acc=0.f; Resource chosen=RES_GRAIN;
         for (int r=1;r<RES_PROD_FIRST;r++){ acc+=wt[r]; if(acc>=roll){chosen=(Resource)r;break;} }
         pr->resource=chosen;
+
+        /* ---- Habitabilité de la province [0..1] -------------------------
+         * Base biome (plafond dur) × confort thermique (pénalité froid/chaud).
+         * Glacier/Pic/Volcan → 0 absolu (infranchissable).
+         * Sahara chaud → ~0.05 ; steppe froide → 0.25-0.40 ;
+         * plaines tempérées → 0.80-0.90. */
+        float hab_base;
+        switch (B) {
+            case BIO_GLACIER:
+            case BIO_PEAK:
+            case BIO_VOLCANO:        hab_base=0.00f; break;  /* zéro absolu */
+            case BIO_DESERT:         hab_base=0.08f; break;
+            case BIO_COASTAL_DESERT: hab_base=0.18f; break;
+            case BIO_DRYLANDS:       hab_base=0.28f; break;
+            case BIO_MOUNTAINS:      hab_base=0.32f; break;
+            case BIO_STEPPE:
+            case BIO_SAVANNA:        hab_base=0.45f; break;
+            case BIO_MARSH:
+            case BIO_BOG:            hab_base=0.50f; break;
+            case BIO_HILLS:
+            case BIO_HIGHLANDS:      hab_base=0.60f; break;
+            case BIO_JUNGLE:
+            case BIO_MANGROVE:       hab_base=0.65f; break;
+            case BIO_FOREST:
+            case BIO_WOODS:          hab_base=0.72f; break;
+            case BIO_GRASSLAND:      hab_base=0.75f; break;
+            case BIO_COAST:
+            case BIO_SHALLOW:        hab_base=0.78f; break;
+            case BIO_PLAINS:         hab_base=0.88f; break;
+            case BIO_FARMLAND:       hab_base=0.95f; break;
+            default:                 hab_base=0.55f; break;
+        }
+        /* Confort thermique : [0.30..0.72] = confort total ;
+         * en-dessous (froid) et au-dessus (chaud) pénalité sévère */
+        float t_comfort;
+        if (tmp >= 0.30f && tmp <= 0.72f) {
+            t_comfort = 1.0f;
+        } else if (tmp < 0.30f) {
+            t_comfort = clampf(tmp / 0.30f, 0.f, 1.f);
+        } else {
+            t_comfort = clampf((1.f - tmp) / 0.28f, 0.f, 1.f);
+        }
+        /* hab_base : zéro absolu court-circuite le calcul (GLACIER/PEAK/VOLCANO) */
+        pr->habitability = (hab_base <= 0.f) ? 0.f
+                         : clampf(hab_base * (0.45f + 0.55f*t_comfort), 0.f, 1.f);
     }
 }
 

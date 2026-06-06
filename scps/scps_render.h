@@ -21,6 +21,7 @@ typedef enum {
     VIEW_MOISTURE,      /* Précipitations / humidité (bleu=humide) */
     VIEW_TEMPERATURE,   /* Température (rouge=chaud) */
     VIEW_RESOURCES,     /* Bien commercial par province */
+    VIEW_HABITABILITY,  /* Habitabilité : rouge=mort, jaune=marginal, vert=fertile */
     VIEW_COUNT
 } ViewMode;
 

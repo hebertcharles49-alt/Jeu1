@@ -169,6 +169,12 @@ typedef struct {
     /* Économie */
     Resource resource;         /* bien commercial principal */
 
+    /* Habitabilité [0..1] — calculée une fois à la génération (biome + temp + altitude).
+     * 0 = région morte (glacier, pic, désert hyperaride) ;
+     * 1 = terres cultivées idéales.
+     * Sert de filtre dans econ_init (active/impassable) et de couche visuelle. */
+    float    habitability;
+
     /* Fiche SCPS — axes [0..10] (doc §2.2) */
     float    langue;           /* horloge phylogénétique */
     float    parente;

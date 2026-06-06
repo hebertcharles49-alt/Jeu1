@@ -251,7 +251,8 @@ int main(int argc, char **argv) {
                 case SDLK_7:     mode=VIEW_FERTILITY;   dirty=true; break;
                 case SDLK_8:     mode=VIEW_MOISTURE;    dirty=true; break;
                 case SDLK_9:     mode=VIEW_TEMPERATURE; dirty=true; break;
-                case SDLK_0:     mode=VIEW_RESOURCES;   dirty=true; break;
+                case SDLK_0:     mode=VIEW_RESOURCES;    dirty=true; break;
+                case SDLK_i:     mode=VIEW_HABITABILITY; dirty=true; break;
                 case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
                 case SDLK_r:
                     seed ^= (uint32_t)time(NULL) * 2654435761u;

@@ -59,7 +59,8 @@ int main(int argc, char **argv) {
         { VIEW_REGIONS,     "out_regions.ppm"     },
         { VIEW_COUNTRIES,   "out_pays.ppm"        },
         { VIEW_CONTINENTS,  "out_continents.ppm"  },
-        { VIEW_RESOURCES,   "out_resources.ppm"   },
+        { VIEW_RESOURCES,    "out_resources.ppm"    },
+        { VIEW_HABITABILITY, "out_habitability.ppm" },
     };
     /* Histogramme des ressources (vérification du placement causal) */
     int rescount[RES_COUNT]; for (int r=0;r<RES_COUNT;r++) rescount[r]=0;

@@ -17,7 +17,7 @@
 
 const char *VIEW_NAMES[VIEW_COUNT] = {
     "Terrain","Territoires","Régions","Pays","Continents","Altimétrie",
-    "Fertilité","Humidité","Température","Ressources"
+    "Fertilité","Humidité","Température","Ressources","Habitabilité"
 };
 
 /* ---- Primitives couleur ---------------------------------------------- */
@@ -115,6 +115,31 @@ static uint32_t cell_color(const World *w, int cx, int cy,
 
     /* ---- Température (bleu froid → rouge chaud) ----------------------- */
     if (mode == VIEW_TEMPERATURE) return heatmap(c->temperature);
+
+    /* ---- Habitabilité (rouge=mort, jaune=marginal, vert=fertile) ----- */
+    if (mode == VIEW_HABITABILITY) {
+        if (h < SEA_LEVEL) return water_color(h);
+        float hab = 0.f;
+        if (c->province >= 0) hab = w->province[c->province].habitability;
+        /* 0→rouge vif, 0.15→orange, 0.40→jaune, 0.70→vert clair, 1→vert */
+        float r2, g2, b2;
+        if (hab < 0.15f) {
+            float t2 = hab / 0.15f;
+            r2=1.f; g2=t2*0.55f; b2=0.f;
+        } else if (hab < 0.40f) {
+            float t2 = (hab-0.15f)/0.25f;
+            r2=1.f-t2*0.3f; g2=0.55f+t2*0.35f; b2=0.f;
+        } else if (hab < 0.70f) {
+            float t2 = (hab-0.40f)/0.30f;
+            r2=0.7f-t2*0.7f; g2=0.90f; b2=t2*0.20f;
+        } else {
+            float t2 = (hab-0.70f)/0.30f;
+            r2=0.f; g2=0.90f-t2*0.25f; b2=0.20f+t2*0.10f;
+        }
+        /* Conserver le hillshading léger pour la lisibilité du relief */
+        float sh2 = 0.60f + c->shade*0.40f;
+        return rgba(r2*sh2, g2*sh2, b2*sh2, 1.f);
+    }
 
     /* ---- Ressources (couleur du bien commercial × hillshading) ------- */
     if (mode == VIEW_RESOURCES) {
