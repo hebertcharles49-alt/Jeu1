@@ -310,7 +310,7 @@ static int     g_nvolc=0;
  * Cascades. Aucun volcan aléatoire — tout découle de la géologie. */
 static void volcanoes_init(const float *height, float seed_f) {
     g_nvolc = 0;
-    int want = 4 + (int)(rng_f() * 5.f);   /* 4-8 volcans */
+    int want = 2 + (int)(rng_f() * 3.f);   /* 2-4 volcans */
 
     /* 1. Collecte des points de frontière de subduction */
     typedef struct { short x, y; int cont_plate; } SubPt;
@@ -346,7 +346,7 @@ static void volcanoes_init(const float *height, float seed_f) {
         int vx = (int)(sp.x + dx/d*arc + tx*jitter);
         int vy = (int)(sp.y + dy/d*arc + ty*jitter);
         if (vx < 2 || vx >= SCPS_W-2 || vy < 2 || vy >= SCPS_H-2) continue;
-        if (height[scps_idx(vx,vy)] < SEA_LEVEL + 0.02f) continue;
+        if (height[scps_idx(vx,vy)] < MOUNTAIN_H) continue;   /* biome montagneux seulement */
         bool ok = true;
         for (int v = 0; v < g_nvolc && ok; v++) {
             float ddx = vx - g_volc[v].cx, ddy = vy - g_volc[v].cy;
@@ -2124,6 +2124,20 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] climat (vent)... "); fflush(stdout);
     gen_climate(w,height,moisture,temp,odist,seed_f,P); printf("ok\n");
+
+    /* Atténuation des rivières en zones arides : le débit D8 est purement
+     * topographique ; on corrige après le climat pour effacer les « fleuves »
+     * fantômes qui traverseraient un désert ou une steppe très sèche.
+     * Quadratique : en dessous de moisture=0.25 le débit s'annule presque. */
+    for (int i=0; i<SCPS_N; i++) {
+        if (height[i] < SEA_LEVEL) continue;
+        float m = moisture[i];
+        if (m < 0.30f) {
+            float damp = (m / 0.30f);
+            damp = damp * damp;
+            w->cell[i].river = (uint8_t)(w->cell[i].river * damp);
+        }
+    }
 
     printf("[scps] biomes...       "); fflush(stdout);
     /* Jitter haute fréquence sur t et m pour briser les lignes de seuil */
