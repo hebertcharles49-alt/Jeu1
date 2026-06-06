@@ -51,23 +51,31 @@ int main(int argc, char **argv) {
     printf("    pays : %d joueur, %d antagonistes, %d cités-états, %d vierges\n",
            n_player,n_antag,n_city,n_virgin);
 
-    printf("=== Simulation : %d ticks (econ + commerce + colonisation) ===\n", ticks);
-    int total_founded=0;
+    printf("=== Simulation : %d ticks (econ + migration + commerce + colonisation) ===\n", ticks);
+    int total_founded=0, total_mig_flows=0;
     for (int tick=0; tick<ticks; tick++) {
         econ_tick(e);
-        total_founded += econ_colonize_tick(e, w);
+        total_founded    += econ_colonize_tick(e, w);
+        total_mig_flows  += econ_migrate_tick(e, w);
         trade_tick(e, t);
         /* Recalibrer le réseau tous les 5 ticks (colonisation → nouveaux nœuds). */
         if (tick>0 && tick%5==0) trade_network_build(t, w, e);
     }
     /* Décompte des régions colonisées */
     int n_col=0, n_active=0;
+    float total_diaspora=0.f, total_coercion=0.f;
     for (int rid=0;rid<e->n_regions;rid++){
         if (e->region[rid].active) n_active++;
-        if (e->region[rid].colonized) n_col++;
+        if (e->region[rid].colonized) {
+            n_col++;
+            total_diaspora += e->region[rid].diaspora_pop;
+            total_coercion += e->region[rid].coercion;
+        }
     }
     printf("    colonisation : %d fondations, %d/%d régions peuplées\n",
            total_founded, n_col, n_active);
+    printf("    migration    : %d flux actifs / simulation, diaspora tot. %.0f\n",
+           total_mig_flows, total_diaspora);
 
     econ_print_summary(e, w);
     trade_print_summary(t, e, w, 12);

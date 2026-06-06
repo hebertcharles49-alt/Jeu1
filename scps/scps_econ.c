@@ -97,6 +97,22 @@ static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
 #define DEATH_RATE    0.015f
 #define SOCIETY_BONUS 0.008f
 
+/* Colonisation */
+#define COLONY_MIN_POP      500.f   /* pop minimale d'une région pour essaimer  */
+#define COLONY_COST_POP     250.f   /* colons détachés (quittent la mère)       */
+#define COLONY_SEED_POP     100.f   /* pop installée dans la nouvelle région    */
+#define COLONY_FOOD_GATE    0.35f   /* seuil de subsistance pour essaimer        */
+
+/* Migration interne */
+#define MIGRATE_RATE        0.02f   /* fraction max de bourgeois/élites migrant/tick */
+#define MIGRATE_THRESHOLD   1.30f   /* différentiel de prospérité déclencheur        */
+#define DIASPORA_TECH_RATE  0.0008f /* tech/tick par unité de diaspora               */
+#define DIASPORA_DECAY      0.98f   /* acculturation : diaspora s'absorbe (~50 ticks) */
+
+/* Relocalisation forcée */
+#define RELOC_COERCION_BASE 0.25f   /* pic de coercition de base par évènement       */
+#define COERCION_DECAY      0.93f   /* demi-vie ≈ 10 ticks                            */
+
 static inline float clampf(float v,float lo,float hi){return v<lo?lo:(v>hi?hi:v);}
 
 const char *social_class_name(SocialClass c) {
@@ -267,32 +283,50 @@ void econ_init(WorldEconomy *e, const World *w) {
         }
     }
 
-    /* ---- Peuplement initial : monde quasi vide -------------------------- *
-     * Seule la région-CAPITALE des polités actives (JOUEUR et ANTAGONISTES)
-     * est remplie à sa capacité — le reste de leur territoire est à coloniser.
-     * Une poignée de CITÉS-ÉTATS sont peuplées à ~2000 (figées). Tout le reste
-     * du monde est vierge et colonisable. */
+    /* ---- Peuplement initial : monde quasi vide ----------------------------- *
+     * JOUEUR / ANTAGONISTE : seule la région-capitale est peuplée à cap_pop.
+     *   Le reste de leur territoire est vierge → ils colonisent.
+     * CITÉ-ÉTAT : TOUTES leurs régions sont peuplées à pop réduite (2000 / n_regs
+     *   par région, plafonnée à cap_pop). Elles colonisent ensuite leurs propres
+     *   territoires vacants mais n'en sortent jamais.
+     * Tout le reste du monde est vierge et colonisable. */
     for (int cid=0; cid<w->n_countries; cid++) {
         const Country *ct=&w->country[cid];
         PolityRole role=ct->role;
-        if (role!=POLITY_PLAYER && role!=POLITY_ANTAGONIST && role!=POLITY_CITY_STATE)
-            continue;
-        int cap_prov=ct->capital_prov;
-        if (cap_prov<0||cap_prov>=w->n_provinces) continue;
-        int cap_reg=w->province[cap_prov].region;
-        if (cap_reg<0||cap_reg>=e->n_regions) continue;
-        RegionEconomy *re=&e->region[cap_reg];
-        if (!re->active) continue;
 
-        /* « Remplie » = à la capacité d'accueil du site (la subsistance locale
-         * a été dimensionnée sur cap_pop, donc la région se nourrit). Le pays
-         * grandira au-delà en colonisant ses voisines. */
-        float seed_pop = (role==POLITY_CITY_STATE)
-            ? fminf(re->cap_pop, 2000.f)       /* cité-état : ~2000, figée */
-            : re->cap_pop;                      /* joueur/antagoniste : capitale pleine */
-        econ_seed_population(re, seed_pop);
-        re->colonized=true;
-        re->owner=(int16_t)cid;
+        if (role==POLITY_PLAYER || role==POLITY_ANTAGONIST) {
+            int cap_prov=ct->capital_prov;
+            if (cap_prov<0||cap_prov>=w->n_provinces) continue;
+            int cap_reg=w->province[cap_prov].region;
+            if (cap_reg<0||cap_reg>=e->n_regions) continue;
+            RegionEconomy *re=&e->region[cap_reg];
+            if (!re->active) continue;
+            econ_seed_population(re, re->cap_pop);
+            re->colonized=true;
+            re->owner=(int16_t)cid;
+
+        } else if (role==POLITY_CITY_STATE) {
+            /* Compter les régions actives du pays */
+            int n_act=0;
+            for (int ri=0;ri<ct->n_regions;ri++){
+                int rid=ct->region_ids[ri];
+                if (rid>=0&&rid<e->n_regions&&e->region[rid].active) n_act++;
+            }
+            if (n_act==0) continue;
+            /* 2000 pop répartis uniformément (plafond = cap_pop de chaque région).
+             * À 3 régions → ~667/reg ; à 5 → ~400/reg. Les régions vierges seront
+             * colonisées depuis les régions sœurs (econ_colonize_tick). */
+            float pop_per_reg = 2000.f / (float)n_act;
+            for (int ri=0;ri<ct->n_regions;ri++){
+                int rid=ct->region_ids[ri];
+                if (rid<0||rid>=e->n_regions) continue;
+                RegionEconomy *re=&e->region[rid];
+                if (!re->active) continue;
+                econ_seed_population(re, fminf(re->cap_pop, pop_per_reg));
+                re->colonized=true;
+                re->owner=(int16_t)cid;
+            }
+        }
     }
 }
 
@@ -445,13 +479,20 @@ void econ_tick(WorldEconomy *e) {
 
         /* Croissance calibrée : doublement ~30 ans à food_sat=1, soc=0.5
          *   net = BIRTH_RATE*food_sat - DEATH_RATE + SOCIETY_BONUS*society_sat
-         * + pic de famine si food_sat < 0.35 */
+         * + pic de famine si food_sat < 0.35
+         * Plafond souple : la croissance s'annule à 1.1×cap_pop (apex naturel
+         * entre 1000 et 6000 selon la capacité du site). */
         float food_s = re->food_sat;
         float soc_s  = re->society_sat;
         float net_growth = BIRTH_RATE*food_s - DEATH_RATE + SOCIETY_BONUS*soc_s;
         if (food_s < 0.35f)
             net_growth -= (0.35f - food_s) * 0.12f;   /* pic de mortalité famine */
         net_growth = clampf(net_growth, -0.10f, 0.06f);
+
+        float total_pop_now=0.f;
+        for (int c=0;c<CLASS_COUNT;c++) total_pop_now+=re->strata[c].pop;
+        float cap_factor = fmaxf(0.f, 1.f - total_pop_now/(re->cap_pop*1.1f));
+        net_growth *= cap_factor;
 
         float satsum=0.f, popsum=0.f;
         for (int c=0;c<CLASS_COUNT;c++) {
@@ -461,6 +502,7 @@ void econ_tick(WorldEconomy *e) {
             satsum+=st->satisfaction*st->pop; popsum+=st->pop;
         }
         re->satisfaction=(popsum>0.f)?satsum/popsum:0.f;
+        re->prosperity = re->gdp/(popsum+1.f);
 
         /* Tech : les élites convertissent richesse × satisfaction en savoir. */
         PopStratum *el=&re->strata[CLASS_ELITE];
@@ -477,6 +519,22 @@ void econ_tick(WorldEconomy *e) {
 
         for (int r=0;r<RES_COUNT;r++){ re->supply[r]=supply[r]; re->demand[r]=demand[r]; }
 
+        /* Diaspora : bonus tech par innovation culturelle accumulée.
+         * S'absorbe progressivement (acculturation, demi-vie ~50 ticks). */
+        if (re->diaspora_pop > 0.f) {
+            re->tech += re->diaspora_pop * DIASPORA_TECH_RATE * re->diaspora_innovation;
+            re->diaspora_pop       *= DIASPORA_DECAY;
+            re->diaspora_innovation*= DIASPORA_DECAY;
+            if (re->diaspora_pop < 0.5f) {
+                re->diaspora_pop=0.f; re->diaspora_innovation=0.f;
+            }
+        }
+
+        /* Coercition : décroît exponentiellement (demi-vie ≈ 10 ticks).
+         * La relocalisation forcée et certains événements la relèvent. */
+        re->coercion *= COERCION_DECAY;
+        if (re->coercion < 0.005f) re->coercion=0.f;
+
         /* Décroissance du stock excédentaire (denrées périssables / report
          * limité) : 15% s'évapore, évite l'accumulation infinie. */
         for (int r=0;r<RES_COUNT;r++) re->stock[r]*=0.85f;
@@ -484,60 +542,178 @@ void econ_tick(WorldEconomy *e) {
 }
 
 /* ====================================================================== */
-/* COLONISATION — expansion du joueur et des antagonistes                 */
+/* COLONISATION                                                            */
 /* ====================================================================== */
+/* Joueur/Antagoniste : essaiment vers toute région vierge adjacente.
+ * Cité-État        : essaime uniquement vers ses propres régions vacantes.
+ * Dans les deux cas : au plus une fondation par polité par tick.           */
 
-#define COLONY_MIN_POP   500.f   /* pop minimale d'une région pour essaimer  */
-#define COLONY_COST_POP  250.f   /* colons détachés (quittent la mère)       */
-#define COLONY_SEED_POP  280.f   /* pop installée dans la nouvelle région    */
-#define COLONY_FOOD_GATE 0.35f   /* seuil de subsistance pour essaimer        */
+static void colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid) {
+    RegionEconomy *src=&e->region[src_rid];
+    RegionEconomy *dst=&e->region[dst_rid];
+    float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
+    float take=fminf(COLONY_COST_POP, spop*0.25f);
+    for (int c=0;c<CLASS_COUNT;c++)
+        src->strata[c].pop -= take*(src->strata[c].pop/fmaxf(spop,EPS));
+    econ_seed_population(dst, COLONY_SEED_POP);
+    dst->colonized=true;
+    dst->owner=(int16_t)cid;
+}
 
 int econ_colonize_tick(WorldEconomy *e, const World *w) {
     int founded=0;
 
-    /* Chaque pays expansionniste (joueur/antagoniste) tente AU PLUS une
-     * fondation par tick : on cherche une région vierge adjacente à l'une de
-     * ses régions peuplées et viables, puis on y détache des colons. */
     for (int cid=0; cid<w->n_countries; cid++) {
-        PolityRole role=w->country[cid].role;
-        if (role!=POLITY_PLAYER && role!=POLITY_ANTAGONIST) continue;
+        const Country *ct=&w->country[cid];
+        PolityRole role=ct->role;
 
-        /* Meilleure source : région du pays la plus peuplée et rassasiée. */
-        int best_src=-1, best_dst=-1; float best_score=-1.f;
-        for (int rs=0; rs<e->n_regions; rs++) {
-            RegionEconomy *src=&e->region[rs];
-            if (!src->colonized || src->owner!=cid) continue;
-            float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
-            if (spop<COLONY_MIN_POP || src->food_sat<COLONY_FOOD_GATE) continue;
+        if (role==POLITY_PLAYER || role==POLITY_ANTAGONIST) {
+            /* Cherche la meilleure paire (source, cible) du pays. */
+            int best_src=-1, best_dst=-1; float best_score=-1.f;
+            for (int rs=0; rs<e->n_regions; rs++) {
+                RegionEconomy *src=&e->region[rs];
+                if (!src->colonized || src->owner!=cid) continue;
+                float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
+                if (spop<COLONY_MIN_POP || src->food_sat<COLONY_FOOD_GATE) continue;
+                for (int rd=0; rd<e->n_regions; rd++) {
+                    if (!e->adj[rs][rd]) continue;
+                    RegionEconomy *dst=&e->region[rd];
+                    if (!dst->active || dst->colonized) continue;
+                    float score = dst->cap_pop*0.001f + (spop-COLONY_MIN_POP)*0.0005f
+                                + src->food_sat;
+                    if (score>best_score){ best_score=score; best_src=rs; best_dst=rd; }
+                }
+            }
+            if (best_src>=0 && best_dst>=0) {
+                colonize_from(e, best_src, best_dst, cid);
+                founded++;
+            }
 
-            for (int rd=0; rd<e->n_regions; rd++) {
-                if (!e->adj[rs][rd]) continue;
-                RegionEconomy *dst=&e->region[rd];
-                if (!dst->active || dst->colonized) continue;
-                /* score : capacité d'accueil de la cible × surplus de la mère */
-                float score = dst->cap_pop*0.001f + (spop-COLONY_MIN_POP)*0.0005f
-                            + src->food_sat;
-                if (score>best_score){ best_score=score; best_src=rs; best_dst=rd; }
+        } else if (role==POLITY_CITY_STATE) {
+            /* Ne peut coloniser que ses propres régions vacantes adjacentes à
+             * une de ses régions déjà peuplées. */
+            int best_src=-1, best_dst=-1; float best_score=-1.f;
+            for (int ri=0; ri<ct->n_regions; ri++) {
+                int rs=ct->region_ids[ri];
+                if (rs<0||rs>=e->n_regions) continue;
+                RegionEconomy *src=&e->region[rs];
+                if (!src->colonized || src->owner!=cid) continue;
+                float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
+                if (spop<COLONY_MIN_POP || src->food_sat<COLONY_FOOD_GATE) continue;
+                /* Cibles : uniquement les régions sœurs du même pays */
+                for (int rj=0; rj<ct->n_regions; rj++) {
+                    int rd=ct->region_ids[rj];
+                    if (rd<0||rd>=e->n_regions||!e->adj[rs][rd]) continue;
+                    RegionEconomy *dst=&e->region[rd];
+                    if (!dst->active || dst->colonized) continue;
+                    float score = dst->cap_pop*0.001f + spop*0.0005f;
+                    if (score>best_score){ best_score=score; best_src=rs; best_dst=rd; }
+                }
+            }
+            if (best_src>=0 && best_dst>=0) {
+                colonize_from(e, best_src, best_dst, cid);
+                founded++;
             }
         }
-
-        if (best_src<0 || best_dst<0) continue;
-
-        /* Détache les colons de la région mère (au prorata des strates). */
-        RegionEconomy *src=&e->region[best_src];
-        float spop=0.f; for(int c=0;c<CLASS_COUNT;c++) spop+=src->strata[c].pop;
-        float take=fminf(COLONY_COST_POP, spop*0.25f);
-        for (int c=0;c<CLASS_COUNT;c++)
-            src->strata[c].pop -= take*(src->strata[c].pop/fmaxf(spop,EPS));
-
-        /* Installe la colonie. */
-        RegionEconomy *dst=&e->region[best_dst];
-        econ_seed_population(dst, COLONY_SEED_POP);
-        dst->colonized=true;
-        dst->owner=(int16_t)cid;
-        founded++;
     }
     return founded;
+}
+
+/* ====================================================================== */
+/* MIGRATION INTERNE                                                       */
+/* ====================================================================== */
+/* Principe : les bourgeois et élites migrent vers les régions adjacentes
+ * plus prospères. La migration crée de la DIASPORA dans la destination,
+ * ce qui augmente son innovation (tech). La pression sur les techs orphelines
+ * (orphan_tech_weight) est aussi mise à jour pour que scps_tech puisse la lire.
+ *
+ * Les laborers ne migrent pas spontanément ; ils sont l'objet de relocalisation
+ * forcée (econ_relocate_pop).                                                  */
+
+int econ_migrate_tick(WorldEconomy *e, const World *w) {
+    (void)w;  /* adj est dans e ; w réservé pour extensions futures */
+    int flows=0;
+
+    for (int rs=0; rs<e->n_regions; rs++) {
+        RegionEconomy *src=&e->region[rs];
+        if (!src->colonized || src->gdp<=0.f) continue;
+
+        for (int rd=0; rd<e->n_regions; rd++) {
+            if (!e->adj[rs][rd]) continue;
+            RegionEconomy *dst=&e->region[rd];
+            if (!dst->colonized) continue;
+
+            /* Différentiel de prospérité : dst doit être significativement
+             * plus riche pour attirer des migrants. */
+            float pros_src = src->prosperity + 0.01f;  /* éviter div/0 */
+            float pros_dst = dst->prosperity;
+            if (pros_dst <= pros_src * MIGRATE_THRESHOLD) continue;
+
+            /* Taux de migration proportionnel au différentiel, plafonné. */
+            float ratio = fminf(MIGRATE_RATE,
+                                (pros_dst/pros_src - 1.f) * 0.04f);
+            float migrated=0.f;
+
+            for (int cl=CLASS_BOURGEOIS; cl<CLASS_COUNT; cl++) {
+                float mv = src->strata[cl].pop * ratio;
+                if (mv < 0.5f) continue;
+                /* Transfert pop + richesse proportionnelle */
+                float wfrac = mv / fmaxf(src->strata[cl].pop, 1.f);
+                float wmv   = src->strata[cl].wealth * wfrac;
+                src->strata[cl].pop    -= mv;
+                src->strata[cl].wealth -= wmv;
+                dst->strata[cl].pop    += mv;
+                dst->strata[cl].wealth += wmv;
+                migrated += mv;
+            }
+
+            if (migrated < 0.5f) continue;
+
+            /* Effet diaspora : novelty = différentiel normalisé.
+             * Plus les cultures d'origine et de destination sont distantes
+             * (proxy ici : différentiel de prospérité), plus l'apport est riche.
+             * Un système culture-intégré pourra remplacer ce proxy plus tard. */
+            float novelty = pros_dst/pros_src - 1.f;
+            dst->diaspora_pop         += migrated;
+            dst->diaspora_innovation  += migrated * novelty;
+            dst->orphan_tech_weight   += migrated * novelty * 0.05f;
+            flows++;
+        }
+    }
+    return flows;
+}
+
+/* ====================================================================== */
+/* RELOCALISATION FORCÉE                                                   */
+/* ====================================================================== */
+/* Déplace `amount` habitants (surtout laborers) de src → dst.
+ * Génère un pic de coercition dans la source, proportionnel à la fraction
+ * déplacée. La destination subit un léger choc d'accueil (stress social).  */
+
+void econ_relocate_pop(WorldEconomy *e, int src_rid, int dst_rid, float amount) {
+    if (src_rid<0||src_rid>=e->n_regions||dst_rid<0||dst_rid>=e->n_regions) return;
+    RegionEconomy *src=&e->region[src_rid];
+    RegionEconomy *dst=&e->region[dst_rid];
+    if (!src->colonized||!dst->colonized||amount<1.f) return;
+
+    float src_pop=0.f;
+    for (int c=0;c<CLASS_COUNT;c++) src_pop+=src->strata[c].pop;
+    float take=fminf(amount, src_pop*0.5f);  /* limite : 50% de la source */
+    if (take<1.f) return;
+
+    /* Prélève d'abord les laborers (80%), puis les bourgeois si insuffisant. */
+    float lab_take = fminf(take*0.8f, src->strata[CLASS_LABORER].pop);
+    float bou_take = fminf(take - lab_take, src->strata[CLASS_BOURGEOIS].pop);
+    src->strata[CLASS_LABORER].pop   -= lab_take;
+    src->strata[CLASS_BOURGEOIS].pop -= bou_take;
+    dst->strata[CLASS_LABORER].pop   += lab_take;
+    dst->strata[CLASS_BOURGEOIS].pop += bou_take;
+
+    /* Coercition source : proportionnelle à la fraction déplacée.
+     * La destination a un léger choc de réception (10% du spike source). */
+    float frac = take / fmaxf(src_pop, 1.f);
+    src->coercion = fminf(1.f, src->coercion + RELOC_COERCION_BASE * frac * 4.f);
+    dst->coercion = fminf(1.f, dst->coercion + RELOC_COERCION_BASE * 0.10f);
 }
 
 /* ====================================================================== */
@@ -563,6 +739,11 @@ void econ_print_region(const WorldEconomy *e, const World *w, int region_id) {
     }
     printf("│ Satisfaction générale : %.0f%%   PIB %.0f   Trésor %.0f   Tech %.1f\n",
            re->satisfaction*100.f, re->gdp, re->treasury, re->tech);
+    if (re->diaspora_pop > 0.5f || re->coercion > 0.005f)
+        printf("│ Diaspora : %.0f hab  innov %.2f  tech-orpheline pression %.2f"
+               "  coercition %.0f%%\n",
+               re->diaspora_pop, re->diaspora_innovation,
+               re->orphan_tech_weight, re->coercion*100.f);
 
     printf("│ Manufactures\n");
     if (re->n_bld==0) printf("│   (aucune)\n");

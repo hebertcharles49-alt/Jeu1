@@ -199,13 +199,14 @@ typedef struct {
 
 /* ---- Rôle politique d'un pays ----------------------------------------- *
  * Au démarrage, le monde est essentiellement VIDE : seul le joueur et une
- * poignée de cités-états sont peuplés. Tout le reste est colonisable. Mais
- * seuls le JOUEUR et les ANTAGONISTES (IA expansionnistes) peuvent coloniser ;
- * les cités-états restent figées sur leur capitale (commerce, pas conquête). */
+ * poignée de cités-états sont peuplés. Tout le reste est colonisable.
+ * JOUEUR / ANTAGONISTE : colonisent le monde entier (expansion libre).
+ * CITÉ-ÉTAT : toute leur région démarrée à pop réduite ; colonisent uniquement
+ *   leurs territoires propres vacants — commerce, pas conquête extérieure. */
 typedef enum {
     POLITY_PLAYER = 0,   /* le joueur — capitale peuplée au départ */
     POLITY_ANTAGONIST,   /* IA majeure — peuplée, colonise */
-    POLITY_CITY_STATE,   /* cité-état — figée, ne colonise pas */
+    POLITY_CITY_STATE,   /* cité-état — peuplée sur toute sa région, colonise ses propres territoires */
     POLITY_UNCLAIMED     /* terres vierges colonisables (pays sans départ) */
 } PolityRole;
 

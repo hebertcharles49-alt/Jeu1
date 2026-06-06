@@ -88,6 +88,16 @@ typedef struct {
     float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */
     float      society_sat;          /* satisfaction sociale [0..1] (cloth+wine+…) */
     float      cap_pop;              /* capacité d'accueil (pop cible à terme) */
+    float      prosperity;           /* PIB/tête normalisé — cache pour migration */
+
+    /* Diaspora & innovation culturelle */
+    float      diaspora_pop;         /* immigrants non-primaires installés (bourgeois+élites) */
+    float      diaspora_innovation;  /* score d'innovation cumulé (diminue par acculturation) */
+    float      orphan_tech_weight;   /* pression vers une tech orpheline (lu par scps_tech) */
+
+    /* Coercition temporaire (relocalisation forcée) — décroît chaque tick */
+    float      coercion;             /* [0..1] : 0=libre, 1=état d'urgence */
+
     bool       active;               /* terre habitable (colonisable) */
     bool       colonized;            /* effectivement peuplée/settlée */
     int16_t    owner;                /* pays qui contrôle la région (-1 = vierge) */
@@ -114,11 +124,22 @@ void econ_init(WorldEconomy *e, const World *w);
 /* Avance la simulation d'un pas (un « tour »). */
 void econ_tick(WorldEconomy *e);
 
-/* Pas de colonisation : le joueur et les antagonistes essaiment depuis leurs
- * régions peuplées vers une région vierge voisine. Les cités-états ne
- * colonisent pas. À appeler après econ_tick(). Renvoie le nb de régions
+/* Pas de colonisation : joueur et antagonistes essaiment vers les régions
+ * vierges voisines ; les cités-états colonisent leurs propres territoires
+ * non encore peuplés. À appeler après econ_tick(). Renvoie le nb de régions
  * nouvellement colonisées ce tick. */
 int econ_colonize_tick(WorldEconomy *e, const World *w);
+
+/* Migration interne basée sur la prospérité : les bourgeois et élites
+ * migrent vers les régions plus riches adjacentes. Crée de la diaspora et
+ * de l'innovation dans la destination. Renvoie le nb de flux migrateurs
+ * actifs ce tick. */
+int econ_migrate_tick(WorldEconomy *e, const World *w);
+
+/* Relocalisation forcée : déplace `amount` habitants (surtout laborers)
+ * de src_rid vers dst_rid. Provoque un pic de coercition dans la source.
+ * Peut être appelée par le joueur ou par un événement scénarisé. */
+void econ_relocate_pop(WorldEconomy *e, int src_rid, int dst_rid, float amount);
 
 /* Affiche un tableau récapitulatif d'une région sur stdout. */
 void econ_print_region(const WorldEconomy *e, const World *w, int region_id);
