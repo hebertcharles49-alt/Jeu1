@@ -78,6 +78,7 @@ typedef enum {
     BIO_GLACIER,
     BIO_MANGROVE,      /* côte tropicale ennoyée (ajouté par l'altération) */
     BIO_BOG,           /* tourbière froide / lande humide */
+    BIO_VOLCANO,       /* cône/caldeira — roche nue et cendres */
     BIO_COUNT
 } Biome;
 
@@ -188,7 +189,12 @@ typedef struct {
     int16_t  country;
     int16_t  continent;
     uint32_t color;
-    char     name[32];          /* ID textuel pour l'instant (noms plus tard) */
+    char     name[32];          /* nom courant (= variante humaine) */
+    /* Toponymie des 4 peuples (préfixe/suffixe liés à l'environnement) */
+    char     name_hum[32];      /* langue commune (descriptif) */
+    char     name_elf[32];      /* elfique — mélodique */
+    char     name_dwarf[32];    /* nain — gutturalo-minéral */
+    char     name_orc[32];      /* orque — rauque */
 } Region;
 
 /* ---- Pays : 3-5 régions contiguës ------------------------------------- */

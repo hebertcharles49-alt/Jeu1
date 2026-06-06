@@ -22,6 +22,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <ctype.h>
 
 /* ========================================================================
  * RNG (Xorshift32 — rapide, reproductible)
@@ -123,7 +124,8 @@ static int   g_nislet;
 
 static void continents_init(int n, float seed_f) {
     (void)seed_f;
-    if (n<1)n=1; if(n>MAX_CONTSHAPE)n=MAX_CONTSHAPE;
+    if (n<1) n=1;
+    if (n>MAX_CONTSHAPE) n=MAX_CONTSHAPE;
     g_ncont=n; g_nislet=0;
     float R0=(0.52f/sqrtf((float)n))*SCPS_H;
 
@@ -311,6 +313,38 @@ static void volcanoes_inject(float *height) {
             float cone=expf(-d*d/(r*r*0.45f))*pk;
             float caldera=expf(-d*d/(calR*calR*0.5f))*pk*0.65f;
             height[scps_idx(x,y)]+=cone-caldera;
+        }
+    }
+}
+
+/* Proximité d'un volcan [0..1] : sol enrichi sur les pentes (mais pas la
+ * caldeira nue elle-même). Utilisé par compute_fertility. */
+static float volcanic_soil(int x, int y) {
+    float best=0.f;
+    for (int v=0;v<g_nvolc;v++) {
+        float dx=(float)x-g_volc[v].cx, dy=(float)y-g_volc[v].cy;
+        float d=sqrtf(dx*dx+dy*dy);
+        float r=g_volc[v].r;
+        if (d>r*2.2f || d<r*0.25f) continue;  /* anneau fertile autour du cône */
+        float s=1.f-clampf((d-r*0.25f)/(r*1.95f),0.f,1.f);
+        if (s>best) best=s;
+    }
+    return best;
+}
+
+/* Marque la caldeira/cône nu en biome volcanique (roche & cendres). */
+static void volcanoes_mark(World *w, const float *height) {
+    for (int v=0;v<g_nvolc;v++) {
+        float cx=g_volc[v].cx, cy=g_volc[v].cy, r=g_volc[v].r;
+        float bareR=r*0.55f;
+        int x0=(int)(cx-bareR), x1=(int)(cx+bareR);
+        int y0=(int)(cy-bareR), y1=(int)(cy+bareR);
+        for (int y=y0;y<=y1;y++) for (int x=x0;x<=x1;x++) {
+            if (x<0||x>=SCPS_W||y<0||y>=SCPS_H) continue;
+            if (height[scps_idx(x,y)]<SEA_LEVEL) continue;
+            float dx=(float)x-cx, dy=(float)y-cy;
+            if (dx*dx+dy*dy<=bareR*bareR)
+                w->cell[scps_idx(x,y)].biome=BIO_VOLCANO;
         }
     }
 }
@@ -741,7 +775,9 @@ static void compute_fertility(float *height, float *moisture, float *temperature
                +(delta?delta[i]*0.35f:0.f)           /* delta limoneux */
                +0.08f*coastal
                -0.55f*clampf((h-MOUNTAIN_H)/0.18f,0.f,1.f)
-               -3.5f*slope;
+               -3.5f*slope
+               +0.22f*volcanic_soil(x,y);             /* terres volcaniques riches */
+        if (cells[i].biome==BIO_VOLCANO) f=0.f;        /* roche nue : stérile */
         cells[i].fertility=clampf(f,0.f,1.f);
     }
     free(irrig); free(delta);
@@ -1050,6 +1086,134 @@ static int agglomerate(const bool *adj, int n, const int16_t *cont,
     return m;
 }
 
+/* ========================================================================
+ * TOPONYMIE — noms de régions dans les 4 langues (elfe, humain, nain, orc)
+ *
+ * Chaque nom est composé par morphèmes liés à l'ENVIRONNEMENT dominant de la
+ * région (forêt, montagne, marais…). La langue commune (humaine) est
+ * descriptive — « Bois Doré » — avec un adjectif tiré du climat ; les trois
+ * autres peuples ont une phonologie propre (préfixe + racine + suffixe).
+ * ====================================================================== */
+typedef enum {
+    ENV_FOREST=0, ENV_MOUNTAIN, ENV_HILLS, ENV_DESERT, ENV_STEPPE,
+    ENV_PLAINS, ENV_MARSH, ENV_COLD, ENV_COAST, ENV_COUNT
+} EnvKind;
+
+static EnvKind env_of_biome(Biome b) {
+    switch (b) {
+        case BIO_FOREST: case BIO_WOODS: case BIO_JUNGLE: return ENV_FOREST;
+        case BIO_MOUNTAINS: case BIO_PEAK: case BIO_HIGHLANDS:
+        case BIO_VOLCANO:                                 return ENV_MOUNTAIN;
+        case BIO_HILLS:                                   return ENV_HILLS;
+        case BIO_DESERT: case BIO_COASTAL_DESERT: case BIO_DRYLANDS:
+                                                          return ENV_DESERT;
+        case BIO_STEPPE: case BIO_SAVANNA:                return ENV_STEPPE;
+        case BIO_PLAINS: case BIO_FARMLAND: case BIO_GRASSLAND:
+                                                          return ENV_PLAINS;
+        case BIO_MARSH: case BIO_BOG: case BIO_MANGROVE:  return ENV_MARSH;
+        case BIO_GLACIER:                                 return ENV_COLD;
+        case BIO_COAST: case BIO_SHALLOW:                 return ENV_COAST;
+        default:                                          return ENV_PLAINS;
+    }
+}
+
+/* Sélection déterministe d'un morphème (rng global = reproductible/graine). */
+#define PICK(arr) (arr)[(int)(rng_f()*(sizeof(arr)/sizeof((arr)[0])))]
+
+static void name_human(char *out, int n, EnvKind e, float lat, bool warm, bool wet) {
+    static const char *NOUN[ENV_COUNT][4]={
+        {"Bois","Forêt","Sylve","Futaie"},     /* FOREST   */
+        {"Mont","Pic","Cime","Crête"},          /* MOUNTAIN */
+        {"Coteau","Colline","Butte","Tertre"},  /* HILLS    */
+        {"Désert","Dune","Reg","Sablière"},     /* DESERT   */
+        {"Steppe","Lande","Plateau","Prairie"}, /* STEPPE   */
+        {"Champ","Val","Pré","Plaine"},         /* PLAINS   */
+        {"Marais","Gué","Fagne","Tourbière"},   /* MARSH    */
+        {"Toundra","Gel","Névé","Banquise"},    /* COLD     */
+        {"Rive","Anse","Cap","Havre"},          /* COAST    */
+    };
+    const char *adj;
+    static const char *COLD_A[]={"Gelé","Blanc","Givré","Pâle"};
+    static const char *ARID_A[]={"Brûlant","Ocre","Cendré","Aride"};
+    static const char *LUSH_A[]={"Doré","Verdoyant","Profond","Vert","Sombre"};
+    static const char *HIGH_A[]={"Haut","Altier","Gris","Noir"};
+    static const char *WILD_A[]={"Vieux","Sauvage","Brumeux","Perdu"};
+    if (lat>0.72f || e==ENV_COLD)                 adj=PICK(COLD_A);
+    else if (e==ENV_DESERT || (e==ENV_STEPPE&&!wet)) adj=PICK(ARID_A);
+    else if (e==ENV_FOREST || e==ENV_MARSH || (e==ENV_PLAINS&&wet)) adj=PICK(LUSH_A);
+    else if (e==ENV_MOUNTAIN || e==ENV_HILLS)     adj=PICK(HIGH_A);
+    else                                          adj=PICK(WILD_A);
+    (void)warm;
+    snprintf(out,n,"%s %s",PICK(NOUN[e]),adj);
+}
+
+static void name_elf(char *out, int n, EnvKind e) {
+    static const char *PRE[ENV_COUNT][4]={
+        {"Eryn","Taur","Lothlor","Galadh"},
+        {"Ered","Orod","Caran","Thang"},
+        {"Amon","Tyn","Emyn","Dol"},
+        {"Lithui","Anor","Calad","Sîr"},
+        {"Rhûn","Parth","Ladu","Nan"},
+        {"Imloth","Nan","Lad","Mel"},
+        {"Nîn","Loeg","Aelin","Hîth"},
+        {"Helch","Ring","Niphred","Gwael"},
+        {"Aer","Linn","Mith","Cír"},
+    };
+    static const char *SUF[]={"dor","ion","iel","las","wen","loth","rond",
+                              "mar","thel","ven","riel","gorn"};
+    snprintf(out,n,"%s%s",PICK(PRE[e]),PICK(SUF));
+}
+
+static void name_dwarf(char *out, int n, EnvKind e) {
+    static const char *PRE[]={"Karak","Khaz","Kron","Dol","Grun","Bur","Zhuf"};
+    static const char *ROOT[ENV_COUNT]={
+        "gal","zorn","dur","dush","vrak","bok","mok","fros","zar"
+    };
+    static const char *SUF[]={"grund","dûm","bar","grim","hold","mar","kar","ank"};
+    char tail[24];
+    snprintf(tail,sizeof(tail),"%s%s",ROOT[e],PICK(SUF));
+    tail[0]=(char)toupper((unsigned char)tail[0]);
+    snprintf(out,n,"%s %s",PICK(PRE),tail);
+}
+
+static void name_orc(char *out, int n, EnvKind e) {
+    static const char *PRE[]={"Gor","Mor","Grish","Uruk","Naz","Skarr","Drak"};
+    static const char *ROOT[ENV_COUNT]={
+        "gnar","gron","brak","skar","vog","grub","glob","hrim","zlak"
+    };
+    static const char *SUF[]={"nak","uk","gash","mog","dûr","snaga","grut","zog"};
+    snprintf(out,n,"%s%s%s",PICK(PRE),ROOT[e],PICK(SUF));
+}
+#undef PICK
+
+static void gen_region_names(World *w) {
+    for (int r=0;r<w->n_regions;r++) {
+        Region *rg=&w->region[r];
+        /* Environnement dominant : vote des biomes des provinces membres. */
+        int evote[ENV_COUNT]={0};
+        float lat_s=0.f; int np=0; bool warm=false, wet=false;
+        for (int k=0;k<rg->n_provinces;k++) {
+            int p=rg->province_ids[k];
+            if (p<0||p>=w->n_provinces) continue;
+            evote[(int)env_of_biome(w->province[p].biome_dominant)]++;
+            lat_s+=w->province[p].lat; np++;
+        }
+        EnvKind e=ENV_PLAINS; int best=-1;
+        for (int i=0;i<ENV_COUNT;i++) if(evote[i]>best){best=evote[i];e=(EnvKind)i;}
+        float lat=np?lat_s/np:0.5f;
+        warm=(lat<0.45f);
+        /* humide si l'env dominant est forêt/marais/plaine non aride */
+        wet=(e==ENV_FOREST||e==ENV_MARSH||e==ENV_PLAINS);
+
+        name_human(rg->name_hum,sizeof(rg->name_hum),e,lat,warm,wet);
+        name_elf  (rg->name_elf,  sizeof(rg->name_elf),  e);
+        name_dwarf(rg->name_dwarf,sizeof(rg->name_dwarf),e);
+        name_orc  (rg->name_orc,  sizeof(rg->name_orc),  e);
+        /* nom courant = variante humaine */
+        snprintf(rg->name,sizeof(rg->name),"%s",rg->name_hum);
+    }
+}
+
 static void build_hierarchy(World *w) {
     int np=w->n_provinces;
     if (np<1){ w->n_regions=w->n_countries=0; return; }
@@ -1120,10 +1284,9 @@ static void build_hierarchy(World *w) {
         w->country[c].color=province_palette(c*9+5);
         snprintf(w->country[c].name,sizeof(w->country[c].name),"Pays %d",c+1);
     }
-    for (int r=0;r<nreg;r++) {
+    for (int r=0;r<nreg;r++)
         w->region[r].color=province_palette(r*7+3);
-        snprintf(w->region[r].name,sizeof(w->region[r].name),"Région %d",r+1);
-    }
+    gen_region_names(w);   /* toponymie elfe/humaine/naine/orque par environnement */
 
     /* Capitale de pays = province la plus fertile (proxy) — via aire faute
      * de fertilité stockée sur la province ; on prend la plus vaste. */
@@ -1389,20 +1552,6 @@ static void step_weathering(World *w, const float *height, float seed_f) {
         }
     }
 
-    /* B2b. Clairières dans les forêts : petites percées lumineuses.
-     *      Double bruit haute fréquence → taches isolées, non uniformes. */
-    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
-        int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL) continue;
-        Biome b=c[i].biome;
-        if (b!=BIO_FOREST&&b!=BIO_WOODS) continue;
-        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-        float gap =stb_perlin_fbm_noise3(nx*18.f,ny*18.f,seed_f+4100.f,2.f,0.5f,3);
-        float gap2=stb_perlin_fbm_noise3(nx*9.f, ny*9.f, seed_f+4110.f,2.f,0.5f,2);
-        if (gap>0.35f&&gap2>0.10f)
-            c[i].biome=(c[i].moisture>0.48f)?BIO_GRASSLAND:BIO_PLAINS;
-    }
-
     /* B2c. Aspérités rocheuses dans les steppes et pelouses sèches. */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int i=scps_idx(x,y);
@@ -1455,6 +1604,28 @@ static void step_weathering(World *w, const float *height, float seed_f) {
         }
     }
     free(snap);
+
+    /* B4. Artefacts FINAUX — posés APRÈS le despeckle pour qu'il ne les fonde
+     *     pas. Ce sont des particularités voulues, isolées, qui font la beauté
+     *     d'un monde (clairières, cônes volcaniques). */
+
+    /* B4a. Clairières : percées lumineuses dans la forêt dense. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        Biome b=c[i].biome;
+        if (b!=BIO_FOREST&&b!=BIO_WOODS) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float gap =stb_perlin_fbm_noise3(nx*18.f,ny*18.f,seed_f+4100.f,2.f,0.5f,3);
+        float gap2=stb_perlin_fbm_noise3(nx*9.f, ny*9.f, seed_f+4110.f,2.f,0.5f,2);
+        if (gap>0.35f&&gap2>0.10f)
+            c[i].biome=(c[i].moisture>0.48f)?BIO_GRASSLAND:BIO_PLAINS;
+    }
+
+    /* B4b. Cônes volcaniques : la caldeira nue marque le biome ; les pentes
+     *      proches gardent leur biome mais reçoivent un sol volcanique
+     *      fertile (cf. compute_fertility, qui relit g_volc). */
+    volcanoes_mark(w, height);
 
     /* Télémétrie : part des terres reconquises par les milieux sauvages */
     int marsh=0,bog=0,mang=0,wood=0,land=0;
@@ -1594,7 +1765,7 @@ static void gen_resources(World *w) {
 WorldParams worldparams_default(uint32_t seed) {
     WorldParams p;
     p.seed         = seed;
-    p.n_continents = 3;      /* doc §3 */
+    p.n_continents = 4;      /* doc §3 — assez pour archipels & ponts type Béringie */
     p.land_amount  = 0.5f;
     p.world_age    = 0.5f;
     p.erosion      = 0.5f;
@@ -1720,6 +1891,7 @@ uint32_t biome_base_color(Biome b) {
         0xFFDCECF8u, /* GLACIER        */
         0xFF2E6848u, /* MANGROVE       */
         0xFF566848u, /* BOG            */
+        0xFF402820u, /* VOLCANO — basalte sombre */
     };
     return (b>=0&&b<BIO_COUNT)?C[(int)b]:0xFFFF00FFu;
 }
@@ -1731,7 +1903,7 @@ const char *biome_name(Biome b) {
         "Savane","Terres sèches","Désert","Désert côtier",
         "Forêt","Bois","Jungle","Marais",
         "Hauts plateaux","Collines","Montagnes","Sommets","Glacier",
-        "Mangrove","Tourbière",
+        "Mangrove","Tourbière","Volcan",
     };
     return (b>=0&&b<BIO_COUNT)?N[(int)b]:"?";
 }
