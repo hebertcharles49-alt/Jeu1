@@ -541,6 +541,47 @@ static void step_coastline(float *height, float seed_f) {
 }
 
 /* ========================================================================
+ * CARTE FANTÔME — relief secondaire à niveau de mer très bas
+ *
+ * On génère une SECONDE heightmap, indépendante de la première (autres
+ * graines de bruit), domain-warpée. On la lit avec un « niveau de mer »
+ * fantôme TRÈS BAS : presque tout son relief est « émergé », mais on n'en
+ * applique la part émergée QUE dans l'océan de la carte principale. Ses
+ * crêtes percent la surface → archipels, chapelets d'îles, hauts-fonds et
+ * récifs dispersés qui peuplent les mers vides. La terre principale n'est
+ * pas touchée (on ne modifie que les cellules sous le niveau de mer). */
+static void step_ghost_layer(float *height, float seed_f) {
+    const float GSEA = 0.30f;   /* niveau de mer fantôme bas → archipels généreux */
+    const float AMP  = 0.34f;   /* amplitude d'émergence */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]>=SEA_LEVEL) continue;            /* terre : intouchée */
+
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        /* Domain warp propre à la carte fantôme (décalages de graine distincts) */
+        float wx=stb_perlin_fbm_noise3(nx*2.1f,ny*2.1f,seed_f+5200.f,2.f,0.5f,5)*0.20f;
+        float wy=stb_perlin_fbm_noise3(nx*2.1f+4.f,ny*2.1f+2.f,seed_f+5210.f,2.f,0.5f,5)*0.20f;
+        float px=nx+wx, py=ny+wy;
+        /* fBm multi-octave → [0..1] approx. */
+        float g=0.5f+0.5f*stb_perlin_fbm_noise3(px*2.8f,py*2.8f,seed_f+5220.f,2.f,0.5f,6);
+        g+=0.18f*stb_perlin_fbm_noise3(px*7.f,py*7.f,seed_f+5230.f,2.f,0.5f,4); /* détail fin */
+
+        /* Fondu de bord de carte (pas d'îles collées au cadre) */
+        float edge=clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1)
+                  *clampf(nx*8.f,0,1)*clampf((1.f-nx)*8.f,0,1);
+        g*=edge;
+
+        float emerged=g-GSEA;
+        if (emerged<=0.f) continue;
+        /* Atténuation en eau profonde : les îles fantômes naissent surtout sur
+         * les plateaux (proche surface) ; au-dessus des fosses, seuls les plus
+         * hauts reliefs percent → cohérent avec une dorsale océanique. */
+        float shelf=clampf((height[i]-(SEA_LEVEL-0.16f))/0.16f,0.25f,1.f);
+        height[i]+=emerged*AMP*shelf;
+    }
+}
+
+/* ========================================================================
  * CONTINENTALITÉ — distance à l'océan (chamfer, deux passes)
  * Sortie [0..1] : 0 = côte/mer, 1 = intérieur profond.
  * Pilote l'assèchement et l'amplitude thermique loin des côtes.
@@ -1853,6 +1894,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] côtes fract...  "); fflush(stdout);
     step_coastline(height,seed_f);        printf("ok\n");
+
+    printf("[scps] carte fantôme.. "); fflush(stdout);
+    step_ghost_layer(height,seed_f);      printf("ok\n");
 
     printf("[scps] continentalité..."); fflush(stdout);
     compute_ocean_distance(height,odist);  printf("ok\n");
