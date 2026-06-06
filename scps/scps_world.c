@@ -2217,7 +2217,7 @@ void world_generate(World *w, const WorldParams *P) {
         float *sm=(float*)malloc(SCPS_N*sizeof(float));
         float *st=(float*)malloc(SCPS_N*sizeof(float));
         if (sm&&st) {
-            for (int pass=0;pass<2;pass++) {
+            for (int pass=0;pass<6;pass++) {
                 for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
                     int i=scps_idx(x,y);
                     if (height[i]<SEA_LEVEL){ sm[i]=moisture[i];st[i]=temp[i];continue; }
