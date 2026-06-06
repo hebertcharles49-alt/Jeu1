@@ -79,9 +79,15 @@ SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o $(OBJ
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
+# Planche-contact de 5 mondes (montage.bmp) — revue rapide après chaque
+# modification du générateur.
+SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o $(OBJDIR)/scps_batch.o
+scps_batch: $(SCPS_BATCH_OBJS)
+	$(CC) $(SCPS_BATCH_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
-	       scps_viewer scps_viewer.exe scps_dump out_*.ppm
+	       scps_viewer scps_viewer.exe scps_dump scps_batch out_*.ppm montage.bmp
 
 .PHONY: all run scps run_scps clean
 
@@ -90,3 +96,4 @@ clean:
 -include $(OBJS:.o=.d)
 -include $(SCPS_OBJS:.o=.d)
 -include $(OBJDIR)/scps_dump.d
+-include $(OBJDIR)/scps_batch.d
