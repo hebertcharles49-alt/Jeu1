@@ -605,8 +605,6 @@ static void step_ghost_layer(float *height, float seed_f) {
  * passant sous le niveau de mer, deviennent lacs/mers intérieures.
  * Le creusement est accentué en altitude (montagnes → gouffres profonds). */
 static void step_ghost_negative(float *height, float seed_f) {
-    const float GSEA = 0.52f;   /* seuil haut → creusement rare et marqué */
-    const float AMP  = 0.46f;   /* profondeur d'effondrement */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int i=scps_idx(x,y);
         if (height[i]<SEA_LEVEL) continue;             /* mer : intouchée */
@@ -616,15 +614,28 @@ static void step_ghost_negative(float *height, float seed_f) {
         float wx=stb_perlin_fbm_noise3(nx*2.3f,ny*2.3f,seed_f+5400.f,2.f,0.5f,5)*0.18f;
         float wy=stb_perlin_fbm_noise3(nx*2.3f+4.f,ny*2.3f+2.f,seed_f+5410.f,2.f,0.5f,5)*0.18f;
         float px=nx+wx, py=ny+wy;
-        float g=0.5f+0.5f*stb_perlin_fbm_noise3(px*3.2f,py*3.2f,seed_f+5420.f,2.f,0.5f,6);
-        g+=0.16f*stb_perlin_fbm_noise3(px*8.f,py*8.f,seed_f+5430.f,2.f,0.5f,4);
 
-        float emerged=g-GSEA;
-        if (emerged<=0.f) continue;
-        /* Plus le terrain est haut, plus le gouffre est profond (montagne →
-         * gorge spectaculaire ; plaine → simple cuvette/lac). */
         float relief=clampf((height[i]-SEA_LEVEL)/(1.f-SEA_LEVEL),0.f,1.f);
-        height[i]-=emerged*AMP*(0.45f+0.55f*relief);
+
+        /* (A) BASSINS LARGES — basse fréquence, creusés fort et SANS égard au
+         *     relief : de vastes étendues plongent sous le niveau de mer →
+         *     mers intérieures type Méditerranée/Caspienne (et non de simples
+         *     gorges). Le warp leur donne un contour organique presque fermé. */
+        float gB=0.5f+0.5f*stb_perlin_fbm_noise3(px*1.55f,py*1.55f,seed_f+5420.f,2.f,0.5f,6);
+        float eb=gB-0.50f;
+        if (eb>0.f) {
+            /* creusement large et profond ; un léger surcreusement au cœur du
+             * bassin (eb² ) façonne une cuvette franche plutôt qu'un plat. */
+            height[i]-=eb*1.05f + eb*eb*0.9f;
+        }
+
+        /* (B) GORGES & GOUFFRES — moyenne fréquence, accentués en altitude
+         *     (montagne → gorge spectaculaire ; plaine → cuvette/lac). */
+        float gD=0.5f+0.5f*stb_perlin_fbm_noise3(px*3.6f,py*3.6f,seed_f+5430.f,2.f,0.5f,6);
+        gD+=0.15f*stb_perlin_fbm_noise3(px*8.5f,py*8.5f,seed_f+5440.f,2.f,0.5f,4);
+        float ed=gD-0.56f;
+        if (ed>0.f)
+            height[i]-=ed*0.46f*(0.45f+0.55f*relief);
     }
 }
 
