@@ -98,49 +98,221 @@ static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
     return 1.f - clampf((d2-d1)/(r*0.28f),0.f,1.f);
 }
 
-/* Masque continental : N noyaux attracteurs → N masses de terre séparées
- * par l'océan. Bords de carte forcés vers l'océan. Coordonnées warpées →
- * littoraux organiques. Renvoie un facteur [0..1] (0 = pleine mer). */
-typedef struct { float cx, cy, r; } ContSeed;
-static ContSeed g_conts[8];
-static int      g_ncont = 3;
+/* Masque continental — formes multi-lobes (corps + péninsules) et archipels
+ *
+ * Chaque continent = 1 corps principal + 0-3 péninsules/bras elliptiques.
+ * Les archipels et ponts type Béringie sont des îles indépendantes.
+ */
+#define MAX_LOBES 5
+typedef struct {
+    float cx, cy;        /* centre en px carte  */
+    float ax, ay;        /* demi-axes en px     */
+    float cosA, sinA;    /* rotation            */
+    float strength;      /* [0.5..1.0]          */
+} ContLobe;
+
+#define MAX_CONTSHAPE 8
+typedef struct { ContLobe lobe[MAX_LOBES]; int n; } ContShape;
+static ContShape g_cshape[MAX_CONTSHAPE];
+static int       g_ncont = 3;
+
+#define MAX_ISLET 14
+typedef struct { float cx,cy,ax,ay,cosA,sinA; } Islet;
+static Islet g_islet[MAX_ISLET];
+static int   g_nislet;
 
 static void continents_init(int n, float seed_f) {
-    if (n<1) n=1;
-    if (n>8) n=8;
-    g_ncont=n;
-    /* Centres répartis horizontalement (chambres d'évolution, doc §3),
-     * jitter vertical pour casser l'alignement. */
-    for (int i=0;i<n;i++) {
-        float u=(i+0.5f)/n;
-        g_conts[i].cx = (0.10f + 0.80f*u) * SCPS_W
-                      + (rng_f()-0.5f)*0.08f*SCPS_W;
-        g_conts[i].cy = (0.32f + 0.36f*rng_f()) * SCPS_H;
-        /* Rayon < espacement des centres → masses denses mais séparées */
-        g_conts[i].r  = (0.70f/sqrtf((float)n)) * SCPS_H;
-    }
     (void)seed_f;
+    if (n<1)n=1; if(n>MAX_CONTSHAPE)n=MAX_CONTSHAPE;
+    g_ncont=n; g_nislet=0;
+    float R0=(0.52f/sqrtf((float)n))*SCPS_H;
+
+    for (int i=0;i<n;i++) {
+        ContShape *cs=&g_cshape[i];
+        float u=(i+0.5f)/(float)n;
+        float cx=(0.10f+0.80f*u)*SCPS_W+(rng_f()-0.5f)*0.08f*SCPS_W;
+        float cy=(0.28f+0.44f*rng_f())*SCPS_H;
+
+        cs->n=1+(int)(rng_f()*4.f);
+        if(cs->n>MAX_LOBES)cs->n=MAX_LOBES;
+
+        /* Lobe principal */
+        {
+            ContLobe *cl=&cs->lobe[0];
+            cl->cx=cx; cl->cy=cy;
+            float asp=0.75f+rng_f()*0.50f;
+            cl->ax=R0*asp; cl->ay=R0;
+            float a=rng_f()*6.2832f;
+            cl->cosA=cosf(a); cl->sinA=sinf(a);
+            cl->strength=1.0f;
+        }
+        /* Péninsules / bras */
+        for (int l=1;l<cs->n;l++) {
+            ContLobe *cl=&cs->lobe[l];
+            float angle=rng_f()*6.2832f;
+            float reach=R0*(0.50f+rng_f()*0.70f);
+            cl->cx=cx+cosf(angle)*reach;
+            cl->cy=cy+sinf(angle)*reach;
+            float asp=1.8f+rng_f()*2.2f;
+            float shortR=R0*(0.15f+rng_f()*0.22f);
+            cl->ax=shortR*asp; cl->ay=shortR;
+            cl->cosA=cosf(angle); cl->sinA=sinf(angle);
+            cl->strength=0.55f+rng_f()*0.35f;
+        }
+    }
+
+    /* Archipels : 0-3 chaînes d'îles indépendantes */
+    int nchains=(int)(rng_f()*4.f);
+    for (int c=0;c<nchains;c++) {
+        int nisles=1+(int)(rng_f()*3.f);
+        float bx=rng_f()*SCPS_W;
+        float by=(0.08f+0.84f*rng_f())*SCPS_H;
+        float dir=rng_f()*6.2832f;
+        float spacing=0.05f*SCPS_W;
+        float iR=0.012f*SCPS_H*(0.5f+rng_f()*1.5f);
+        for (int k=0;k<nisles&&g_nislet<MAX_ISLET;k++) {
+            Islet *il=&g_islet[g_nislet++];
+            il->cx=bx+cosf(dir)*spacing*(float)k+(rng_f()-0.5f)*spacing*0.3f;
+            il->cy=by+sinf(dir)*spacing*(float)k+(rng_f()-0.5f)*spacing*0.3f;
+            float asp=1.f+rng_f()*2.f;
+            il->ax=iR*asp; il->ay=iR;
+            float a=rng_f()*6.2832f;
+            il->cosA=cosf(a); il->sinA=sinf(a);
+        }
+    }
+
+    /* Béringie : pont fin entre deux continents (probabilité 35%) */
+    if (n>=2 && rng_f()<0.35f && g_nislet+2<=MAX_ISLET) {
+        float ax=g_cshape[0].lobe[0].cx, ay=g_cshape[0].lobe[0].cy;
+        float bxc=g_cshape[1].lobe[0].cx, byc=g_cshape[1].lobe[0].cy;
+        float mx=(ax+bxc)*0.5f, my=(ay+byc)*0.5f;
+        my+=(rng_f()<0.5f?-1.f:1.f)*SCPS_H*0.22f; /* décalage polaire */
+        float bridgeLen=0.06f*SCPS_W;
+        float brAngle=rng_f()*6.2832f;
+        for (int k=0;k<2;k++) {
+            Islet *il=&g_islet[g_nislet++];
+            il->cx=mx+cosf(brAngle)*bridgeLen*(k-0.5f);
+            il->cy=my+sinf(brAngle)*bridgeLen*(k-0.5f);
+            il->ax=0.018f*SCPS_W; il->ay=0.008f*SCPS_H;
+            il->cosA=cosf(brAngle); il->sinA=sinf(brAngle);
+        }
+    }
 }
 
 static float continental_mask(int x, int y, float seed_f) {
     float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-    /* Domain warp pour des côtes sinueuses */
-    float wx=stb_perlin_fbm_noise3(nx*1.6f, ny*1.6f, seed_f+1200.f,2.f,0.5f,4)*0.16f;
+    float wx=stb_perlin_fbm_noise3(nx*1.6f,ny*1.6f,seed_f+1200.f,2.f,0.5f,4)*0.16f;
     float wy=stb_perlin_fbm_noise3(nx*1.6f+4.f,ny*1.6f+2.f,seed_f+1210.f,2.f,0.5f,4)*0.16f;
     float fx=(nx+wx)*SCPS_W, fy=(ny+wy)*SCPS_H;
 
     float best=0.f;
     for (int i=0;i<g_ncont;i++) {
-        float dx=fx-g_conts[i].cx, dy=fy-g_conts[i].cy;
-        float d=sqrtf(dx*dx+dy*dy)/g_conts[i].r;      /* 0 au centre, 1 au bord */
+        ContShape *cs=&g_cshape[i];
+        for (int l=0;l<cs->n;l++) {
+            ContLobe *cl=&cs->lobe[l];
+            float rx=(fx-cl->cx)*cl->cosA+(fy-cl->cy)*cl->sinA;
+            float ry=-(fx-cl->cx)*cl->sinA+(fy-cl->cy)*cl->cosA;
+            float d=sqrtf((rx/cl->ax)*(rx/cl->ax)+(ry/cl->ay)*(ry/cl->ay));
+            float lobe=1.f-clampf(d,0.f,1.f);
+            lobe=lobe*lobe*(3.f-2.f*lobe)*cl->strength;
+            if (lobe>best) best=lobe;
+        }
+    }
+    for (int i=0;i<g_nislet;i++) {
+        Islet *il=&g_islet[i];
+        float rx=(fx-il->cx)*il->cosA+(fy-il->cy)*il->sinA;
+        float ry=-(fx-il->cx)*il->sinA+(fy-il->cy)*il->cosA;
+        float d=sqrtf((rx/il->ax)*(rx/il->ax)+(ry/il->ay)*(ry/il->ay));
         float lobe=1.f-clampf(d,0.f,1.f);
-        lobe=lobe*lobe*(3.f-2.f*lobe);                 /* smoothstep */
+        lobe=lobe*lobe*(3.f-2.f*lobe)*0.55f;
         if (lobe>best) best=lobe;
     }
-    /* Bordure de carte → océan (évite les continents collés au cadre) */
-    float edge = clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1)
-               * clampf(nx*8.f,0,1)*clampf((1.f-nx)*8.f,0,1);
+    float edge=clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1)
+              *clampf(nx*8.f,0,1)*clampf((1.f-nx)*8.f,0,1);
     return best*edge;
+}
+
+/* ========================================================================
+ * FEATURES OCÉANIQUES — fosses abyssales et hauts-fonds (récifs)
+ * ====================================================================== */
+static void step_ocean_features(float *height, float seed_f) {
+    /* Fosses : 2-5 arcs linéaires dans l'océan profond */
+    int ntr=2+(int)(rng_f()*4.f);
+    for (int t=0;t<ntr;t++) {
+        float cx=rng_f()*SCPS_W, cy=(0.05f+0.90f*rng_f())*SCPS_H;
+        float aLen=(0.07f+rng_f()*0.12f)*SCPS_W;
+        float aWid=(0.008f+rng_f()*0.008f)*SCPS_H;
+        float angle=rng_f()*3.14159f;
+        float cosA=cosf(angle), sinA=sinf(angle);
+        for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+            int i=scps_idx(x,y);
+            if (height[i]>=SEA_LEVEL-0.08f) continue;
+            float dx=(float)x-cx, dy=(float)y-cy;
+            float along=dx*cosA+dy*sinA;
+            float perp =-dx*sinA+dy*cosA;
+            float da=along/aLen, dp=perp/aWid;
+            if (da<-1.f||da>1.f) continue;
+            float d=sqrtf(dp*dp+da*da*0.1f);
+            if (d>1.f) continue;
+            height[i]-=(1.f-d*d)*0.10f;
+        }
+    }
+    /* Hauts-fonds / récifs : bruit haute fréquence sur la marge continentale */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        float h=height[i];
+        if (h>=SEA_LEVEL||h<SEA_LEVEL-0.12f) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float reef=stb_perlin_fbm_noise3(nx*28.f,ny*28.f,seed_f+3100.f,2.f,0.5f,3);
+        if (reef>0.20f) height[i]+=clampf((reef-0.20f)*0.06f,0.f,0.05f);
+    }
+}
+
+/* ========================================================================
+ * VOLCANS — cônes isolés avec caldeira (injectés dans step_architecture)
+ * ====================================================================== */
+#define MAX_VOLC 8
+typedef struct { float cx,cy,r,peak; } Volcano;
+static Volcano g_volc[MAX_VOLC];
+static int     g_nvolc=0;
+
+static void volcanoes_init(const float *height) {
+    g_nvolc=0;
+    int want=3+(int)(rng_f()*6.f);
+    for (int tries=0; tries<600&&g_nvolc<want; tries++) {
+        int x=(int)(rng_f()*SCPS_W), y=(int)(rng_f()*SCPS_H);
+        float h=height[scps_idx(x,y)];
+        if (h<SEA_LEVEL+0.04f) continue;
+        bool ok=true;
+        for (int v=0;v<g_nvolc&&ok;v++) {
+            float dx=x-g_volc[v].cx, dy=y-g_volc[v].cy;
+            if (dx*dx+dy*dy<28.f*28.f) ok=false;
+        }
+        if (!ok) continue;
+        g_volc[g_nvolc].cx=(float)x; g_volc[g_nvolc].cy=(float)y;
+        g_volc[g_nvolc].r=8.f+rng_f()*16.f;
+        g_volc[g_nvolc].peak=0.07f+rng_f()*0.13f;
+        g_nvolc++;
+    }
+}
+
+static void volcanoes_inject(float *height) {
+    for (int v=0;v<g_nvolc;v++) {
+        float cx=g_volc[v].cx, cy=g_volc[v].cy;
+        float r=g_volc[v].r, pk=g_volc[v].peak;
+        float calR=r*0.22f;
+        int x0=(int)(cx-r*2.f), x1=(int)(cx+r*2.f);
+        int y0=(int)(cy-r*2.f), y1=(int)(cy+r*2.f);
+        for (int y=y0;y<=y1;y++) for (int x=x0;x<=x1;x++) {
+            if (x<0||x>=SCPS_W||y<0||y>=SCPS_H) continue;
+            float dx=(float)x-cx, dy=(float)y-cy;
+            float d=sqrtf(dx*dx+dy*dy);
+            if (d>r*1.8f) continue;
+            float cone=expf(-d*d/(r*r*0.45f))*pk;
+            float caldera=expf(-d*d/(calR*calR*0.5f))*pk*0.65f;
+            height[scps_idx(x,y)]+=cone-caldera;
+        }
+    }
 }
 
 static void step_geology(float *height, float seed_f, const WorldParams *P) {
@@ -184,6 +356,8 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
         }
     }
     normalize_f(height,SCPS_N);
+    step_ocean_features(height, seed_f);
+    volcanoes_init(height);
 }
 
 /* ========================================================================
@@ -200,6 +374,7 @@ static void step_architecture(float *height, float seed_f) {
         float v = stb_perlin_fbm_noise3  (nx*8.f, ny*6.f,seed_f+300.f,2.f,0.5f,4);
         height[scps_idx(x,y)] += r*0.14f*mtn_frac + v*0.07f*low_frac;
     }
+    volcanoes_inject(height);
     normalize_f(height,SCPS_N);
 }
 
@@ -364,7 +539,8 @@ static void gen_climate(World *w, float *height, float *moisture,
         float t_reg  = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.10f;
         float t_loc  = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.05f;
         float cont_heat = odist[i]*(1.f-lat)*0.10f;  /* déserts continentaux brûlants */
-        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat+t_cont+t_reg+t_loc+t_bias,0.f,1.f);
+        float cont_cold=odist[i]*lat*0.18f; /* intérieur continental = gel polaire (Sibérie) */
+        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat-cont_cold+t_cont+t_reg+t_loc+t_bias,0.f,1.f);
     }
 
     /* ---- 2. Advection d'humidité ----------------------------------- */
@@ -1211,6 +1387,47 @@ static void step_weathering(World *w, const float *height, float seed_f) {
                    (height[i]<SEA_LEVEL+0.06f || near_lake || c[i].river>90)) {
             c[i].biome=(t<0.32f)?BIO_BOG:BIO_MARSH;
         }
+    }
+
+    /* B2b. Clairières dans les forêts : petites percées lumineuses.
+     *      Double bruit haute fréquence → taches isolées, non uniformes. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        Biome b=c[i].biome;
+        if (b!=BIO_FOREST&&b!=BIO_WOODS) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float gap =stb_perlin_fbm_noise3(nx*18.f,ny*18.f,seed_f+4100.f,2.f,0.5f,3);
+        float gap2=stb_perlin_fbm_noise3(nx*9.f, ny*9.f, seed_f+4110.f,2.f,0.5f,2);
+        if (gap>0.35f&&gap2>0.10f)
+            c[i].biome=(c[i].moisture>0.48f)?BIO_GRASSLAND:BIO_PLAINS;
+    }
+
+    /* B2c. Aspérités rocheuses dans les steppes et pelouses sèches. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        Biome b=c[i].biome;
+        if (b!=BIO_STEPPE&&b!=BIO_DRYLANDS&&b!=BIO_GRASSLAND) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float rock=stb_perlin_ridge_noise3(nx*14.f,ny*14.f,seed_f+4200.f,2.f,0.5f,1.f,4);
+        if      (rock>0.72f)              c[i].biome=BIO_HIGHLANDS;
+        else if (rock>0.62f&&b==BIO_STEPPE) c[i].biome=BIO_HILLS;
+    }
+
+    /* B2d. Zones mortes / toundra : forêt boréale très continentale → steppe/glacier.
+     *      Effet Sibérie : intérieur froid + éloigné de l'océan = zone inhospitalière. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;
+        if (c[i].temperature>0.22f) continue;
+        if (c[i].ocean_dist<0.62f) continue;
+        Biome b=c[i].biome;
+        if (b!=BIO_FOREST&&b!=BIO_WOODS) continue;
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float tundra=stb_perlin_fbm_noise3(nx*5.f,ny*5.f,seed_f+4300.f,2.f,0.5f,3);
+        if (tundra>0.0f)
+            c[i].biome=(c[i].moisture<0.25f)?BIO_GLACIER:BIO_STEPPE;
     }
 
     /* B3. Despeckle : 2 passes de filtre majoritaire pour fondre les pixels
