@@ -1045,68 +1045,47 @@ static Biome assign_biome(float h, float m, float t) {
  * naturellement dans les vallées et ont une forme liée au terrain, pas un
  * disque parfait. Pour garder les performances on limite la taille : un lac
  * qui demanderait > MAX_LAKE_CELLS cellules n'est pas retenu. */
-#define MAX_LAKE_CELLS 120
+/* Lacs dans les cuvettes : détecte les dépressions cardinales et les étend
+ * aux voisins immédiats légèrement plus bas (max 25 cellules). Les lacs
+ * résultent d'une forme qui suit la vallée, pas un disque parfait.
+ * Seules les dépressions bien encaissées (altitude > SEA_LEVEL+0.020) sont
+ * retenues — évite de noyer les plaines côtières. */
+#define MAX_LAKE_CELLS 25
 static void fill_lakes(float *height, Cell *cells) {
     bool *inlake=(bool*)calloc(SCPS_N,sizeof(bool));
-    int  *stk   =(int*)malloc(SCPS_N*sizeof(int));
-    if (!inlake||!stk){ free(inlake);free(stk);return; }
+    int   batch[MAX_LAKE_CELLS];
+    if (!inlake) return;
 
     for (int y=2;y<SCPS_H-2;y++) for (int x=2;x<SCPS_W-2;x++) {
         int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL+0.015f||inlake[i]) continue;
-        /* Point de dépression : tous les voisins cardinaux sont plus hauts */
+        if (height[i]<SEA_LEVEL+0.020f||inlake[i]) continue;
+        /* Dépression cardinale stricte */
         bool dep=true;
         for (int d=0;d<8;d+=2) {
             if (height[scps_idx(x+DDX[d],y+DDY[d])]<height[i]){dep=false;break;}
         }
         if (!dep) continue;
 
-        /* Flood-fill à hauteur du col le plus bas (brim) */
-        float brim=height[i];
-        /* Cherche le col : hauteur max des voisins directs */
-        for (int d=0;d<8;d+=2) {
-            float hn=height[scps_idx(x+DDX[d],y+DDY[d])];
-            if (hn>brim) brim=hn;
+        /* Expansion aux voisins dans un rayon de 1 et à hauteur proche */
+        float hdep=height[i];
+        float thr =hdep+0.008f;   /* seuil strict : petite cuvette seulement */
+        int sz=0;
+        batch[sz++]=i;
+        for (int d=0;d<8;d++) {
+            int nx2=x+DDX[d],ny2=y+DDY[d];
+            if (nx2<1||nx2>=SCPS_W-1||ny2<1||ny2>=SCPS_H-1) continue;
+            int j=scps_idx(nx2,ny2);
+            if (inlake[j]||height[j]<SEA_LEVEL+0.010f) continue;
+            if (height[j]<=thr) batch[sz++]=j;
+            if (sz>=MAX_LAKE_CELLS) break;
         }
-        /* Réduit le brim d'une marge (évite lacs trop grands) */
-        brim=height[i]+(brim-height[i])*0.55f;
-
-        /* Fill itératif */
-        int top=0, sz=0;
-        stk[top++]=i;
-        bool ok=true;
-        bool *visited=(bool*)calloc(SCPS_N,sizeof(bool));
-        if (!visited){ok=false;}
-        int *batch=(int*)malloc(MAX_LAKE_CELLS*sizeof(int));
-        if (!batch){free(visited);ok=false;}
-
-        if (ok) {
-            visited[i]=true;
-            while (top>0&&sz<MAX_LAKE_CELLS) {
-                int cur=stk[--top];
-                batch[sz++]=cur;
-                int cx2=cur%SCPS_W, cy2=cur/SCPS_W;
-                for (int d=0;d<8;d+=2) {
-                    int nx2=cx2+DDX[d],ny2=cy2+DDY[d];
-                    if (nx2<1||nx2>=SCPS_W-1||ny2<1||ny2>=SCPS_H-1) continue;
-                    int j=scps_idx(nx2,ny2);
-                    if (visited[j]||inlake[j]) continue;
-                    if (height[j]<=brim&&height[j]>=SEA_LEVEL+0.008f) {
-                        visited[j]=true; stk[top++]=j;
-                    }
-                }
-            }
-            if (sz>=2&&sz<=MAX_LAKE_CELLS) {
-                for (int k=0;k<sz;k++) {
-                    cells[batch[k]].lake=true;
-                    height[batch[k]]=SEA_LEVEL+0.005f;
-                    inlake[batch[k]]=true;
-                }
-            }
+        for (int k=0;k<sz;k++) {
+            cells[batch[k]].lake=true;
+            height[batch[k]]=SEA_LEVEL+0.005f;
+            inlake[batch[k]]=true;
         }
-        free(visited); free(batch);
     }
-    free(inlake); free(stk);
+    free(inlake);
 }
 
 /* ========================================================================
