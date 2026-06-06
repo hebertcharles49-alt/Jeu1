@@ -102,11 +102,19 @@ CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_culture_demo.o
 culture_demo: $(CULTURE_DEMO_OBJS)
 	$(CC) $(CULTURE_DEMO_OBJS) -o $@ -lm
 
+PROSPERITY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                        $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                        $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                        $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_prosperity_demo.o
+prosperity_demo: $(PROSPERITY_DEMO_OBJS)
+	$(CC) $(PROSPERITY_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
-	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo culture_demo out_*.ppm montage.bmp
+	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo culture_demo \
+	       prosperity_demo out_*.ppm montage.bmp
 
-.PHONY: all run scps run_scps clean
+.PHONY: all run scps run_scps clean prosperity_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore
 # leur absence au premier build.
@@ -121,3 +129,5 @@ clean:
 -include $(OBJDIR)/scps_tech_demo.d
 -include $(OBJDIR)/scps_scps_culture.d
 -include $(OBJDIR)/scps_culture_demo.d
+-include $(OBJDIR)/scps_scps_prosperity.d
+-include $(OBJDIR)/scps_prosperity_demo.d
