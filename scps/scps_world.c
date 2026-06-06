@@ -409,12 +409,15 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
         float dot=g_plates[pa].dx*g_plates[pb].dx+g_plates[pa].dy*g_plates[pb].dy;
         float conv=(1.f-dot)*0.5f;
         float bump=0.f;
-        if (!g_plates[pa].oceanic && !g_plates[pb].oceanic) bump=bs*conv*0.80f;
-        else if (g_plates[pa].oceanic != g_plates[pb].oceanic) bump=bs*conv*0.45f;
+        if (!g_plates[pa].oceanic && !g_plates[pb].oceanic) bump=bs*conv*1.05f;
+        else if (g_plates[pa].oceanic != g_plates[pb].oceanic) bump=bs*conv*0.60f;
         if (bump>0.f) {
             float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
-            float r=stb_perlin_ridge_noise3(nx2*10.f,ny2*8.f,seed_f+50.f,2.f,0.5f,1.f,5);
-            height[scps_idx(x,y)] += bump*(0.5f+0.5f*r)*mtn_amp*mask;
+            /* Chaîne primaire : ridge + ridge secondaire warpé → dorsale nervurée */
+            float r1=stb_perlin_ridge_noise3(nx2*8.f, ny2*6.f, seed_f+50.f,2.f,0.5f,1.f,6);
+            float r2=stb_perlin_ridge_noise3(nx2*16.f+r1*2.f,ny2*12.f+r1*2.f,
+                                             seed_f+55.f,2.f,0.5f,1.f,5);
+            height[scps_idx(x,y)] += bump*(r1*0.65f+r2*0.35f)*mtn_amp*mask;
         }
     }
     normalize_f(height,SCPS_N);
@@ -424,17 +427,46 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
 
 /* ========================================================================
  * COUCHE 2 — ARCHITECTURE
- * Crêtes, falaises, vallées encaissées
+ *
+ * Réseau de crêtes hiérarchique à 3 niveaux :
+ *   R1 — chaîne principale (grande longueur d'onde) : dorsale primaire
+ *   R2 — contreforts secondaires warpés par R1 : les contreforts SUIVENT
+ *        la chaîne principale et s'y raccordent (pas d'objets isolés)
+ *   R3 — éperons tertiaires warpés par R2 : ramifications latérales
+ *        fines, val·lées et cols entre les éperons
+ *
+ * La warp-chain est la clé : r2 est évalué aux coordonnées déformées par
+ * r1, donc ses crêtes sont orthogonales/parallèles à r1. Même logique pour
+ * r3 vis-à-vis de r2. On obtient un réseau arborescent, pas des boudins.
  * ====================================================================== */
 static void step_architecture(float *height, float seed_f) {
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float h=height[scps_idx(x,y)];
-        float mtn_frac = clampf((h-0.48f)/0.4f,0.f,1.f);
-        float low_frac = clampf((0.62f-h)/0.4f,0.f,1.f);
-        float r = stb_perlin_ridge_noise3(nx*12.f,ny*9.f,seed_f+200.f,2.f,0.5f,1.f,5);
-        float v = stb_perlin_fbm_noise3  (nx*8.f, ny*6.f,seed_f+300.f,2.f,0.5f,4);
-        height[scps_idx(x,y)] += r*0.14f*mtn_frac + v*0.07f*low_frac;
+        float mtn = clampf((h-0.46f)/0.38f,0.f,1.f);
+        float low = clampf((0.60f-h)/0.38f,0.f,1.f);
+
+        /* R1 — dorsale primaire (basse fréquence, fort signal) */
+        float r1=stb_perlin_ridge_noise3(nx*5.5f, ny*4.0f, seed_f+200.f,2.f,0.5f,1.f,6);
+
+        /* R2 — contreforts secondaires : coords warpées par r1 → branchent
+         * sur la dorsale sans la quitter */
+        float r2=stb_perlin_ridge_noise3(nx*11.f+r1*2.2f, ny*8.5f+r1*2.2f,
+                                         seed_f+210.f,2.f,0.5f,1.f,5);
+
+        /* R3 — éperons tertiaires warpés par r2 → ramifications fines */
+        float r3=stb_perlin_ridge_noise3(nx*22.f+r2*1.6f, ny*17.f+r2*1.6f,
+                                         seed_f+220.f,2.f,0.5f,1.f,4);
+
+        /* Vallées / bassins versants (complément des crêtes) */
+        float v=stb_perlin_fbm_noise3(nx*9.f+r1*0.8f, ny*7.f+r1*0.8f,
+                                      seed_f+300.f,2.f,0.5f,5);
+
+        /* Zones montagneuses : réseau de crêtes complet */
+        float mtn_add = r1*0.26f + r2*0.15f + r3*0.08f;
+        /* Zones basses : modelé de vallées seulement */
+        float low_add = v*0.07f;
+        height[scps_idx(x,y)] += mtn_add*mtn + low_add*low;
     }
     volcanoes_inject(height);
     normalize_f(height,SCPS_N);
@@ -530,7 +562,7 @@ static void step_erosion(float *height, Cell *cells, float erosion) {
  * faire franchir le rivage localement → criques, caps, détroits et petites
  * îles satellites. Le large et l'intérieur ne bougent pas (fenêtre nulle). */
 static void step_coastline(float *height, float seed_f) {
-    const float BAND=0.060f;          /* demi-épaisseur de la bande côtière */
+    const float BAND=0.095f;    /* bande large : saisit plateau continental + rivage */
     float *out=(float*)malloc(SCPS_N*sizeof(float));
     if (!out) return;
     memcpy(out,height,SCPS_N*sizeof(float));
@@ -539,17 +571,27 @@ static void step_coastline(float *height, float seed_f) {
         float d=height[i]-SEA_LEVEL;
         if (d<-BAND || d>BAND) continue;
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-        /* Domain warp local pour casser tout alignement résiduel */
-        float wx=stb_perlin_fbm_noise3(nx*7.f,ny*7.f,seed_f+2400.f,2.f,0.5f,3)*0.035f;
-        float wy=stb_perlin_fbm_noise3(nx*7.f+3.f,ny*7.f+1.f,seed_f+2410.f,2.f,0.5f,3)*0.035f;
-        float px=nx+wx, py=ny+wy;
-        /* fBm sur trois octaves franches (côte fractale auto-similaire) */
-        float n = stb_perlin_fbm_noise3(px*10.f,py*10.f,seed_f+2420.f,2.f,0.5f,3)*0.55f
-                + stb_perlin_fbm_noise3(px*21.f,py*21.f,seed_f+2430.f,2.f,0.5f,3)*0.30f
-                + stb_perlin_fbm_noise3(px*40.f,py*40.f,seed_f+2440.f,2.f,0.5f,2)*0.15f;
-        /* Fenêtre : maximale au rivage, nulle aux bords de la bande */
+
+        /* Warp passe 1 — grande échelle (décale baies entières) */
+        float wx1=stb_perlin_fbm_noise3(nx*5.f,   ny*5.f,   seed_f+2400.f,2.f,0.5f,5)*0.048f;
+        float wy1=stb_perlin_fbm_noise3(nx*5.f+2.f,ny*5.f+1.f,seed_f+2405.f,2.f,0.5f,5)*0.048f;
+        float px=nx+wx1, py=ny+wy1;
+
+        /* Warp passe 2 — petite échelle (rugosité de falaise) */
+        float wx2=stb_perlin_fbm_noise3(px*14.f,   py*14.f,   seed_f+2410.f,2.f,0.5f,4)*0.020f;
+        float wy2=stb_perlin_fbm_noise3(px*14.f+3.f,py*14.f+1.f,seed_f+2415.f,2.f,0.5f,4)*0.020f;
+        px+=wx2; py+=wy2;
+
+        /* 5 octaves fractales — chaque octave ×2 en fréquence, ×0.5 en amplitude
+         * (fBm classique) + octave ultrafine pour rugosité au zoom ×10 */
+        float n = stb_perlin_fbm_noise3(px* 7.f,py* 7.f,seed_f+2420.f,2.f,0.5f,4)*0.48f
+                + stb_perlin_fbm_noise3(px*15.f,py*15.f,seed_f+2430.f,2.f,0.5f,4)*0.26f
+                + stb_perlin_fbm_noise3(px*30.f,py*30.f,seed_f+2440.f,2.f,0.5f,3)*0.14f
+                + stb_perlin_fbm_noise3(px*60.f,py*60.f,seed_f+2450.f,2.f,0.5f,3)*0.08f
+                + stb_perlin_fbm_noise3(px*120.f,py*120.f,seed_f+2460.f,2.f,0.5f,2)*0.04f;
+
         float wnd=1.f-(d<0?-d:d)/BAND; wnd*=wnd;
-        out[i]=height[i]+n*0.052f*wnd;
+        out[i]=height[i]+n*0.092f*wnd;
     }
     memcpy(height,out,SCPS_N*sizeof(float));
     free(out);
