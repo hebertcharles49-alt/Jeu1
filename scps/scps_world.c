@@ -151,18 +151,20 @@ static void continents_init(int n, float seed_f) {
             cl->cosA=cosf(a); cl->sinA=sinf(a);
             cl->strength=1.0f;
         }
-        /* Péninsules / bras */
+        /* Péninsules / bras — trapus et bien RECOUVRANTS (sinon ils pointent
+         * hors du corps en fines « oreilles de lapin »). Portée réduite (ils
+         * chevauchent le corps), aspect modéré, rayon court plus large. */
         for (int l=1;l<cs->n;l++) {
             ContLobe *cl=&cs->lobe[l];
             float angle=rng_f()*6.2832f;
-            float reach=R0*(0.50f+rng_f()*0.70f);
+            float reach=R0*(0.30f+rng_f()*0.40f);    /* recouvre le corps */
             cl->cx=cx+cosf(angle)*reach;
             cl->cy=cy+sinf(angle)*reach;
-            float asp=1.8f+rng_f()*2.2f;
-            float shortR=R0*(0.15f+rng_f()*0.22f);
+            float asp=1.25f+rng_f()*1.05f;           /* moins effilé */
+            float shortR=R0*(0.26f+rng_f()*0.22f);   /* plus large */
             cl->ax=shortR*asp; cl->ay=shortR;
             cl->cosA=cosf(angle); cl->sinA=sinf(angle);
-            cl->strength=0.55f+rng_f()*0.35f;
+            cl->strength=0.70f+rng_f()*0.28f;        /* assez fort pour fusionner */
         }
     }
 
@@ -204,6 +206,14 @@ static void continents_init(int n, float seed_f) {
     }
 }
 
+/* Smooth-maximum polynomial (k = largeur de fusion). Fond deux lobes en une
+ * union arrondie au lieu d'une jointure nette → péninsules soudées au corps,
+ * plus d'« oreilles » saillantes. */
+static inline float smaxf(float a, float b, float k) {
+    float h=clampf(0.5f+0.5f*(a-b)/k,0.f,1.f);
+    return (b*(1.f-h)+a*h)+k*h*(1.f-h);
+}
+
 static float continental_mask(int x, int y, float seed_f) {
     float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
     /* Domain warping multi-échelle (Inigo Quilez, 2nd ordre) :
@@ -221,6 +231,9 @@ static float continental_mask(int x, int y, float seed_f) {
     float best=0.f;
     for (int i=0;i<g_ncont;i++) {
         ContShape *cs=&g_cshape[i];
+        /* Union LISSE des lobes d'un MÊME continent (corps + péninsules) :
+         * les bras se soudent au corps sans pointe. */
+        float cval=0.f;
         for (int l=0;l<cs->n;l++) {
             ContLobe *cl=&cs->lobe[l];
             float rx=(fx-cl->cx)*cl->cosA+(fy-cl->cy)*cl->sinA;
@@ -228,8 +241,9 @@ static float continental_mask(int x, int y, float seed_f) {
             float d=sqrtf((rx/cl->ax)*(rx/cl->ax)+(ry/cl->ay)*(ry/cl->ay));
             float lobe=1.f-clampf(d,0.f,1.f);
             lobe=lobe*lobe*(3.f-2.f*lobe)*cl->strength;
-            if (lobe>best) best=lobe;
+            cval = (l==0) ? lobe : smaxf(cval,lobe,0.28f);
         }
+        if (cval>best) best=cval;   /* continents distincts : union dure */
     }
     for (int i=0;i<g_nislet;i++) {
         Islet *il=&g_islet[i];
@@ -578,6 +592,39 @@ static void step_ghost_layer(float *height, float seed_f) {
          * hauts reliefs percent → cohérent avec une dorsale océanique. */
         float shelf=clampf((height[i]-(SEA_LEVEL-0.16f))/0.16f,0.25f,1.f);
         height[i]+=emerged*AMP*shelf;
+    }
+}
+
+/* ========================================================================
+ * CARTE FANTÔME NÉGATIVE — creuse la terre (gouffres & lacs)
+ *
+ * Symétrique de step_ghost_layer mais à l'envers : une 3e heightmap
+ * indépendante, lue avec un seuil haut (relief fantôme rare), appliquée
+ * UNIQUEMENT sur la terre, en SOUSTRACTION. Là où ses crêtes coïncident
+ * avec la terre, le sol s'effondre → gorges, gouffres, et cuvettes qui,
+ * passant sous le niveau de mer, deviennent lacs/mers intérieures.
+ * Le creusement est accentué en altitude (montagnes → gouffres profonds). */
+static void step_ghost_negative(float *height, float seed_f) {
+    const float GSEA = 0.52f;   /* seuil haut → creusement rare et marqué */
+    const float AMP  = 0.46f;   /* profondeur d'effondrement */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int i=scps_idx(x,y);
+        if (height[i]<SEA_LEVEL) continue;             /* mer : intouchée */
+
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        /* Heightmap fantôme #2 (graines de bruit encore distinctes) */
+        float wx=stb_perlin_fbm_noise3(nx*2.3f,ny*2.3f,seed_f+5400.f,2.f,0.5f,5)*0.18f;
+        float wy=stb_perlin_fbm_noise3(nx*2.3f+4.f,ny*2.3f+2.f,seed_f+5410.f,2.f,0.5f,5)*0.18f;
+        float px=nx+wx, py=ny+wy;
+        float g=0.5f+0.5f*stb_perlin_fbm_noise3(px*3.2f,py*3.2f,seed_f+5420.f,2.f,0.5f,6);
+        g+=0.16f*stb_perlin_fbm_noise3(px*8.f,py*8.f,seed_f+5430.f,2.f,0.5f,4);
+
+        float emerged=g-GSEA;
+        if (emerged<=0.f) continue;
+        /* Plus le terrain est haut, plus le gouffre est profond (montagne →
+         * gorge spectaculaire ; plaine → simple cuvette/lac). */
+        float relief=clampf((height[i]-SEA_LEVEL)/(1.f-SEA_LEVEL),0.f,1.f);
+        height[i]-=emerged*AMP*(0.45f+0.55f*relief);
     }
 }
 
@@ -1897,6 +1944,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] carte fantôme.. "); fflush(stdout);
     step_ghost_layer(height,seed_f);      printf("ok\n");
+
+    printf("[scps] fantôme négat.. "); fflush(stdout);
+    step_ghost_negative(height,seed_f);   printf("ok\n");
 
     printf("[scps] continentalité..."); fflush(stdout);
     compute_ocean_distance(height,odist);  printf("ok\n");
