@@ -87,7 +87,8 @@ scps_batch: $(SCPS_BATCH_OBJS)
 
 # Banc d'essai du moteur économique (console, sans SDL)
 ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_econ_demo.o
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_econ_demo.o
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
@@ -104,4 +105,5 @@ clean:
 -include $(OBJDIR)/scps_dump.d
 -include $(OBJDIR)/scps_batch.d
 -include $(OBJDIR)/scps_scps_econ.d
+-include $(OBJDIR)/scps_scps_trade.d
 -include $(OBJDIR)/scps_econ_demo.d

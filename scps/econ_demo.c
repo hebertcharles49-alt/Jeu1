@@ -1,15 +1,15 @@
 /*
- * econ_demo.c — banc d'essai console du moteur économique (sans SDL/UI)
+ * econ_demo.c — banc d'essai console : économie + commerce inter-régional
  *
- *   make econ_demo && ./econ_demo [graine] [n_ticks] [region_a region_b]
+ *   make econ_demo && ./econ_demo [graine] [n_ticks] [region_a [region_b]]
  *
- * Génère un monde, initialise l'économie depuis sa géographie, fait tourner
- * la simulation n_ticks tours, puis affiche un sommaire monde et le détail
- * de deux régions (par défaut : la plus riche et une autre). Permet de
- * valider la chaîne pop → production → marché → satisfaction sans interface.
+ * Boucle : econ_tick → trade_tick → econ_tick → ...
+ * Affiche un sommaire monde, les top routes commerciales, et le détail de
+ * deux régions (économie + balance commerciale).
  */
 #include "scps_world.h"
 #include "scps_econ.h"
+#include "scps_trade.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -20,37 +20,54 @@ int main(int argc, char **argv) {
     int ticks = (argc>2)? atoi(argv[2]) : 40;
     if (ticks<1) ticks=1;
 
-    World *w = (World*)malloc(sizeof(World));
+    World        *w = (World*)       malloc(sizeof(World));
     WorldEconomy *e = (WorldEconomy*)malloc(sizeof(WorldEconomy));
-    if (!w||!e){ fprintf(stderr,"OOM\n"); return 1; }
+    TradeNetwork *t = (TradeNetwork*)malloc(sizeof(TradeNetwork));
+    if (!w||!e||!t){ fprintf(stderr,"OOM\n"); return 1; }
 
     WorldParams p = worldparams_default(seed);
     printf("=== Génération du monde (graine %u) ===\n", seed);
     world_generate(w, &p);
 
-    printf("\n=== Initialisation économie ===\n");
+    printf("=== Initialisation économie ===\n");
     econ_init(e, w);
 
-    /* Choix des deux régions à détailler */
-    int ra = (argc>3)? atoi(argv[3]) : 0;
-    int rb = (argc>4)? atoi(argv[4]) : -1;  /* -1 → on prendra la + riche */
+    printf("=== Construction du réseau commercial ===\n");
+    trade_network_build(t, w, e);
+    printf("    %d liens créés\n", t->n_links);
 
-    printf("=== Simulation : %d ticks ===\n", ticks);
-    for (int t=0; t<ticks; t++) econ_tick(e);
+    /* Régions à détailler */
+    int ra = (argc>3)? atoi(argv[3]) : 0;
+    int rb = -1;
+
+    printf("=== Simulation : %d ticks (econ + commerce) ===\n", ticks);
+    for (int tick=0; tick<ticks; tick++) {
+        econ_tick(e);
+        trade_tick(e, t);
+        /* Recalibrer les capacités tous les 10 ticks (pop change). */
+        if (tick>0 && tick%10==0) trade_network_build(t, w, e);
+    }
 
     econ_print_summary(e, w);
+    trade_print_summary(t, e, w, 12);
 
-    /* Si rb non fourni, détaille la région la plus riche en plus de ra. */
+    /* Région la plus riche si rb pas fourni */
+    if (argc>4) rb=atoi(argv[4]);
     if (rb<0) {
         float best=-1.f; rb=0;
-        for (int rid=0; rid<e->n_regions; rid++)
+        for (int rid=0;rid<e->n_regions;rid++)
             if (e->region[rid].active && e->region[rid].gdp>best) {
                 best=e->region[rid].gdp; rb=rid;
             }
     }
-    econ_print_region(e, w, ra);
-    if (rb!=ra) econ_print_region(e, w, rb);
 
-    free(w); free(e);
+    econ_print_region(e, w, ra);
+    trade_print_region(t, e, w, ra);
+    if (rb!=ra) {
+        econ_print_region(e, w, rb);
+        trade_print_region(t, e, w, rb);
+    }
+
+    free(w); free(e); free(t);
     return 0;
 }
