@@ -18,4 +18,5 @@ scps_dump
 out_*.ppm
 out_*.png
 scps_batch
+econ_demo
 montage.bmp
