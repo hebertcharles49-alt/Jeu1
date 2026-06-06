@@ -56,17 +56,20 @@ static inline uint32_t alpha_over(uint32_t dst, uint32_t src, float alpha) {
                 ch_b(dst)*ia+ch_b(src)*alpha, 1.f);
 }
 
-/* ---- Eau : gradient profondeur --------------------------------------- */
-static const uint32_t WATER_SHALLOW = 0xFF2C6898u;
-static const uint32_t WATER_DEEP    = 0xFF0A1828u;
+/* ---- Eau : gradient profondeur propre (sans relief sous-marin apparent) */
+static const uint32_t WATER_COAST   = 0xFF3B7EAAu;  /* plateau continental */
+static const uint32_t WATER_MID     = 0xFF1A4870u;  /* mer ouverte */
+static const uint32_t WATER_DEEP    = 0xFF091626u;  /* abysses */
 
 static uint32_t water_color(float height) {
-    /* depth 0=côte (SEA_LEVEL) → 1=profond */
-    float depth = clampf((SEA_LEVEL - height) / SEA_LEVEL * 2.f, 0.f, 1.f);
-    uint32_t col = lerp_color(WATER_SHALLOW, WATER_DEEP, depth);
-    /* Légère variation texture (banding subtil) */
-    float band = 0.92f + 0.08f * sinf(height * 180.f);
-    return shade_color(col, band);
+    float depth = clampf((SEA_LEVEL - height) / 0.55f, 0.f, 1.f); /* normalisé */
+    /* Trois stops : côte → mer → abysses, sans sinusoïde sur height */
+    uint32_t col;
+    if (depth < 0.35f)
+        col = lerp_color(WATER_COAST, WATER_MID,  depth/0.35f);
+    else
+        col = lerp_color(WATER_MID,   WATER_DEEP, (depth-0.35f)/0.65f);
+    return col;
 }
 
 /* ---- Heatmap [0..1] → ARGB ------------------------------------------ */

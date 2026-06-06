@@ -639,6 +639,41 @@ static void step_ghost_layer(float *height, float seed_f) {
 }
 
 /* ========================================================================
+ * LISSAGE OCÉAN — plusieurs passes de blur gaussien 3×3 sur les cellules
+ * sous-marines uniquement.
+ *
+ * Les couches fantômes (positive et négative) injectent du relief haute
+ * fréquence partout. Sous l'eau, ce relief percolait visuellement comme
+ * un « texture parasitaire ». On le lisse ici AVANT le calcul du climat
+ * (les îles fantômes restent, mais leur voisinage sous-marin est propre).
+ * La terre n'est jamais modifiée.
+ * ====================================================================== */
+static void step_smooth_ocean(float *height, int passes) {
+    float *tmp=(float*)malloc(SCPS_N*sizeof(float));
+    if (!tmp) return;
+    for (int p=0;p<passes;p++) {
+        memcpy(tmp,height,SCPS_N*sizeof(float));
+        for (int y=1;y<SCPS_H-1;y++) for (int x=1;x<SCPS_W-1;x++) {
+            int i=scps_idx(x,y);
+            if (height[i]>=SEA_LEVEL) continue;  /* terre : intouchée */
+            /* Gaussien 3×3 : centre ×4, cardinal ×2, diagonal ×1 */
+            float s= height[i]*4.f
+                   + height[scps_idx(x+1,y)]  *2.f
+                   + height[scps_idx(x-1,y)]  *2.f
+                   + height[scps_idx(x,y+1)]  *2.f
+                   + height[scps_idx(x,y-1)]  *2.f
+                   + height[scps_idx(x+1,y+1)]*1.f
+                   + height[scps_idx(x-1,y+1)]*1.f
+                   + height[scps_idx(x+1,y-1)]*1.f
+                   + height[scps_idx(x-1,y-1)]*1.f;
+            tmp[i]=s/16.f;
+        }
+        memcpy(height,tmp,SCPS_N*sizeof(float));
+    }
+    free(tmp);
+}
+
+/* ========================================================================
  * CARTE FANTÔME NÉGATIVE — creuse la terre (gouffres & lacs)
  *
  * Symétrique de step_ghost_layer mais à l'envers : une 3e heightmap
@@ -761,29 +796,33 @@ static void gen_climate(World *w, float *height, float *moisture,
         float t_cont = stb_perlin_fbm_noise3(nx*1.8f,ny*1.5f,seed_f+510.f,2.f,0.5f,4)*0.15f;
         float t_reg  = stb_perlin_fbm_noise3(nx*4.0f,ny*3.5f,seed_f+500.f,2.f,0.5f,4)*0.10f;
         float t_loc  = stb_perlin_fbm_noise3(nx*9.0f,ny*8.0f,seed_f+520.f,2.f,0.5f,3)*0.05f;
-        float cont_heat = odist[i]*(1.f-lat)*0.10f;  /* déserts continentaux brûlants */
-        float cont_cold=odist[i]*lat*0.18f; /* intérieur continental = gel polaire (Sibérie) */
-        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat-cont_cold+t_cont+t_reg+t_loc+t_bias,0.f,1.f);
+        float cont_heat = odist[i]*(1.f-lat)*0.12f;  /* déserts continentaux brûlants */
+        float cont_cold = odist[i]*lat*0.20f;          /* gel polaire intérieur (Sibérie) */
+        /* Calotte polaire : refroidissement fort >60° lat */
+        float polar_cap = clampf((lat-0.60f)/0.25f,0.f,1.f)*0.50f;
+        temperature[i]=clampf(1.f-lat-alt_cold+cont_heat-cont_cold-polar_cap
+                              +t_cont+t_reg+t_loc+t_bias,0.f,1.f);
     }
 
     /* ---- 2. Advection d'humidité ----------------------------------- */
     float *rain=(float*)calloc(SCPS_N,sizeof(float));
     if(!rain) return;
-    const float HUM_CAP=1.0f, EVAP=0.16f, RAIN_K=0.05f, ORO_K=4.5f;
+    /* ORO_K élevé = ombre pluviométrique forte (montagne bloque les nuages).
+     * FOREST_EVAP = transpiration forestière (forêt régénère l'humidité
+     * sous-vent — "les forêts font la pluie"). */
+    const float HUM_CAP=1.0f, EVAP=0.16f, RAIN_K=0.055f, ORO_K=6.5f;
+    const float FOREST_EVAP=0.045f;  /* re-évaporation par la canopée */
 
     for (int y=0;y<SCPS_H;y++) {
         float lat=fabsf((float)y/SCPS_H-0.5f)*2.f;
         int dir=wind_dir_x(lat);
         float humidity=0.f;
-        /* Deux balayages : le 1er amorce l'humidité (air venu du large par
-         * enroulement), le 2nd enregistre la précipitation. */
         for (int pass=0;pass<2;pass++)
         for (int k=0;k<SCPS_W;k++) {
             int x = (dir>0) ? k : (SCPS_W-1-k);
             int i=scps_idx(x,y);
             float h=height[i];
             if (h<SEA_LEVEL) {
-                /* Océan : évaporation (eau chaude → plus de vapeur) */
                 float t=temperature[i];
                 humidity += EVAP*(0.4f+0.6f*t)*(HUM_CAP-humidity);
                 if(humidity>HUM_CAP)humidity=HUM_CAP;
@@ -791,11 +830,19 @@ static void gen_climate(World *w, float *height, float *moisture,
                 int xu=clampi(x-dir,0,SCPS_W-1);
                 float rise=h-height[scps_idx(xu,y)];
                 if(rise<0.f)rise=0.f;
-                float oro = humidity*rise*ORO_K;   /* soulèvement orographique */
-                float base= humidity*RAIN_K;        /* pluie de fond */
+                float oro = humidity*rise*ORO_K;   /* ombre pluviométrique */
+                float base= humidity*RAIN_K;
                 float p=base+oro; if(p>humidity)p=humidity;
                 humidity-=p;
                 if(pass==1) rain[i]=p;
+                /* Ré-évaporation forestière : la forêt rejette de la vapeur
+                 * dans l'air sous-vent → humidifie la zone aval.
+                 * (On lit le biome du pass précédent ; il sera affiné plus tard.) */
+                Biome b=cells[i].biome;
+                if (b==BIO_FOREST||b==BIO_WOODS||b==BIO_JUNGLE||b==BIO_MANGROVE) {
+                    humidity+=FOREST_EVAP*(rain[i]/0.3f+0.4f)*(HUM_CAP-humidity);
+                    if(humidity>HUM_CAP)humidity=HUM_CAP;
+                }
             }
         }
     }
@@ -818,17 +865,26 @@ static void gen_climate(World *w, float *height, float *moisture,
 
         float tropical=clampf(1.f-lat*2.6f,0.f,1.f);  /* mousson équatoriale */
         float coastal =1.f-odist[i];                   /* humidité côtière */
-        float fbm=stb_perlin_fbm_noise3(nx*4.f,ny*3.f,seed_f+700.f,2.f,0.5f,4)*0.08f;
+        float fbm=stb_perlin_fbm_noise3(nx*4.f,ny*3.f,seed_f+700.f,2.f,0.5f,4)*0.07f;
 
-        float m = 0.08f
-                + 0.48f*rain[i]      /* advection : continentalité + ombre pluvio. */
-                + 0.22f*tropical     /* pluies de convection tropicale */
-                + 0.20f*coastal      /* proximité de l'océan */
-                + fbm + m_bias;      /* slider humidité */
+        /* Ceinture subtropicale sèche (descente de l'air de Hadley ~25-35°)
+         * C'est ce qui crée le Sahara, le Gobi et l'Outback.
+         * Double cloche : l'une pour chaque hémisphère (lat est toujours |y|). */
+        float subtrop = expf(-((lat-0.30f)*(lat-0.30f))/(0.07f*0.07f))*0.52f;
 
-        /* Corridor riparien : "pas d'eau sans montagne" — le fleuve né en
-         * altitude verdit sa vallée jusque dans le désert (effet Nil). */
-        m += (cells[i].river/255.f)*0.30f;
+        /* Assèchement continental profond (Gobi / intérieur de l'Asie centrale) */
+        float inland_dry = odist[i]*odist[i]*0.40f;
+
+        float m = 0.07f
+                + 0.44f*rain[i]      /* advection : pluie orographique + ombre */
+                + 0.19f*tropical     /* convection tropicale */
+                + 0.18f*coastal      /* proximité de l'océan */
+                + fbm + m_bias
+                - subtrop            /* ceinture subtropicale → Sahara/Gobi */
+                - inland_dry;        /* intérieur profond → steppes/déserts froids */
+
+        /* Corridor riparien : le fleuve verdit sa vallée même dans le désert */
+        m += (cells[i].river/255.f)*0.28f;
 
         moisture[i]=clampf(m,0.f,1.f);
     }
@@ -2001,6 +2057,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] fantôme négat.. "); fflush(stdout);
     step_ghost_negative(height,seed_f);   printf("ok\n");
+
+    printf("[scps] lissage océan... "); fflush(stdout);
+    step_smooth_ocean(height,4);          printf("ok\n");
 
     printf("[scps] continentalité..."); fflush(stdout);
     compute_ocean_distance(height,odist);  printf("ok\n");
