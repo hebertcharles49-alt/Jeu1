@@ -424,8 +424,13 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
-        /* Détail de terrain (haute fréquence) modulé par le masque continental */
-        float detail = stb_perlin_fbm_noise3(nx*4.5f,ny*3.6f,seed_f,2.f,0.5f,7);
+        /* Domain warp IQ 1er ordre sur le bruit de détail : casse l'axe-alignment
+         * du Perlin brut → collines, vallées et plateaux organiques, pas rectangulaires. */
+        float dqx=stb_perlin_fbm_noise3(nx*2.1f,     ny*2.1f,     seed_f+10.f,2.f,0.5f,5);
+        float dqy=stb_perlin_fbm_noise3(nx*2.1f+3.7f,ny*2.1f+1.9f,seed_f+11.f,2.f,0.5f,5);
+        float detail = stb_perlin_fbm_noise3(nx*4.5f+dqx*0.38f,
+                                             ny*3.6f+dqy*0.38f,
+                                             seed_f,2.f,0.5f,7);
         float mask    = continental_mask(x,y,seed_f);
         /* Mer profonde hors masque ; terre détaillée dans le masque.
          * Plateau interne (smoothstep du masque) → continents pleins, peu de
@@ -516,8 +521,9 @@ static void step_architecture(float *height, float seed_f) {
         float r3=stb_perlin_ridge_noise3(nx*22.f+r2*1.6f, ny*17.f+r2*1.6f,
                                          seed_f+220.f,2.f,0.5f,1.f,4);
 
-        /* Vallées / bassins versants */
-        float v=stb_perlin_fbm_noise3(nx*9.f+r1*0.8f, ny*7.f+r1*0.8f,
+        /* Vallées / bassins versants — warpées par r1 ET une composante transverse */
+        float v=stb_perlin_fbm_noise3(nx*9.f+r1*1.1f+r2*0.4f,
+                                      ny*7.f+r1*1.1f+r2*0.4f,
                                       seed_f+300.f,2.f,0.5f,5);
 
         /* Texture pure : R2+R3 ajoutent du détail aux montagnes existantes,
@@ -1151,7 +1157,12 @@ static void build_cross_cost(const World *w, const float *height,
                       -height[scps_idx(x,clampi(y-1,0,SCPS_H-1))]);
         cost += (hx+hy)*24.0f;                                    /* pente */
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
-        cost += 0.45f*(0.5f+0.5f*stb_perlin_fbm_noise3(nx*9.f,ny*9.f,seed_f+90.f,2.f,0.5f,3));
+        /* Domain warp sur le bruit de sinuosité des frontières :
+         * sans warp, les iso-coûts sont trop rectilignes → frontières trop droites. */
+        float cwx=stb_perlin_fbm_noise3(nx*4.5f,     ny*4.5f,     seed_f+91.f,2.f,0.5f,4)*0.07f;
+        float cwy=stb_perlin_fbm_noise3(nx*4.5f+2.3f,ny*4.5f+1.1f,seed_f+92.f,2.f,0.5f,4)*0.07f;
+        cost += 0.55f*(0.5f+0.5f*stb_perlin_fbm_noise3((nx+cwx)*9.f,(ny+cwy)*9.f,
+                                                        seed_f+90.f,2.f,0.5f,4));
         ccost[i]=cost;
     }
 }
@@ -2144,8 +2155,11 @@ void world_generate(World *w, const WorldParams *P) {
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int i=scps_idx(x,y);
         float nx2=(float)x/SCPS_W, ny2=(float)y/SCPS_H;
-        float jt=stb_perlin_noise3(nx2*16.f,ny2*15.f,seed_f+900.f,0,0,0)*0.045f;
-        float jm=stb_perlin_noise3(nx2*15.f,ny2*16.f,seed_f+901.f,0,0,0)*0.035f;
+        /* Deux couches : grosse (brise les bandes latitudinales) + fine (hf) */
+        float jt= stb_perlin_fbm_noise3(nx2*5.f, ny2*4.5f,seed_f+900.f,2.f,0.5f,4)*0.065f
+                + stb_perlin_noise3    (nx2*16.f,ny2*15.f, seed_f+902.f,0,0,0)     *0.035f;
+        float jm= stb_perlin_fbm_noise3(nx2*5.f, ny2*4.5f,seed_f+901.f,2.f,0.5f,4)*0.055f
+                + stb_perlin_noise3    (nx2*15.f,ny2*16.f, seed_f+903.f,0,0,0)     *0.028f;
         w->cell[i].height     =height[i];
         w->cell[i].moisture   =moisture[i];
         w->cell[i].temperature=temp[i];
