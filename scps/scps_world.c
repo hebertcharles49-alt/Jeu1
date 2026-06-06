@@ -146,7 +146,7 @@ static void continents_init(int n, float seed_f) {
         {
             ContLobe *cl=&cs->lobe[0];
             cl->cx=cx; cl->cy=cy;
-            float asp=0.75f+rng_f()*0.50f;
+            float asp=0.75f+rng_f()*0.30f;   /* max 1.05 → moins de "saucisse" */
             cl->ax=R0*asp; cl->ay=R0;
             float a=rng_f()*6.2832f;
             cl->cosA=cosf(a); cl->sinA=sinf(a);
@@ -161,7 +161,7 @@ static void continents_init(int n, float seed_f) {
             float reach=R0*(0.30f+rng_f()*0.40f);    /* recouvre le corps */
             cl->cx=cx+cosf(angle)*reach;
             cl->cy=cy+sinf(angle)*reach;
-            float asp=1.25f+rng_f()*1.05f;           /* moins effilé */
+            float asp=1.10f+rng_f()*0.55f;           /* max 1.65 — péninsules moins filiformes */
             float shortR=R0*(0.26f+rng_f()*0.22f);   /* plus large */
             cl->ax=shortR*asp; cl->ay=shortR;
             cl->cosA=cosf(angle); cl->sinA=sinf(angle);
@@ -182,7 +182,7 @@ static void continents_init(int n, float seed_f) {
             Islet *il=&g_islet[g_nislet++];
             il->cx=bx+cosf(dir)*spacing*(float)k+(rng_f()-0.5f)*spacing*0.3f;
             il->cy=by+sinf(dir)*spacing*(float)k+(rng_f()-0.5f)*spacing*0.3f;
-            float asp=1.f+rng_f()*2.f;
+            float asp=1.f+rng_f()*1.0f;  /* max 2.0 → îlots moins filiformes */
             il->ax=iR*asp; il->ay=iR;
             float a=rng_f()*6.2832f;
             il->cosA=cosf(a); il->sinA=sinf(a);
@@ -477,7 +477,7 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
      */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float mask=continental_mask(x,y,seed_f);
-        if (mask<0.15f) continue;
+        if (mask<0.30f) continue;   /* pas de montagnes près des côtes */
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
         if (bs<0.04f) continue;
@@ -504,7 +504,7 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
          *      dorsale, insérés entre les cols */
         float r2=stb_perlin_ridge_noise3(lx*0.045f+r1*1.8f, ly*0.028f+r1*1.8f,
                                          seed_f+55.f,2.f,0.5f,1.f,5);
-        height[scps_idx(x,y)] += bump*(r1*0.68f+r2*0.32f)*mtn_amp*mask;
+        height[scps_idx(x,y)] += bump*(r1*0.68f+r2*0.32f)*mtn_amp*(mask*mask);
     }
     normalize_f(height,SCPS_N);
     step_ocean_features(height, seed_f);
@@ -994,7 +994,7 @@ static Biome assign_biome(float h, float m, float t) {
     if (h<SEA_LEVEL-0.14f) return BIO_DEEP_OCEAN;
     if (h<SEA_LEVEL-0.04f) return BIO_OCEAN;
     if (h<SEA_LEVEL)       return BIO_SHALLOW;
-    if (h<SEA_LEVEL+0.025f) return BIO_COAST;
+    if (h<SEA_LEVEL+0.042f) return BIO_COAST;  /* bande littorale plus visible */
     if (h>=PEAK_H)          return (t<0.16f)?BIO_GLACIER:BIO_PEAK;
     if (h>=MOUNTAIN_H)      return BIO_MOUNTAINS;
     if (h>=MOUNTAIN_H-0.09f)return (t<0.30f)?BIO_HIGHLANDS:BIO_HILLS;
@@ -1040,17 +1040,73 @@ static Biome assign_biome(float h, float m, float t) {
 /* ========================================================================
  * LACS
  * ====================================================================== */
+/* Détecte les dépressions topographiques terrestres et les inonde jusqu'à
+ * leur niveau de débordement (brim-fill simple). Les lacs résultants sont
+ * naturellement dans les vallées et ont une forme liée au terrain, pas un
+ * disque parfait. Pour garder les performances on limite la taille : un lac
+ * qui demanderait > MAX_LAKE_CELLS cellules n'est pas retenu. */
+#define MAX_LAKE_CELLS 120
 static void fill_lakes(float *height, Cell *cells) {
-    for (int y=1;y<SCPS_H-1;y++) for (int x=1;x<SCPS_W-1;x++) {
+    bool *inlake=(bool*)calloc(SCPS_N,sizeof(bool));
+    int  *stk   =(int*)malloc(SCPS_N*sizeof(int));
+    if (!inlake||!stk){ free(inlake);free(stk);return; }
+
+    for (int y=2;y<SCPS_H-2;y++) for (int x=2;x<SCPS_W-2;x++) {
         int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL+0.015f) continue;
+        if (height[i]<SEA_LEVEL+0.015f||inlake[i]) continue;
+        /* Point de dépression : tous les voisins cardinaux sont plus hauts */
         bool dep=true;
         for (int d=0;d<8;d+=2) {
-            int nx2=x+DDX[d],ny2=y+DDY[d];
-            if (height[scps_idx(nx2,ny2)]<height[i]){dep=false;break;}
+            if (height[scps_idx(x+DDX[d],y+DDY[d])]<height[i]){dep=false;break;}
         }
-        if (dep) { cells[i].lake=true; height[i]=SEA_LEVEL+0.005f; }
+        if (!dep) continue;
+
+        /* Flood-fill à hauteur du col le plus bas (brim) */
+        float brim=height[i];
+        /* Cherche le col : hauteur max des voisins directs */
+        for (int d=0;d<8;d+=2) {
+            float hn=height[scps_idx(x+DDX[d],y+DDY[d])];
+            if (hn>brim) brim=hn;
+        }
+        /* Réduit le brim d'une marge (évite lacs trop grands) */
+        brim=height[i]+(brim-height[i])*0.55f;
+
+        /* Fill itératif */
+        int top=0, sz=0;
+        stk[top++]=i;
+        bool ok=true;
+        bool *visited=(bool*)calloc(SCPS_N,sizeof(bool));
+        if (!visited){ok=false;}
+        int *batch=(int*)malloc(MAX_LAKE_CELLS*sizeof(int));
+        if (!batch){free(visited);ok=false;}
+
+        if (ok) {
+            visited[i]=true;
+            while (top>0&&sz<MAX_LAKE_CELLS) {
+                int cur=stk[--top];
+                batch[sz++]=cur;
+                int cx2=cur%SCPS_W, cy2=cur/SCPS_W;
+                for (int d=0;d<8;d+=2) {
+                    int nx2=cx2+DDX[d],ny2=cy2+DDY[d];
+                    if (nx2<1||nx2>=SCPS_W-1||ny2<1||ny2>=SCPS_H-1) continue;
+                    int j=scps_idx(nx2,ny2);
+                    if (visited[j]||inlake[j]) continue;
+                    if (height[j]<=brim&&height[j]>=SEA_LEVEL+0.008f) {
+                        visited[j]=true; stk[top++]=j;
+                    }
+                }
+            }
+            if (sz>=2&&sz<=MAX_LAKE_CELLS) {
+                for (int k=0;k<sz;k++) {
+                    cells[batch[k]].lake=true;
+                    height[batch[k]]=SEA_LEVEL+0.005f;
+                    inlake[batch[k]]=true;
+                }
+            }
+        }
+        free(visited); free(batch);
     }
+    free(inlake); free(stk);
 }
 
 /* ========================================================================
@@ -2173,6 +2229,35 @@ void world_generate(World *w, const WorldParams *P) {
             damp = damp * damp;
             w->cell[i].river = (uint8_t)(w->cell[i].river * damp);
         }
+    }
+
+    /* Lissage de moisture et temp sur 2 passes 3×3 (terrestre uniquement) :
+     * adoucit les gradients trop nets avant l'assignation des biomes →
+     * transitions plus organiques entre zones sèche/humide et chaud/froid. */
+    {
+        float *sm=(float*)malloc(SCPS_N*sizeof(float));
+        float *st=(float*)malloc(SCPS_N*sizeof(float));
+        if (sm&&st) {
+            for (int pass=0;pass<2;pass++) {
+                for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+                    int i=scps_idx(x,y);
+                    if (height[i]<SEA_LEVEL){ sm[i]=moisture[i];st[i]=temp[i];continue; }
+                    float wm=0.f,wt=0.f,ws=0.f;
+                    for (int dy=-1;dy<=1;dy++) for (int dx=-1;dx<=1;dx++) {
+                        int nx2=clampi(x+dx,0,SCPS_W-1),ny2=clampi(y+dy,0,SCPS_H-1);
+                        int j=scps_idx(nx2,ny2);
+                        if (height[j]<SEA_LEVEL) continue;
+                        float w2=(dx==0&&dy==0)?4.f:(dx*dy==0)?2.f:1.f; /* Gauss 3×3 */
+                        wm+=moisture[j]*w2; wt+=temp[j]*w2; ws+=w2;
+                    }
+                    sm[i]=(ws>0.f)?wm/ws:moisture[i];
+                    st[i]=(ws>0.f)?wt/ws:temp[i];
+                }
+                memcpy(moisture,sm,SCPS_N*sizeof(float));
+                memcpy(temp,st,SCPS_N*sizeof(float));
+            }
+        }
+        free(sm); free(st);
     }
 
     printf("[scps] biomes...       "); fflush(stdout);
