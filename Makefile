@@ -92,9 +92,14 @@ ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
+# Banc d'essai de l'arbre de technologies (console, autonome)
+TECH_DEMO_OBJS := $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_tech_demo.o
+tech_demo: $(TECH_DEMO_OBJS)
+	$(CC) $(TECH_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
-	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo out_*.ppm montage.bmp
+	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo out_*.ppm montage.bmp
 
 .PHONY: all run scps run_scps clean
 
@@ -107,3 +112,5 @@ clean:
 -include $(OBJDIR)/scps_scps_econ.d
 -include $(OBJDIR)/scps_scps_trade.d
 -include $(OBJDIR)/scps_econ_demo.d
+-include $(OBJDIR)/scps_scps_tech.d
+-include $(OBJDIR)/scps_tech_demo.d

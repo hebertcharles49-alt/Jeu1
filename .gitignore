@@ -19,4 +19,5 @@ out_*.ppm
 out_*.png
 scps_batch
 econ_demo
+tech_demo
 montage.bmp
