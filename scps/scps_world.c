@@ -300,7 +300,10 @@ static void step_ocean_features(float *height, float seed_f) {
  * VOLCANS — cônes isolés avec caldeira (injectés dans step_architecture)
  * ====================================================================== */
 #define MAX_VOLC 8
-typedef struct { float cx,cy,r,peak; } Volcano;
+typedef struct {
+    float cx,cy,r,peak;
+    float fdx,fdy;  /* direction d'écoulement dominant (gradient aval normalisé) */
+} Volcano;
 static Volcano g_volc[MAX_VOLC];
 static int     g_nvolc=0;
 
@@ -353,10 +356,19 @@ static void volcanoes_init(const float *height, float seed_f) {
             if (ddx*ddx + ddy*ddy < 30.f*30.f) ok = false;
         }
         if (!ok) continue;
+        /* Direction d'écoulement : gradient de hauteur sur un rayon large */
+        float ghx = height[scps_idx(clampi(vx+4,0,SCPS_W-1),vy)]
+                  - height[scps_idx(clampi(vx-4,0,SCPS_W-1),vy)];
+        float ghy = height[scps_idx(vx,clampi(vy+4,0,SCPS_H-1))]
+                  - height[scps_idx(vx,clampi(vy-4,0,SCPS_H-1))];
+        float glen = sqrtf(ghx*ghx+ghy*ghy);
+        if (glen < 1e-4f) { ghx=0.f; ghy=1.f; glen=1.f; }
         g_volc[g_nvolc].cx   = (float)vx;
         g_volc[g_nvolc].cy   = (float)vy;
         g_volc[g_nvolc].r    = 9.f + rng_f() * 14.f;
         g_volc[g_nvolc].peak = 0.08f + rng_f() * 0.12f;
+        g_volc[g_nvolc].fdx  = -ghx/glen;   /* pointe vers le bas */
+        g_volc[g_nvolc].fdy  = -ghy/glen;
         g_nvolc++;
     }
     free(sub);
@@ -381,33 +393,46 @@ static void volcanoes_inject(float *height) {
     }
 }
 
-/* Proximité d'un volcan [0..1] : sol enrichi sur les pentes (mais pas la
- * caldeira nue elle-même). Utilisé par compute_fertility. */
+/* Sol volcanique enrichi : uniquement côté aval (cendres + coulées de lave).
+ * Reproduit l'effet Naples : un seul versant du volcan est fertile. Le
+ * facteur directionnel est un cosinus remapé [0..1] → annule la contribution
+ * sur le versant au vent et la maximise côté sous-le-vent. */
 static float volcanic_soil(int x, int y) {
     float best=0.f;
     for (int v=0;v<g_nvolc;v++) {
         float dx=(float)x-g_volc[v].cx, dy=(float)y-g_volc[v].cy;
         float d=sqrtf(dx*dx+dy*dy);
         float r=g_volc[v].r;
-        if (d>r*2.2f || d<r*0.25f) continue;  /* anneau fertile autour du cône */
-        float s=1.f-clampf((d-r*0.25f)/(r*1.95f),0.f,1.f);
+        if (d>r*2.6f || d<r*0.30f) continue;
+        float radial = 1.f-clampf((d-r*0.30f)/(r*2.3f),0.f,1.f);
+        /* Projection sur la direction d'écoulement : > 0 = côté aval */
+        float dot = (d>0.f) ? (dx*g_volc[v].fdx+dy*g_volc[v].fdy)/d : 0.f;
+        float dir  = clampf(dot*0.7f+0.3f, 0.f, 1.f); /* 0 au vent → 1 sous le vent */
+        float s = radial * dir;
         if (s>best) best=s;
     }
     return best;
 }
 
-/* Marque la caldeira/cône nu en biome volcanique (roche & cendres). */
+/* Marque la caldeira/cône nu en biome volcanique.
+ * Le rayon effectif est modulé par un FBM → contour irrégulier (cratère
+ * ébréché, coulées de roche figée) plutôt qu'un disque parfait. */
 static void volcanoes_mark(World *w, const float *height) {
     for (int v=0;v<g_nvolc;v++) {
         float cx=g_volc[v].cx, cy=g_volc[v].cy, r=g_volc[v].r;
-        float bareR=r*0.55f;
-        int x0=(int)(cx-bareR), x1=(int)(cx+bareR);
-        int y0=(int)(cy-bareR), y1=(int)(cy+bareR);
+        float bareR=r*0.60f;
+        int x0=(int)(cx-bareR*1.6f), x1=(int)(cx+bareR*1.6f);
+        int y0=(int)(cy-bareR*1.6f), y1=(int)(cy+bareR*1.6f);
         for (int y=y0;y<=y1;y++) for (int x=x0;x<=x1;x++) {
             if (x<0||x>=SCPS_W||y<0||y>=SCPS_H) continue;
             if (height[scps_idx(x,y)]<SEA_LEVEL) continue;
             float dx=(float)x-cx, dy=(float)y-cy;
-            if (dx*dx+dy*dy<=bareR*bareR)
+            float d=sqrtf(dx*dx+dy*dy);
+            /* Rayon local modulé par un bruit pour un contour organique */
+            float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+            float warp=stb_perlin_fbm_noise3(nx*18.f,ny*18.f,(float)v*7.3f+13.f,
+                                             2.f,0.5f,3)*0.30f + 1.f;
+            if (d <= bareR*warp)
                 w->cell[scps_idx(x,y)].biome=BIO_VOLCANO;
         }
     }
