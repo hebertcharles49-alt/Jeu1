@@ -15,6 +15,7 @@
  */
 #include "scps_prosperity.h"
 #include "scps_culture.h"
+#include "scps_core.h"        /* scps_order : le moteur d'ordre interne §2.4 vérifié */
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -128,10 +129,24 @@ static float compute_C_base(const World *w, const TradeNetwork *net, int cid) {
     return clampf(base, 0.f, 10.f);
 }
 
-/* ---- Stabilité interne ------------------------------------------------- */
-static float compute_SI(const TechState *ts) {
-    if (!ts) return 4.0f;
-    return clampf(ts->K * 0.70f + (10.f - ts->H) * 0.30f, 0.f, 10.f);
+/* ---- Gouvernance & pression : entrées de scps_order -------------------- *
+ * Tant qu'aucun levier (centralisation/ouverture, doc §7) n'est branché, P et
+ * F sont neutres. La pression I émerge des besoins non couverts du pays. */
+static float governance_P(const World *w, int cid) { (void)w; (void)cid; return 5.f; }
+static float governance_F(const World *w, int cid) { (void)w; (void)cid; return 5.f; }
+
+static float econ_fiscal_pressure(const WorldEconomy *econ, int cid) {
+    float pop_sum = 0.f, unmet = 0.f;
+    for (int r = 0; r < econ->n_regions; r++) {
+        const RegionEconomy *re = &econ->region[r];
+        if (re->owner != cid || !re->culture.settled) continue;
+        float pop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                  + re->strata[CLASS_ELITE].pop;
+        pop_sum += pop;
+        unmet   += pop * (1.f - re->satisfaction);   /* besoins non couverts → charge */
+    }
+    if (pop_sum <= 0.f) return 4.f;
+    return clampf((unmet / pop_sum) * 10.f, 0.f, 10.f);
 }
 
 /* ---- PE d'un contact externe ------------------------------------------ */
@@ -154,11 +169,11 @@ void prosperity_init(WorldProsperity *wp, const World *w) {
 /* ======================================================================= */
 void prosperity_tick(WorldProsperity *wp, const World *w,
                      const WorldEconomy *econ, const TradeNetwork *net,
-                     const TechState ts[]) {
+                     const TechState ts[], const WorldLegitimacy *wl) {
     int NC = w->n_countries;
     wp->n_countries = NC;
 
-    /* ---- Passe 1 : profil culturel + C + SI ----------------------------- */
+    /* ---- Passe 1 : profil culturel + C (SI calculée en passe 3) ---------- */
     for (int cid = 0; cid < NC; cid++) {
         CountryProsperity *cp = &wp->country[cid];
         compute_profile(econ, w, cid, &cp->profile);
@@ -168,8 +183,6 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
            ajoutée en fin de passe 3 ; ici on fait le decay + base pull) */
         cp->C = cp->C * (1.f - 0.008f) + C_base * 0.008f * 5.f;
         cp->C = clampf(cp->C, 0.f, 10.f);
-
-        cp->SI = compute_SI(ts ? &ts[cid] : NULL);
     }
 
     /* ---- Passe 2 : matrice de voisinage (liens = pays différents) -------- */
@@ -195,11 +208,11 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         const TechState   *ts_c = ts ? &ts[cid] : NULL;
 
         float K = ts_c ? ts_c->K        : 3.f;
-        float L = ts_c ? ts_c->L        : 3.f;
-        float P = ts_c ? ts_c->puissance: 3.f;
+        float Lt= ts_c ? ts_c->L        : 3.f;   /* tech L (ordre consenti) → croissance */
+        float P = ts_c ? ts_c->puissance: 3.f;   /* puissance → porte PE (§2.3)          */
         float H = ts_c ? ts_c->H        : 0.f;
-
         float C = cp->C;
+        float flux_f = ts_c ? tech_flux(ts_c) : 0.f;
 
         /* PE interne */
         float d_bar_int = cp->profile.D_bar_int;
@@ -229,21 +242,36 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
 
         cp->P_potentiel = cp->PE_interne + cp->PE_externe;
 
-        /* SI & rendement */
-        float SI        = cp->SI;
-        float fragil    = ts_c ? tech_fragility(ts_c) : 0.f;
-        cp->rendement   = (SI / 10.f) * (1.f - LAMBDA * fragil / 10.f);
-        cp->rendement   = clampf(cp->rendement, 0.f, 1.f);
-        cp->P_realise   = cp->P_potentiel * cp->rendement;
+        /* ---- ORDRE INTERNE : le moteur vérifié scps_order (§2.4) ----------- *
+         * SI / fragilité / fracture / mode ÉMERGENT du §2.4 avec la LÉGITIMITÉ
+         * VIVANTE comme entrée — fini le proxy K·0.7+(10−H)·0.3. C'est ici que
+         * le dragon devient mortel : un ordre coercitif-fragile craque au choc. */
+        float Lg = wl ? legitimacy_country(wl, w, econ, cid) : Lt;
+        ScpsState st = {0};
+        st.D_bar = cp->profile.D_bar_int;   /* diversité interne (§2.4) ; D∞ sert au PE (§2.3) */
+        st.C     = C;
+        st.P     = governance_P(w, cid);          /* perméabilité (gouvernance/ouverture) */
+        st.K     = K;
+        st.H     = H;
+        st.F     = governance_F(w, cid);          /* fédéralisme (centralisation)         */
+        st.I     = econ_fiscal_pressure(econ, cid);
+        st.L     = Lg;                            /* ← l'entrée vivante                   */
+        st.flux_faustien = flux_f;
+        ScpsOrder o = scps_order(&st);
+        cp->SI        = o.SI;
+        cp->fragilite = o.fragilite;
+        cp->fracture  = o.fracture;
+        cp->mode      = (int)scps_mode(&o);
+        cp->rendement = clampf((o.SI / 10.f) * (1.f - LAMBDA * o.fragilite / 10.f), 0.f, 1.f);
+        cp->P_realise = cp->P_potentiel * cp->rendement;
 
         /* Sorties */
         cp->Lumiere        = BETA  * cp->P_potentiel * (K / 10.f);
         cp->tresor_tick    = GAMMA * cp->P_realise;
-        cp->croissance_tick= DELTA * cp->P_realise * (L / 10.f);
+        cp->croissance_tick= DELTA * cp->P_realise * (Lt / 10.f);
 
-        /* Surchauffe : la coercition H étouffe le flux narratif (I′ = I·(10−H)/10),
-         * une société dure laisse moins déborder mais paie ailleurs (fragilité). */
-        float flux_f = ts_c ? tech_flux(ts_c) : 0.f;
+        /* Surchauffe (§2.3, puissance × charge faustienne — distincte de la
+         * déréalisation interne déjà portée par scps_order). */
         float charge_f = ts_c ? ts_c->charge : 0.f;
         float I_factor  = (10.f - H) / 10.f;
         float surch_raw = ((P / 10.f) * charge_f + flux_f) * I_factor - K;
@@ -296,6 +324,8 @@ void prosperity_print_country(const WorldProsperity *wp, const World *w, int cid
     printf("╠══════════════════════════════════════════════════════╣\n");
     printf("║  C=%.3f  SI=%.3f  pôle=%s\n",
            cp->C, cp->SI, pole_state_name(cp->pole));
+    printf("║  fragilité=%.3f  fracture=%.3f  mode=%s\n",
+           cp->fragilite, cp->fracture, scps_mode_name((ScpsMode)cp->mode));
     printf("║  PE_int=%.3f  PE_ext=%.3f  P_pot=%.3f\n",
            cp->PE_interne, cp->PE_externe, cp->P_potentiel);
     printf("║  rendement=%.3f  P_réalisé=%.3f\n",

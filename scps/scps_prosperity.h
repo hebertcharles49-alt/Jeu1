@@ -18,6 +18,7 @@
 #include "scps_econ.h"
 #include "scps_trade.h"
 #include "scps_tech.h"
+#include "scps_legitimacy.h"   /* L vivant, entrée de scps_order */
 
 typedef enum {
     POLE_CALME = 0,
@@ -46,6 +47,10 @@ typedef struct {
     float tresor_tick;
     float croissance_tick;
     PoleState pole;
+    /* Sorties du moteur vérifié scps_order (§2.4) — la vraie stabilité. */
+    float fragilite;       /* part de l'ordre tenue par la contrainte [0..10] */
+    float fracture;        /* sécession latente : diverse ET non consentie     */
+    int   mode;            /* ScpsMode (stocké en int : n'expose pas scps_core) */
 } CountryProsperity;
 
 typedef struct {
@@ -56,7 +61,8 @@ typedef struct {
 void prosperity_init(WorldProsperity *wp, const World *w);
 void prosperity_tick(WorldProsperity *wp, const World *w,
                      const WorldEconomy *econ, const TradeNetwork *net,
-                     const TechState ts[]);  /* ts[SCPS_MAX_COUNTRY], can be NULL */
+                     const TechState ts[],          /* ts[SCPS_MAX_COUNTRY], can be NULL */
+                     const WorldLegitimacy *wl);    /* L vivant ; NULL = tech.L de repli */
 void prosperity_print_country(const WorldProsperity *wp, const World *w, int cid);
 void prosperity_print_summary(const WorldProsperity *wp, const World *w);
 const char *pole_state_name(PoleState s);

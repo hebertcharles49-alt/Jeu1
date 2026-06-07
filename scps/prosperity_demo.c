@@ -38,8 +38,9 @@ int main(int argc, char **argv) {
     TradeNetwork     *net = (TradeNetwork*)    malloc(sizeof(TradeNetwork));
     TechState        *ts  = (TechState*)       calloc(SCPS_MAX_COUNTRY, sizeof(TechState));
     WorldProsperity  *wp  = (WorldProsperity*) malloc(sizeof(WorldProsperity));
+    WorldLegitimacy  *wl  = (WorldLegitimacy*) malloc(sizeof(WorldLegitimacy));
 
-    if (!w || !econ || !net || !ts || !wp) {
+    if (!w || !econ || !net || !ts || !wp || !wl) {
         fprintf(stderr, "OOM\n");
         return 1;
     }
@@ -68,8 +69,9 @@ int main(int argc, char **argv) {
         tech_state_init(&ts[c], false);
     }
 
-    /* ---- Init prospérité ------------------------------------------------- */
+    /* ---- Init prospérité + légitimité ------------------------------------ */
     prosperity_init(wp, w);
+    legitimacy_init(wl, w, econ);
 
     /* ---- Boucle de simulation ------------------------------------------- */
     printf("=== Simulation : %d ticks ===\n", ticks);
@@ -78,10 +80,11 @@ int main(int argc, char **argv) {
         econ_colonize_tick(econ, w);
         econ_migrate_tick(econ, w);
         world_tick(w, econ, 1.0f);   /* dérive lente de l'horloge linguistique */
+        legitimacy_tick(wl, w, econ, ts);   /* L émerge (lit l'éco du tick) AVANT la prospérité */
         if (tick > 0 && tick % 5 == 0)
             trade_network_build(net, w, econ);
         trade_tick(econ, net);
-        prosperity_tick(wp, w, econ, net, ts);
+        prosperity_tick(wp, w, econ, net, ts, wl);   /* assemble ScpsState avec le L frais */
     }
 
     /* ---- Résumé monde ---------------------------------------------------- */
@@ -156,6 +159,6 @@ int main(int argc, char **argv) {
 
     printf("╚══════════════════════════════════════════════════════════════╝\n");
 
-    free(w); free(econ); free(net); free(ts); free(wp);
+    free(w); free(econ); free(net); free(ts); free(wp); free(wl);
     return 0;
 }

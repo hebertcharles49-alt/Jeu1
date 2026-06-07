@@ -99,6 +99,7 @@ culture_demo: $(CULTURE_DEMO_OBJS)
 PROSPERITY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                         $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
                         $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                        $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                         $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_prosperity_demo.o
 prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 	$(CC) $(PROSPERITY_DEMO_OBJS) -o $@ -lm
