@@ -46,17 +46,17 @@ static float sigmoid(float x) {
 
 /* ---- Profil culturel d'un pays ---------------------------------------- *
  * Lu sur la POPULATION (RegionEconomy.culture), pas sur la géographie : seules
- * les régions PEUPLÉES (settled) comptent, pondérées par leur population. */
+ * les régions PEUPLÉES (settled) comptent, pondérées par leur population.
+ * Agrégé par ce que le pays POSSÈDE (owner), pas par l'assignation géographique
+ * figée — ainsi une conquête transfère bien la région (et sa diversité). */
 static void compute_profile(const WorldEconomy *econ, const World *w, int cid,
                             CulturalProfile *prof) {
     memset(prof, 0, sizeof(*prof));
-    const Country *co = &w->country[cid];
+    (void)w;
 
-    /* Régions peuplées du pays. */
     int rids[SCPS_MAX_REG]; int nr = 0;
-    for (int ri = 0; ri < co->n_regions && nr < SCPS_MAX_REG; ri++) {
-        int rid = co->region_ids[ri];
-        if (rid < 0 || rid >= econ->n_regions) continue;
+    for (int rid = 0; rid < econ->n_regions && nr < SCPS_MAX_REG; rid++) {
+        if (econ->region[rid].owner != cid) continue;
         if (!econ->region[rid].culture.settled) continue;
         rids[nr++] = rid;
     }
@@ -285,7 +285,7 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
          * décroissants). Un Tribunal monte K, une Citadelle monte H. */
         {
             float bK=0.f, bP=0.f, bH=0.f, bPE=0.f;
-            for (int r=0;r<econ->n_regions;r++) if (w->region[r].country==cid) {
+            for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid) {
                 bK  += econ->region[r].build.K_inst;
                 bP  += econ->region[r].build.P_open;
                 bH  += econ->region[r].build.H_coerc;
