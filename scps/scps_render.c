@@ -83,8 +83,29 @@ static uint32_t heatmap(float v) {
     return rgba(r,g,b,1.f);
 }
 
+/* Fondu BILINÉAIRE des couleurs de biome entre les 4 cellules voisines (le
+ * « blending » de présentation, §1a) : les bords de biome deviennent des
+ * dégradés au lieu de bandes nettes. Le poids d'une cellule MER est annulé →
+ * la côte reste franche (pas de boue terre/mer). Enroulé en X (monde rond).
+ * PRÉSENTATION pure : ne lit que la carte (biome/hauteur), jamais une
+ * coordonnée SCPS, et ne touche ni la simulation ni les biomes stockés. */
+static uint32_t biome_blend(const World *w, int cx, int cy, float fx, float fy) {
+    int x1=(cx+1)%SCPS_W, y1=(cy+1<SCPS_H)?cy+1:cy;
+    const Cell *q[4]={ scps_cellc(w,cx,cy), scps_cellc(w,x1,cy),
+                       scps_cellc(w,cx,y1), scps_cellc(w,x1,y1) };
+    float wt[4]={ (1.f-fx)*(1.f-fy), fx*(1.f-fy), (1.f-fx)*fy, fx*fy };
+    float sum=0.f, r=0.f, g=0.f, b=0.f;
+    for (int i=0;i<4;i++){
+        if (q[i]->height<SEA_LEVEL) continue;      /* la mer ne déteint pas sur la terre */
+        uint32_t col=biome_base_color(q[i]->biome);
+        r+=ch_r(col)*wt[i]; g+=ch_g(col)*wt[i]; b+=ch_b(col)*wt[i]; sum+=wt[i];
+    }
+    if (sum<1e-4f) return biome_base_color(q[0]->biome);
+    return rgba(r/sum, g/sum, b/sum, 1.f);
+}
+
 /* ---- Rendu d'une cellule individuelle -------------------------------- */
-static uint32_t cell_color(const World *w, int cx, int cy,
+static uint32_t cell_color(const World *w, int cx, int cy, float fx, float fy,
                             ViewMode mode, int selected_prov) {
     const Cell *c = scps_cellc(w, cx, cy);
     float h = c->height;
@@ -150,8 +171,8 @@ static uint32_t cell_color(const World *w, int cx, int cy,
         return col;
     }
 
-    /* ---- Terrain de base + hillshading ------------------------------- */
-    uint32_t base = biome_base_color(c->biome);
+    /* ---- Terrain de base (fondu de biome) + hillshading -------------- */
+    uint32_t base = biome_blend(w, cx, cy, fx, fy);
     float    sh   = c->shade;
 
     /* Ombre côtière : assombrit le bord des terres */
@@ -250,7 +271,8 @@ void render_map(const World *w, uint32_t *pixels, int pw, int ph,
                 /* Hors carte : fond sombre */
                 col = 0xFF080C10u;
             } else {
-                col = cell_color(w, cx, cy, mode, p->selected_prov);
+                /* position fractionnaire dans la cellule → fondu bilinéaire */
+                col = cell_color(w, cx, cy, wx-(float)cx, wy-(float)cy, mode, p->selected_prov);
             }
             pixels[sy * pw + sx] = col;
         }

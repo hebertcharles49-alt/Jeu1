@@ -615,6 +615,27 @@ static void volcanoes_mark(World *w, const float *height) {
     }
 }
 
+/* ========================================================================
+ * LITHOLOGIE — champ de DURETÉ de roche dérivé de la géologie (les plaques)
+ *
+ * Dur aux sutures CONVERGENTES (roche ignée/métamorphique soulevée) et selon
+ * un bruit lithologique basse fréquence ; tendre dans les bassins/intérieurs.
+ * L'érosion côtière et hydraulique le LISENT → baies dans le tendre, caps qui
+ * jaillissent dans le dur. CAUSAL : la géologie sculpte la côte. */
+static float g_hardness[SCPS_N];
+static void compute_hardness(float seed_f) {
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
+        int pa,pb;
+        float bs=plate_boundary(x,y,&pa,&pb,seed_f);
+        float dot=g_plates[pa].dx*g_plates[pb].dx+g_plates[pa].dy*g_plates[pb].dy;
+        float conv=(1.f-dot)*0.5f;                       /* convergence → roche dure */
+        float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
+        float litho=stb_perlin_fbm_noise3(nx*2.6f,ny*2.6f,seed_f+1700.f,2.f,0.5f,4); /* -1..1 */
+        float hard=0.42f + 0.46f*bs*conv + 0.17f*litho;
+        g_hardness[scps_idx(x,y)]=clampf(hard,0.f,1.f);
+    }
+}
+
 static void step_geology(float *height, float seed_f, const WorldParams *P) {
     plates_init(seed_f, P->world_age);
     continents_init(P->n_continents, seed_f);
@@ -687,6 +708,7 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
     step_ocean_features(height, seed_f);
     /* Volcans tectoniques : placés le long des zones de subduction */
     volcanoes_init(height, seed_f);
+    compute_hardness(seed_f);   /* dureté lithologique (érosion différentielle) */
 }
 
 /* ========================================================================
@@ -813,7 +835,10 @@ static void step_erosion(float *height, Cell *cells, float erosion) {
          * à un ruisseau de 5. */
         float rs=logf(1.f+accum[i])/lmax;
         cells[i].river=(uint8_t)(clampf(rs,0.f,1.f)*255.f);
-        if (rs>0.45f && height[i]>SEA_LEVEL) height[i]-=(rs-0.45f)*carve; /* creuse le lit */
+        /* Creusement modulé par la LITHOLOGIE : vallées profondes dans le tendre,
+         * la roche dure résiste (érosion différentielle, §2a). */
+        float soft=1.f-g_hardness[i];
+        if (rs>0.45f && height[i]>SEA_LEVEL) height[i]-=(rs-0.45f)*carve*(0.5f+1.0f*soft);
     }
     normalize_f(height,SCPS_N);
     free(fdir); free(accum);
@@ -857,7 +882,10 @@ static void step_coastline(float *height, float seed_f) {
                 + stb_perlin_fbm_noise3(px*120.f,py*120.f,seed_f+2460.f,2.f,0.5f,2)*0.04f;
 
         float wnd=1.f-(d<0?-d:d)/BAND; wnd*=wnd;
-        out[i]=height[i]+n*0.092f*wnd;
+        /* Franchissement du rivage ∝ (1−dureté) : baies creusées dans la roche
+         * TENDRE, caps qui résistent dans la roche DURE (§2a). */
+        float soft=1.f-g_hardness[i];
+        out[i]=height[i]+n*0.092f*wnd*(0.55f+0.9f*soft);
     }
     memcpy(height,out,SCPS_N*sizeof(float));
     free(out);
