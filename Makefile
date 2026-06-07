@@ -55,14 +55,20 @@ READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
 readout_demo: $(READOUT_DEMO_OBJS)
 	$(CC) $(READOUT_DEMO_OBJS) -o $@ -lm
 
-# ---- Visualiseur de carte procédurale (SDL2/OpenGL) ----------------------
-SCPS_SRCS := scps/scps_world.c scps/scps_render.c scps/scps_culture.c scps/viewer.c
-SCPS_OBJS := $(SCPS_SRCS:scps/%.c=$(OBJDIR)/scps_%.o)
+# ---- Visualiseur de carte + UI diégétique (SDL2 + SDL_ttf) ---------------
+# Le viewer lie toute la chaîne sim (la membrane scps_readout traduit en mots),
+# mais N'inclut PAS scps_core.h (cloison vérifiée par grep).
+SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+             $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
+             $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_tech.o \
+             $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+             $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+             $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
 $(SCPS_TARGET): $(SCPS_OBJS)
-	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lm $(WINLIBS)
+	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS)
 run_scps: scps
 	./$(SCPS_TARGET)
 

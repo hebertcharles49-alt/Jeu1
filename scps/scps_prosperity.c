@@ -145,8 +145,10 @@ static float econ_fiscal_pressure(const WorldEconomy *econ, int cid) {
         pop_sum += pop;
         unmet   += pop * (1.f - re->satisfaction);   /* besoins non couverts → charge */
     }
-    if (pop_sum <= 0.f) return 4.f;
-    return clampf((unmet / pop_sum) * 10.f, 0.f, 10.f);
+    if (pop_sum <= 0.f) return 3.f;
+    /* base modérée + surcroît selon les besoins non couverts (proxy calibrable :
+     * un État repu digère peu, une famine impose une lourde charge). */
+    return clampf(2.5f + (unmet / pop_sum) * 4.f, 0.f, 10.f);
 }
 
 /* ---- PE d'un contact externe ------------------------------------------ */
