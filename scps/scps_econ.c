@@ -93,8 +93,8 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
         [RES_SALT]=0.20f,
     },
     [CLASS_ELITE] = {
-        [RES_GRAIN]=1.00f, [RES_WINE]=0.70f, [RES_PAPER]=0.35f,
-        [RES_PRECIOUS_WARE]=0.45f, [RES_PRECIOUS_CLOTH]=0.45f, [RES_FUR]=0.30f,
+        [RES_GRAIN]=1.00f, [RES_WINE]=0.70f, [RES_PAPER]=0.35f, [RES_FUR]=0.30f,
+        [RES_PRECIOUS_WARE]=0.90f,   /* palier STATUT : servi en orfèvrerie OU étoffe selon la culture */
     },
 };
 
@@ -109,6 +109,16 @@ static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
 #define DRINK_OFFCULT 0.5f
 static inline Resource preferred_drink(const PopCulture *c){
     return (c->subsistance < 5.f) ? RES_BEER : RES_WINE;
+}
+/* Le palier STATUT (luxe d'élite) est lui aussi une variante : les cultures
+ * martiales/pastorales (clans, nains, orques) prisent l'ORFÈVRERIE (torques,
+ * runes, totems = bien OUVRÉ → precious_ware) ; les cultures établies/raffinées
+ * (cités, sylve, mercantile) prisent l'ÉTOFFE PRÉCIEUSE (soie, fil-de-lune →
+ * precious_cloth). Servir le mauvais luxe ne flatte qu'à moitié — l'élite
+ * conquise reste sur sa faim (le terreau du coup d'État). */
+#define LUXE_OFFCULT 0.5f
+static inline Resource preferred_luxe(const PopCulture *c){
+    return (c->subsistance < 5.f) ? RES_PRECIOUS_WARE : RES_PRECIOUS_CLOTH;
 }
 
 #define TAX_RATE     0.15f   /* part de la valeur produite captée par les élites */
@@ -647,6 +657,28 @@ void econ_tick(WorldEconomy *e, float dt) {
                     re->stock[alt]-=need*got_a; budget-=need*got_a*re->price[alt];
                     float got=clampf(got_p + DRINK_OFFCULT*got_a, 0.f, 1.f);
                     met_w+=w_d*got; r_soc_need+=need; r_soc_got+=need*got;
+                    continue;
+                }
+                /* ── Palier STATUT (luxe d'élite) : VARIANTE culturelle ──
+                 * orfèvrerie (martial) OU étoffe précieuse (raffiné) ; le mauvais
+                 * luxe ne flatte qu'à moitié (l'élite conquise reste sur sa faim). */
+                if (r==RES_PRECIOUS_WARE){
+                    Resource pref=preferred_luxe(&re->culture);
+                    Resource alt =(pref==RES_PRECIOUS_WARE)?RES_PRECIOUS_CLOTH:RES_PRECIOUS_WARE;
+                    float w_l=BASE_PRICE[pref]*need; need_w+=w_l;
+                    float cs_p=clampf(re->stock[pref]/(need+EPS),0.f,1.f);
+                    float cost_p=need*cs_p*re->price[pref];
+                    float cb_p=(cost_p>0.f)?clampf(budget/cost_p,0.f,1.f):1.f;
+                    float got_p=cs_p*cb_p;
+                    re->stock[pref]-=need*got_p; budget-=need*got_p*re->price[pref];
+                    float rem=1.f-got_p;
+                    float cs_a=clampf(re->stock[alt]/(need*rem+EPS),0.f,1.f)*rem;
+                    float cost_a=need*cs_a*re->price[alt];
+                    float cb_a=(cost_a>0.f)?clampf(budget/cost_a,0.f,1.f):1.f;
+                    float got_a=cs_a*cb_a;
+                    re->stock[alt]-=need*got_a; budget-=need*got_a*re->price[alt];
+                    float got=clampf(got_p + LUXE_OFFCULT*got_a, 0.f, 1.f);
+                    met_w+=w_l*got; r_soc_need+=need; r_soc_got+=need*got;
                     continue;
                 }
                 float w=BASE_PRICE[r]*need;          /* importance ~ valeur */

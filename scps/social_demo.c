@@ -47,6 +47,26 @@ static float society_with_drink(WorldEconomy *e, int r, float subsistance, Resou
     return re->society_sat;
 }
 
+/* Satisfaction de l'ÉLITE servie d'UN luxe donné (orfèvrerie ou étoffe), pour une
+ * culture de subsistance donnée. Les deux boissons sont servies (palier moral
+ * neutralisé) → seul le LUXE varie. */
+static float elite_sat_with_luxe(WorldEconomy *e, int r, float subsistance, Resource luxe){
+    RegionEconomy *re=&e->region[r];
+    re->active=true; re->colonized=true; re->culture.settled=true;
+    re->culture.subsistance=subsistance; re->owner=0;
+    re->n_bld=0; re->coercion=0.f; re->over_tax=0.f;
+    for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
+    re->strata[CLASS_LABORER].pop=1000.f; re->strata[CLASS_LABORER].wealth=1e6f;
+    re->strata[CLASS_BOURGEOIS].pop=200.f;re->strata[CLASS_BOURGEOIS].wealth=1e6f;
+    re->strata[CLASS_ELITE].pop=200.f;    re->strata[CLASS_ELITE].wealth=1e6f;
+    re->stock[RES_GRAIN]=1e5f; re->stock[RES_FISH]=1e5f; re->stock[RES_WOOD]=1e5f;
+    re->stock[RES_CLOTH]=1e5f; re->stock[RES_PAPER]=1e5f; re->stock[RES_SALT]=1e5f; re->stock[RES_FUR]=1e5f;
+    re->stock[RES_WINE]=1e5f; re->stock[RES_BEER]=1e5f;     /* boisson satisfaite quoi qu'il arrive */
+    re->stock[luxe]=1e5f;                                   /* SEUL ce luxe est disponible */
+    econ_tick(e, 1.f);
+    return re->strata[CLASS_ELITE].satisfaction;
+}
+
 /* Recherche accumulée en un tick pour un niveau de SAVOIR bâti donné (toutes
  * choses égales par ailleurs : mêmes élites, même satisfaction). */
 static float tech_with_savoir(WorldEconomy *e, int r, float savoir){
@@ -110,6 +130,17 @@ int main(int argc, char **argv){
            clan_beer, clan_wine, city_wine, city_beer);
     ok("un peuple de clans est PLUS content avec sa bière qu'avec du vin", clan_beer > clan_wine + 0.02f);
     ok("un peuple des cités est PLUS content avec son vin qu'avec de la bière", city_wine > city_beer + 0.02f);
+
+    /* ── 2b. STATUT (luxe) : orfèvrerie martiale vs étoffe raffinée ── */
+    printf("\n── 2b. Le luxe d'élite : à chaque culture son statut ──\n");
+    float clan_ware  = elite_sat_with_luxe(e, 1, 2.0f, RES_PRECIOUS_WARE);   /* martial → orfèvrerie */
+    float clan_cloth = elite_sat_with_luxe(e, 1, 2.0f, RES_PRECIOUS_CLOTH);  /* … servi en étoffe (off) */
+    float city_cloth = elite_sat_with_luxe(e, 2, 8.0f, RES_PRECIOUS_CLOTH);  /* raffiné → étoffe */
+    float city_ware  = elite_sat_with_luxe(e, 2, 8.0f, RES_PRECIOUS_WARE);   /* … servi en orfèvrerie (off) */
+    printf("   élite martiale (orfèvrerie=%.2f vs étoffe=%.2f) · raffinée (étoffe=%.2f vs orfèvrerie=%.2f)\n",
+           clan_ware, clan_cloth, city_cloth, city_ware);
+    ok("une élite martiale préfère l'ORFÈVRERIE à l'étoffe", clan_ware > clan_cloth + 0.02f);
+    ok("une élite raffinée préfère l'ÉTOFFE à l'orfèvrerie", city_cloth > city_ware + 0.02f);
 
     /* ═══ 3. FOI — un Temple soutient la légitimité ═════════════════════ */
     printf("\n── 3. La foi : un Temple soutient le consentement ──\n");
