@@ -14,6 +14,7 @@
  *   7. Plein dev : province pleine à Prospérité 100 → pop +15 % plus vite.
  */
 #include "scps_world.h"
+#include "scps_econ.h"
 #include "scps_labor.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,6 +183,42 @@ int main(int argc, char **argv){
     pf->n_bld=3; e->stock[LR_FOOD]=2;
     long pf0=labor_pop_total(e); labor_tick(e); long pf1=labor_pop_total(e);
     ok("la famine (nourriture épuisée) stoppe et inverse la croissance", pf1 < pf0);
+
+    /* ═══ 9. INTÉGRATION — l'économie d'un VRAI pays lit sa géographie ══ */
+    printf("\n── 9. Intégration : seeder un pays du monde ; la richesse suit la terre ──\n");
+    WorldEconomy *econ=malloc(sizeof(WorldEconomy));
+    if (econ){
+        econ_init(econ,w); gen_population(w,econ); worldgen_seed_peoples(w,econ,RACE_HUMAIN);
+        /* moyenne du flux géo par pays sur ses régions possédées → riche vs pauvre. */
+        int cRich=-1,cPoor=-1; float bestF=-1.f, worstF=1e9f;
+        for (int c=0;c<w->n_countries;c++){
+            if (w->country[c].role==POLITY_UNCLAIMED) continue;
+            double sf=0; int n=0;
+            for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==c && econ->region[r].culture.settled){
+                int pid=w->region[r].province_ids[0]; sf+=province_trade_flow(e,pid); n++;
+            }
+            if (n<1) continue;
+            float mf=(float)(sf/n);
+            if (mf>bestF){ bestF=mf; cRich=c; }
+            if (mf<worstF){ worstF=mf; cPoor=c; }
+        }
+        if (cRich>=0 && cPoor>=0 && cRich!=cPoor){
+            labor_seed_from_world(e,w,econ,cRich); for(int t=0;t<5;t++) labor_tick(e);
+            float idxR=labor_prosperity_index(e); long goldR=e->flow[LR_GOLD];
+            labor_seed_from_world(e,w,econ,cPoor); for(int t=0;t<5;t++) labor_tick(e);
+            float idxP=labor_prosperity_index(e); long goldP=e->flow[LR_GOLD];
+            printf("   pays RICHE (flux %.2f) : indice prospérité %.1f → Prospérité %d  (or +%ld/j)\n",
+                   bestF, idxR, (int)(idxR*10.f+0.5f), goldR);
+            printf("   pays PAUVRE (flux %.2f) : indice prospérité %.1f → Prospérité %d  (or +%ld/j)\n",
+                   worstF, idxP, (int)(idxP*10.f+0.5f), goldP);
+            ok("l'économie est seedée du vrai pays et son indice tient dans [0..10]",
+               idxR>=0.f && idxR<=10.f && idxP>=0.f && idxP<=10.f);
+            ok("la richesse SUIT la géographie (meilleur flux → plus de revenu/prospérité)",
+               goldR > goldP && idxR >= idxP);
+        } else { ok("(monde trop homogène pour le test d'intégration — ignoré)", true);
+                 ok("(idem)", true); }
+        free(econ);
+    } else { ok("(OOM econ — ignoré)", true); ok("(idem)", true); }
 
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);

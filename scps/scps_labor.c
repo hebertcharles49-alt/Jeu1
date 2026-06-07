@@ -121,6 +121,52 @@ void labor_seed_start(LaborEcon *e, int prov0){
 }
 
 /* ===================================================================== */
+/* INTÉGRATION — seeder l'économie depuis un VRAI pays du monde           */
+/* ===================================================================== */
+void labor_seed_from_world(LaborEcon *e, const World *w, const WorldEconomy *econ, int cid){
+    /* on garde la géo précalculée (labor_init) ; on (ré)installe l'économie. */
+    e->n_prov=0;
+    memset(e->stock,0,sizeof e->stock); memset(e->flow,0,sizeof e->flow);
+    e->stock[LR_FOOD]=200; e->stock[LR_GOLD]=200; e->stock[LR_MATERIALS]=200;
+    e->market.supply=1.f; e->market.price=BASE_PRICE; e->treasury=200;
+
+    for (int r=0; r<econ->n_regions && e->n_prov<LAB_MAX_PROV; r++){
+        if (econ->region[r].owner!=cid || !econ->region[r].culture.settled) continue;
+        int pid = (r<w->n_regions) ? w->region[r].province_ids[0] : -1;
+        if (pid<0 || pid>=w->n_provinces) continue;
+        long pop = (long)(econ->region[r].strata[CLASS_LABORER].pop
+                        + econ->region[r].strata[CLASS_BOURGEOIS].pop
+                        + econ->region[r].strata[CLASS_ELITE].pop);
+        if (pop<100) pop=100;
+        LProvince *p=&e->prov[e->n_prov++];
+        memset(p,0,sizeof(*p));
+        p->prov=pid; p->colonized=true; p->pop=pop;
+        p->pop_by_class[LAB_LABORER]=pop*8/10;
+        p->pop_by_class[LAB_ARTISAN]=pop*15/100;
+        p->pop_by_class[LAB_ELITE]  =pop - p->pop_by_class[LAB_LABORER] - p->pop_by_class[LAB_ARTISAN];
+        /* Bâtiments choisis sur la GÉO réelle : collecteur + marché + extraction. */
+        p->bld[0]=(LBuilding){ LB_COLLECTOR, 0, 1 };
+        p->bld[1]=(LBuilding){ LB_MARKET,    0, 1 };
+        LBuildType ex = LB_QUARRY;
+        if      (e->g_pres[pid][LR_METAL] >0.3f) ex=LB_MINE;
+        else if (e->g_pres[pid][LR_BOIS]  >0.3f) ex=LB_SAWMILL;
+        else if (e->g_pres[pid][LR_ARGILE]>0.3f) ex=LB_CLAYPIT;
+        p->bld[2]=(LBuilding){ ex, 0, 1 };
+        p->n_bld=3;
+    }
+}
+
+float labor_prosperity_index(const LaborEcon *e){
+    long pop = labor_pop_total(e); if (pop<1) pop=1;
+    float per100  = (float)pop/100.f;
+    float foodsec = (labor_food_balance(e) >= 0) ? 3.0f : 0.0f;   /* le pain d'abord */
+    float gold_pc = (float)e->flow[LR_GOLD]      / per100;        /* revenu par tête */
+    float mat_pc  = (float)e->flow[LR_MATERIALS] / per100;        /* matériaux par tête */
+    float idx = foodsec + clampf(gold_pc*5.0f, 0.f, 4.f) + clampf(mat_pc*4.0f, 0.f, 3.f);
+    return clampf(idx, 0.f, 10.f);
+}
+
+/* ===================================================================== */
 /* SORTIES LUES DE LA GÉO (§5)                                            */
 /* ===================================================================== */
 float province_trade_flow(const LaborEcon *e, int prov){

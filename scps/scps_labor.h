@@ -91,6 +91,16 @@ void labor_init(LaborEcon *e, const World *w);            /* relit la géo ; éc
 void labor_seed_start(LaborEcon *e, int prov0);
 void labor_tick(LaborEcon *e);                            /* la boucle §11 */
 
+/* ---- INTÉGRATION : seeder depuis un VRAI pays du monde ---------------- *
+ * Pose une province de main-d'œuvre par région possédée et peuplée (pop lue de
+ * l'économie existante, bâtiments choisis sur la GÉO réelle de chaque province).
+ * L'économie des populations devient alors celle d'un pays du monde. */
+void  labor_seed_from_world(LaborEcon *e, const World *w, const WorldEconomy *econ, int cid);
+/* Indice de prospérité [0..10] que l'économie PRODUIT (sécurité alimentaire +
+ * revenu et matériaux par tête). Se projette sur la métrique Prospérité 0-100
+ * (la même que voit le joueur) — le pont avec la membrane/les métriques. */
+float labor_prosperity_index(const LaborEcon *e);
+
 /* ---- Jobs & niveaux (§9) ---------------------------------------------- */
 int  building_job_capacity_pop(int level);   /* capacité CUMULÉE en pop (max niv.5 = 2200) */
 int  building_job_slots(int level);          /* en slots (= pop / 100) */
