@@ -70,6 +70,9 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
              $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_diplo.o \
              $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_statecraft.o \
+             $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_scps_events.o \
+             $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o \
+             $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_ai.o \
              $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 

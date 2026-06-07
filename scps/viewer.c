@@ -27,6 +27,14 @@
 #include "scps_readout.h"   /* la membrane : viewer ne voit QUE des bandes + mots.
                              * (n'inclut PAS scps_core.h — cloison vérifiée par grep) */
 #include "scps_statecraft.h"/* Influence/Opinion/Diplomates : API en ENTIERS de jeu */
+#include "scps_agency.h"    /* actions du joueur (file de construction, en JOURS) */
+#include "scps_routes.h"
+#include "scps_diplo.h"
+#include "scps_events.h"    /* chocs, évènements culturels, ÂGES */
+#include "scps_modifier.h"  /* pile de dérive démographique */
+#include "scps_demography.h"/* GROUPES par province (composition) + H/intégration */
+#include "scps_labor.h"     /* topbar : Or / Nourriture / Matériaux */
+#include "scps_ai.h"        /* les voisins VIVENT : lecteurs de coordonnées, mêmes leviers */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +44,12 @@
 /* ---- Configuration fenêtre ------------------------------------------- */
 #define WIN_W 1280
 #define WIN_H  640
+
+/* ---- Temps de jeu : du snapshot au JEU VIVANT ------------------------ */
+typedef enum { SPEED_PAUSE=0, SPEED_1, SPEED_2, SPEED_5, SPEED_COUNT } GameSpeed;
+static const double DAYS_PER_SEC[SPEED_COUNT] = { 0.0, 3.0, 8.0, 24.0 };
+static const char  *SPEED_LABEL[SPEED_COUNT]  = { "❙❙ Pause", "▸ ×1", "▸▸ ×2", "▸▸▸ ×5" };
+#define GAME_YEARS 250
 
 /* ---- État caméra ----------------------------------------------------- */
 typedef struct {
@@ -196,30 +210,80 @@ typedef struct {
     TradeNetwork    *net;
     TechState       *ts;
     Statecraft      *sc;
+    AgencyState     *ag;       /* file d'actions (joueur ET IA) — en jours */
+    EventsState     *ev;       /* chocs / évènements / âges */
+    ModifierStack   *drift;    /* pile de dérive démographique */
+    LaborEcon       *labor;    /* économie de pop du joueur (topbar) */
+    DiploState      *dp;       /* relations / guerres */
+    RouteNetwork    *rn;       /* routes commerciales */
+    AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
+    bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
+    int              day;      /* jour de jeu (1 tick = 1 jour) */
+    int              year;
+    int              player;   /* pays du joueur */
     bool             ready;
 } Sim;
 
-static void sim_rebuild(Sim *s, World *w) {
-    if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc) return;
-    econ_init(s->econ, w);
-    gen_population(w, s->econ);
-    worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);   /* races en gradient */
-    legitimacy_init(s->wl, w, s->econ);
-    prosperity_init(s->wp, w);
-    trade_network_build(s->net, w, s->econ);
-    statecraft_init(s->sc, w);
-    for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
-    for (int t=0;t<30;t++) {                 /* snapshot : 30 ans de simulation */
+/* UN JOUR de jeu vivant (§1). Chaque sous-système avance à SA cadence calibrée :
+ * agency/évènements/statecraft/labor en JOURS ; l'économie/légitimité/prospérité/
+ * démographie à l'ANNÉE (comme les bancs d'essai — on ne dérègle pas le pacing).
+ * Le joueur n'est qu'un acteur : ses actions sont déjà en file dans s->ag. */
+static void sim_day(Sim *s, World *w) {
+    /* — quotidien — */
+    agency_advance(s->ag, w, s->econ, s->wl, 1);            /* les actions progressent */
+    routes_advance(s->rn, w, s->econ, 1);
+    for (int c=0;c<w->n_countries;c++) if (s->ai_on[c])     /* les voisins VIVENT (cadence étalée) */
+        ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
+    world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
+    statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 1);
+    labor_tick(s->labor);
+    /* — annuel (le tour stratégique) — */
+    if (s->day % 365 == 364) {
         econ_tick(s->econ);
         econ_colonize_tick(s->econ, w);
         econ_migrate_tick(s->econ, w);
         world_tick(w, s->econ, 1.0f);
         legitimacy_tick(s->wl, w, s->econ, s->ts);
-        if (t%5==0) trade_network_build(s->net, w, s->econ);
+        trade_network_build(s->net, w, s->econ);
         trade_tick(s->econ, s->net);
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
-        statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, NULL, NULL, 365); /* Influence/Opinion/Agitation */
+        demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f);   /* migration + assimilation */
     }
+    if (++s->day % 365 == 0) s->year++;
+}
+
+/* (Ré)initialise la partie VIVANTE : monde déjà généré, on installe TOUS les
+ * sous-systèmes, on attache les GROUPES démographiques, on amorce ~3 ans, puis
+ * la partie avance par sim_day (plus de snapshot figé). */
+static void sim_rebuild(Sim *s, World *w) {
+    if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
+        || !s->ag || !s->ev || !s->drift || !s->labor) return;
+    econ_init(s->econ, w);
+    gen_population(w, s->econ);
+    worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);
+    legitimacy_init(s->wl, w, s->econ);
+    prosperity_init(s->wp, w);
+    trade_network_build(s->net, w, s->econ);
+    statecraft_init(s->sc, w);
+    agency_init(s->ag);
+    diplo_init(s->dp);
+    routes_init(s->rn);
+    for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
+    s->player = 0;
+    for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){ s->player=c; break; }
+    /* Chaque voisin (non-vierge, non-joueur) reçoit un acteur IA — sa personnalité
+     * sort de sa fiche, ses actions empruntent la MÊME couche d'agency que le joueur. */
+    for (int c=0;c<w->n_countries;c++){
+        s->ai_on[c] = (c!=s->player && w->country[c].role!=POLITY_UNCLAIMED
+                       && w->country[c].capital_prov>=0);
+        if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
+    }
+    demography_attach(w, s->econ, s->drift);             /* 1 groupe substrat/région (non-régression) */
+    events_init(s->ev, w, w->seed);
+    labor_init(s->labor, w);
+    labor_seed_from_world(s->labor, w, s->econ, s->player);
+    s->day=0; s->year=0;
+    for (int t=0; t<3*365; t++) sim_day(s, w);           /* amorce : une carte déjà vivante */
     s->ready = true;
 }
 
@@ -251,27 +315,76 @@ static int draw_reading(SDL_Renderer *ren, int x, int y, const char *cat,
     return x + total + 18;
 }
 
-static void draw_bandeau(SDL_Renderer *ren, int win_w, const WorldProsperity *wp,
-                         const TechState *ts, const Statecraft *sc, const World *w, int cid) {
-    CountryReadout r = country_readout(wp, ts, w, cid);
-    if (sc) r.influence = statecraft_influence(sc, cid);
-    int bh = 30;
+/* Une ressource « Nom stock +flux » (flux rouge si négatif). Survolable. */
+static int draw_res(SDL_Renderer *ren, int x, int y, const char *name, long stock, long flow,
+                    const char *def){
+    char buf[48]; snprintf(buf,sizeof buf, "%s %ld", name, stock);
+    draw_text(ren, g_font, x, y, COL_PARCH, buf);
+    int w1 = text_w(g_font, buf);
+    char fb[24]; snprintf(fb,sizeof fb, " %+ld", flow);
+    SDL_Color fc = (flow<0) ? sense_color(0.12f) : sense_color(0.82f);
+    draw_text(ren, g_font, x+w1, y, fc, fb);
+    int total = w1 + text_w(g_font, fb);
+    zone_add((SDL_Rect){x-3,y-2,total+6,19}, def);
+    return x + total + 20;
+}
+
+/* LA TOPBAR (§2) : ressources · métriques 0-100 · temps/âge/vitesse. Deux rangs,
+ * cuivre sur bleu nuit. Aucun flottant SCPS — tout par la membrane (mots + 0-100). */
+static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World *w, int cid,
+                        GameSpeed sp) {
+    CountryReadout r = country_readout(s->wp, s->ts, w, cid);
+    r.influence = statecraft_influence(s->sc, cid);
+    int bh = 52;
     fill_rect(ren, 0,0, win_w, bh, COL_PANEL);
     fill_rect(ren, 0,bh, win_w, 2, COL_COPPER);
-    int x=12, y=6;
+
+    /* — Rang A : ressources (gauche) · temps/âge/vitesse (droite) — */
+    int x=12, yA=6;
+    x = draw_res(ren,x,yA, lres_name(LR_GOLD),      s->labor->stock[LR_GOLD],      s->labor->flow[LR_GOLD],
+                 "L'or en caisse : taxes et surplus commercial vendu au marché.");
+    x = draw_res(ren,x,yA, lres_name(LR_FOOD),      s->labor->stock[LR_FOOD],      s->labor->flow[LR_FOOD],
+                 "Les vivres ; la famine stoppe la croissance de la population.");
+    x = draw_res(ren,x,yA, lres_name(LR_MATERIALS), s->labor->stock[LR_MATERIALS], s->labor->flow[LR_MATERIALS],
+                 "Les matériaux de construction ; bâtir, coloniser et armer en consomment.");
+    /* droite : date · barre 250 ans · âge · VITESSE (Espace = pause, +/-) */
+    char date[48]; snprintf(date,sizeof date, "An %d / %d", s->year, GAME_YEARS);
+    const char *age = (s->ev->ages.last_dawned>=0) ? age_name((AgeId)s->ev->ages.last_dawned) : "Aube du monde";
+    const char *spl = SPEED_LABEL[sp];
+    int wdate=text_w(g_font,date), wage=text_w(g_font,age), wspeed=text_w(g_font,spl);
+    int bar_w=110, gap=14;
+    int speedx = win_w - 12 - wspeed;
+    int agex   = speedx - gap - wage;
+    int barx   = agex - gap - bar_w;
+    int datex  = barx - gap - wdate;
+    if (datex < x+10) datex = x+10;
+    draw_text(ren, g_font, datex, yA, COL_PARCH, date);
+    zone_add((SDL_Rect){datex-3,yA-2,wdate+6,19}, "L'an de la partie (borne de fin : 250). Les âges montent la pression de la fin.");
+    fill_rect(ren, barx, yA+4, bar_w, 8, COL_PANEL2);
+    int filled = (int)((double)bar_w * (s->year<GAME_YEARS?s->year:GAME_YEARS) / GAME_YEARS);
+    fill_rect(ren, barx, yA+4, filled, 8, COL_COPPER);
+    draw_text(ren, g_font, agex, yA, sense_color(0.5f), age);
+    zone_add((SDL_Rect){agex-3,yA-2,wage+6,19}, "L'âge courant du monde — reconnu quand le monde a atteint son état.");
+    draw_text(ren, g_font, speedx, yA, (sp==SPEED_PAUSE)?sense_color(0.5f):COL_COPPER, spl);
+    zone_add((SDL_Rect){speedx-3,yA-2,wspeed+6,19}, "Vitesse du temps. Espace = pause ; + / − = accélérer / ralentir.");
+
+    /* — Rang B : pays + métriques 0-100 — */
+    int yB=28;
     const char *name = (cid>=0 && cid<w->n_countries) ? w->country[cid].name : "—";
-    draw_text(ren, g_font, x, y, COL_COPPER, name); x += text_w(g_font,name) + 22;
-    x = draw_reading(ren,x,y,"Stabilité", r.m_stabilite.value, label_stab(r.stabilite),   band_good(r.stabilite,5,true),  hover_stab());
-    x = draw_reading(ren,x,y,"Assise",    -1,                  label_assise(r.assise),    band_good(r.assise,4,false),    hover_assise());
-    x = draw_reading(ren,x,y,"Légitimité",r.m_legitimite.value,label_legit(r.legitimite), band_good(r.legitimite,5,true), hover_legit());
-    x = draw_reading(ren,x,y,"Cohésion",  r.m_cohesion.value,  label_concorde(r.concorde),band_good(r.concorde,4,false),  hover_concorde());
-    x = draw_reading(ren,x,y,"Prospérité",r.m_prosperite.value,label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
-    x = draw_reading(ren,x,y,"Savoir",    r.m_savoir.value,    label_savoir(r.savoir),    band_good(r.savoir,4,true),     hover_savoir());
-    x = draw_reading(ren,x,y,"Influence", r.influence,         "",                        COL_PARCH,
-                     "La réputation diplomatique : prospérité, taille et accords tenus la nourrissent ; elle plafonne le nombre de diplomates en mission.");
+    int xb=12;
+    draw_text(ren, g_font, xb, yB, COL_COPPER, name); xb += text_w(g_font,name) + 18;
+    xb = draw_reading(ren,xb,yB,"Stabilité", r.m_stabilite.value, label_stab(r.stabilite),   band_good(r.stabilite,5,true),  hover_stab());
+    xb = draw_reading(ren,xb,yB,"Assise",    -1,                  label_assise(r.assise),    band_good(r.assise,4,false),    hover_assise());
+    xb = draw_reading(ren,xb,yB,"Légitimité",r.m_legitimite.value,label_legit(r.legitimite), band_good(r.legitimite,5,true), hover_legit());
+    xb = draw_reading(ren,xb,yB,"Cohésion",  r.m_cohesion.value,  label_concorde(r.concorde),band_good(r.concorde,4,false),  hover_concorde());
+    xb = draw_reading(ren,xb,yB,"Prospérité",r.m_prosperite.value,label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
+    xb = draw_reading(ren,xb,yB,"Savoir",    r.m_savoir.value,    label_savoir(r.savoir),    band_good(r.savoir,4,true),     hover_savoir());
+    xb = draw_reading(ren,xb,yB,"Influence", r.influence,         "",                        COL_PARCH,
+                      "La réputation diplomatique : prospérité, taille et accords tenus la nourrissent ; elle plafonne les diplomates en mission.");
     if (r.presage != PG_CALME)
-        draw_reading(ren,x,y,"Présage",   -1,                  label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
-    if (r.augure) {  /* ligne d'alerte sous le bandeau, uniquement en péril */
+        draw_reading(ren,xb,yB,"Présage",   -1,                  label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
+
+    if (r.augure) {  /* ligne d'alerte / augure sous la topbar (réemploi machinerie IA) */
         fill_rect(ren, 0,bh+2, win_w, 20, COL_PANEL2);
         draw_text(ren, g_font, 12, bh+3, sense_color(0.12f), r.augure);
     }
@@ -292,33 +405,68 @@ static void ui_row(SDL_Renderer *ren, int x, int *y, int pw, const char *cat,
 
 static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                                 const World *w, const WorldEconomy *econ,
-                                const WorldProsperity *wp, const WorldLegitimacy *wl, int pid) {
+                                const WorldProsperity *wp, const WorldLegitimacy *wl,
+                                const ModifierStack *drift, int pid) {
     ProvinceReadout p = province_readout(w, econ, wp, wl, pid);
-    int pw=312, px=win_w-pw, py=44, ph=win_h-py-26;
+    int pw=312, px=win_w-pw, py=56, ph=win_h-py-26;
     fill_rect(ren, px,py, pw,ph, COL_PANEL);
     fill_rect(ren, px,py, 2,ph, COL_COPPER);
     int x=px+16, y=py+14, rw=pw-30;
     char line[192];
+    bool restive=false;     /* une minorité frondeuse présente → chemins H / Intégrer */
 
     draw_text(ren, g_font_big, x, y, COL_COPPER, p.nom); y += 28;
     snprintf(line,sizeof line, "%s · %s", p.terrain, label_stature(p.stature));
     draw_text(ren, g_font, x, y, COL_PARCH, line);
     zone_add((SDL_Rect){x-2,y-2,rw,19}, hover_stature()); y += 22;
 
-    ui_section(ren, x, &y, "PEUPLE");
-    ui_row(ren,x,&y,rw,"Race", p.race, COL_PARCH,
-           "L'espèce de la population : sa couche biologique (démographie, "
-           "tempérament) superposée à la culture.");
-    snprintf(line,sizeof line, "Âmes %ld", p.ames);
-    draw_text(ren, g_font, x, y, COL_PARCH, line);
-    zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre d'habitants."); y += 20;
-    ui_row(ren,x,&y,rw,"Flux", label_flux(p.flux), band_good(p.flux,5,true), hover_flux());
-    if (p.diaspora) {
-        draw_text(ren, g_font, x, y, COL_DIM, "⚑ Diaspora présente");
-        zone_add((SDL_Rect){x-2,y-2,rw,19},
-                 "Une communauté déracinée, installée loin de sa terre — porteuse d'idées et de tensions.");
-        y += 20;
+    /* COMPOSITION — la ventilation des GROUPES de la province (le payoff du
+     * refactor démographique). race/classe diégétiques ; loyauté en MOT ; état. */
+    {
+        int reg = (pid>=0 && pid<w->n_provinces) ? w->province[pid].region : -1;
+        if (reg>=0 && reg<econ->n_regions && econ->region[reg].pop.n_groups>0) {
+            ui_section(ren, x, &y, "COMPOSITION");
+            int owner = econ->region[reg].owner;
+            const PopCulture *crown = &econ->region[reg].culture;     /* repli */
+            if (owner>=0 && owner<w->n_countries) {
+                int cp=w->country[owner].capital_prov;
+                if (cp>=0 && cp<w->n_provinces) { int cr=w->province[cp].region;
+                    if (cr>=0 && cr<econ->n_regions) crown=&econ->region[cr].culture; }
+            }
+            static char comp_hov[SCPS_MAX_GROUPS][160];
+            GroupReadout gr[SCPS_MAX_GROUPS];
+            int ng = province_composition(&econ->region[reg].pop, drift, crown, 5.f, 5.f,
+                                          gr, SCPS_MAX_GROUPS);
+            for (int i=0;i<ng;i++) {
+                int barw = 6 + (int)(gr[i].percent*0.38f);     /* barre de proportion (≤44) */
+                SDL_Color lc = band_good(gr[i].loyaute,5,true);
+                fill_rect(ren, x, y+3, barw, 10, lc);
+                char buf[80];
+                snprintf(buf,sizeof buf, "%d%% %s — %s", gr[i].percent, gr[i].race, label_humeur(gr[i].loyaute));
+                draw_text(ren, g_font, x+50, y, COL_PARCH, buf);
+                int bw=text_w(g_font,buf);
+                char et[44]; snprintf(et,sizeof et, " · %s", gr[i].etat);
+                draw_text(ren, g_font, x+50+bw, y, COL_DIM, et);
+                snprintf(comp_hov[i],sizeof comp_hov[i],
+                         "%s · %s — %s (%s). Race/classe diégétiques ; loyauté en mot ; jamais un nom SCPS.",
+                         gr[i].race, gr[i].klass, label_humeur(gr[i].loyaute), gr[i].etat);
+                zone_add((SDL_Rect){x-2,y-2,rw,19}, comp_hov[i]);
+                if (i>0 && gr[i].loyaute <= HU_FRONDEUSE) restive=true;   /* minorité restive */
+                y += 20;
+            }
+            snprintf(line,sizeof line, "Âmes %ld", p.ames);
+            draw_text(ren, g_font, x, y, COL_DIM, line);
+            zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 20;
+        } else {
+            ui_section(ren, x, &y, "PEUPLE");
+            ui_row(ren,x,&y,rw,"Race", p.race, COL_PARCH,
+                   "L'espèce de la population.");
+            snprintf(line,sizeof line, "Âmes %ld", p.ames);
+            draw_text(ren, g_font, x, y, COL_PARCH, line);
+            zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre d'habitants."); y += 20;
+        }
     }
+    ui_row(ren,x,&y,rw,"Flux", label_flux(p.flux), band_good(p.flux,5,true), hover_flux());
 
     ui_section(ren, x, &y, "ÉCONOMIE");
     ui_row(ren,x,&y,rw,"Vocation", p.vocation, COL_PARCH,
@@ -338,6 +486,27 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         draw_text(ren, g_font, x, y, sense_color(0.06f), "⚑ Au bord de la révolte");
         zone_add((SDL_Rect){x-2,y-2,rw,19},
                  "L'agitation a franchi le seuil : maintenue, elle vire à la révolte ouverte.");
+        y += 20;
+    }
+
+    /* ACTIONS (§4) — tout passe par la couche d'agency, en JOURS. Le survol dit
+     * le coût. Sur une minorité restive : DEUX chemins distincts (réprimer vs intégrer). */
+    ui_section(ren, x, &y, "ACTIONS");
+    draw_text(ren, g_font, x, y, COL_PARCH, "▸ Bâtir  [B]");
+    zone_add((SDL_Rect){x-2,y-2,rw,19},
+             "Met une construction en file (couche d'agency) : rien d'instantané, tout en jours ; "
+             "coûte des matériaux (prix de marché si le stock manque). [B] file un Tribunal.");
+    y += 20;
+    if (restive) {
+        draw_text(ren, g_font, x, y, sense_color(0.30f), "▸ Réprimer (la poigne)");
+        zone_add((SDL_Rect){x-2,y-2,rw,19},
+                 "Réprimer : calme immédiat de l'agitation — MAIS la légitimité du groupe est rongée "
+                 "et la fragilité monte. Réversible : la révolte resurgit si la botte se lève (rien n'est métabolisé).");
+        y += 20;
+        draw_text(ren, g_font, x, y, sense_color(0.75f), "▸ Intégrer (la patience)");
+        zone_add((SDL_Rect){x-2,y-2,rw,19},
+                 "Intégrer : métabolise lentement (capacité + ouverture + légitimité + temps) — durable et vrai, "
+                 "mais long (∝ la distance culturelle : le gouffre prend des générations).");
         y += 20;
     }
 }
@@ -416,6 +585,14 @@ int main(int argc, char **argv) {
     sim.net  = (TradeNetwork*)    malloc(sizeof(TradeNetwork));
     sim.ts   = (TechState*)       calloc(SCPS_MAX_COUNTRY, sizeof(TechState));
     sim.sc   = (Statecraft*)      malloc(sizeof(Statecraft));
+    sim.ag   = (AgencyState*)     malloc(sizeof(AgencyState));
+    sim.ev   = (EventsState*)     malloc(sizeof(EventsState));
+    sim.drift= (ModifierStack*)   malloc(sizeof(ModifierStack));
+    sim.labor= (LaborEcon*)       malloc(sizeof(LaborEcon));
+    sim.dp   = (DiploState*)      malloc(sizeof(DiploState));
+    sim.rn   = (RouteNetwork*)    malloc(sizeof(RouteNetwork));
+    sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
+    sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 
     int win_w = WIN_W, win_h = WIN_H;
     PixBuf pb = pixbuf_create(ren, win_w, win_h);
@@ -426,6 +603,9 @@ int main(int argc, char **argv) {
     uint32_t  seed     = have_shot_seed ? shot_seed : (uint32_t)time(NULL);
     WorldParams params = worldparams_default(seed);
     ViewMode  mode     = VIEW_TERRAIN;
+    GameSpeed  speed   = SPEED_1;        /* le temps coule (Espace = pause) */
+    double     day_accum = 0.0;
+    uint32_t   last_ticks = SDL_GetTicks();
     int       selected = -1;
     bool      dirty    = true;
     bool      running  = true;
@@ -466,8 +646,8 @@ int main(int argc, char **argv) {
         if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
         if (sim.ready && g_font) {
             zone_reset();
-            draw_bandeau(ren, win_w, sim.wp, sim.ts, sim.sc, world, cid);
-            draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, selected);
+            draw_topbar(ren, win_w, &sim, world, cid, speed);
+            draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
         }
         SDL_RenderPresent(ren);
         uint32_t *cap = (uint32_t*)malloc((size_t)win_w*win_h*4);
@@ -546,6 +726,24 @@ int main(int argc, char **argv) {
                 switch (ev.key.keysym.sym) {
                 case SDLK_ESCAPE:
                 case SDLK_q:     running = false; break;
+                /* --- Contrôle du TEMPS (§1) : Espace = pause ; +/- = vitesse --- */
+                case SDLK_SPACE:
+                    speed = (speed==SPEED_PAUSE) ? SPEED_1 : SPEED_PAUSE; break;
+                case SDLK_PLUS: case SDLK_EQUALS: case SDLK_KP_PLUS:
+                    if (speed<SPEED_5) speed++;
+                    if (speed==SPEED_PAUSE) speed=SPEED_1;
+                    break;
+                case SDLK_MINUS: case SDLK_KP_MINUS:
+                    if (speed>SPEED_1) speed--;
+                    break;
+                /* --- ACTION (§4) : bâtir, via la couche d'agency, en JOURS --- */
+                case SDLK_b:
+                    if (sim.ready && selected>=0 && selected<world->n_provinces) {
+                        int reg = world->province[selected].region;
+                        if (reg>=0 && agency_order_build(sim.ag, reg, EDI_TRIBUNAL))
+                            printf("\n[scps] Action : Tribunal mis en file (région %d) — construit en jours.\n", reg);
+                    }
+                    break;
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
                 case SDLK_1:     mode=VIEW_TERRAIN;     dirty=true; break;
                 case SDLK_2:     mode=VIEW_POLITICAL;   dirty=true; break;
@@ -601,6 +799,19 @@ int main(int argc, char **argv) {
             selected = -1; dirty = true; regen = false;
         }
 
+        /* --- LE TEMPS COULE : la partie avance selon la vitesse (§1) --- */
+        {
+            uint32_t now = SDL_GetTicks();
+            double frame_dt = (now - last_ticks) / 1000.0; last_ticks = now;
+            if (frame_dt > 0.25) frame_dt = 0.25;               /* anti spirale de la mort */
+            if (sim.ready && speed != SPEED_PAUSE && sim.year < GAME_YEARS) {
+                day_accum += frame_dt * DAYS_PER_SEC[speed];
+                int steps=0;
+                while (day_accum >= 1.0 && steps < 40) { sim_day(&sim, world); day_accum -= 1.0; steps++; }
+                if (steps>0) dirty = true;                      /* propriété/overlays peuvent changer */
+            } else day_accum = 0.0;
+        }
+
         if (dirty && pb.pixels) {
             rp.cam_ox = cam.ox; rp.cam_oy = cam.oy; rp.cam_scale = cam.scale;
             rp.selected_prov = selected;
@@ -617,9 +828,9 @@ int main(int argc, char **argv) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
             zone_reset();
             int cid = country_for_panel(world, selected);
-            draw_bandeau(ren, win_w, sim.wp, sim.ts, sim.sc, world, cid);
+            draw_topbar(ren, win_w, &sim, world, cid, speed);
             if (selected >= 0)
-                draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, selected);
+                draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             draw_hover_footer(ren, win_w, win_h, mx2, my2);
         }
         SDL_RenderPresent(ren);
@@ -636,6 +847,8 @@ int main(int argc, char **argv) {
     pixbuf_destroy(&pb);
     free(world);
     free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
+    free(sim.ag); free(sim.ev); free(sim.drift); free(sim.labor);
+    free(sim.dp); free(sim.rn); free(sim.ai); free(sim.ai_on);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
     TTF_Quit();
