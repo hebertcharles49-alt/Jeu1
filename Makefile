@@ -204,6 +204,14 @@ STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 structural_demo: $(STRUCTURAL_DEMO_OBJS)
 	$(CC) $(STRUCTURAL_DEMO_OBJS) -o $@ -lm
 
+# ---- L'économie des populations : main-d'œuvre, jobs, matériaux, marché ---
+# La prod scale sur les JOBS REMPLIS ; les sorties LISENT la géo du worldgen.
+LABOR_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_species.o \
+                   $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_labor_demo.o
+labor_demo: $(LABOR_DEMO_OBJS)
+	$(CC) $(LABOR_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \
