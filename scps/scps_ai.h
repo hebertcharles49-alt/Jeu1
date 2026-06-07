@@ -46,6 +46,12 @@ typedef struct {
     float tresor;        /* trésor disponible (somme régionale) */
     float food;          /* marge d'infrastructure alimentaire */
     float armee;         /* puissance militaire projetable */
+    /* NOUVEAU — les BESOINS (l'IA était aveugle à ce qui manque) */
+    Resource chain_gap;  /* intrant manquant d'un raffineur présent (RES_NONE si aucun) */
+    Resource demand_gap; /* bien d'un panier de classe non comblé (variante culturelle comprise) */
+    Resource strat_gap;  /* matière stratégique absente du pays (salpêtre/fer céleste/cristal) */
+    float    gap_acuity; /* gravité agrégée du manque [0..1] */
+    float    take_pressure; /* acuité d'un bien NON-productible localement → ne reste que PRENDRE/COMMERCER [0..1] */
 } AiView;
 
 /* ---- Compteurs (preuve d'émergence : on tally par acteur) ------------------ */

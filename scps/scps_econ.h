@@ -253,5 +253,7 @@ void econ_print_summary(const WorldEconomy *e, const World *w);
 /* Libellés */
 const char *social_class_name(SocialClass c);
 const char *building_name(BuildingType b);
+/* Recette d'un bâtiment (intrants → extrant) — pour la perception IA. */
+void        building_recipe(BuildingType b, Resource *in1, Resource *in2, Resource *out);
 
 #endif /* SCPS_ECON_H */

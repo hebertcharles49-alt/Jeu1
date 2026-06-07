@@ -192,8 +192,31 @@ int main(int argc, char **argv){
         AiView vD=ai_observe(s.wp,s.w,s.econ,cidD);
         AiView vM=ai_observe(s.wp,s.w,s.econ,cidM);
         AiView vB=ai_observe(s.wp,s.w,s.econ,cidB);
+        /* À BESOINS ÉGAUX (zéro trou), l'agressivité vient de la FICHE. */
+        vD.gap_acuity=vM.gap_acuity=vB.gap_acuity=0.f;
+        vD.take_pressure=vM.take_pressure=vB.take_pressure=0.f;
         float gD=ai_aggression(&act[0],&vD), gB=ai_aggression(&act[2],&vB), gM=ai_aggression(&act[1],&vM);
-        ok("l'agressivité nette ordonne Dominateur > Bâtisseur > Mercantile", gD>gB && gB>gM);
+        ok("à besoins égaux, l'agressivité ordonne Dominateur > Bâtisseur > Mercantile", gD>gB && gB>gM);
+
+        /* BESOIN PERÇU : la vue expose désormais les TROUS (chaîne/demande/stratégie). */
+        ok("la VUE perçoit les besoins (trou de chaîne/demande/stratégie + acuité)",
+           (vM.chain_gap!=RES_NONE||vM.demand_gap!=RES_NONE||vM.strat_gap!=RES_NONE||vM.gap_acuity>=0.f));
+
+        /* ESCALADE : un Mercantile STABLE à qui un bien aigu est REFUSÉ (introuvable
+         * → ne reste que PRENDRE) devient agressif — pas une permission de fiche, une PRESSION. */
+        AiView calm   = { .SI=7.f,.fragilite=2.f,.L=6.f,.K=6.f,.Dinf_interne=2.f,.armee=3.f };
+        AiView blocked= calm; blocked.gap_acuity=1.f; blocked.take_pressure=1.f;
+        float g_calm = ai_aggression(&act[1], &calm);
+        float g_war  = ai_aggression(&act[1], &blocked);
+        ok("un besoin AIGU et BLOQUÉ pousse même un Mercantile à l'agression (escalade)",
+           g_war > g_calm + 0.1f);
+
+        /* FREIN PRÉSERVÉ : le MÊME besoin bloqué, sur un acteur FRAGILE, escalade MOINS
+         * (il encaisse plutôt que de se suicider). */
+        AiView frag    = { .SI=2.f,.fragilite=7.f,.L=4.f,.K=4.f,.Dinf_interne=9.f,.armee=3.f };
+        AiView frag_blk= frag; frag_blk.gap_acuity=1.f; frag_blk.take_pressure=1.f;
+        float g_frag = ai_aggression(&act[1], &frag_blk);
+        ok("un acteur FRAGILE ENCAISSE le manque (le frein borne l'escalade)", g_frag < g_war);
     }
 
     /* ---- L'arc : on laisse tourner, on tally les ACTES (mêmes verbes) ----- */

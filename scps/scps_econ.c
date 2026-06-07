@@ -167,6 +167,15 @@ static inline float clampf(float v,float lo,float hi){return v<lo?lo:(v>hi?hi:v)
  * MAL. L'ASSIMILATION (integration↑, via le refactor démographique) fait DÉRIVER
  * sa demande vers la dominante → la pénalité s'efface sur les générations.
  * Renvoie la fraction de pop « mal servie » [0..1] (0 si province homogène). */
+/* Recette d'un bâtiment (intrants → extrant) — exposée pour la perception IA
+ * (détecter un raffineur qui tourne à vide faute d'intrant). */
+void building_recipe(BuildingType b, Resource *in1, Resource *in2, Resource *out){
+    if (b<0 || b>=BLD_TYPE_COUNT){ if(in1)*in1=RES_NONE; if(in2)*in2=RES_NONE; if(out)*out=RES_NONE; return; }
+    if (in1) *in1=RECIPE[b].in1;
+    if (in2) *in2=RECIPE[b].in2;
+    if (out) *out=RECIPE[b].out;
+}
+
 float econ_off_culture_fraction(const ProvincePop *pp){
     if (!pp || pp->n_groups<=1) return 0.f;
     int dom=-1; long best=-1;

@@ -104,6 +104,51 @@ AiView ai_observe(const WorldProsperity *wp, const World *w,
         v.food   += econ->region[r].build.food_cap;
     }
     v.armee = diplo_mil_power(w, econ, cid);
+
+    /* ── PERCEPTION DES BESOINS — ce qui MANQUE (l'IA était aveugle à tout ça) ──
+     * Lu des MÊMES données que la membrane montre au joueur : capacités d'extraction,
+     * stocks, demande/offre agrégées du pays. Aucune omniscience sur l'ennemi. */
+    {
+        static const Resource STRAT[3] = { RES_SALTPETER, RES_CELESTIAL_IRON, RES_ARCANE_CRYSTAL };
+        float rawcap[RES_COUNT], stock[RES_COUNT], demand[RES_COUNT], supply[RES_COUNT];
+        for (int g=0; g<RES_COUNT; g++){ rawcap[g]=stock[g]=demand[g]=supply[g]=0.f; }
+        for (int r=0; r<econ->n_regions; r++) if (econ->region[r].owner==cid){
+            const RegionEconomy *re=&econ->region[r];
+            for (int g=1; g<RES_COUNT; g++){ rawcap[g]+=re->raw_cap[g]; stock[g]+=re->stock[g];
+                demand[g]+=re->demand[g]; supply[g]+=re->supply[g]; }
+        }
+        /* TROU DE CHAÎNE : un raffineur présent dont un intrant manque (ni extrait, ni en stock). */
+        Resource chain=RES_NONE; float chain_short=0.f;
+        for (int r=0; r<econ->n_regions && chain==RES_NONE; r++) if (econ->region[r].owner==cid){
+            const RegionEconomy *re=&econ->region[r];
+            for (int i=0; i<re->n_bld && chain==RES_NONE; i++){
+                Resource in1,in2,out; building_recipe(re->bld[i].type,&in1,&in2,&out);
+                Resource ins[2]={in1,in2};
+                for (int k=0;k<2;k++){ Resource g=ins[k]; if(g==RES_NONE) continue;
+                    if (rawcap[g]<0.1f && supply[g]<0.5f && stock[g]<1.f){ chain=g; chain_short=1.f; break; } }
+            }
+        }
+        v.chain_gap=chain;
+        /* TROU STRATÉGIQUE : une matière qui débloque tech/militaire, extraite NULLE PART. */
+        Resource strat=RES_NONE; float strat_short=0.f;
+        for (int k=0;k<3;k++){ Resource g=STRAT[k]; if (rawcap[g]<0.1f && stock[g]<0.5f){ strat=g; strat_short=1.f; break; } }
+        v.strat_gap=strat;
+        /* TROU DE DEMANDE : un bien dont la demande dépasse nettement l'offre (panier non comblé,
+         * variante culturelle comprise — la demande des minorités est déjà dans re->demand). */
+        Resource dgap=RES_NONE; float dworst=0.f;
+        for (int g=RES_PROD_FIRST; g<RES_COUNT; g++){
+            float d=demand[g], s=supply[g]+stock[g];
+            if (d>1.f && s < d*0.6f){ float sh=(d-s)/d; if (sh>dworst){ dworst=sh; dgap=g; } }
+        }
+        v.demand_gap=dgap;
+        v.gap_acuity = clampf(0.5f*chain_short + 0.5f*strat_short + 0.6f*dworst, 0.f, 1.f);
+        /* PRESSION DE PRISE : un trou stratégique, ou un brut de chaîne, INTROUVABLE chez soi
+         * (rawcap nul) → on ne peut ni le produire : ne restent que PRENDRE ou COMMERCER. */
+        float take=0.f;
+        if (strat!=RES_NONE) take += 0.6f;
+        if (chain!=RES_NONE && chain<RES_PROD_FIRST && rawcap[chain]<0.1f) take += 0.4f;
+        v.take_pressure = clampf(take, 0.f, 1.f);
+    }
     return v;
 }
 
@@ -118,9 +163,16 @@ float ai_consolidation_pressure(const AiView *v){
     return clampf(p, 0.f, 1.f);
 }
 
+#define NEED_W 0.7f   /* poids de la pression de besoin sur l'agression (surface d'équilibrage) */
 float ai_aggression(const AiActor *a, const AiView *v){
     float brake = ai_consolidation_pressure(v);
-    return (a->w_expand + 0.5f*a->w_faith) * (1.f - brake);
+    float base  = a->w_expand + 0.5f*a->w_faith;
+    /* L'agression ne lit plus QUE la fiche : un besoin AIGU dont le seul moyen
+     * restant est PRENDRE (bien introuvable chez soi, donc à arracher) POUSSE à la
+     * guerre — même un Mercantile bloqué escalade. Le frein la borne toujours
+     * (un acteur fragile encaisse le manque plutôt que de se suicider). */
+    float need_push = NEED_W * v->gap_acuity * v->take_pressure;
+    return (base + need_push) * (1.f - brake);
 }
 
 /* ===================================================================== */
