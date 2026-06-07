@@ -9,6 +9,7 @@
  */
 #include "scps_world.h"
 #include "scps_render.h"
+#include "scps_econ.h"    /* econ_init + gen_population → histogramme subsistance */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +77,28 @@ int main(int argc, char **argv) {
     printf("[dump] biomes dom.:");
     for (int b=0;b<BIO_COUNT;b++) if (bc[b]) printf(" %s=%d", biome_name((Biome)b), bc[b]);
     printf("\n");
+
+    /* Histogramme de PopCulture.subsistance — vérifie que l'échelle biome→
+     * subsistance n'est plus inversée (steppe pastorale ≈ 2-3, plaine ≈ 6,
+     * terres intensives ≈ 8). Nécessite l'éco (régions) + le peuplement. */
+    {
+        WorldEconomy *econ = (WorldEconomy*)malloc(sizeof(WorldEconomy));
+        if (econ) {
+            econ_init(econ, w);
+            gen_population(w, econ);
+            int sb[11]; for (int b=0;b<11;b++) sb[b]=0;
+            for (int r=0;r<w->n_regions;r++) {
+                int b=(int)(econ->region[r].culture.subsistance+0.5f);
+                if (b<0) b=0;
+                if (b>10) b=10;
+                sb[b]++;
+            }
+            printf("[dump] subsistance (PopCulture) :");
+            for (int b=0;b<=10;b++) if (sb[b]) printf(" %d:%d", b, sb[b]);
+            printf("\n");
+            free(econ);
+        }
+    }
 
     printf("[dump] graine %u → vues %dx%d\n", seed, W, H);
     for (size_t i = 0; i < sizeof(views)/sizeof(views[0]); i++) {

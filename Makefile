@@ -52,7 +52,8 @@ run: $(TARGET)
 	./$(TARGET)
 
 # ---- Moteur SCPS (visualiseur de carte procédurale) ---------------------
-SCPS_SRCS := scps/scps_world.c scps/scps_render.c scps/viewer.c
+# scps_world.o dépend de scps_culture.o (gen_population appelle culture_make).
+SCPS_SRCS := scps/scps_world.c scps/scps_render.c scps/scps_culture.c scps/viewer.c
 SCPS_OBJS := $(SCPS_SRCS:scps/%.c=$(OBJDIR)/scps_%.o)
 SCPS_LDFLAGS := $(SDL_LIBS) -lm
 ifdef WIN
@@ -74,21 +75,25 @@ $(SCPS_TARGET): $(SCPS_OBJS)
 run_scps: scps
 	./$(SCPS_TARGET)
 
-# Générateur d'images headless (sans SDL) — vérification de la génération
-SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o $(OBJDIR)/scps_dump.o
+# Générateur d'images headless (sans SDL) — vérification de la génération.
+# Inclut econ + culture : dump.c peuple la culture pour l'histogramme subsistance.
+SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
+                  $(OBJDIR)/scps_dump.o
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
 # Planche-contact de 5 mondes (montage.bmp) — revue rapide après chaque
 # modification du générateur.
-SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o $(OBJDIR)/scps_batch.o
+SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_batch.o
 scps_batch: $(SCPS_BATCH_OBJS)
 	$(CC) $(SCPS_BATCH_OBJS) -o $@ -lm
 
 # Banc d'essai du moteur économique (console, sans SDL)
 ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
-                  $(OBJDIR)/scps_econ_demo.o
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_econ_demo.o
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 

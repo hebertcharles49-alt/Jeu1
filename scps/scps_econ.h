@@ -34,6 +34,7 @@
 #define SCPS_ECON_H
 
 #include "scps_types.h"
+#include "scps_culture.h"   /* PopCulture embarque les traits dérivés (Ethos, …) */
 
 /* ---- Strates sociales ------------------------------------------------- */
 typedef enum {
@@ -68,9 +69,33 @@ typedef struct {
 
 #define ECON_MAX_BLD 6      /* une manufacture de chaque type par région */
 
+/* ---- Profil culturel de la population d'une région --------------------- *
+ * Distinct de la géographie : ce sont les gens qui ont une culture, pas la
+ * terre. Initialisé depuis le biome dominant à la génération (gen_population),
+ * puis mutable via syncrétisme, dérive (world_tick) et migration. */
+typedef struct {
+    /* Les cinq axes [0..10] — seuls axes lus pour la distance culturelle. */
+    float langue;      /* horloge phylogénétique */
+    float valeurs;
+    float subsistance; /* ancrée sur le biome dominant à l'init */
+    float parente;
+    float religion;
+    /* Traits dérivés (résolus par culture_make, remutés par syncrétisme). */
+    Ethos        ethos;
+    Lifeway      lifeway;
+    Structure    structure;
+    Credo        credo;
+    ReligionBranch rel_branch;
+    MartialTrait martial;
+    EconTrait    econ;
+    int  age;       /* ticks d'existence (dérive) */
+    bool settled;   /* false = région vierge, pas encore peuplée */
+} PopCulture;
+
 /* ---- Économie d'une région -------------------------------------------- */
 typedef struct {
     PopStratum strata[CLASS_COUNT];
+    PopCulture culture;   /* profil culturel de la population locale */
 
     float      raw_cap[RES_COUNT];   /* extraction max/tick par matière première */
     Building   bld[ECON_MAX_BLD];
@@ -93,7 +118,6 @@ typedef struct {
     /* Diaspora & innovation culturelle */
     float      diaspora_pop;         /* immigrants non-primaires installés (bourgeois+élites) */
     float      diaspora_innovation;  /* score d'innovation cumulé (diminue par acculturation) */
-    float      orphan_tech_weight;   /* pression vers une tech orpheline (lu par scps_tech) */
 
     /* Coercition temporaire (relocalisation forcée) — décroît chaque tick */
     float      coercion;             /* [0..1] : 0=libre, 1=état d'urgence */

@@ -175,12 +175,10 @@ typedef struct {
      * Sert de filtre dans econ_init (active/impassable) et de couche visuelle. */
     float    habitability;
 
-    /* Fiche SCPS — axes [0..10] (doc §2.2) */
-    float    langue;           /* horloge phylogénétique */
-    float    parente;
-    float    religion;
-    float    subsistance;      /* ancrée sur le biome dominant */
-    float    valeurs;
+    /* NOTE : aucun champ culturel ici. La culture (langue, valeurs, subsistance,
+     * parenté, religion, traits dérivés) est une propriété de la POPULATION,
+     * portée par RegionEconomy.culture (PopCulture, cf. scps_econ.h), pas du
+     * terrain. La Province reste strictement géographique. */
 
     /* Rendu */
     uint32_t color;            /* ARGB, précalculé à la génération */

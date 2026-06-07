@@ -6,7 +6,8 @@
  * la simulation — l'aléa est dans la génération du monde, pas dans l'éco.
  */
 #include "scps_econ.h"
-#include "scps_world.h"   /* resource_name() */
+#include "scps_world.h"   /* resource_name(), subsistance_for_biome() */
+#include "scps_culture.h" /* culture_content_distance() pour la novelty diaspora */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -170,7 +171,10 @@ void econ_init(WorldEconomy *e, const World *w) {
             if (pid<0||pid>=w->n_provinces) continue;
             const Province *pv=&w->province[pid];
             float a = (float)pv->area;
-            cap  += a * (0.25f + 0.75f*clampf(pv->subsistance/10.f,0.f,1.f));
+            /* Intensité agricole du biome (même source de vérité que l'axe
+             * subsistance culturel) → capacité d'accueil brute. */
+            float subs = subsistance_for_biome(pv->biome_dominant);
+            cap  += a * (0.25f + 0.75f*clampf(subs/10.f,0.f,1.f));
             hab_w += pv->habitability * a;
             area += a;
         }
@@ -597,6 +601,7 @@ static void colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid) {
         src->strata[c].pop -= take*(src->strata[c].pop/fmaxf(spop,EPS));
     econ_seed_population(dst, COLONY_SEED_POP);
     dst->colonized=true;
+    dst->culture.settled=true;   /* la culture de biome (gen_population) s'active */
     dst->owner=(int16_t)cid;
 }
 
@@ -663,9 +668,9 @@ int econ_colonize_tick(WorldEconomy *e, const World *w) {
 /* MIGRATION INTERNE                                                       */
 /* ====================================================================== */
 /* Principe : les bourgeois et élites migrent vers les régions adjacentes
- * plus prospères. La migration crée de la DIASPORA dans la destination,
- * ce qui augmente son innovation (tech). La pression sur les techs orphelines
- * (orphan_tech_weight) est aussi mise à jour pour que scps_tech puisse la lire.
+ * plus prospères. La migration crée de la DIASPORA dans la destination, dont
+ * l'apport d'innovation (tech) dépend de la DISTANCE CULTURELLE entre la
+ * population d'origine et la population hôte (et non de l'écart de richesse).
  *
  * Les laborers ne migrent pas spontanément ; ils sont l'objet de relocalisation
  * forcée (econ_relocate_pop).                                                  */
@@ -709,14 +714,19 @@ int econ_migrate_tick(WorldEconomy *e, const World *w) {
 
             if (migrated < 0.5f) continue;
 
-            /* Effet diaspora : novelty = différentiel normalisé.
-             * Plus les cultures d'origine et de destination sont distantes
-             * (proxy ici : différentiel de prospérité), plus l'apport est riche.
-             * Un système culture-intégré pourra remplacer ce proxy plus tard. */
-            float novelty = pros_dst/pros_src - 1.f;
+            /* Effet diaspora : la nouveauté apportée est la DISTANCE CULTURELLE
+             * (L∞ de contenu, [0..1]) entre population source et hôte. Deux
+             * populations proches n'innovent pas en se mêlant ; deux populations
+             * éloignées fécondent l'hôte (au prix d'une friction d'intégration). */
+            const PopCulture *csrc = &src->culture;
+            const PopCulture *cdst = &dst->culture;
+            Culture tmp_src = { .valeurs=csrc->valeurs, .subsistance=csrc->subsistance,
+                                .parente=csrc->parente,  .religion=csrc->religion };
+            Culture tmp_dst = { .valeurs=cdst->valeurs, .subsistance=cdst->subsistance,
+                                .parente=cdst->parente,  .religion=cdst->religion };
+            float novelty = culture_content_distance(&tmp_src, &tmp_dst) / 10.f; /* [0..1] */
             dst->diaspora_pop         += migrated;
             dst->diaspora_innovation  += migrated * novelty;
-            dst->orphan_tech_weight   += migrated * novelty * 0.05f;
             flows++;
         }
     }
@@ -783,10 +793,8 @@ void econ_print_region(const WorldEconomy *e, const World *w, int region_id) {
     printf("│ Satisfaction générale : %.0f%%   PIB %.0f   Trésor %.0f   Tech %.1f\n",
            re->satisfaction*100.f, re->gdp, re->treasury, re->tech);
     if (re->diaspora_pop > 0.5f || re->coercion > 0.005f)
-        printf("│ Diaspora : %.0f hab  innov %.2f  tech-orpheline pression %.2f"
-               "  coercition %.0f%%\n",
-               re->diaspora_pop, re->diaspora_innovation,
-               re->orphan_tech_weight, re->coercion*100.f);
+        printf("│ Diaspora : %.0f hab  innov %.2f  coercition %.0f%%\n",
+               re->diaspora_pop, re->diaspora_innovation, re->coercion*100.f);
 
     printf("│ Manufactures\n");
     if (re->n_bld==0) printf("│   (aucune)\n");

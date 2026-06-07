@@ -95,10 +95,9 @@ static void print_province_info(const World *w, int prov_id) {
     printf("│  Ressource       : %s\n", resource_name(p->resource));
     printf("│  Hiérarchie      : région %d · pays %d · continent %d\n",
            (int)p->region, (int)p->country, (int)p->continent);
-    printf("│  SCPS — langue   : %.1f  parenté : %.1f  religion : %.1f\n",
-           p->langue, p->parente, p->religion);
-    printf("│          subsistance: %.1f  valeurs : %.1f\n",
-           p->subsistance, p->valeurs);
+    /* La culture (langue/valeurs/subsistance/parenté/religion) n'appartient
+     * plus à la Province : c'est un attribut de la population régionale
+     * (RegionEconomy.culture), absente de ce visualiseur purement géographique. */
     printf("└────────────────────────────────────────────────\n");
     fflush(stdout);
 }

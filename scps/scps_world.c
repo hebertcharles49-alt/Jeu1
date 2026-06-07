@@ -18,6 +18,7 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "../src/stb_perlin.h"
 #include "scps_world.h"
+#include "scps_culture.h"   /* culture_make(), lifeway_*, ethos_nearest() */
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1764,46 +1765,139 @@ static void compute_render_flags(World *w, float *height) {
 }
 
 /* ========================================================================
- * FICHE SCPS PAR PROVINCE
+ * GÉOGRAPHIE — noms de provinces (la culture vit ailleurs : gen_population)
  * ====================================================================== */
-static float subsistance_for_biome(Biome b) {
-    switch(b){
-        case BIO_STEPPE: case BIO_SAVANNA: return 8.5f;
-        case BIO_GRASSLAND: case BIO_HIGHLANDS: return 7.5f;
-        case BIO_FARMLAND: case BIO_PLAINS:     return 3.0f;
-        case BIO_COAST: case BIO_SHALLOW:       return 5.0f;
-        case BIO_FOREST: case BIO_WOODS:        return 7.0f;
-        case BIO_JUNGLE:                        return 6.5f;
-        case BIO_MARSH:                         return 6.0f;
-        case BIO_DESERT: case BIO_DRYLANDS:     return 9.0f;
-        default:                                return 5.0f;
+static void gen_province_names(World *w) {
+    for (int p=0;p<w->n_provinces;p++)
+        snprintf(w->province[p].name,sizeof(w->province[p].name),"Prov.%d",p+1);
+}
+
+/* Intensité agricole [0..10] d'un biome — dérivée du mode de vie qu'il
+ * verrouille, donc TOUJOURS cohérente avec l'axe de subsistance culturel
+ * (plus d'échelle inversée : steppe pastorale ≈ 2.5, plaine ≈ 6, terres
+ * intensives ≈ 7.5). Source unique de vérité : la table LIFE[] de culture. */
+float subsistance_for_biome(Biome b) {
+    return lifeway_subs(lifeway_for_biome(b));
+}
+
+/* ========================================================================
+ * PEUPLEMENT — profil culturel par région (PopCulture)
+ *
+ * La culture est portée par la POPULATION (RegionEconomy.culture), pas par le
+ * terrain. À appeler APRÈS econ_init (les régions doivent exister). Le mode de
+ * vie est verrouillé par le biome dominant de la province-capitale ; l'éthos
+ * est tiré autour de celui qu'attire ce mode de vie ; la branche religieuse
+ * suit la latitude ; la langue mesure la distance à la proto-famille la plus
+ * proche, dont les foyers sont les centroïdes des continents générés.
+ * ====================================================================== */
+void gen_population(World *w, WorldEconomy *econ) {
+    if (!econ) return;
+    /* RNG dédié, reproductible par graine, indépendant des passes amont. */
+    rng_seed(w->seed ^ 0xC0FFEEu);
+
+    /* ---- Origines des proto-familles = centroïdes des continents ---------- *
+     * Moyenne des seeds de province par continent : le foyer linguistique
+     * tombe toujours sur de la terre, jamais en pleine mer.                  */
+    double ccx[SCPS_MAX_CONTINENT]={0}, ccy[SCPS_MAX_CONTINENT]={0};
+    int    ccn[SCPS_MAX_CONTINENT]={0};
+    for (int p=0;p<w->n_provinces;p++){
+        int c=w->province[p].continent;
+        if (c<0||c>=w->n_continents) continue;
+        ccx[c]+=w->province[p].seed_x; ccy[c]+=w->province[p].seed_y; ccn[c]++;
+    }
+    float ox[SCPS_MAX_CONTINENT+3], oy[SCPS_MAX_CONTINENT+3];
+    int   no=0;
+    for (int c=0;c<w->n_continents;c++) if (ccn[c]>0){
+        ox[no]=(float)(ccx[c]/ccn[c]); oy[no]=(float)(ccy[c]/ccn[c]); no++;
+    }
+    if (no==0){ ox[no]=SCPS_W*0.5f; oy[no]=SCPS_H*0.5f; no++; }
+    /* Garantir au moins 3 familles : on interpole entre les continents
+     * existants (positions intermédiaires) plutôt que des fractions fixes. */
+    int base=no;
+    while (no<3){
+        if (base==1){ ox[no]=ox[0]; oy[no]=oy[0]; }
+        else { int i=no%base, j=(no+1)%base;
+               ox[no]=(ox[i]+ox[j])*0.5f; oy[no]=(oy[i]+oy[j])*0.5f; }
+        no++;
+    }
+    float maxr=sqrtf((float)(SCPS_W*SCPS_W+SCPS_H*SCPS_H))/2.f;
+
+    /* ---- Profil culturel de chaque région -------------------------------- */
+    for (int r=0;r<w->n_regions;r++){
+        const Region *rg=&w->region[r];
+        PopCulture   *pc=&econ->region[r].culture;
+        memset(pc,0,sizeof(*pc));
+        if (rg->n_provinces<=0) continue;
+        int cap_pid=rg->province_ids[0];
+        if (cap_pid<0||cap_pid>=w->n_provinces) continue;
+        Biome biome=w->province[cap_pid].biome_dominant;
+
+        /* Position et latitude de la région = moyenne de ses provinces. */
+        double rx=0, ry=0, rlat=0; int nv=0;
+        for (int k=0;k<rg->n_provinces;k++){
+            int pid=rg->province_ids[k];
+            if (pid<0||pid>=w->n_provinces) continue;
+            rx+=w->province[pid].seed_x; ry+=w->province[pid].seed_y;
+            rlat+=w->province[pid].lat;  nv++;
+        }
+        if (nv>0){ rx/=nv; ry/=nv; rlat/=nv; } else { rx=ox[0]; ry=oy[0]; rlat=0.5; }
+
+        /* Éthos : centré sur l'attracteur du mode de vie + bruit ±1.5. */
+        Lifeway lw=lifeway_for_biome(biome);
+        float vcenter=lifeway_val_attr(lw)+(rng_f()-0.5f)*3.0f;
+        Ethos ethos=ethos_nearest(vcenter);
+
+        /* Branche religieuse selon la latitude moyenne (équateur→pôle). */
+        ReligionBranch branch;
+        if (rlat<0.25)      branch=(rng_f()<0.5f)?REL_DHARMIQUE:REL_SINIQUE;
+        else if (rlat<0.60) branch=REL_ABRAHAMIQUE;
+        else                branch=REL_ANIMISTE;
+
+        /* Credo selon l'éthos. */
+        Credo credo;
+        if (ethos==ETHOS_DOMINATEUR)                       credo=CREDO_PURIFICATEUR;
+        else if (ethos==ETHOS_HONNEUR||ethos==ETHOS_ORDRE) credo=CREDO_EVANGELISTE;
+        else                                               credo=CREDO_PLURALISTE;
+
+        Culture c=culture_make(biome, ethos, branch, credo);
+        pc->valeurs=c.valeurs; pc->subsistance=c.subsistance;
+        pc->parente=c.parente; pc->religion=c.religion;
+        pc->ethos=c.ethos; pc->lifeway=c.lifeway; pc->structure=c.structure;
+        pc->credo=c.credo; pc->rel_branch=c.rel_branch;
+        pc->martial=c.martial; pc->econ=c.econ;
+        pc->age=0;
+
+        /* Langue = horloge phylogénétique : distance à la proto-famille la
+         * plus proche (centroïde de continent), normalisée, + léger bruit. */
+        float mind=1e30f;
+        for (int o=0;o<no;o++){
+            float dx=(float)rx-ox[o], dy=(float)ry-oy[o];
+            float d=sqrtf(dx*dx+dy*dy);
+            if (d<mind) mind=d;
+        }
+        pc->langue=clampf(mind/maxr*10.f+(rng_f()-0.5f)*1.5f,0.f,10.f);
+
+        pc->settled=econ->region[r].colonized;
     }
 }
 
-static void gen_scps(World *w) {
-    /* Familles linguistiques : 3 proto-langues réparties sur la carte */
-    int famx[3]={SCPS_W/6, SCPS_W/2, SCPS_W*5/6};
-    int famy[3]={SCPS_H/2, SCPS_H/4, SCPS_H*3/4};
-    float maxr=sqrtf((float)(SCPS_W*SCPS_W+SCPS_H*SCPS_H))/2.f;
-
-    for (int p=0;p<w->n_provinces;p++) {
-        Province *pr=&w->province[p];
-        pr->subsistance=clampf(subsistance_for_biome(pr->biome_dominant)+(rng_f()-0.5f)*1.8f,0.f,10.f);
-        float bv=(pr->subsistance>7.f)?7.f+rng_f()*2.5f:3.f+rng_f()*3.5f;
-        pr->valeurs=clampf(bv,0.f,10.f);
-        pr->religion=clampf(pr->lat*5.5f+rng_f()*4.5f,0.f,10.f);
-        pr->parente =clampf(pr->subsistance*0.65f+rng_f()*3.5f,0.f,10.f);
-
-        /* Langue = horloge phylogénétique (distance à la proto-famille la plus proche) */
-        float min_d=1e30f;
-        for (int f=0;f<3;f++){
-            float dx=(float)(pr->seed_x-famx[f]),dy=(float)(pr->seed_y-famy[f]);
-            float d=sqrtf(dx*dx+dy*dy);
-            if (d<min_d) min_d=d;
-        }
-        pr->langue=clampf(min_d/maxr*10.f+(rng_f()-0.5f)*1.5f,0.f,10.f);
-
-        snprintf(pr->name,sizeof(pr->name),"Prov.%d",p+1);
+/* ========================================================================
+ * DÉRIVE TEMPORELLE — un pas de simulation côté monde+population
+ *
+ * Pour l'instant : dérive lente de l'horloge linguistique des régions peuplées
+ * (deux populations isolées divergent en « cousinage » sans changer d'âme).
+ * Réutilise culture_age_tick() via une fiche Culture temporaire.
+ * ====================================================================== */
+void world_tick(World *w, WorldEconomy *econ, float dt) {
+    if (!econ) return;
+    for (int r=0;r<w->n_regions;r++){
+        if (!econ->region[r].culture.settled) continue;
+        PopCulture *pc=&econ->region[r].culture;
+        Culture tmp; memset(&tmp,0,sizeof(tmp));
+        tmp.langue=pc->langue; tmp.age=pc->age;
+        culture_age_tick(&tmp, 0.002f*dt);
+        pc->langue=tmp.langue;
+        pc->age   =tmp.age;
     }
 }
 
@@ -2359,8 +2453,10 @@ void world_generate(World *w, const WorldParams *P) {
     printf("[scps] flags rendu...  "); fflush(stdout);
     compute_render_flags(w,height);       printf("ok\n");
 
-    printf("[scps] SCPS...         "); fflush(stdout);
-    gen_scps(w);                          printf("ok\n");
+    printf("[scps] noms prov...    "); fflush(stdout);
+    gen_province_names(w);                printf("ok\n");
+    /* La culture (PopCulture) est peuplée par gen_population() APRÈS econ_init :
+     * elle appartient à la population régionale, pas à la géographie. */
 
     printf("[scps] ressources...   "); fflush(stdout);
     gen_resources(w);                     printf("ok\n");

@@ -43,66 +43,66 @@ static float sigmoid(float x) {
     return 1.f / (1.f + expf(-x));
 }
 
-/* ---- Collecte des provinces d'un pays ---------------------------------- */
-static int country_provinces(const World *w, int cid,
-                              int out[/*60*/], int max_out) {
-    int n = 0;
-    const Country *co = &w->country[cid];
-    for (int ri = 0; ri < co->n_regions && n < max_out; ri++) {
-        int rid = co->region_ids[ri];
-        if (rid < 0 || rid >= w->n_regions) continue;
-        const Region *reg = &w->region[rid];
-        for (int pi = 0; pi < reg->n_provinces && n < max_out; pi++) {
-            int pid = reg->province_ids[pi];
-            if (pid >= 0 && pid < w->n_provinces) {
-                out[n++] = pid;
-            }
-        }
-    }
-    return n;
-}
-
-/* ---- Profil culturel d'un pays ---------------------------------------- */
-static void compute_profile(const World *w, int cid, CulturalProfile *prof) {
-    int pids[60];
-    int np = country_provinces(w, cid, pids, 60);
+/* ---- Profil culturel d'un pays ---------------------------------------- *
+ * Lu sur la POPULATION (RegionEconomy.culture), pas sur la géographie : seules
+ * les régions PEUPLÉES (settled) comptent, pondérées par leur population. */
+static void compute_profile(const WorldEconomy *econ, const World *w, int cid,
+                            CulturalProfile *prof) {
     memset(prof, 0, sizeof(*prof));
+    const Country *co = &w->country[cid];
 
-    if (np == 0) return;
+    /* Régions peuplées du pays. */
+    int rids[SCPS_MAX_REG]; int nr = 0;
+    for (int ri = 0; ri < co->n_regions && nr < SCPS_MAX_REG; ri++) {
+        int rid = co->region_ids[ri];
+        if (rid < 0 || rid >= econ->n_regions) continue;
+        if (!econ->region[rid].culture.settled) continue;
+        rids[nr++] = rid;
+    }
+    if (nr == 0) return;
 
-    /* Moyenne pondérée par area */
+    /* Moyenne pondérée par la population totale de la région (la culture est
+     * une propriété de la population : on pèse par les gens, pas par la surface). */
     double wsum = 0.0, sv = 0.0, ss = 0.0, sp = 0.0, sr = 0.0;
-    for (int i = 0; i < np; i++) {
-        const Province *prov = &w->province[pids[i]];
-        double a = (double)prov->area;
-        wsum += a;
-        sv   += a * prov->valeurs;
-        ss   += a * prov->subsistance;
-        sp   += a * prov->parente;
-        sr   += a * prov->religion;
+    for (int i = 0; i < nr; i++) {
+        const RegionEconomy *re = &econ->region[rids[i]];
+        const PopCulture *pc = &re->culture;
+        double pop = re->strata[CLASS_LABORER].pop
+                   + re->strata[CLASS_BOURGEOIS].pop
+                   + re->strata[CLASS_ELITE].pop;
+        if (pop < 1.0) pop = 1.0;   /* settled mais transitoirement vide : poids plancher */
+        wsum += pop;
+        sv += pop * pc->valeurs;  ss += pop * pc->subsistance;
+        sp += pop * pc->parente;  sr += pop * pc->religion;
     }
     if (wsum > 0.0) {
-        prof->valeurs      = (float)(sv / wsum);
-        prof->subsistance  = (float)(ss / wsum);
-        prof->parente      = (float)(sp / wsum);
-        prof->religion     = (float)(sr / wsum);
+        prof->valeurs     = (float)(sv / wsum);
+        prof->subsistance = (float)(ss / wsum);
+        prof->parente     = (float)(sp / wsum);
+        prof->religion    = (float)(sr / wsum);
     }
 
-    /* Distances par paires de provinces — D̄_int et D∞_int */
+    /* NOTE : l'axe « langue » (horloge phylogénétique) est intentionnellement
+     * exclu du calcul de distance culturelle ici. Il mesure le cousinage
+     * ressenti (divergence temporelle), pas la friction de contenu. Deux
+     * cultures-sœurs récemment divergées (langue proche) peuvent avoir un
+     * contenu très différent ; les inclure fausserait D̄. */
+
+    /* Distances par paires de régions — métrique L∞ (cohérente avec
+     * culture_content_distance) : D̄_int = moyenne des L∞ ; D∞_int = max. */
     float sum_dist = 0.f, max_dist = 0.f;
     int pairs = 0;
-    for (int i = 0; i < np; i++) {
-        const Province *a = &w->province[pids[i]];
-        for (int j = i+1; j < np; j++) {
-            const Province *b = &w->province[pids[j]];
+    for (int i = 0; i < nr; i++) {
+        const PopCulture *a = &econ->region[rids[i]].culture;
+        for (int j = i+1; j < nr; j++) {
+            const PopCulture *b = &econ->region[rids[j]].culture;
             float dv = fabsf_local(a->valeurs     - b->valeurs);
             float ds = fabsf_local(a->subsistance - b->subsistance);
             float dp = fabsf_local(a->parente     - b->parente);
             float dr = fabsf_local(a->religion    - b->religion);
-            float mean4 = (dv + ds + dp + dr) / 4.f;
-            float max4  = dv; if (ds>max4) max4=ds; if (dp>max4) max4=dp; if (dr>max4) max4=dr;
-            sum_dist += mean4;
-            if (max4 > max_dist) max_dist = max4;
+            float dinf = dv; if (ds>dinf) dinf=ds; if (dp>dinf) dinf=dp; if (dr>dinf) dinf=dr;
+            sum_dist += dinf;
+            if (dinf > max_dist) max_dist = dinf;
             pairs++;
         }
     }
@@ -155,14 +155,13 @@ void prosperity_init(WorldProsperity *wp, const World *w) {
 void prosperity_tick(WorldProsperity *wp, const World *w,
                      const WorldEconomy *econ, const TradeNetwork *net,
                      const TechState ts[]) {
-    (void)econ;  /* reserved for future per-region prosperity queries */
     int NC = w->n_countries;
     wp->n_countries = NC;
 
     /* ---- Passe 1 : profil culturel + C + SI ----------------------------- */
     for (int cid = 0; cid < NC; cid++) {
         CountryProsperity *cp = &wp->country[cid];
-        compute_profile(w, cid, &cp->profile);
+        compute_profile(econ, w, cid, &cp->profile);
 
         float C_base = compute_C_base(w, net, cid);
         /* C update : EMA lente + croissance proportionnelle à P_réalisé (sera
@@ -199,7 +198,6 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         float L = ts_c ? ts_c->L        : 3.f;
         float P = ts_c ? ts_c->puissance: 3.f;
         float H = ts_c ? ts_c->H        : 0.f;
-        (void)H;
 
         float C = cp->C;
 
@@ -220,12 +218,13 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
             float ds = fabsf_local(cp->profile.subsistance- np2->subsistance);
             float dp_a = fabsf_local(cp->profile.parente  - np2->parente);
             float dr = fabsf_local(cp->profile.religion   - np2->religion);
-            float d_bar_ext = (dv + ds + dp_a + dr) / 4.f;
+            /* L∞ entre les deux profils-pays (un seul couple → D̄ = D∞),
+             * cohérent avec culture_content_distance() et le profil interne. */
             float d_inf_ext = dv;
-            if (ds > d_inf_ext) d_inf_ext = ds;
+            if (ds   > d_inf_ext) d_inf_ext = ds;
             if (dp_a > d_inf_ext) d_inf_ext = dp_a;
-            if (dr > d_inf_ext) d_inf_ext = dr;
-            cp->PE_externe += PE_contact(C, K, P, d_bar_ext, d_inf_ext);
+            if (dr   > d_inf_ext) d_inf_ext = dr;
+            cp->PE_externe += PE_contact(C, K, P, d_inf_ext, d_inf_ext);
         }
 
         cp->P_potentiel = cp->PE_interne + cp->PE_externe;
@@ -242,10 +241,12 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         cp->tresor_tick    = GAMMA * cp->P_realise;
         cp->croissance_tick= DELTA * cp->P_realise * (L / 10.f);
 
-        /* Surchauffe */
+        /* Surchauffe : la coercition H étouffe le flux narratif (I′ = I·(10−H)/10),
+         * une société dure laisse moins déborder mais paie ailleurs (fragilité). */
         float flux_f = ts_c ? tech_flux(ts_c) : 0.f;
         float charge_f = ts_c ? ts_c->charge : 0.f;
-        float surch_raw = (P / 10.f) * charge_f + flux_f - K;
+        float I_factor  = (10.f - H) / 10.f;
+        float surch_raw = ((P / 10.f) * charge_f + flux_f) * I_factor - K;
         cp->surchauffe = surch_raw > 0.f ? surch_raw : 0.f;
 
         /* C growth après P_réalisé calculé */
@@ -284,8 +285,14 @@ void prosperity_print_country(const WorldProsperity *wp, const World *w, int cid
     printf("║    valeurs=%.2f  subsistance=%.2f  parenté=%.2f  religion=%.2f\n",
            cp->profile.valeurs, cp->profile.subsistance,
            cp->profile.parente,  cp->profile.religion);
-    printf("║    D̄_int=%.3f   D∞_int=%.3f\n",
-           cp->profile.D_bar_int, cp->profile.D_inf_int);
+    /* D̄ et D∞ sont multi-octets (macron combinant, ∞) : on pad sur la largeur
+     * en OCTETS (58) pour obtenir les 54 COLONNES affichées du gabarit. */
+    {
+        char dl[96];
+        snprintf(dl, sizeof dl, "    D̄_int=%.3f   D∞_int=%.3f",
+                 cp->profile.D_bar_int, cp->profile.D_inf_int);
+        printf("║%-58s║\n", dl);
+    }
     printf("╠══════════════════════════════════════════════════════╣\n");
     printf("║  C=%.3f  SI=%.3f  pôle=%s\n",
            cp->C, cp->SI, pole_state_name(cp->pole));

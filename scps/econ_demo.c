@@ -31,6 +31,8 @@ int main(int argc, char **argv) {
 
     printf("=== Initialisation économie ===\n");
     econ_init(e, w);
+    /* Profil culturel des populations régionales (après création des régions). */
+    gen_population(w, e);
 
     printf("=== Construction du réseau commercial ===\n");
     trade_network_build(t, w, e);
@@ -57,6 +59,7 @@ int main(int argc, char **argv) {
         econ_tick(e);
         total_founded    += econ_colonize_tick(e, w);
         total_mig_flows  += econ_migrate_tick(e, w);
+        world_tick(w, e, 1.0f);   /* dérive lente de l'horloge linguistique */
         trade_tick(e, t);
         /* Recalibrer le réseau tous les 5 ticks (colonisation → nouveaux nœuds). */
         if (tick>0 && tick%5==0) trade_network_build(t, w, e);

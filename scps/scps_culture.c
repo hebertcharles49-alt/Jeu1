@@ -117,8 +117,21 @@ Lifeway lifeway_for_biome(Biome b){
 /* MOTEUR DE MUTATION — friction Éthos × Mode de vie (§4)                 */
 /* ===================================================================== */
 
-/* Éthos « naturel » qu'un mode de vie attire (pour mesurer l'incongruité). */
-static float lifeway_natural_val(Lifeway l){ return LIFE[l].val_attr; }
+/* Éthos « naturel » qu'un mode de vie attire (pour mesurer l'incongruité).
+ * Exposé : la génération du monde l'utilise comme centre de tirage de l'éthos. */
+float lifeway_val_attr(Lifeway l){ return LIFE[l].val_attr; }
+/* Ancre de subsistance d'un mode de vie — source unique de vérité, partagée
+ * avec subsistance_for_biome() côté monde (plus d'échelle inversée). */
+float lifeway_subs(Lifeway l){ return LIFE[l].subs; }
+/* Éthos dont l'ancre VALEURS est la plus proche d'une valeur donnée. */
+Ethos ethos_nearest(float value){
+    Ethos best = ETHOS_ORDRE; float bd = 1e9f;
+    for (int e=0;e<ETHOS_COUNT;e++){
+        float d = absf(ETHOS_VAL[e]-value);
+        if (d<bd){ bd=d; best=(Ethos)e; }
+    }
+    return best;
+}
 
 /* Structure cristallisée : attracteur dérivé du mode de vie, infléchi par
  * l'éthos (un éthos très mercantile relâche la parenté ; très martial la
@@ -136,31 +149,34 @@ static Structure resolve_structure(Lifeway l, Ethos e){
  * pliée par l'agressivité de l'éthos. Honore les exemples travaillés (§4). */
 static MartialTrait resolve_martial(Lifeway l, Ethos e){
     bool aggressive = (ETHOS_VAL[e] >= 6.5f);   /* Dominateur/Honneur */
-    bool ordered    = (e==ETHOS_ORDRE || e==ETHOS_BUREAUCRATE);
     bool mercantile = (e==ETHOS_MERCANTILE);
+    bool pacifist   = (e==ETHOS_PACIFISTE);
     switch(l){
         case LIFE_PASTORAL:
-            /* razzia/maritime héritée n'a pas de mer → horde montée */
-            return aggressive ? MART_HORDE_MONTEE
-                 : ordered    ? MART_HORDE_MONTEE : MART_HORDE_MONTEE;
+            /* agressif → choc monté ; sinon (pacifiste/mercantile/ordonné) la
+             * cavalerie sert à la razzia furtive plutôt qu'à la charge. */
+            return aggressive ? MART_HORDE_MONTEE : MART_EMBUSCADE;
         case LIFE_SEAFARER:
+            /* dominateur → thalassocratie de proie ; tous les autres (agressif,
+             * mercantile à flotte marchande armée, doux) → razzia maritime. */
             return (e==ETHOS_DOMINATEUR) ? MART_THALASSO_PREDATRICE
-                 : aggressive            ? MART_RAZZIA_MARITIME
-                 : MART_RAZZIA_MARITIME;
+                                         : MART_RAZZIA_MARITIME;
         case LIFE_MINER:
             /* enclavé : la garde devient garnisons de col */
             return MART_GARNISON_COL;
         case LIFE_FARMER:
-            return aggressive ? MART_MUR_BOUCLIERS
-                 : ordered    ? MART_MUR_BOUCLIERS : MART_MUR_BOUCLIERS;
+            if (e==ETHOS_DOMINATEUR)                     return MART_LEVEE_MASSIVE;
+            if (e==ETHOS_ORDRE || e==ETHOS_BUREAUCRATE)  return MART_MUR_BOUCLIERS;
+            if (mercantile || pacifist)                  return MART_SIEGE; /* paye l'ingénierie plutôt que le sang */
+            return MART_MUR_BOUCLIERS;
         case LIFE_INTENSIVE:
             return (e==ETHOS_DOMINATEUR) ? MART_LEVEE_MASSIVE : MART_SIEGE;
         case LIFE_HUNTER:
         case LIFE_HORTICULTURE:
         default:
-            return aggressive ? MART_EMBUSCADE : MART_EMBUSCADE;
+            /* forêt/harmonie : guérilla ; le pacifiste se replie en col gardé. */
+            return pacifist ? MART_GARNISON_COL : MART_EMBUSCADE;
     }
-    (void)mercantile;
 }
 
 /* Trait ÉCONOMIQUE émergent : même logique. */
@@ -171,8 +187,9 @@ static EconTrait resolve_econ(Lifeway l, Ethos e){
         case LIFE_PASTORAL:
             return raider ? ECON_TRIBUT : ECON_CARAVANE;
         case LIFE_SEAFARER:
-            return (e==ETHOS_DOMINATEUR) ? ECON_TRIBUT_PORTS
-                 : mercantile            ? ECON_CARAVANE : ECON_CARAVANE;
+            /* dominateur → rente des ports captifs ; sinon carrefour caravanier
+             * maritime (le mercantile y excelle, mais l'issue est la même). */
+            return (e==ETHOS_DOMINATEUR) ? ECON_TRIBUT_PORTS : ECON_CARAVANE;
         case LIFE_MINER:
             /* commerce contraint par l'enclavement → contrebande */
             return mercantile ? ECON_CONTREBANDE : ECON_RENTE_AGRAIRE;
@@ -207,7 +224,7 @@ static const char *ethos_qualifier(Ethos e){
 
 static void name_culture(Culture *c){
     /* Incongruité = écart entre l'éthos hérité et l'éthos naturel du biome. */
-    float incong = absf(c->valeurs - lifeway_natural_val(c->lifeway));
+    float incong = absf(c->valeurs - lifeway_val_attr(c->lifeway));
     if (incong >= 3.0f) {
         /* hybride nommé que le designer n'a pas pré-écrit */
         c->is_hybrid = true;
@@ -355,11 +372,7 @@ bool culture_syncretize(const Culture *a, const Culture *b, Culture *out){
     /* Traits : on garde le mode de vie de A (verrou biome), l'éthos résolu
      * sur les valeurs fusionnées, et on REMUTE les émergents. */
     h.lifeway = a->lifeway;
-    /* éthos le plus proche des valeurs fusionnées */
-    Ethos be=ETHOS_ORDRE; float bd=1e9f;
-    for (int e=0;e<ETHOS_COUNT;e++){ float d=absf(ETHOS_VAL[e]-h.valeurs);
-        if(d<bd){bd=d;be=(Ethos)e;} }
-    h.ethos     = be;
+    h.ethos     = ethos_nearest(h.valeurs);   /* éthos le plus proche des valeurs fusionnées */
     h.structure = resolve_structure(h.lifeway, h.ethos);
     h.parente   = STRUCT_PAR[h.structure]*0.5f + h.parente*0.5f;
     h.martial   = resolve_martial(h.lifeway, h.ethos);

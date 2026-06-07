@@ -156,6 +156,14 @@ void culture_pair_for_biome(Biome biome, Culture *a, Culture *b,
 /* Le mode de vie verrouillé par un biome. */
 Lifeway lifeway_for_biome(Biome biome);
 
+/* ---- Ancres exposées (lecture seule) --------------------------------- *
+ * Permettent à la génération du monde de choisir un éthos cohérent avec le
+ * biome et de dériver la subsistance SANS dupliquer les tables internes
+ * (évite la désynchronisation d'échelle entre modules). */
+float lifeway_val_attr(Lifeway l);   /* éthos « naturel » attiré par ce mode de vie */
+float lifeway_subs(Lifeway l);       /* ancre de subsistance du mode de vie [0..10] */
+Ethos ethos_nearest(float value);    /* éthos dont l'ancre VALEURS est la plus proche */
+
 /* ---- Distance & relation (§9) ---------------------------------------- */
 /* D_inf : max des écarts sur les axes de CONTENU (valeurs, subsistance,
  * parenté, religion). C'est la friction. */
