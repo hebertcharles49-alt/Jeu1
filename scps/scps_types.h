@@ -145,6 +145,7 @@ typedef enum {
     RES_GOLD,           /* montagnes (parfois artefact) */
     RES_PRECIOUS_METAL, /* mithril, adamantium — profond/rare */
     RES_ARCANE_CRYSTAL, /* cristal arcanique — RÉSIDU de la Conjonction, nœuds telluriques (TRÈS rare) */
+    RES_CELESTIAL_IRON, /* fer céleste — météorique : cratères/sommets (TRÈS rare) → armes enchantées */
 
     /* === Frontière : tout ce qui suit est un bien de PRODUCTION === */
     RES_PROD_FIRST,
@@ -155,6 +156,7 @@ typedef enum {
     RES_PRECIOUS_CLOTH,         /* étoffe précieuse des 4 races */
     RES_PAPER,                  /* transformation           */
     RES_ESSENCE,                /* ARCANE : mana raffiné (cristal brûlé) → sa combustion MONTE la Brèche */
+    RES_ENCHANTED_ARMS,         /* armes/armures enchantées (fer céleste + essence) → puissance militaire */
     RES_COUNT
 } Resource;
 

@@ -48,6 +48,8 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_PAPER]         = 5.5f,
     [RES_ARCANE_CRYSTAL]= 16.0f,   /* résidu rare des nœuds telluriques */
     [RES_ESSENCE]       = 34.0f,   /* mana raffiné — très haute valeur */
+    [RES_CELESTIAL_IRON]= 20.0f,   /* météorique — très rare */
+    [RES_ENCHANTED_ARMS]= 46.0f,   /* armes enchantées — la Forge supérieure */
 };
 
 /* Recette d'une manufacture : jusqu'à 2 intrants → 1 produit. */
@@ -68,6 +70,9 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
      * nourrit la Brèche (couplée plus bas dans econ_tick → arcane_charge). */
     [BLD_MAGE_WORKSHOP]={ RES_ARCANE_CRYSTAL, 1.0f, RES_NONE, 0.f, RES_ESSENCE,    1.0f, 1.3f },
+    /* ARCANE militaire : le fer céleste + l'essence → armes enchantées (la Forge
+     * supérieure). Consomme donc l'essence de l'atelier de mage (chaîne arcane). */
+    [BLD_CELESTIAL_FORGE]={ RES_CELESTIAL_IRON, 1.0f, RES_ESSENCE, 1.0f, RES_ENCHANTED_ARMS, 1.0f, 1.4f },
 };
 
 /* Besoins par tête et par strate (unités/100 hab/tick). Le grain (vivres)
@@ -152,7 +157,7 @@ const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
         "Manufacture textile","Scierie navale","Papeterie",
         "Domaine viticole","Joaillerie","Atelier d'étoffe précieuse",
-        "Atelier de mage"
+        "Atelier de mage","Forge céleste"
     };
     return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
 }
@@ -315,6 +320,10 @@ void econ_init(WorldEconomy *e, const World *w) {
         if ((re->raw_cap[RES_SULFUR]>0.f || re->raw_cap[RES_PRECIOUS_METAL]>0.f)
             && ((uint32_t)(rid*2654435761u) % 4u)==0u)
             re->raw_cap[RES_ARCANE_CRYSTAL] += 1.0f;
+        /* Fer céleste — météorique : ENCORE plus rare, lié aux sommets/cratères
+         * (proxy : minerai de fer en relief), ~1 région concernée sur 9. */
+        if (re->raw_cap[RES_IRON]>0.f && ((uint32_t)(rid*40503u+7u) % 9u)==0u)
+            re->raw_cap[RES_CELESTIAL_IRON] += 0.8f;
 
         /* ---- Manufactures : implantées là où l'intrant est extrait dans
          *      la région (cohérence géographique de la chaîne de prod). */
@@ -330,6 +339,8 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
         /* ARCANE : un atelier de mage s'élève au nœud tellurique (cristal). */
         if (re->raw_cap[RES_ARCANE_CRYSTAL] > 0.f) region_ensure_building(re,BLD_MAGE_WORKSHOP);
+        /* ARCANE militaire : une forge céleste là où tombe le fer céleste. */
+        if (re->raw_cap[RES_CELESTIAL_IRON] > 0.f) region_ensure_building(re,BLD_CELESTIAL_FORGE);
 
         /* Niveau initial des manufactures : dimensionné sur la capacité
          * d'accueil (l'infrastructure latente du site). */

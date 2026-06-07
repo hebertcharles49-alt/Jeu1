@@ -60,6 +60,7 @@ typedef enum {
     BLD_JEWELER,       /* or+métal précieux → joaillerie (bien d'élite) */
     BLD_WEAVER_LUX,    /* tissu   → étoffe précieuse    */
     BLD_MAGE_WORKSHOP, /* ARCANE : cristal → essence (mana) — sa combustion MONTE la Brèche */
+    BLD_CELESTIAL_FORGE,/* ARCANE militaire : fer céleste + essence → armes enchantées */
     BLD_TYPE_COUNT
 } BuildingType;
 

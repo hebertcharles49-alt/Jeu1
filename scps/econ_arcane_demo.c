@@ -19,6 +19,7 @@
 #include "scps_tech.h"
 #include "scps_legitimacy.h"
 #include "scps_prosperity.h"
+#include "scps_diplo.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,8 +82,25 @@ int main(int argc, char **argv){
     ok("l'atelier de mage PRODUIT de l'essence (le cristal raffiné)", ess1 > ess0 + 0.5f);
     ok("brûler le cristal CHARGE l'arcane (arcane_charge > 0)", charge > 0.01f);
 
-    /* ═══ 4. La combustion rapproche la Brèche (flux faustien → déréal) ══ */
-    printf("\n── 4. La combustion arcane MONTE la déréalisation (la Brèche approche) ──\n");
+    /* ═══ 4. La forge céleste : fer céleste + essence → armes enchantées → puissance ═ */
+    printf("\n── 4. Forge céleste : fer céleste + essence → armes enchantées → puissance militaire ──\n");
+    float mil0 = diplo_mil_power(w, e, cid);
+    e->region[rid].raw_cap[RES_CELESTIAL_IRON] = 3.0f;     /* un filon de fer céleste */
+    {
+        int bi=-1;
+        for (int i=0;i<e->region[rid].n_bld;i++) if (e->region[rid].bld[i].type==BLD_CELESTIAL_FORGE) bi=i;
+        if (bi<0 && e->region[rid].n_bld<ECON_MAX_BLD){ bi=e->region[rid].n_bld++; e->region[rid].bld[bi].type=BLD_CELESTIAL_FORGE; }
+        if (bi>=0) e->region[rid].bld[bi].level=3.f;
+    }
+    for (int t=0;t<5;t++) econ_tick(e,1.f);   /* la chaîne tourne : cristal→essence→armes */
+    float arms = e->region[rid].stock[RES_ENCHANTED_ARMS];
+    float mil1 = diplo_mil_power(w, e, cid);
+    printf("   armes enchantées en stock = %.1f | puissance militaire %.2f → %.2f\n", arms, mil0, mil1);
+    ok("la forge céleste PRODUIT des armes enchantées (fer céleste + essence)", arms > 0.5f);
+    ok("les armes enchantées montent la PUISSANCE militaire (l'arcane nourrit la guerre)", mil1 > mil0 + 0.1f);
+
+    /* ═══ 5. La combustion rapproche la Brèche (flux faustien → déréal) ══ */
+    printf("\n── 5. La combustion arcane MONTE la déréalisation (la Brèche approche) ──\n");
     /* On place le pays au MARGE faustienne (capacité K basse) : la déréalisation
      * = max(0, (P/10)·C + flux_faustien − K) ne répond que si K ne l'écrase pas.
      * C'est précisément le sens : sans capacité pour CONTENIR la magie, en brûler
