@@ -248,7 +248,6 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
                                  const WorldProsperity *wp, const WorldLegitimacy *wl,
                                  int pid) {
     ProvinceReadout pr; memset(&pr, 0, sizeof pr);
-    (void)wp;
     if (pid < 0 || pid >= w->n_provinces) { pr.nom = "—"; pr.terrain = "—"; return pr; }
     const Province *p = &w->province[pid];
     int reg = p->region;
@@ -283,7 +282,18 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     pr.diaspora = (dia > 0.5f);
 
     pr.vocation  = vocation_word(p->resource, p->coastal, p->biome_dominant);
-    pr.carrefour = CF_NONE;   /* PE concentrée par province : Partie 4 (à venir) */
+    /* Carrefour : concentration de PE. L'infrastructure marchande BÂTIE
+     * (Marché/Entrepôt) + la prospérité locale font le pôle ; la surchauffe du
+     * pays le déchire (le seuil de déréalisation). */
+    {
+        float hub = re ? (re->build.PE_infra + rclampf(re->prosperity*2.f, 0.f, 3.f)) : 0.f;
+        int   cc  = w->province[pid].country;
+        bool  overheat = (cc>=0 && cc<wp->n_countries && wp->country[cc].surchauffe > 2.f);
+        if      (hub < 1.0f) pr.carrefour = CF_NONE;
+        else if (overheat)   pr.carrefour = CF_SURCHAUFFE;
+        else if (hub < 2.5f) pr.carrefour = CF_FLORISSANTE;
+        else                 pr.carrefour = CF_BOUILLONNANTE;
+    }
 
     /* Allégeance — les lectures les plus proches du SCPS. */
     float L_local = (wl && reg >= 0 && reg < SCPS_MAX_REG) ? wl->L[reg] : 5.f;

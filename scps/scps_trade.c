@@ -316,6 +316,7 @@ void trade_print_region(const TradeNetwork *net, const WorldEconomy *e,
 
 void trade_print_summary(const TradeNetwork *net, const WorldEconomy *e,
                          const World *w, int top_n) {
+    (void)e;   /* réservé (cohérence d'API) : ce résumé ne lit que le réseau */
     if (top_n<=0) top_n=10;
     printf("\n══ RÉSEAU COMMERCIAL ══  %d liens  %d flux actifs\n",
            net->n_links, net->n_flows);

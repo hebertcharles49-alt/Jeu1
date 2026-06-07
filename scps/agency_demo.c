@@ -103,10 +103,12 @@ int main(int argc, char **argv){
     run_days(&s, 2*SCPS_DAYS_PER_YEAR);
     snapshot(&s, "fondation", &SI0,&F0,&L0);
 
-    /* Phase 1 — INSTITUTIONS (→ K) : Tribunal, Chancellerie, Académie. */
+    /* Phase 1 — INSTITUTIONS (→ K) + infrastructure (→ PE, food). */
     agency_order_build(s.ag, s.cap_reg, EDI_TRIBUNAL);
     agency_order_build(s.ag, s.cap_reg, EDI_CHANCELLERIE);
     agency_order_build(s.ag, s.cap_reg, EDI_ACADEMIE);
+    agency_order_build(s.ag, s.cap_reg, EDI_MARCHE);    /* → PE_infra (carrefour) */
+    agency_order_build(s.ag, s.cap_reg, EDI_GRENIER);   /* → food_cap (apex) */
     run_days(&s, 6*SCPS_DAYS_PER_YEAR);   /* l'Académie met ~5 ans */
     snapshot(&s, "après institutions (K↑)", &SI1,&F1,&L1);
 
@@ -129,8 +131,10 @@ int main(int argc, char **argv){
        b->K_inst >= 3.5f);
     ok("coercition bâtie dans la capitale (Garnison+Forteresse+Citadelle)",
        b->H_coerc >= 5.5f);
-    printf("     capitale : K_inst=%.1f  H_coerc=%.1f  P_open=%.1f\n",
-           b->K_inst, b->H_coerc, b->P_open);
+    ok("infrastructure marchande bâtie (PE_infra, Marché)", b->PE_infra >= 1.0f);
+    ok("stockage alimentaire bâti (food_cap, Grenier)",     b->food_cap >= 1.0f);
+    printf("     capitale : K_inst=%.1f  H_coerc=%.1f  PE_infra=%.1f  food_cap=%.1f\n",
+           b->K_inst, b->H_coerc, b->PE_infra, b->food_cap);
 
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);

@@ -263,6 +263,7 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         /* Couche BIOLOGIQUE : les leviers de la RACE du pays (lus sur la région-
          * capitale) déplacent les entrées — Nain bâtisseur K+ mais factieux
          * fracture+, Orque coercition+, Halfelin perméabilité+, etc. */
+        float race_prod = 0.f;   /* productivité de la race → échelle P_réalisé */
         {
             int cap_prov = w->country[cid].capital_prov;
             int cap_reg  = (cap_prov>=0 && cap_prov<w->n_provinces)
@@ -274,6 +275,8 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
                 st.P     = clampf(st.P     + lev.permeabilite, 0.f, 10.f);
                 st.H     = clampf(st.H     + lev.coercition,   0.f, 10.f);
                 st.D_bar = clampf(st.D_bar + lev.fracture,     0.f, 10.f);  /* fracture interne */
+                st.flux_faustien += lev.arcane;   /* arcane → pente faustienne (Elfe Arcanique) */
+                race_prod = lev.productivite;     /* Gnome Inventif / Orque Borné → rendement */
             }
         }
 
@@ -281,15 +284,17 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
          * agrège les édifices du pays sur K/P/H, plafond ±5 (rendements
          * décroissants). Un Tribunal monte K, une Citadelle monte H. */
         {
-            float bK=0.f, bP=0.f, bH=0.f;
+            float bK=0.f, bP=0.f, bH=0.f, bPE=0.f;
             for (int r=0;r<econ->n_regions;r++) if (w->region[r].country==cid) {
-                bK += econ->region[r].build.K_inst;
-                bP += econ->region[r].build.P_open;
-                bH += econ->region[r].build.H_coerc;
+                bK  += econ->region[r].build.K_inst;
+                bP  += econ->region[r].build.P_open;
+                bH  += econ->region[r].build.H_coerc;
+                bPE += econ->region[r].build.PE_infra;   /* marchés/entrepôts → PE capté */
             }
             st.K = clampf(st.K + clampf(bK,0.f,5.f), 0.f, 10.f);
             st.P = clampf(st.P + clampf(bP,0.f,5.f), 0.f, 10.f);
             st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
+            cp->P_potentiel += clampf(bPE,0.f,5.f);    /* l'infrastructure capte le carrefour */
         }
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;
@@ -298,7 +303,7 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         cp->L         = Lg;                  /* exposé pour la membrane (légitimité pays) */
         cp->mode      = (int)scps_mode(&o);
         cp->rendement = clampf((o.SI / 10.f) * (1.f - LAMBDA * o.fragilite / 10.f), 0.f, 1.f);
-        cp->P_realise = cp->P_potentiel * cp->rendement;
+        cp->P_realise = cp->P_potentiel * cp->rendement * (1.f + race_prod);  /* productivité de race */
 
         /* Sorties */
         cp->Lumiere        = BETA  * cp->P_potentiel * (K / 10.f);

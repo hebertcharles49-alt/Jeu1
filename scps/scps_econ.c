@@ -539,7 +539,9 @@ void econ_tick(WorldEconomy *e) {
 
         float total_pop_now=0.f;
         for (int c=0;c<CLASS_COUNT;c++) total_pop_now+=re->strata[c].pop;
-        float cap_factor = fmaxf(0.f, 1.f - total_pop_now/(re->cap_pop*1.1f));
+        /* Les greniers/irrigation bâtis (food_cap) étendent l'apex démographique. */
+        float eff_cap = re->cap_pop + re->build.food_cap*250.f;
+        float cap_factor = fmaxf(0.f, 1.f - total_pop_now/(eff_cap*1.1f));
         net_growth *= cap_factor;
 
         float satsum=0.f, popsum=0.f;
