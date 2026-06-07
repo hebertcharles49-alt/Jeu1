@@ -68,7 +68,7 @@ int main(int argc, char **argv){
     prosperity_init(s.wp,s.w); legitimacy_init(s.wl,s.w,s.econ);
     diplo_init(s.dp); routes_init(s.rn); statecraft_init(s.sc,s.w);
     for (int t=0;t<25;t++){                 /* échauffe la sim (25 ans) */
-        econ_tick(s.econ); econ_colonize_tick(s.econ,s.w); world_tick(s.w,s.econ,1.f);
+        econ_tick(s.econ, 1.f); econ_colonize_tick(s.econ,s.w); world_tick(s.w,s.econ,1.f);
         legitimacy_tick(s.wl,s.w,s.econ,s.ts);
         prosperity_tick(s.wp,s.w,s.econ,s.net,s.ts,s.wl);
     }

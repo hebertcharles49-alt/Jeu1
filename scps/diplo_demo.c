@@ -56,7 +56,7 @@ int main(int argc,char**argv){
     /* L'économie se met en route, SANS colonisation : le joueur reste sur sa
      * seule capitale (homogène, D̄≈0) — pour isoler l'effet de la conquête. */
     for(int t=0;t<8;t++){
-        econ_tick(econ);
+        econ_tick(econ, 1.f);
         legitimacy_tick(wl,w,econ,ts); prosperity_tick(wp,w,econ,net,ts,wl);
     }
 

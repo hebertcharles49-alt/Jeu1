@@ -44,13 +44,14 @@ static void sim_day(Sim *s, World *w) {
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
-    /* — mensuel : réputation diplomatique (O(n²)) + démographie (au pas dt) — */
+    /* — mensuel : économie + réputation diplomatique (O(n²)) + démographie — */
     if (s->day % 30 == 29) {
+        econ_tick(s->econ, 1.f/12.f);
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
     }
     if (s->day % 365 == 364) {
-        econ_tick(s->econ); econ_colonize_tick(s->econ, w); econ_migrate_tick(s->econ, w);
+        econ_colonize_tick(s->econ, w); econ_migrate_tick(s->econ, w);
         world_tick(w, s->econ, 1.0f);
         legitimacy_tick(s->wl, w, s->econ, s->ts);
         trade_network_build(s->net, w, s->econ); trade_tick(s->econ, s->net);

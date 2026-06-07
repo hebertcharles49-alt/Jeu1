@@ -110,7 +110,7 @@ int main(int argc, char **argv){
     for (int c=0;c<s.w->n_countries;c++) tech_state_init(&s.ts[c],false);
     prosperity_init(s.wp,s.w); legitimacy_init(s.wl,s.w,s.econ);
     statecraft_init(s.sc,s.w); routes_init(s.rn); diplo_init(s.dp);
-    for (int t=0;t<15;t++){ econ_tick(s.econ); econ_colonize_tick(s.econ,s.w); world_tick(s.w,s.econ,1.f);
+    for (int t=0;t<15;t++){ econ_tick(s.econ, 1.f); econ_colonize_tick(s.econ,s.w); world_tick(s.w,s.econ,1.f);
         legitimacy_tick(s.wl,s.w,s.econ,s.ts); tickP(&s); }
     events_init(s.ev,s.w,seed);
 

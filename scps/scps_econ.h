@@ -195,8 +195,10 @@ typedef struct {
  * géographie/ressources du monde déjà généré. */
 void econ_init(WorldEconomy *e, const World *w);
 
-/* Avance la simulation d'un pas (un « tour »). */
-void econ_tick(WorldEconomy *e);
+/* Avance la simulation d'un pas. dt = années/tick (1 en annuel, 1/12 en mensuel) :
+ * les processus cumulatifs (croissance, tech, impôt→trésor) suivent dt, les flux
+ * production/consommation s'équilibrent par tick (satisfaction préservée). */
+void econ_tick(WorldEconomy *e, float dt);
 
 /* Pas de colonisation : joueur et antagonistes essaiment vers les régions
  * vierges voisines ; les cités-états colonisent leurs propres territoires

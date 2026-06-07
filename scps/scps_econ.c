@@ -378,7 +378,28 @@ void econ_init(WorldEconomy *e, const World *w) {
 /* SIMULATION — un tick                                                   */
 /* ====================================================================== */
 
-void econ_tick(WorldEconomy *e) {
+/* §7 — Tolérance fiscale par ÉTHOS × classe : le SEUIL (×satisfaction) au-delà
+ * duquel on FUIT l'impôt et l'on gronde. La culture chiffre la stratégie fiscale
+ * (un Mercantile n'étrangle pas ses bourgeois ; un Bureaucrate extrait partout ;
+ * un Dominateur essore la masse mais pas l'élite). */
+static float ethos_tax_tolerance(Ethos e, SocialClass c){
+    static const float T[ETHOS_COUNT][CLASS_COUNT] = {
+        /*               Laborer Bourgeois Élite */
+        /* DOMINATEUR */ {0.60f,  0.40f,   0.25f},
+        /* HONNEUR    */ {0.55f,  0.40f,   0.22f},
+        /* ORDRE      */ {0.55f,  0.52f,   0.42f},
+        /* BUREAUCRATE*/ {0.60f,  0.60f,   0.58f},
+        /* MERCANTILE */ {0.45f,  0.28f,   0.42f},
+        /* PACIFISTE  */ {0.30f,  0.30f,   0.30f},
+    };
+    if (e<0||e>=ETHOS_COUNT||c<0||c>=CLASS_COUNT) return 0.40f;
+    return T[e][c];
+}
+#define STATE_TAX_AMBITION 0.42f   /* le taux que l'État VISE (l'éthos décide ce qui rentre) */
+#define K_TAX_AGIT         0.85f   /* poids de la surtaxe sur la satisfaction (la grogne) */
+
+void econ_tick(WorldEconomy *e, float dt) {
+    if (dt<=0.f) dt=1.f;
     e->tick++;
 
     for (int rid=0; rid<e->n_regions; rid++) {
@@ -391,7 +412,8 @@ void econ_tick(WorldEconomy *e) {
         float gdp         = 0.f;
         float wage_pool   = 0.f;   /* → laborers */
         float profit_pool = 0.f;   /* → bourgeois */
-        float tax_pool    = 0.f;   /* → élites */
+        float tax_pool    = 0.f;   /* → rente d'élite */
+        float over_tax[CLASS_COUNT]={0};   /* surtaxe par classe (grogne, §6) */
 
         /* ---- 1. EXTRACTION des matières premières ----------------------
          * Emploie des laborers ; chaque unité extraite demande 0.5 de
@@ -450,11 +472,27 @@ void econ_tick(WorldEconomy *e) {
         }
         re->gdp=gdp;
 
-        /* ---- 3. REVENUS répartis sur les strates ----------------------- */
+        /* ---- 3. REVENUS : salaire / profit / RENTE (l'élite vit de la rente) */
         re->strata[CLASS_LABORER].wealth   += wage_pool;
         re->strata[CLASS_BOURGEOIS].wealth += profit_pool;
-        re->strata[CLASS_ELITE].wealth     += tax_pool;
-        re->treasury += tax_pool;
+        re->strata[CLASS_ELITE].wealth     += tax_pool;   /* rente, PAS l'impôt d'État */
+
+        /* ---- 3b. IMPÔT D'ÉTAT (§6-7) : par classe, taux VISÉ borné par le SEUIL
+         * = tolérance(éthos,classe) × (0.4 + 0.6·satisfaction du tick passé).
+         * Au-delà : ÉVASION (le net BAISSE) + grogne (la satisfaction chutera).
+         * La boucle : un peuple CONTENT sous un éthos TOLÉRANT paie fort ;
+         * surtaxer un peuple mécontent ne rapporte pas — contenter d'abord. */
+        for (int c=0;c<CLASS_COUNT;c++){
+            PopStratum *st=&re->strata[c];
+            float sat   = clampf(st->satisfaction,0.f,1.f);
+            float seuil = ethos_tax_tolerance(re->culture.ethos,(SocialClass)c)*(0.40f+0.60f*sat);
+            float evasion   = clampf(STATE_TAX_AMBITION - seuil, 0.f, 1.f);
+            float collected = STATE_TAX_AMBITION * st->wealth * (1.f-evasion) * dt;
+            if (collected>st->wealth) collected=st->wealth;
+            st->wealth   -= collected;
+            re->treasury += collected;
+            over_tax[c]   = (STATE_TAX_AMBITION>seuil)?(STATE_TAX_AMBITION-seuil):0.f;
+        }
 
         /* ---- 4. DEMANDE de consommation par strate --------------------- */
         for (int c=0;c<CLASS_COUNT;c++) {
@@ -498,7 +536,9 @@ void econ_tick(WorldEconomy *e) {
                 met_w+=w*got;
             }
             re->strata[c].wealth=fmaxf(0.f,budget);
-            re->strata[c].satisfaction=(need_w>0.f)?met_w/need_w:0.5f;
+            float basket=(need_w>0.f)?met_w/need_w:0.5f;
+            /* la surtaxe (§6) gronde : elle ABAISSE la satisfaction → agitation */
+            re->strata[c].satisfaction=clampf(basket - over_tax[c]*K_TAX_AGIT, 0.f, 1.f);
         }
 
         /* ---- 6. MISE À JOUR : démographie, tech, satisfaction générale - */
@@ -536,6 +576,7 @@ void econ_tick(WorldEconomy *e) {
         if (food_s < 0.35f)
             net_growth -= (0.35f - food_s) * 0.12f;   /* pic de mortalité famine */
         net_growth = clampf(net_growth, -0.10f, 0.06f);
+        net_growth *= dt;   /* cumulatif → suit le pas (mensuel : 1/12 d'an) */
 
         float total_pop_now=0.f;
         for (int c=0;c<CLASS_COUNT;c++) total_pop_now+=re->strata[c].pop;
@@ -556,7 +597,7 @@ void econ_tick(WorldEconomy *e) {
 
         /* Tech : les élites convertissent richesse × satisfaction en savoir. */
         PopStratum *el=&re->strata[CLASS_ELITE];
-        re->tech += el->wealth*TECH_RATE*el->satisfaction;
+        re->tech += el->wealth*TECH_RATE*el->satisfaction*dt;
 
         /* Bourgeois réinvestissent une part du profit dans les manufactures
          * (croissance de capacité plafonnée par leur richesse). */

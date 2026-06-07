@@ -62,12 +62,18 @@ static bool is_forest(Biome b){ return b==BIO_FOREST||b==BIO_WOODS||b==BIO_JUNGL
 static bool is_arid (Biome b){ return b==BIO_DESERT||b==BIO_DRYLANDS||b==BIO_SAVANNA||b==BIO_STEPPE||b==BIO_COASTAL_DESERT; }
 static bool is_lowland(Biome b){ return b==BIO_PLAINS||b==BIO_FARMLAND||b==BIO_GRASSLAND||b==BIO_MARSH||b==BIO_MANGROVE||b==BIO_BOG; }
 
+#define AGE_DAWN_YEARS 20   /* l'âge de l'Aube (base) dure les 20 premières années */
+#define AGE_MIN_YEARS  30   /* puis un âge par génération (30 ans) entre avènements */
+
 void events_init(EventsState *ev, const World *w, uint32_t seed){
     memset(ev,0,sizeof(*ev));
     ev->rng = seed ? seed : 0xA17F23C5u;
     ev->ages.research_mult = 1.f;
     ev->ages.integration_mult = 1.f;
     ev->ages.last_dawned = -1;
+    /* L'Aube dure 20 ans : le 1er âge ne peut s'éveiller avant l'an 20
+     * (gate : an ≥ last_dawn_year + 30, donc last init = 20 − 30 = −10). */
+    ev->ages.last_dawn_year = AGE_DAWN_YEARS - AGE_MIN_YEARS;
     ev->last_id = -1; ev->last_name = NULL;
 
     /* accumulateurs par région */
@@ -520,8 +526,6 @@ static void age_dawn(EventsState *ev, AgeId a, World *w, WorldEconomy *econ, Wor
     ev->ages.dawned[a]=true; ev->ages.last_dawned=(int)a;
     ev->ages.last_dawn_year = ev->ages.days_elapsed/365;   /* horodate l'avènement */
 }
-
-#define AGE_MIN_YEARS 30   /* un âge dure au moins une GÉNÉRATION (pas d'âge précoce) */
 
 bool events_check_ages(EventsState *ev, World *w, WorldEconomy *econ,
                        WorldProsperity *wp, WorldLegitimacy *wl, const TechState ts[]){

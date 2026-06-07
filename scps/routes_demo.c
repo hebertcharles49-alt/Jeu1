@@ -46,7 +46,7 @@ int main(int argc,char**argv){
     trade_network_build(net,w,econ);
     for(int c=0;c<w->n_countries;c++) tech_state_init(&ts[c],false);
     prosperity_init(wp,w); legitimacy_init(wl,w,econ); routes_init(rn);
-    for(int t=0;t<5;t++){ econ_tick(econ); }
+    for(int t=0;t<5;t++){ econ_tick(econ, 1.f); }
 
     int player=0; for(int c=0;c<w->n_countries;c++) if(w->country[c].role==POLITY_PLAYER){player=c;break;}
     int cap=w->country[player].capital_prov; int home=(cap>=0)?w->province[cap].region:0;

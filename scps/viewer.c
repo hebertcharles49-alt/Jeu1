@@ -236,15 +236,15 @@ static void sim_day(Sim *s, World *w) {
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
-    /* — mensuel : réputation diplomatique (O(n²), tenu) + démographie (au pas
-     * dt=1/12 → même rythme annuel, mais plus fluide qu'un saut yearly) — */
+    /* — mensuel : ÉCONOMIE + réputation diplomatique (O(n²)) + démographie, tous
+     * au pas dt=1/12 → même rythme annuel, mais plus fluide qu'un saut yearly — */
     if (s->day % 30 == 29) {
+        econ_tick(s->econ, 1.f/12.f);
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
     }
     /* — annuel (le tour stratégique) — */
     if (s->day % 365 == 364) {
-        econ_tick(s->econ);
         econ_colonize_tick(s->econ, w);
         econ_migrate_tick(s->econ, w);
         world_tick(w, s->econ, 1.0f);

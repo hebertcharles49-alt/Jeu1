@@ -46,7 +46,7 @@ typedef struct {
 #define STEP 10   /* on avance le monde par pas de 10 jours (le jour reste l'atome IA) */
 
 static void world_step(Sim *s, AiActor *act, int n_act, int day){
-    econ_tick(s->econ);
+    econ_tick(s->econ, 1.f);
     agency_advance(s->ag, s->w, s->econ, s->wl, STEP);
     routes_advance(s->rn, s->w, s->econ, STEP);
     for (int i=0;i<n_act;i++) ai_step(&act[i], s->w, s->econ, s->wp, s->wl,

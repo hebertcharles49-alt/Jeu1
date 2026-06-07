@@ -41,7 +41,7 @@ typedef struct {
 /* Un jour : éco → actions → légitimité → prospérité (ordre anti-circularité). */
 static void run_days(Sim *s, int days){
     for (int d=0; d<days; d++){
-        econ_tick(s->econ);
+        econ_tick(s->econ, 1.f);
         agency_advance(s->ag, s->w, s->econ, s->wl, 1);
         legitimacy_tick(s->wl, s->w, s->econ, s->ts);
         prosperity_tick(s->wp, s->w, s->econ, s->net, s->ts, s->wl);

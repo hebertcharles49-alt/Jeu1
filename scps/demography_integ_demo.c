@@ -53,7 +53,7 @@ int main(int argc, char **argv){
     econ_init(econ,w); gen_population(w,econ); worldgen_seed_peoples(w,econ,RACE_HUMAIN);
     for (int c=0;c<w->n_countries;c++) tech_state_init(&ts[c],false);
     prosperity_init(wp,w); legitimacy_init(wl,w,econ);
-    for (int t=0;t<20;t++){ econ_tick(econ); econ_colonize_tick(econ,w); world_tick(w,econ,1.f);
+    for (int t=0;t<20;t++){ econ_tick(econ, 1.f); econ_colonize_tick(econ,w); world_tick(w,econ,1.f);
         legitimacy_tick(wl,w,econ,ts); prosperity_tick(wp,w,econ,NULL,ts,wl); }
     int player=0; for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){player=c;break;}
 

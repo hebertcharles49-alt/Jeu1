@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
     /* ---- Boucle de simulation ------------------------------------------- */
     printf("=== Simulation : %d ticks ===\n", ticks);
     for (int tick = 0; tick < ticks; tick++) {
-        econ_tick(econ);
+        econ_tick(econ, 1.f);
         econ_colonize_tick(econ, w);
         econ_migrate_tick(econ, w);
         world_tick(w, econ, 1.0f);   /* dérive lente de l'horloge linguistique */
