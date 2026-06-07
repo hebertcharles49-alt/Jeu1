@@ -106,7 +106,7 @@ int main(int argc, char **argv){
 
     /* ═══ C. demography_tick VIVANT : L par groupe, puis assimilation ══ */
     printf("\n── C. demography_tick : la minorité a une L basse, puis s'assimile ──\n");
-    for (int yr=0; yr<8; yr++) demography_tick(w,econ,wl,drift,5.f,5.f);
+    for (int yr=0; yr<8; yr++) demography_tick(w,econ,wl,drift,5.f,5.f,1.f);
     const PopGroup *dom=province_dominant(pp);
     float Lnat=dom?dom->L:0, Lmin=10.f; int mi=-1;
     for (int i=0;i<pp->n_groups;i++) if (&pp->groups[i]!=dom && cdist(&pp->groups[i].origin,&crown)>3.f)
@@ -117,7 +117,7 @@ int main(int argc, char **argv){
     if (mi>=0){
         PopCulture morig=pp->groups[mi].origin;
         float dist0=cdist(&pp->groups[mi].culture,&crown);
-        for (int yr=0; yr<70; yr++) demography_tick(w,econ,wl,drift,7.f,7.f);
+        for (int yr=0; yr<70; yr++) demography_tick(w,econ,wl,drift,7.f,7.f,1.f);
         bool gone=true; float dist1=0;
         for (int i=0;i<pp->n_groups;i++) if (cdist(&pp->groups[i].origin,&morig)<0.1f){
             gone=false; dist1=cdist(&pp->groups[i].culture,&crown);

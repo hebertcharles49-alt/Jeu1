@@ -94,7 +94,7 @@ void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift);
  * la migration (groupes vers la prospérité), puis SYNCHRONISE RegionEconomy.culture
  * (= groupe dominant). Le verdict reste au pays (scps_order inchangé). */
 void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
-                     ModifierStack *drift, float P, float K);
+                     ModifierStack *drift, float P, float K, float dt);
 
 /* Dépose `amount` du groupe dominant du pays `cid` (sa culture régnante) dans la
  * région conquise `region` → minorité de colons sous une couronne étrangère, OU

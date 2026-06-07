@@ -526,19 +526,20 @@ static void age_dawn(EventsState *ev, AgeId a, World *w, WorldEconomy *econ, Wor
 bool events_check_ages(EventsState *ev, World *w, WorldEconomy *econ,
                        WorldProsperity *wp, WorldLegitimacy *wl, const TechState ts[]){
     bool any=false;
-    /* Rythme : un seul âge par fenêtre de 30 ans, et rien avant l'an 30 (le monde
-     * a besoin d'une génération pour mûrir — fini le « commerce mondial » à l'an 2). */
-    int year = ev->ages.days_elapsed/365;
-    if (year < ev->ages.last_dawn_year + AGE_MIN_YEARS) return false;
-    if (!ev->ages.dawned[AGE_COMMERCE] && age_trig_commerce(w,econ,wp,ts)){ age_dawn(ev,AGE_COMMERCE,w,econ,wp); any=true; }
-    if (!ev->ages.dawned[AGE_REASON]   && age_trig_reason  (w,econ,wp,ts)){ age_dawn(ev,AGE_REASON,w,econ,wp);   any=true; }
+    /* Rythme : UN SEUL âge par fenêtre de 30 ans, rien avant l'an 30. La barrière
+     * est RÉÉVALUÉE après chaque avènement (last_dawn_year bouge) → les âges
+     * s'égrènent une génération à la fois, jamais en grappe. */
+    #define AGE_GATE (ev->ages.days_elapsed/365 >= ev->ages.last_dawn_year + AGE_MIN_YEARS)
+    if (AGE_GATE && !ev->ages.dawned[AGE_COMMERCE] && age_trig_commerce(w,econ,wp,ts)){ age_dawn(ev,AGE_COMMERCE,w,econ,wp); any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_REASON]   && age_trig_reason  (w,econ,wp,ts)){ age_dawn(ev,AGE_REASON,w,econ,wp);   any=true; }
     /* Lumières AVANT les âges politiques (la société de masse d'abord). */
-    if (!ev->ages.dawned[AGE_LUMIERES] && age_trig_lumieres(w,wp))        { age_dawn(ev,AGE_LUMIERES,w,econ,wp); any=true; }
-    if (!ev->ages.dawned[AGE_EMPIRES]  && age_trig_empires (w,econ,wp,ts,wl)){ age_dawn(ev,AGE_EMPIRES,w,econ,wp);any=true; }
-    if (!ev->ages.dawned[AGE_BREACH]   && age_trig_breach  (w,econ,wp,ts)){ age_dawn(ev,AGE_BREACH,w,econ,wp);   any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_LUMIERES] && age_trig_lumieres(w,wp))        { age_dawn(ev,AGE_LUMIERES,w,econ,wp); any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_EMPIRES]  && age_trig_empires (w,econ,wp,ts,wl)){ age_dawn(ev,AGE_EMPIRES,w,econ,wp);any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_BREACH]   && age_trig_breach  (w,econ,wp,ts)){ age_dawn(ev,AGE_BREACH,w,econ,wp);   any=true; }
     /* Politiques : exigent que les Lumières aient eu lieu (causalité). */
-    if (!ev->ages.dawned[AGE_SOULEVEMENTS] && age_trig_soulevements(ev,w,wp)){ age_dawn(ev,AGE_SOULEVEMENTS,w,econ,wp); any=true; }
-    if (!ev->ages.dawned[AGE_ORDRE_FER]    && age_trig_ordrefer   (ev,w,wp)){ age_dawn(ev,AGE_ORDRE_FER,w,econ,wp);    any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_SOULEVEMENTS] && age_trig_soulevements(ev,w,wp)){ age_dawn(ev,AGE_SOULEVEMENTS,w,econ,wp); any=true; }
+    if (AGE_GATE && !ev->ages.dawned[AGE_ORDRE_FER]    && age_trig_ordrefer   (ev,w,wp)){ age_dawn(ev,AGE_ORDRE_FER,w,econ,wp);    any=true; }
+    #undef AGE_GATE
     return any;
 }
 bool  ages_dawned(const EventsState *ev, AgeId a){ return (a>=0&&a<AGE_COUNT)?ev->ages.dawned[a]:false; }

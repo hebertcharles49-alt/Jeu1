@@ -55,6 +55,15 @@ static int cap_region(const World *w, int cid){
 }
 static void tickP(Sim *s){ prosperity_tick(s->wp,s->w,s->econ,s->net,s->ts,s->wl); }
 
+/* Laisse couler les générations (palier d'âge 30 ans) jusqu'à ce qu'un âge cible
+ * advienne — la chaîne s'égrène un âge à la fois, on ne la teste pas en grappe. */
+static void chain_to(Sim *s, AgeId target){
+    for (int g=0; g<14 && !ages_dawned(s->ev,target); g++){
+        s->ev->ages.days_elapsed += 31*365;
+        events_check_ages(s->ev,s->w,s->econ,s->wp,s->wl,s->ts);
+    }
+}
+
 /* Façonne les ENTRÉES d'ordre d'un pays (H/K/L/C/race) pour isoler un cas. */
 static void shape(Sim *s, int cid, float techH, float techK, float Lval, float Cval){
     if (cid<0||cid>=s->w->n_countries) return;
@@ -124,7 +133,7 @@ int main(int argc, char **argv){
     /* Maintenant la société accumule savoir + connexion → les Lumières adviennent,
      * et alors seulement la chaîne peut se dérouler. */
     light_the_world(&s);
-    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    chain_to(&s, AGE_SOULEVEMENTS);   /* on laisse le temps : la chaîne s'égrène */
     ok("les Lumières s'éveillent (savoir mondial + connexion atteints)", ages_dawned(s.ev,AGE_LUMIERES));
     ok("APRÈS les Lumières, la chaîne causale peut se dérouler (Soulèvements éveillé)",
        ages_dawned(s.ev,AGE_SOULEVEMENTS));
@@ -143,7 +152,8 @@ int main(int argc, char **argv){
     /* Avènement des Lumières (savoir+C atteints) → +I et dissolution coercitive. */
     light_the_world(&s);
     shape(&s, cOpen, 1.f,7.f,8.f,6.f); shape(&s, cCoer, 9.f,4.f,2.f,6.f);  /* re-fige les cas */
-    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    chain_to(&s, AGE_LUMIERES);        /* Commerce→Raison→Lumières, génération par génération */
+    shape(&s, cOpen, 1.f,7.f,8.f,6.f); shape(&s, cCoer, 9.f,4.f,2.f,6.f);  /* re-fige après la chaîne */
     tickP(&s);
     float SIo1=s.wp->country[cOpen].SI, FRc1=s.wp->country[cCoer].fragilite;
     printf("   société OUVERTE : SI %.1f→%.1f (pression de réforme) ; régime COERCITIF : fragilité %.1f→%.1f (amorcé)\n",
@@ -171,7 +181,7 @@ int main(int argc, char **argv){
     s.wp->age_I_bonus=1.5f;   /* l'effervescence des idées (Lumières en cours) */
     tickP(&s);
     int rev0=events_count_revolutionary(s.w,s.wp);
-    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);   /* masse critique atteinte → Soulèvements */
+    chain_to(&s, AGE_SOULEVEMENTS);   /* Lumières déjà là → la masse critique éveille les Soulèvements */
     bool soulev = ages_dawned(s.ev,AGE_SOULEVEMENTS);
     tickP(&s);
     int rev1=events_count_revolutionary(s.w,s.wp);

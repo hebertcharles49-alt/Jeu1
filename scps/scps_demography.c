@@ -327,8 +327,9 @@ void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift){
 }
 
 void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
-                     ModifierStack *drift, float P, float K){
+                     ModifierStack *drift, float P, float K, float dt){
     (void)wl;
+    if (dt<=0.f) dt=1.f;
     /* 1. Par région : L par groupe, assimilation, rafraîchir le cache, sync dominante. */
     for (int r=0; r<econ->n_regions; r++){
         RegionEconomy *re=&econ->region[r];
@@ -340,7 +341,7 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
             group_L_tick(&pp->groups[i], drift, crown, re->satisfaction, 0.f, re->coercion, re->build.H_coerc);
             pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
         }
-        assimilation_tick(pp, drift, P, K, 1.f);                 /* dérive durable (∝ D∞) */
+        assimilation_tick(pp, drift, P, K, dt);                  /* dérive durable (∝ D∞), au pas dt */
         for (int i=0;i<pp->n_groups;i++)
             pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
         const PopGroup *dom=province_dominant(pp);

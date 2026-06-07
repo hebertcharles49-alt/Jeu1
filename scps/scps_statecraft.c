@@ -203,7 +203,9 @@ void statecraft_tick(Statecraft *sc, World *w, WorldEconomy *econ,
         sc->staff[c].count = staff_cap(sc, c);
     }
 
-    /* ---- Opinion → relation (lecteurs) + statut de guerre, avec inertie -- */
+    /* ---- Opinion → relation (lecteurs) + statut de guerre, avec inertie ----
+     * O(n²) : appelé au pas MENSUEL par la boucle (diplo rep tous les mois, pas
+     * tous les jours) → coût tenu même à 50+ pays. */
     for (int a=0;a<NC;a++) for (int b=0;b<NC;b++){
         if (a==b) continue;
         Relation rel = diplo_relation(w, econ, wp, diplo, a, b);

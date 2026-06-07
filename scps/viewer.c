@@ -235,8 +235,13 @@ static void sim_day(Sim *s, World *w) {
     for (int c=0;c<w->n_countries;c++) if (s->ai_on[c])     /* les voisins VIVENT (cadence étalée) */
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
-    statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 1);
     labor_tick(s->labor);
+    /* — mensuel : réputation diplomatique (O(n²), tenu) + démographie (au pas
+     * dt=1/12 → même rythme annuel, mais plus fluide qu'un saut yearly) — */
+    if (s->day % 30 == 29) {
+        statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
+        demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
+    }
     /* — annuel (le tour stratégique) — */
     if (s->day % 365 == 364) {
         econ_tick(s->econ);
@@ -247,7 +252,6 @@ static void sim_day(Sim *s, World *w) {
         trade_network_build(s->net, w, s->econ);
         trade_tick(s->econ, s->net);
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
-        demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f);   /* migration + assimilation */
     }
     if (++s->day % 365 == 0) s->year++;
 }
