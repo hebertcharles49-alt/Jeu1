@@ -529,6 +529,18 @@ void econ_tick(WorldEconomy *e, float dt) {
             float lim = cap;
             if (rc->in1!=RES_NONE) lim=fminf(lim, re->stock[rc->in1]/fmaxf(rc->q1,EPS));
             if (rc->in2!=RES_NONE) lim=fminf(lim, re->stock[rc->in2]/fmaxf(rc->q2,EPS));
+            /* RÉSERVE VIVRIÈRE : le grain NOURRIT avant de se brasser. On ne brasse
+             * que le SURPLUS au-delà du besoin alimentaire (sinon la bière affame
+             * la province — la famine revient). */
+            if (rc->in1==RES_GRAIN || rc->in2==RES_GRAIN){
+                float pop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                          + re->strata[CLASS_ELITE].pop;
+                float reserve = pop/100.f * 1.20f;      /* besoin de grain (1/100 hab) + marge */
+                float spare   = fmaxf(0.f, re->stock[RES_GRAIN] - reserve);
+                float gq = (rc->in1==RES_GRAIN)?rc->q1:rc->q2;
+                lim = fminf(lim, spare/fmaxf(gq,EPS));
+            }
+            if (lim<=0.f){ b->workers=0.f; continue; }
             float want_labor=rc->labor*cap;
             float avail=labor_avail-labor_used;
             float lratio=(want_labor>0.f)?clampf(avail/want_labor,0.f,1.f):0.f;

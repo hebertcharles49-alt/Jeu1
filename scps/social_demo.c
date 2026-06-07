@@ -68,11 +68,11 @@ int main(int argc, char **argv){
         RegionEconomy *re=&e->region[0];
         re->active=true; re->colonized=true; re->culture.settled=true; re->owner=0;
         for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
-        re->raw_cap[RES_GRAIN]=6.f;
+        re->raw_cap[RES_GRAIN]=30.f;   /* grain ABONDANT : on ne brasse que le SURPLUS */
         re->n_bld=0;
         re->bld[re->n_bld].type=BLD_BREWERY; re->bld[re->n_bld].level=3.f; re->n_bld++;
-        re->strata[CLASS_LABORER].pop=600.f; re->strata[CLASS_LABORER].wealth=400.f;
-        re->strata[CLASS_BOURGEOIS].pop=100.f; re->strata[CLASS_ELITE].pop=50.f;
+        re->strata[CLASS_LABORER].pop=400.f; re->strata[CLASS_LABORER].wealth=400.f;
+        re->strata[CLASS_BOURGEOIS].pop=80.f; re->strata[CLASS_ELITE].pop=40.f;
         for (int t=0;t<6;t++) econ_tick(e,1.f);
         float beer=re->stock[RES_BEER];
         printf("   après 6 mois de brassage : bière en stock = %.1f\n", beer);
