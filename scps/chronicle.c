@@ -132,6 +132,36 @@ static void empire_avg(const World *w, const WorldEconomy *e, const WorldProsper
     *prosp = n? (int)(sp/n):0;
     *stab  = n? (int)(ss/n):0;
 }
+/* Population totale (somme des strates économiques de toutes les régions). */
+static double total_pop(const WorldEconomy *e){
+    double p=0.0;
+    for (int r=0;r<e->n_regions;r++) for (int c=0;c<CLASS_COUNT;c++) p+=e->region[r].strata[c].pop;
+    return p;
+}
+/* Population PAR CONTINENT (remplit pc[0..ncont-1]). */
+static void continent_pop(const World *w, const WorldEconomy *e, double *pc, int ncont){
+    for (int i=0;i<ncont;i++) pc[i]=0.0;
+    for (int r=0;r<e->n_regions && r<w->n_regions;r++){
+        int ci=w->region[r].continent;
+        if (ci<0||ci>=ncont) continue;
+        for (int c=0;c<CLASS_COUNT;c++) pc[ci]+=e->region[r].strata[c].pop;
+    }
+}
+/* POURQUOI les révoltes : moyennes L/K/SI des polities EN révolution (mode 2)
+ * vs stables → on lit la cause (légitimité ? capacité ?). */
+static void revolt_cause(const World *w, const WorldEconomy *e, const WorldProsperity *wp,
+                         int *nr, float *Lr, float *Kr, float *SIr,
+                         int *ns, float *Ls, float *Ks, float *SIs){
+    *nr=*ns=0; *Lr=*Kr=*SIr=*Ls=*Ks=*SIs=0.f;
+    for (int c=0;c<w->n_countries;c++){
+        if (w->country[c].role==POLITY_UNCLAIMED || regions_of(e,c)==0) continue;
+        const CountryProsperity *cp=&wp->country[c];
+        if (cp->mode==2){ (*nr)++; *Lr+=cp->L; *Kr+=cp->K; *SIr+=cp->SI; }
+        else            { (*ns)++; *Ls+=cp->L; *Ks+=cp->K; *SIs+=cp->SI; }
+    }
+    if (*nr){ *Lr/=*nr; *Kr/=*nr; *SIr/=*nr; }
+    if (*ns){ *Ls/=*ns; *Ks/=*ns; *SIs/=*ns; }
+}
 
 int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
@@ -200,8 +230,8 @@ int main(int argc, char **argv){
             if (si<4 && s.year>=snap[si]){
                 int treg=0; top_power(w,s.econ,&treg);
                 int ap,as_; empire_avg(w,s.econ,s.wp,s.ts,&ap,&as_);
-                printf("   an %3d : %2d pays vivants | 1er empire %2d rég | empires : prospérité %2d stab %2d | %d guerre(s), %d révolté(s)\n",
-                       snap[si], lv, treg, ap, as_, wa, rv);
+                printf("   an %3d : %2d pays vivants | pop %.0fk | 1er empire %2d rég | empires : prospérité %2d stab %2d | %d guerre(s), %d révolté(s)\n",
+                       snap[si], lv, total_pop(s.econ)/1000.0, treg, ap, as_, wa, rv);
                 si++;
             }
         }
@@ -220,6 +250,24 @@ int main(int argc, char **argv){
             printf("              1er empire « %s » : %d régions (%d%% des terres) | Stabilité %d  Prospérité %d  Légitimité %d  Cohésion %d — Assise %s\n",
                    w->country[tp].name, treg, share, r.m_stabilite.value, r.m_prosperite.value,
                    r.m_legitimite.value, r.m_cohesion.value, label_assise(r.assise));
+
+        /* POPULATION : totale + par continent (les 4 plus peuplés). */
+        {
+            double pc[SCPS_MAX_CONTINENT]; continent_pop(w, s.econ, pc, cont);
+            int ord[SCPS_MAX_CONTINENT]; for (int i=0;i<cont;i++) ord[i]=i;
+            for (int i=0;i<cont;i++) for (int j=i+1;j<cont;j++) if (pc[ord[j]]>pc[ord[i]]){int t=ord[i];ord[i]=ord[j];ord[j]=t;}
+            printf("              population : %.0fk au total ; par continent :", total_pop(s.econ)/1000.0);
+            for (int i=0;i<cont && i<4;i++) printf(" C%d %.0fk", ord[i], pc[ord[i]]/1000.0);
+            printf("\n");
+        }
+        /* POURQUOI les révoltes : la cause LUE (légitimité ? capacité ?). */
+        {
+            int nr,ns; float Lr,Kr,SIr,Ls,Ks,SIs;
+            revolt_cause(w, s.econ, s.wp, &nr,&Lr,&Kr,&SIr, &ns,&Ls,&Ks,&SIs);
+            printf("              révoltes : %d en révolution (Légit moy %.1f · capacité K %.1f · stab.int SI %.1f) "
+                   "vs %d stables (Légit %.1f · K %.1f · SI %.1f)\n",
+                   nr,Lr,Kr,SIr, ns,Ls,Ks,SIs);
+        }
 
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
