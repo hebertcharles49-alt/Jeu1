@@ -96,6 +96,34 @@ typedef struct {
     SpeciesArchetype race;
 } PopCulture;
 
+/* ---- GROUPES de population (clé de voûte démographique) ---------------- *
+ * Une province ne contient plus une fiche homogène mais des GROUPES
+ * (race, culture, classe, effectif). D interne = distance ENTRE groupes ;
+ * H agit SUR eux ; l'assimilation fait DÉRIVER la culture d'une minorité.
+ * `culture` est la fiche EFFECTIVE (cache recalculé = origine + dérive) — ce que
+ * lisent prosperity/legitimacy ; `origin` est le substrat FIXE. Rétro-compat :
+ * une province à UN groupe reproduit exactement les nombres d'hier. */
+#define SCPS_MAX_GROUPS 8
+typedef struct {
+    SpeciesArchetype race;
+    Sphere       origin_sphere;  /* FIXE : pour le gouffre */
+    PopCulture   origin;         /* substrat FIXE */
+    PopCulture   culture;        /* fiche EFFECTIVE (cache = origine + dérive) */
+    SocialClass  klass;
+    long         count;
+    float        L;              /* légitimité du groupe envers la couronne */
+    float        agit_base;      /* agitation VRAIE (la suppression la masque) */
+    float        integration;    /* 0..1 → pilote l'assimilation */
+    bool         diaspora;       /* installé loin de sa terre (migration) */
+    int          drift_id;       /* clé dans la pile de dérive du monde */
+} PopGroup;
+typedef struct {
+    PopGroup groups[SCPS_MAX_GROUPS];
+    int      n_groups;           /* 0 = non attaché → repli sur RegionEconomy.culture */
+    int      prov;               /* province du monde (géo) — optionnel */
+    float    prosperity;         /* prospérité locale [0..10] (gradient de migration) */
+} ProvincePop;
+
 /* ---- Densité institutionnelle bâtie (couche d'agency) ----------------- *
  * Un bâtiment n'est pas un bonus : c'est de la densité institutionnelle
  * RÉALISÉE qui déplace une coordonnée que le moteur d'ordre LIT. Ces
@@ -112,7 +140,8 @@ typedef struct {
 /* ---- Économie d'une région -------------------------------------------- */
 typedef struct {
     PopStratum strata[CLASS_COUNT];
-    PopCulture culture;   /* profil culturel de la population locale */
+    PopCulture culture;   /* profil culturel DOMINANT (synchronisé sur le plus gros groupe) */
+    ProvincePop pop;      /* les GROUPES de la province (clé de voûte) — n_groups=0 si non attaché */
     ProvBuild  build;     /* densité institutionnelle bâtie par le joueur */
     float      route_pe;  /* PE apporté par les routes commerciales (transitoire) */
 

@@ -17,33 +17,15 @@
  * Le verdict reste au PAYS (scps_order inchangé) ; les métriques par province
  * (D, L, agitation) suffisent au local et remontent au pays.
  */
-#include "scps_econ.h"       /* PopCulture, SocialClass */
+#include "scps_world.h"      /* World, WorldEconomy (l'intégration au moteur) */
+#include "scps_econ.h"       /* PopGroup, ProvincePop, PopCulture, SocialClass */
 #include "scps_species.h"    /* SpeciesArchetype, Sphere */
 #include "scps_modifier.h"   /* la pile de dérive (assimilation/suppression) */
 #include "scps_readout.h"    /* BandHumeur — la loyauté en MOT (membrane) */
 
-#define DEMO_MAX_GROUPS 8
-
-/* ---- Un groupe de population (§1) ------------------------------------- */
-typedef struct {
-    SpeciesArchetype race;
-    Sphere       origin_sphere;  /* FIXE : pour le gouffre */
-    PopCulture   origin;         /* fiche SUBSTRAT (fixe) ; l'effective = origine + dérive */
-    SocialClass  klass;
-    long         count;
-    float        L;              /* légitimité de CE groupe envers la couronne (§2) */
-    float        agit_base;      /* agitation VRAIE (pilotée par L) — la suppression la masque */
-    float        integration;    /* 0..1, monte avec la tutelle → pilote l'assimilation */
-    bool         diaspora;       /* installé loin de sa terre (par migration) */
-    int          drift_id;       /* clé dans la pile de dérive du pays */
-} PopGroup;
-
-typedef struct {
-    PopGroup groups[DEMO_MAX_GROUPS];
-    int      n_groups;
-    int      prov;          /* province du monde (géo) — optionnel */
-    float    prosperity;    /* prospérité locale [0..10] (gradient de migration) */
-} ProvincePop;
+/* PopGroup / ProvincePop sont définis dans scps_econ.h (bas niveau) : ainsi
+ * RegionEconomy les porte et prosperity/legitimacy les LISENT sans cycle. */
+#define DEMO_MAX_GROUPS SCPS_MAX_GROUPS
 
 /* ---- Fiche EFFECTIVE = origine + pile (recalcul, pas mutation) -------- */
 PopCulture group_culture_effective  (const PopGroup *g, const ModifierStack *drift);
@@ -98,5 +80,25 @@ int province_composition(const ProvincePop *pp, const ModifierStack *drift,
                          const PopCulture *crown, float P, float K,
                          GroupReadout out[], int max);
 const char *labor_class_word(SocialClass k);   /* Noblesse / Artisans / Laboureurs */
+
+/* ===================================================================== */
+/* INTÉGRATION AU MOTEUR VIVANT (§7) — la province RÉELLE porte des groupes */
+/* ===================================================================== */
+/* Attache à chaque région peuplée UN groupe substrat (sa culture, sa pop) →
+ * rétro-compatible : mono-groupe = les nombres d'hier. À appeler après
+ * gen_population/worldgen_seed_peoples. drift = la pile du monde (réinitialisée). */
+void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift);
+
+/* Un pas (un an) sur la démographie VIVANTE : rafraîchit la fiche effective de
+ * chaque groupe (cache), fait la L par groupe, l'assimilation (dérive durable),
+ * la migration (groupes vers la prospérité), puis SYNCHRONISE RegionEconomy.culture
+ * (= groupe dominant). Le verdict reste au pays (scps_order inchangé). */
+void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
+                     ModifierStack *drift, float P, float K);
+
+/* Dépose `amount` du groupe dominant du pays `cid` (sa culture régnante) dans la
+ * région conquise `region` → minorité de colons sous une couronne étrangère, OU
+ * laisse les locaux conquis en minorité restive. Crée du D INTERNE vécu. */
+void demography_on_conquest(World *w, WorldEconomy *econ, ModifierStack *drift, int region, int conqueror);
 
 #endif /* SCPS_DEMOGRAPHY_H */

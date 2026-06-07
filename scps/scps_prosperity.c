@@ -54,61 +54,50 @@ static void compute_profile(const WorldEconomy *econ, const World *w, int cid,
     memset(prof, 0, sizeof(*prof));
     (void)w;
 
-    int rids[SCPS_MAX_REG]; int nr = 0;
-    for (int rid = 0; rid < econ->n_regions && nr < SCPS_MAX_REG; rid++) {
-        if (econ->region[rid].owner != cid) continue;
-        if (!econ->region[rid].culture.settled) continue;
-        rids[nr++] = rid;
-    }
-    if (nr == 0) return;
-
-    /* Moyenne pondérée par la population totale de la région (la culture est
-     * une propriété de la population : on pèse par les gens, pas par la surface). */
-    double wsum = 0.0, sv = 0.0, ss = 0.0, sp = 0.0, sr = 0.0;
-    for (int i = 0; i < nr; i++) {
-        const RegionEconomy *re = &econ->region[rids[i]];
-        const PopCulture *pc = &re->culture;
-        double pop = re->strata[CLASS_LABORER].pop
-                   + re->strata[CLASS_BOURGEOIS].pop
-                   + re->strata[CLASS_ELITE].pop;
-        if (pop < 1.0) pop = 1.0;   /* settled mais transitoirement vide : poids plancher */
-        wsum += pop;
-        sv += pop * pc->valeurs;  ss += pop * pc->subsistance;
-        sp += pop * pc->parente;  sr += pop * pc->religion;
-    }
-    if (wsum > 0.0) {
-        prof->valeurs     = (float)(sv / wsum);
-        prof->subsistance = (float)(ss / wsum);
-        prof->parente     = (float)(sp / wsum);
-        prof->religion    = (float)(sr / wsum);
-    }
-
-    /* NOTE : l'axe « langue » (horloge phylogénétique) est intentionnellement
-     * exclu du calcul de distance culturelle ici. Il mesure le cousinage
-     * ressenti (divergence temporelle), pas la friction de contenu. Deux
-     * cultures-sœurs récemment divergées (langue proche) peuvent avoir un
-     * contenu très différent ; les inclure fausserait D̄. */
-
-    /* Distances par paires de régions — métrique L∞ (cohérente avec
-     * culture_content_distance) : D̄_int = moyenne des L∞ ; D∞_int = max. */
-    float sum_dist = 0.f, max_dist = 0.f;
-    int pairs = 0;
-    for (int i = 0; i < nr; i++) {
-        const PopCulture *a = &econ->region[rids[i]].culture;
-        for (int j = i+1; j < nr; j++) {
-            const PopCulture *b = &econ->region[rids[j]].culture;
-            float dv = fabsf_local(a->valeurs     - b->valeurs);
-            float ds = fabsf_local(a->subsistance - b->subsistance);
-            float dp = fabsf_local(a->parente     - b->parente);
-            float dr = fabsf_local(a->religion    - b->religion);
-            float dinf = dv; if (ds>dinf) dinf=ds; if (dp>dinf) dinf=dp; if (dr>dinf) dinf=dr;
-            sum_dist += dinf;
-            if (dinf > max_dist) max_dist = dinf;
-            pairs++;
+    /* CLÉ DE VOÛTE : on collecte les fiches par GROUPE (clé de voûte démographique)
+     * à travers les régions possédées — le D interne se lit ENTRE les groupes.
+     * Repli mono-groupe : une région non attachée (n_groups=0) compte pour sa
+     * RegionEconomy.culture, et une région attachée à UN groupe-substrat donne la
+     * MÊME entrée → les nombres d'hier (non-régression). */
+    #define PROF_CAP (SCPS_MAX_REG * 2)
+    const PopCulture *cs[PROF_CAP]; double wt[PROF_CAP]; int n = 0;
+    for (int rid = 0; rid < econ->n_regions; rid++) {
+        const RegionEconomy *re = &econ->region[rid];
+        if (re->owner != cid || !re->culture.settled) continue;
+        if (re->pop.n_groups > 0) {
+            for (int k = 0; k < re->pop.n_groups && n < PROF_CAP; k++) {
+                if (re->pop.groups[k].count <= 0) continue;
+                cs[n] = &re->pop.groups[k].culture; wt[n] = (double)re->pop.groups[k].count; n++;
+            }
+        } else if (n < PROF_CAP) {
+            double pop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                       + re->strata[CLASS_ELITE].pop;
+            if (pop < 1.0) pop = 1.0;
+            cs[n] = &re->culture; wt[n] = pop; n++;
         }
     }
-    prof->D_bar_int = (pairs > 0) ? sum_dist / (float)pairs : 0.f;
+    if (n == 0) return;
+
+    /* Moyenne pondérée par la population (la culture est une propriété des gens). */
+    double wsum=0, sv=0, ss=0, sp=0, sr=0;
+    for (int i=0;i<n;i++){ double p=wt[i]; wsum+=p;
+        sv+=p*cs[i]->valeurs; ss+=p*cs[i]->subsistance; sp+=p*cs[i]->parente; sr+=p*cs[i]->religion; }
+    if (wsum>0){ prof->valeurs=(float)(sv/wsum); prof->subsistance=(float)(ss/wsum);
+                 prof->parente=(float)(sp/wsum); prof->religion=(float)(sr/wsum); }
+
+    /* Distances par paires de GROUPES (langue exclue) : D̄_int = moyenne, D∞_int = max
+     * (le MAILLON FAIBLE). Une province conquise mixte y injecte sa diversité interne. */
+    float sum_dist=0.f, max_dist=0.f; int pairs=0;
+    for (int i=0;i<n;i++) for (int j=i+1;j<n;j++){
+        const PopCulture *a=cs[i], *b=cs[j];
+        float dv=fabsf_local(a->valeurs-b->valeurs), ds=fabsf_local(a->subsistance-b->subsistance);
+        float dp=fabsf_local(a->parente-b->parente), dr=fabsf_local(a->religion-b->religion);
+        float dinf=dv; if(ds>dinf)dinf=ds; if(dp>dinf)dinf=dp; if(dr>dinf)dinf=dr;
+        sum_dist+=dinf; if(dinf>max_dist)max_dist=dinf; pairs++;
+    }
+    prof->D_bar_int = (pairs>0) ? sum_dist/(float)pairs : 0.f;
     prof->D_inf_int = max_dist;
+    #undef PROF_CAP
 }
 
 /* ---- Connectivité de base à partir des liens commerciaux --------------- */

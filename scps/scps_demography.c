@@ -45,6 +45,13 @@ static float agit_from_L(float L){ return clampf((6.f - L)*15.f, 0.f, 100.f); }
 /* ===================================================================== */
 /* FICHE EFFECTIVE = origine + dérive (recalcul, jamais mutation)         */
 /* ===================================================================== */
+static const PopCulture *dom_ruling_culture(const World *w, const WorldEconomy *econ, int cid){
+    if (cid<0||cid>=w->n_countries) return NULL;
+    int cp=w->country[cid].capital_prov; if(cp<0||cp>=w->n_provinces) return NULL;
+    int cr=w->province[cp].region; if(cr<0||cr>=econ->n_regions) return NULL;
+    return &econ->region[cr].culture;
+}
+
 PopCulture group_culture_effective(const PopGroup *g, const ModifierStack *drift){
     PopCulture c = g->origin;
     if (drift){
@@ -286,4 +293,93 @@ int province_composition(const ProvincePop *pp, const ModifierStack *drift,
         n++;
     }
     return n;
+}
+
+/* ===================================================================== */
+/* INTÉGRATION AU MOTEUR VIVANT (§7)                                      */
+/* ===================================================================== */
+/* ---- Migration vivante (surface d'équilibrage) ------------------------ */
+#define MIG_GRADIENT   1.5f    /* il faut une cible NOTABLEMENT plus prospère */
+#define MIG_FRACTION   200     /* 1/200 du groupe dominant par an (0.5 %) */
+#define MIG_MIN        20
+
+void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift){
+    if (drift) memset(drift, 0, sizeof(*drift));     /* la pile de dérive du monde, à neuf */
+    int id=1;
+    for (int r=0; r<econ->n_regions; r++){
+        RegionEconomy *re=&econ->region[r];
+        ProvincePop *pp=&re->pop;
+        memset(pp, 0, sizeof(*pp));
+        pp->prov = (r<w->n_regions) ? w->region[r].province_ids[0] : -1;
+        pp->prosperity = re->prosperity;
+        if (!re->culture.settled) continue;
+        long total = (long)(re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                          + re->strata[CLASS_ELITE].pop);
+        if (total<1) total=1;
+        PopGroup *g=&pp->groups[0]; memset(g,0,sizeof(*g));
+        g->race=re->culture.race; g->origin_sphere=species_sphere(re->culture.race);
+        g->origin=re->culture; g->culture=re->culture;     /* substrat = effective au départ */
+        g->klass=CLASS_LABORER; g->count=total;
+        g->L=7.f; g->agit_base=agit_from_L(7.f); g->integration=1.f;   /* natifs intégrés */
+        g->diaspora=false; g->drift_id=id++;
+        pp->n_groups=1;     /* MONO-GROUPE → non-régression (les nombres d'hier) */
+    }
+}
+
+void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
+                     ModifierStack *drift, float P, float K){
+    (void)wl;
+    /* 1. Par région : L par groupe, assimilation, rafraîchir le cache, sync dominante. */
+    for (int r=0; r<econ->n_regions; r++){
+        RegionEconomy *re=&econ->region[r];
+        ProvincePop *pp=&re->pop;
+        if (pp->n_groups<=0 || !re->culture.settled) continue;
+        pp->prosperity = re->prosperity;
+        const PopCulture *crown = (re->owner>=0) ? dom_ruling_culture(w,econ,re->owner) : &re->culture;
+        for (int i=0;i<pp->n_groups;i++){
+            group_L_tick(&pp->groups[i], drift, crown, re->satisfaction, 0.f, re->coercion, re->build.H_coerc);
+            pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
+        }
+        assimilation_tick(pp, drift, P, K, 1.f);                 /* dérive durable (∝ D∞) */
+        for (int i=0;i<pp->n_groups;i++)
+            pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
+        const PopGroup *dom=province_dominant(pp);
+        if (dom) re->culture = dom->culture;                     /* la dominante mène la province */
+    }
+    /* 2. Migration : les groupes affluent vers la prospérité voisine (round-robin). */
+    static int mig_id=1000000;
+    for (int r=0; r<econ->n_regions; r++){
+        RegionEconomy *re=&econ->region[r];
+        if (re->pop.n_groups<=0 || !re->culture.settled) continue;
+        int best=-1; float bestp=re->prosperity + MIG_GRADIENT;
+        for (int s=0;s<econ->n_regions;s++)
+            if (econ->adj[r][s] && econ->region[s].culture.settled && econ->region[s].pop.n_groups>0
+                && econ->region[s].prosperity>bestp){ bestp=econ->region[s].prosperity; best=s; }
+        if (best<0) continue;
+        PopGroup *dom=(PopGroup*)province_dominant(&re->pop);
+        long amount=dom->count/MIG_FRACTION;
+        if (amount<MIG_MIN) continue;
+        int gi=(int)(dom-re->pop.groups);
+        migration_move(&re->pop, &econ->region[best].pop, gi, amount, mig_id++);
+    }
+}
+
+void demography_on_conquest(World *w, WorldEconomy *econ, ModifierStack *drift, int region, int conqueror){
+    (void)drift;
+    if (region<0||region>=econ->n_regions) return;
+    ProvincePop *pp=&econ->region[region].pop;
+    if (pp->n_groups<=0) return;
+    /* les conquis deviennent une minorité restive : l'intégration repart de zéro. */
+    for (int i=0;i<pp->n_groups;i++){ pp->groups[i].integration=0.1f; pp->groups[i].L=2.0f; pp->groups[i].agit_base=agit_from_L(2.0f); }
+    /* on dépose des colons de la couronne (culture du conquérant) → D INTERNE vécu. */
+    const PopCulture *crown = dom_ruling_culture(w,econ,conqueror);
+    if (crown && pp->n_groups<SCPS_MAX_GROUPS){
+        long total=province_total_pop(pp);
+        PopGroup g; memset(&g,0,sizeof g);
+        g.race=crown->race; g.origin_sphere=species_sphere(crown->race);
+        g.origin=*crown; g.culture=*crown; g.klass=CLASS_ELITE;
+        g.count=total/5+50; g.L=7.f; g.agit_base=agit_from_L(7.f); g.integration=1.f;
+        g.diaspora=true; g.drift_id=900000+region;
+        pp->groups[pp->n_groups++]=g;
+    }
 }

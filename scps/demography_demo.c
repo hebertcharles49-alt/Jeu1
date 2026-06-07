@@ -42,7 +42,7 @@ static int g_id=1;
 static PopGroup grp(SpeciesArchetype race, Sphere sph, PopCulture o, SocialClass k,
                     long count, float L, float integ, bool diaspora){
     PopGroup g; memset(&g,0,sizeof g);
-    g.race=race; g.origin_sphere=sph; g.origin=o; g.klass=k; g.count=count;
+    g.race=race; g.origin_sphere=sph; g.origin=o; g.culture=o; g.klass=k; g.count=count;
     g.L=L; g.agit_base=agitL(L); g.integration=integ; g.diaspora=diaspora; g.drift_id=g_id++;
     return g;
 }
