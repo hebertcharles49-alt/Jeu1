@@ -212,6 +212,13 @@ LABOR_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
 labor_demo: $(LABOR_DEMO_OBJS)
 	$(CC) $(LABOR_DEMO_OBJS) -o $@ -lm
 
+# ---- Les armées : recrutement, armes, contres, combat au dé ---------------
+# Bâti sur l'économie (pop par classe + armes fabriquées). Autonome (pas de SDL).
+ARMY_DEMO_OBJS := $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_army.o \
+                  $(OBJDIR)/scps_army_demo.o
+army_demo: $(ARMY_DEMO_OBJS)
+	$(CC) $(ARMY_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \
