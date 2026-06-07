@@ -232,6 +232,18 @@ int main(int argc, char **argv){
     ok("sans revanchisme, la citadelle ÉCRASE la sécession", out_plain==OUT_CRUSHED);
     ok("le REVANCHISME post-conquête donne l'INDÉPENDANCE malgré la citadelle", out_rev==OUT_SECEDED);
 
+    /* ═══ 10. CICATRICE — une révolte résolue stunt la province ════════ */
+    printf("\n── 10. La cicatrice : une révolte résolue laisse une plaie (−50 %% dévelop.) ──\n");
+    revolt_init(&rs);
+    solo_owner(e, 4, OWNER);
+    rig(e, 4, OWNER, 0.05f, 0.20f, 0.3f, 20.f);   /* H haut → écrasement */
+    push(e, 4, grp(RACE_HUMAIN, CLASS_LABORER, 4000, 2.f, 1.0f, crown, 241));
+    e->region[4].revolt_scar=0.f;
+    revolt_ignite(&rs, w, e, drift, 4, 0.4f);
+    revolt_tick(&rs, w, e, drift, wl, wp, 120);
+    printf("   cicatrice après écrasement : %.2f\n", e->region[4].revolt_scar);
+    ok("une révolte résolue LAISSE une cicatrice de développement", e->region[4].revolt_scar > 0.4f);
+
     (void)n_countries_0;
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);

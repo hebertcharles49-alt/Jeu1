@@ -82,8 +82,12 @@ void revolt_init(RevoltState *rs){ memset(rs,0,sizeof *rs); rs->last_spawned=-1;
 void revolt_on_conquest(RevoltState *rs, int region){
     if (region>=0 && region<SCPS_MAX_REG) rs->revanchism_days[region]=(float)REVANCHISM_DAYS;
 }
-static inline bool revanchist(const RevoltState *rs, int region){
-    return region>=0 && region<SCPS_MAX_REG && rs->revanchism_days[region]>0.f;
+/* Le séparatisme post-conquête FOND avec sa fenêtre : facteur [0..1] = plein à
+ * la conquête fraîche, décroissant à zéro sur ~10 ans (la durée est CÂBLÉE sur
+ * l'effet : la rage de l'indépendance s'éteint à mesure que la plaie se referme). */
+static inline float revanchism_factor(const RevoltState *rs, int region){
+    if (region<0 || region>=SCPS_MAX_REG) return 0.f;
+    return clampf(rs->revanchism_days[region] / (float)REVANCHISM_DAYS, 0.f, 1.f);
 }
 
 /* ===================================================================== */
@@ -150,7 +154,8 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
     if (worst<0 || wd<IGNITE_DEFICIT) return -1;
     PopGroup *g=&pp->groups[worst];
     long mob=revolt_mobilized(g, wd);
-    if (revanchist(rs,region)) mob=(long)((float)mob*REVANCHISM_MOBIL);  /* la rage grossit les rangs */
+    { float rf=revanchism_factor(rs,region);   /* la rage grossit les rangs, ∝ fraîcheur de la conquête */
+      if (rf>0.f) mob=(long)((float)mob*(1.f + (REVANCHISM_MOBIL-1.f)*rf)); }
     if (mob<MIN_REBELS) return -1;
     if (mob>g->count) mob=g->count;
 
@@ -198,7 +203,7 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
             if (d>worst) worst=d;
         }
         /* le séparatisme post-conquête désespère la province « quoi qu'il arrive » */
-        if (worst>=SCAN_DEFICIT || revanchist(rs,r)) rs->desperation_days[r] += (float)days;
+        if (worst>=SCAN_DEFICIT || revanchism_factor(rs,r)>0.f) rs->desperation_days[r] += (float)days;
         else rs->desperation_days[r] = fmaxf(0.f, rs->desperation_days[r]-(float)days);
         if (rs->desperation_days[r] >= (float)SCAN_SUSTAIN){
             if (revolt_ignite(rs, w, econ, drift, r, re->over_tax)>=0)
@@ -276,8 +281,10 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
         float zeal = (rb->kind==REBEL_COUP)?ZEAL_COUP
                    : (rb->kind==REBEL_SECESSION)?ZEAL_SECEDE : ZEAL_CLASS;
         float rebel = (float)rb->mobilized * zeal;
-        bool revanche = (rb->kind==REBEL_SECESSION) && revanchist(rs, rb->region);
-        if (revanche) rebel *= REVANCHISM_REBEL;   /* l'indépendance galvanise */
+        /* Séparatisme à durée CÂBLÉE : l'élan d'indépendance ∝ fraîcheur de la
+         * conquête (plein à chaud, nul une fois la plaie refermée). */
+        float rf = (rb->kind==REBEL_SECESSION) ? revanchism_factor(rs, rb->region) : 0.f;
+        rebel *= (1.f + (REVANCHISM_REBEL-1.f)*rf);   /* l'indépendance galvanise */
 
         /* Garnison locale : seuls les groupes LOYAUX (pondérés par leur intégration)
          * se lèvent pour l'ordre — le groupe soulevé, lui, ne se garnisonne pas. Une
@@ -293,7 +300,7 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
         float reinforce = fminf(milp*REINFORCE, REINFORCE_CAP);   /* l'armée ne tient pas TOUT le pays ici */
         float morale = (rb->owner<wp->n_countries) ? clampf(0.6f+wp->country[rb->owner].SI/12.f,0.6f,1.4f) : 1.f;
         float garrison = (loyal_pop*GARR_LOYAL + re->build.H_coerc*GARR_H + reinforce) * morale;
-        if (revanche) garrison *= REVANCHISM_GARR;  /* une province hostile tient mal */
+        garrison *= (1.f - (1.f-REVANCHISM_GARR)*rf);  /* une province fraîchement prise tient mal */
 
         if (garrison >= rebel){
             /* ── ÉCRASÉS : morts + le pays se raidit (coercition, L brisée) ── */
@@ -344,6 +351,10 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
          * quelques années (le grief doit se reconstruire) — fin des re-flambées. */
         if (rb->region<SCPS_MAX_REG && rb->outcome!=OUT_SECEDED)
             rs->desperation_days[rb->region] = -REVOLT_COOLDOWN;
+        /* CICATRICE : la province convulsée se développe mal quelques années
+         * (−50 % croissance & production) — la révolte laisse une plaie économique. */
+        if (rb->region>=0 && rb->region<econ->n_regions)
+            econ->region[rb->region].revolt_scar = 1.0f;
         /* usure : le slot se libère (la liste se compacte au prochain allumage) */
         rb->active=false;
     }

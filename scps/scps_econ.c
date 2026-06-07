@@ -574,6 +574,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             if (rc->in1!=RES_NONE){ re->stock[rc->in1]-=lim*rc->q1; demand[rc->in1]+=lim*rc->q1; }
             if (rc->in2!=RES_NONE){ re->stock[rc->in2]-=lim*rc->q2; demand[rc->in2]+=lim*rc->q2; }
             float out=lim*rc->qout*prod_mult;   /* outils → productivité */
+            out *= (1.f - 0.5f*re->revolt_scar); /* la cicatrice de révolte ronge la production */
             re->stock[rc->out]+=out;
             supply[rc->out]+=out;
             b->workers=rc->labor*lim;
@@ -744,6 +745,10 @@ void econ_tick(WorldEconomy *e, float dt) {
         if (food_s < 0.35f)
             net_growth -= (0.35f - food_s) * 0.12f;   /* pic de mortalité famine */
         net_growth = clampf(net_growth, -0.10f, 0.06f);
+        /* CICATRICE DE RÉVOLTE : une province récemment soulevée se développe mal —
+         * −50 % de croissance tant que la plaie n'est pas refermée (fade ~4 ans). */
+        re->revolt_scar = fmaxf(0.f, re->revolt_scar - 0.25f*dt);
+        net_growth *= (1.f - 0.5f*re->revolt_scar);
         net_growth *= dt;   /* cumulatif → suit le pas (mensuel : 1/12 d'an) */
 
         float total_pop_now=0.f;

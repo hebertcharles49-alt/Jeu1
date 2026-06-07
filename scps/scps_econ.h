@@ -180,6 +180,9 @@ typedef struct {
 
     /* Coercition temporaire (relocalisation forcée) — décroît chaque tick */
     float      coercion;             /* [0..1] : 0=libre, 1=état d'urgence */
+    /* Cicatrice de révolte [0..1] : une province récemment soulevée se développe
+     * MAL (−50 % de croissance ET de production) ; décroît sur quelques années. */
+    float      revolt_scar;
 
     /* ARCANE (§ fil arcane) : essence brûlée ce tick par les ateliers de mage.
      * prosperity_tick l'agrège dans le flux faustien → déréalisation/Brèche. */

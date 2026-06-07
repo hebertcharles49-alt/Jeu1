@@ -150,6 +150,7 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     if (defender>=0 && diplo_status(d,conqueror,defender)!=DIPLO_WAR) return false;
     re->owner = conqueror;            /* transfert : la diversité suit (compute_profile) */
     re->colonized = true;
+    re->revolt_scar = 1.0f;           /* la conquête CONVULSE : −50 % dévelop. quelques années */
     legitimacy_on_conquest(wl, region);   /* L au plancher, intégration à zéro */
     return true;
 }
