@@ -151,10 +151,6 @@ static MetricReadout mk_metric(int value, const char *word, const char *hover) {
     MetricReadout m; m.value = value; m.word = word; m.hover = hover; return m;
 }
 
-/* ---- Lisibilité des bâtiments : un nombre 0-100 → un MOT de quatre bandes -- */
-static const char *word4(int v, const char *a, const char *b, const char *c, const char *d){
-    return (v < 25) ? a : (v < 50) ? b : (v < 75) ? c : d;
-}
 
 /* ===================================================================== */
 /* ASSEMBLAGE                                                             */
@@ -416,42 +412,34 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     pr.agitation     = mk_metric(agit, label_agitation(band_agitation(agit)), hover_agitation());
     pr.seuil_revolte = revolt_threshold_reached(agit);
 
-    /* ── LISIBILITÉ DES BÂTIMENTS (0-100) — ce que les édifices font, en clair ──
-     * On surface les coordonnées BÂTIES (ProvBuild) que le moteur LIT déjà, sans
-     * jamais exposer un flottant SCPS : le joueur voit l'effet de ses chantiers. */
+    /* ── BÂTIMENTS — capacité CONSOMMÉE par la population : chaque âme occupe
+     * 1 logement et 1 service. On affiche les places ENCORE LIBRES (capacité − pop),
+     * pas un score abstrait. Plus deux SLOTS RÉSERVÉS lus de l'état bâti. ──────── */
     {
-        float food_sat   = re ? re->food_sat    : 0.5f;
-        float society_sat= re ? re->society_sat : 0.5f;
-        float food_cap   = re ? re->build.food_cap : 0.f;
-        float K_inst     = re ? re->build.K_inst   : 0.f;
-        float savoir     = re ? re->build.savoir   : 0.f;
-        float faith      = re ? re->build.faith    : 0.f;
-        float cap_pop    = re ? re->cap_pop        : 0.f;
-        /* L'infrastructure se mesure PAR TÊTE : plus la province est peuplée, plus
-         * il faut bâtir pour la servir (une métropole avec un seul tribunal est
-         * sous-équipée ; un hameau avec le même tribunal est bien pourvu). */
-        float pop_u = fmaxf(1.f, pop/1500.f);   /* ~1 unité d'édifice pour 1500 âmes */
-        /* LOGEMENTS : nourrir (food_sat) + infrastructure vivrière PAR TÊTE (greniers/
-         * irrigation/aqueducs suffisants pour la population) + marge d'accueil. */
-        float headroom  = (cap_pop > 1.f) ? rclampf((cap_pop - pop) / cap_pop, 0.f, 1.f) : 0.5f;
-        float food_infra= rclampf((food_cap/pop_u)/2.0f, 0.f, 1.f);
-        int log_v = iclamp((int)roundf(50.f*food_sat + 30.f*food_infra + 20.f*headroom), 0, 100);
-        pr.logements = mk_metric(log_v,
-            word4(log_v, "surpeuplé", "à l'étroit", "convenable", "spacieux"),
-            "La capacité de la province à loger et nourrir SA population — greniers, irrigation, aqueducs (rapportés au nombre d'âmes).");
-        /* SERVICES : densité institutionnelle PAR TÊTE (admin K + savoir + foi
-         * suffisants pour la population) + biens sociaux servis. */
-        float inst_pc = rclampf((0.30f*K_inst + 0.25f*savoir + 0.22f*faith)/pop_u, 0.f, 1.f);
-        int srv_v = iclamp((int)roundf(55.f*inst_pc + 45.f*society_sat), 0, 100);
-        pr.services = mk_metric(srv_v,
-            word4(srv_v, "délaissé", "sommaire", "pourvu", "florissant"),
-            "Les services rendus à SA population : administration, savoir, foi, biens sociaux (rapportés au nombre d'âmes).");
-        /* ORDRE : consentement (L) + garnison bâtie (H) − agitation. */
-        int ord_v = iclamp((int)roundf(50.f*rclampf(L_local/10.f,0.f,1.f) + 28.f*rclampf(garrison/4.f,0.f,1.f)
-                                       + 22.f*(1.f - agit/100.f)), 0, 100);
-        pr.ordre = mk_metric(ord_v,
-            word4(ord_v, "anarchique", "troublé", "tenu", "ferme"),
-            "La fermeté avec laquelle la province est tenue — consentement, garnison, calme.");
+        float food_cap = re ? re->build.food_cap : 0.f;
+        float K_inst   = re ? re->build.K_inst   : 0.f;
+        float savoir   = re ? re->build.savoir   : 0.f;
+        float faith    = re ? re->build.faith    : 0.f;
+        float cap_pop  = re ? re->cap_pop        : 0.f;
+        float H        = re ? re->build.H_coerc  : 0.f;
+        /* LOGEMENTS : capacité d'accueil (porteuse du site + greniers/aqueducs bâtis) ;
+         * chaque âme occupe UN logement → places libres = capacité − population. */
+        long house_cap = (long)(cap_pop + food_cap*250.f);
+        pr.logements_cap    = house_cap;
+        pr.logements_libres = house_cap - (long)pop;
+        /* SERVICES : chaque point d'édifice civique (admin/savoir/foi) sert ~700 âmes ;
+         * chaque âme consomme UN service → places libres = capacité − population. */
+        long serv_cap = (long)((K_inst + savoir + faith) * 700.f);
+        pr.services_cap    = serv_cap;
+        pr.services_libres = serv_cap - (long)pop;
+        /* SLOT DÉFENSE : la fortification bâtie (la coercition BÂTIE H). */
+        pr.defense = (H < 0.5f) ? "aucune" : (H < 1.5f) ? "Palissade"
+                   : (H < 3.5f) ? "Remparts" : "Citadelle";
+        pr.defense_hover = "Slot DÉFENSE : la fortification bâtie — palissade → remparts → citadelle (tient la province, monte la garnison).";
+        /* SLOT SPÉCIALISATION : le métier de production du site (mine, pêcheries,
+         * comptoir, atelier…) — lu de la ressource/géo, comme la vocation. */
+        pr.specialisation = pr.vocation;
+        pr.specialisation_hover = "Slot SPÉCIALISATION : ce que la province exploite ou raffine le mieux (mine, pêcheries, comptoir, atelier…).";
     }
     return pr;
 }

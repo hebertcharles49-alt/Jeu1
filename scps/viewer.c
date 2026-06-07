@@ -171,8 +171,6 @@ static SDL_Color band_good(int idx, int n, bool higher_better) {
     float g = (n>1) ? (float)idx/(float)(n-1) : 0.5f;
     return sense_color(higher_better ? g : 1.f-g);
 }
-/* 0-100 → une des quatre bandes (même découpe que les mots de la membrane). */
-static int band4(int v){ return v<25?0:v<50?1:v<75?2:3; }
 
 /* ---- Texte (SDL_ttf) -------------------------------------------------- */
 static TTF_Font *g_font = NULL, *g_font_big = NULL;
@@ -495,16 +493,21 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         y += 20;
     }
 
-    /* BÂTIMENTS — la LISIBILITÉ de ce que les chantiers font, en clair : Logements
-     * (loger/nourrir), Services (admin/savoir/foi/biens sociaux), Ordre (consentement
-     * + garnison − agitation). Mot + nombre 0-100 ; jamais un flottant SCPS. */
+    /* BÂTIMENTS — chaque âme consomme 1 logement + 1 service : on affiche les places
+     * ENCORE LIBRES (capacité − pop), pas un score. Plus deux SLOTS RÉSERVÉS :
+     * Défense (palissade→citadelle) et Spécialisation (port/mine/atelier). */
     ui_section(ren, x, &y, "BÂTIMENTS");
-    snprintf(line,sizeof line, "%s · %d", p.logements.word, p.logements.value);
-    ui_row(ren,x,&y,rw,"Logements", line, band_good(band4(p.logements.value),4,true), p.logements.hover);
-    snprintf(line,sizeof line, "%s · %d", p.services.word, p.services.value);
-    ui_row(ren,x,&y,rw,"Services",  line, band_good(band4(p.services.value),4,true),  p.services.hover);
-    snprintf(line,sizeof line, "%s · %d", p.ordre.word, p.ordre.value);
-    ui_row(ren,x,&y,rw,"Ordre",     line, band_good(band4(p.ordre.value),4,true),     p.ordre.hover);
+    if (p.logements_libres>=0) snprintf(line,sizeof line, "%ld libres / %ld", p.logements_libres, p.logements_cap);
+    else                       snprintf(line,sizeof line, "complet · manque %ld", -p.logements_libres);
+    ui_row(ren,x,&y,rw,"Logements", line, p.logements_libres>=0?COL_PARCH:sense_color(0.10f),
+           "Places d'habitat encore libres (capacité bâtie − population). Saturé = bâtir greniers/aqueducs pour loger la croissance.");
+    if (p.services_libres>=0) snprintf(line,sizeof line, "%ld libres / %ld", p.services_libres, p.services_cap);
+    else                      snprintf(line,sizeof line, "sous-équipé · manque %ld", -p.services_libres);
+    ui_row(ren,x,&y,rw,"Services", line, p.services_libres>=0?COL_PARCH:sense_color(0.10f),
+           "Services encore disponibles (capacité bâtie − population). Sous-équipé = bâtir tribunal/temple/bibliothèque.");
+    ui_row(ren,x,&y,rw,"Défense", p.defense,
+           (p.defense[0]=='a')?COL_DIM:COL_COPPER, p.defense_hover);
+    ui_row(ren,x,&y,rw,"Spécialisation", p.specialisation, COL_COPPER, p.specialisation_hover);
 
     /* ACTIONS (§4) — tout passe par la couche d'agency, en JOURS. Le survol dit
      * le coût. Sur une minorité restive : DEUX chemins distincts (réprimer vs intégrer). */

@@ -100,10 +100,15 @@ typedef struct {
     bool          diaspora;
     MetricReadout agitation;   /* 0-100 : L bas + coercition + tension de diversité */
     bool          seuil_revolte;/* l'agitation a franchi le seuil de révolte */
-    /* LISIBILITÉ DES BÂTIMENTS (0-100 + mot) — ce que les édifices font, en
-     * clair : Logements (capacité à loger/nourrir), Services (admin/savoir/foi/
-     * biens sociaux), Ordre (consentement + garnison − agitation). */
-    MetricReadout logements, services, ordre;
+    /* BÂTIMENTS — la population consomme 1 logement + 1 service chacun ; on
+     * affiche les places ENCORE DISPONIBLES (capacité bâtie − population), pas un
+     * score abstrait. Plus deux SLOTS RÉSERVÉS lus de l'état bâti. */
+    long  logements_libres, logements_cap;   /* habitat : places libres / capacité totale */
+    long  services_libres,  services_cap;    /* services : places libres / capacité totale */
+    const char *defense;        /* slot DÉFENSE : structure bâtie (palissade/remparts/citadelle) */
+    const char *defense_hover;
+    const char *specialisation; /* slot PRODUCTION : ce que la province exploite/raffine */
+    const char *specialisation_hover;
 } ProvinceReadout;
 
 /* ===================================================================== */
