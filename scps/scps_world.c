@@ -1360,14 +1360,15 @@ static void compute_fertility(float *height, float *moisture, float *temperature
         }
         slope/=4.f;
         float t=temperature[i], m=moisture[i];
-        float t_score=1.f-fabsf(t-0.55f)*1.9f;
+        float t_score=1.f-fabsf(t-0.55f)*1.3f;       /* optimum thermique ÉLARGI (moins de famine) */
         float coastal=1.f-cells[i].ocean_dist;     /* accès commerce/pêche */
-        float f=0.26f*m+0.22f*clampf(t_score,0.f,1.f)
+        float f=0.16f                                /* socle vivrier : la terre nourrit un peu partout */
+               +0.30f*m+0.26f*clampf(t_score,0.f,1.f)
                +0.34f*clampf(irrig[i]*2.4f,0.f,1.f)  /* plaine alluviale */
                +(delta?delta[i]*0.35f:0.f)           /* delta limoneux */
                +0.08f*coastal
-               -0.55f*clampf((h-MOUNTAIN_H)/0.18f,0.f,1.f)
-               -3.5f*slope
+               -0.45f*clampf((h-MOUNTAIN_H)/0.18f,0.f,1.f)
+               -1.9f*slope                            /* la pente pénalise MOINS (terrasses) */
                +0.22f*volcanic_soil(x,y);             /* terres volcaniques riches */
         if (cells[i].biome==BIO_VOLCANO) f=0.f;        /* roche nue : stérile */
         cells[i].fertility=clampf(f,0.f,1.f);
@@ -2502,19 +2503,24 @@ static void gen_resources(World *w) {
         #define ADD(R,V) wt[R]+=(V)
 
         /* --- Agricole & élevage --- */
-        if (B==BIO_FARMLAND)       ADD(RES_GRAIN,     3.6f);   /* terres cultivées */
-        if (B==BIO_PLAINS)         ADD(RES_GRAIN,     2.6f);
-        if (B==BIO_GRASSLAND)      ADD(RES_GRAIN,     2.0f);   /* arable aussi */
-        if (humid_flat)            ADD(RES_GRAIN,     0.8f);
-        if (flat && !arid)         ADD(RES_LIVESTOCK, 1.6f);
-        if (pastoral)            { ADD(RES_LIVESTOCK, 2.2f); ADD(RES_WOOL, 1.8f); }
-        if (hills)               { ADD(RES_WOOL,      2.0f); ADD(RES_LIVESTOCK, 1.0f); }
-        if (flat && arid && warm)  ADD(RES_COTTON,    2.6f);   /* flatlands arides */
+        /* La NOURRITURE domine : on remappe les probas vers les vivres pour
+         * qu'un monde ne meure pas de faim. Le grain l'emporte largement sur les
+         * terres arables ; l'élevage et la pêche complètent. */
+        if (B==BIO_FARMLAND)       ADD(RES_GRAIN,     5.5f);   /* terres cultivées */
+        if (B==BIO_PLAINS)         ADD(RES_GRAIN,     4.4f);
+        if (B==BIO_GRASSLAND)      ADD(RES_GRAIN,     3.4f);   /* arable aussi */
+        if (B==BIO_WOODS)          ADD(RES_GRAIN,     1.6f);   /* clairières cultivables */
+        if (B==BIO_SAVANNA)        ADD(RES_LIVESTOCK, 2.0f);   /* savane → pâture */
+        if (humid_flat)            ADD(RES_GRAIN,     1.4f);
+        if (flat && !arid)         ADD(RES_LIVESTOCK, 2.2f);
+        if (pastoral)            { ADD(RES_LIVESTOCK, 2.6f); ADD(RES_WOOL, 1.5f); }
+        if (hills)               { ADD(RES_LIVESTOCK, 1.6f); ADD(RES_WOOL, 1.5f); }
+        if (flat && arid && warm)  ADD(RES_COTTON,    1.8f);   /* flatlands arides */
 
         /* --- Poisson : côte ou fleuve à fort débit (sans voler la terre
          *     productive : poids modéré, gagne surtout les côtes pauvres) --- */
-        if (coastal[p])            ADD(RES_FISH, 1.4f);
-        if (bigriver)              ADD(RES_FISH, 1.7f);
+        if (coastal[p])            ADD(RES_FISH, 2.6f);   /* la mer nourrit fort */
+        if (bigriver)              ADD(RES_FISH, 2.4f);
 
         /* --- Fourrure : régions froides et sauvages --- */
         if (cold && (forested||B==BIO_BOG||B==BIO_GLACIER||B==BIO_STEPPE))

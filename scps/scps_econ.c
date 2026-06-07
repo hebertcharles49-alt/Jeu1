@@ -315,9 +315,13 @@ void econ_init(WorldEconomy *e, const World *w) {
          * ~90% de la population, laissant la satisfaction refléter les biens
          * supérieurs et non une famine universelle. */
         float subsist = total_pop / 100.f;
-        re->raw_cap[RES_GRAIN] += subsist * 0.95f;
+        /* Le socle vivrier DOIT dépasser la consommation (≈1.0/100/tête, toutes
+         * classes) — sinon le monde meurt de faim. On le porte au-dessus du seuil,
+         * pondéré par la FERTILITÉ moyenne de la région (les bonnes terres
+         * nourrissent plus). */
+        re->raw_cap[RES_GRAIN] += subsist * (1.15f + 0.70f*reg_hab[rid]);
         re->raw_cap[RES_WOOD]  += subsist * 0.40f;
-        if (coastal) re->raw_cap[RES_FISH] += subsist * 0.30f;
+        if (coastal) re->raw_cap[RES_FISH] += subsist * 0.55f;
 
         /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux
          * failles profondes/volcaniques (proxy : présence de soufre ou de métal
@@ -584,6 +588,9 @@ void econ_tick(WorldEconomy *e, float dt) {
         /* Satisfaction par strate : fraction des besoins effectivement
          * achetée, pondérée par la solvabilité (budget vs coût). On sert
          * d'abord les vivres, puis le reste. Le stock disponible plafonne. */
+        /* Suivi de la couverture RÉELLE par palier (pas la satisfaction globale) :
+         * food_got mesure les VIVRES effectivement servis, soc_got le reste. */
+        float r_food_need=0.f, r_food_got=0.f, r_soc_need=0.f, r_soc_got=0.f;
         for (int c=0;c<CLASS_COUNT;c++) {
             float units=re->strata[c].pop/100.f;
             if (units<=0.f){ re->strata[c].satisfaction=0.f; continue; }
@@ -602,6 +609,9 @@ void econ_tick(WorldEconomy *e, float dt) {
                 re->stock[r]-=need*got;
                 budget-=need*got*re->price[r];
                 met_w+=w*got;
+                /* couverture par palier : les vivres VS le reste */
+                if (r==RES_GRAIN||r==RES_FISH||r==RES_LIVESTOCK){ r_food_need+=need; r_food_got+=need*got; }
+                else                                            { r_soc_need +=need; r_soc_got +=need*got; }
             }
             re->strata[c].wealth=fmaxf(0.f,budget);
             float basket=(need_w>0.f)?met_w/need_w:0.5f;
@@ -610,23 +620,11 @@ void econ_tick(WorldEconomy *e, float dt) {
         }
 
         /* ---- 6. MISE À JOUR : démographie, tech, satisfaction générale - */
-        /* Satisfaction alimentaire : grain + fish (besoins laborers) */
+        /* food_sat = la couverture VIVRIÈRE RÉELLE (et non la satisfaction
+         * globale) → plus de nourriture = plus de croissance, fin de la famine. */
         {
-            float food_need=0.f, food_met=0.f;
-            float soc_need=0.f,  soc_met=0.f;
-            for (int c=0;c<CLASS_COUNT;c++) {
-                float units=re->strata[c].pop/100.f;
-                for (int r=0;r<RES_COUNT;r++) {
-                    float nd=NEED[c][r]*units;
-                    if (nd<=0.f) continue;
-                    bool is_food=(r==RES_GRAIN||r==RES_FISH||r==RES_LIVESTOCK);
-                    float sat=clampf(re->strata[c].satisfaction,0.f,1.f);
-                    if (is_food){ food_need+=nd; food_met+=nd*sat; }
-                    else        { soc_need +=nd; soc_met +=nd*sat; }
-                }
-            }
-            re->food_sat   = (food_need>0.f)?clampf(food_met/food_need,0.f,1.f):0.5f;
-            re->society_sat= (soc_need >0.f)?clampf(soc_met /soc_need ,0.f,1.f):0.5f;
+            re->food_sat   = (r_food_need>0.f)?clampf(r_food_got/r_food_need,0.f,1.f):0.5f;
+            re->society_sat= (r_soc_need >0.f)?clampf(r_soc_got /r_soc_need ,0.f,1.f):0.5f;
             /* §4 — pénalité OFF-CULTURE : une minorité d'une autre sphère est MAL
              * servie par les biens (confort/moral/luxe) de la culture dominante.
              * Frappe la satisfaction SOCIALE — PAS les vivres (food_sat épargné,
