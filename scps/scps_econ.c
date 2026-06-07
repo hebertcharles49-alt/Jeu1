@@ -382,7 +382,7 @@ void econ_init(WorldEconomy *e, const World *w) {
  * duquel on FUIT l'impôt et l'on gronde. La culture chiffre la stratégie fiscale
  * (un Mercantile n'étrangle pas ses bourgeois ; un Bureaucrate extrait partout ;
  * un Dominateur essore la masse mais pas l'élite). */
-static float ethos_tax_tolerance(Ethos e, SocialClass c){
+float econ_tax_tolerance(Ethos e, SocialClass c){
     static const float T[ETHOS_COUNT][CLASS_COUNT] = {
         /*               Laborer Bourgeois Élite */
         /* DOMINATEUR */ {0.60f,  0.40f,   0.25f},
@@ -485,7 +485,7 @@ void econ_tick(WorldEconomy *e, float dt) {
         for (int c=0;c<CLASS_COUNT;c++){
             PopStratum *st=&re->strata[c];
             float sat   = clampf(st->satisfaction,0.f,1.f);
-            float seuil = ethos_tax_tolerance(re->culture.ethos,(SocialClass)c)*(0.40f+0.60f*sat);
+            float seuil = econ_tax_tolerance(re->culture.ethos,(SocialClass)c)*(0.40f+0.60f*sat);
             float evasion   = clampf(STATE_TAX_AMBITION - seuil, 0.f, 1.f);
             float collected = STATE_TAX_AMBITION * st->wealth * (1.f-evasion) * dt;
             if (collected>st->wealth) collected=st->wealth;

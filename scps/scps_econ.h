@@ -200,6 +200,10 @@ void econ_init(WorldEconomy *e, const World *w);
  * production/consommation s'équilibrent par tick (satisfaction préservée). */
 void econ_tick(WorldEconomy *e, float dt);
 
+/* Tolérance fiscale [0..1] par ÉTHOS × classe (§7) : le seuil (×satisfaction)
+ * au-delà duquel on fuit l'impôt et l'on gronde. Exposé pour les bancs d'essai. */
+float econ_tax_tolerance(Ethos e, SocialClass c);
+
 /* Pas de colonisation : joueur et antagonistes essaiment vers les régions
  * vierges voisines ; les cités-états colonisent leurs propres territoires
  * non encore peuplés. À appeler après econ_tick(). Renvoie le nb de régions

@@ -102,6 +102,12 @@ ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
+ECON_TAX_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_tax_demo.o
+econ_tax_demo: $(ECON_TAX_DEMO_OBJS)
+	$(CC) $(ECON_TAX_DEMO_OBJS) -o $@ -lm
+
 # ---- Banc d'essai de l'arbre de technologies -----------------------------
 TECH_DEMO_OBJS := $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_tech_demo.o
 tech_demo: $(TECH_DEMO_OBJS)
