@@ -189,6 +189,35 @@ int main(int argc,char**argv){
                diplo_casus_belli(w,econ,wp,dp,A,Badj,RES_NONE)!=CB_NONE);
     }
 
+    /* ---- 5. Score de guerre (§2) : le bras-de-fer (batailles, occupation, attrition) ---- */
+    printf("\n── 5. Score de guerre (batailles plafonnées +50 · occupation · attrition) ──\n");
+    {
+        int A=player, B=-1, Ar=-1;
+        for(int c=0;c<w->n_countries && B<0;c++){
+            if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+            for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==c){ B=c; break; }
+        }
+        for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==A){ Ar=r; break; }
+        if(B>=0 && Ar>=0){
+            diplo_init(dp);
+            diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);   /* A = attaquant */
+            float armsA0=0.f;
+            for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==A){
+                econ->region[r].stock[RES_ENCHANTED_ARMS]=1000.f; armsA0+=1000.f; }   /* A surarme */
+            for(int y=0;y<15;y++) diplo_war_tick(dp,w,econ,wp,1.f);
+            ok("l'avantage militaire POUSSE le battle_score (l'attaquant gagne les batailles)",
+               dp->battle_score[A][B] > 5.f);
+            ok("le battle_score est PLAFONNÉ à +50 (les batailles seules ne gagnent pas)",
+               dp->battle_score[A][B] <= 50.01f);
+            dp->conquered[A][B]=5;
+            ok("l'occupation porte le score AU-DELÀ de +50 (l'autre moitié)",
+               diplo_war_score(dp,A,B) > 50.5f);
+            float armsA1=0.f;
+            for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==A) armsA1+=econ->region[r].stock[RES_ENCHANTED_ARMS];
+            ok("l'attrition SAIGNE les armes pendant la guerre (épuisement)", armsA1 < armsA0);
+        }
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

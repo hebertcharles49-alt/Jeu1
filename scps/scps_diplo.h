@@ -45,6 +45,11 @@ typedef struct {
     float       truce[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* jours d'interdiction de guerre (fond) */
     float       momentum[SCPS_MAX_COUNTRY];                 /* conquêtes RÉCENTES (décroît) → fulgurance perçue */
     int8_t      cb[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];     /* casus belli ACTIF de a contre b (but de guerre) */
+    /* SCORE DE GUERRE — le bras-de-fer (a = ATTAQUANT, celui qui a le CB) :
+     * batailles (∝ avantage militaire, PLAFONNÉ +50) + occupation (provinces prises,
+     * l'autre +50→+100) ; le défenseur pousse vers −100 par l'attrition. */
+    float       battle_score[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* [-100 .. +50] */
+    int16_t     conquered  [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];   /* régions prises ce conflit (occupation) */
 } DiploState;
 
 void diplo_init(DiploState *d);
@@ -92,6 +97,16 @@ int   diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
 bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
                           WorldLegitimacy *wl, int conqueror, int region);
 
-void diplo_tick(DiploState *d, float dt);   /* usure de guerre (war_years++) */
+void diplo_tick(DiploState *d, float dt);   /* usure de guerre (war_years++) + trêve/momentum */
+
+/* ---- SCORE DE GUERRE (§2) — le bras-de-fer, à ticker chaque an ---------- *
+ * Met à jour le battle_score (∝ avantage militaire, plafonné +50) et applique
+ * l'ATTRITION (la guerre SAIGNE les armes des deux camps, le perdant plus →
+ * mil_power baisse → la guerre s'épuise). L'occupation se lit à part (conquered). */
+void  diplo_war_tick (DiploState *d, World *w, WorldEconomy *econ,
+                      const WorldProsperity *wp, float dt);
+/* Le score courant du point de vue de l'ATTAQUANT a contre b [-100..+100] :
+ * batailles (≤+50) + occupation (+50→+100) − attrition (vers −100). */
+float diplo_war_score(const DiploState *d, int a, int b);
 
 #endif /* SCPS_DIPLO_H */

@@ -252,6 +252,9 @@ static void sim_day(Sim *s, World *w) {
         trade_network_build(s->net, w, s->econ);
         trade_tick(s->econ, s->net);
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
+        /* Diplomatie annuelle : usure de guerre, fonte des trêves/momentum, score de guerre. */
+        diplo_tick(s->dp, 365.f);
+        diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }
     if (++s->day % 365 == 0) s->year++;
 }

@@ -94,6 +94,11 @@ static void sim_day(Sim *s, World *w) {
         legitimacy_tick(s->wl, w, s->econ, s->ts);
         trade_network_build(s->net, w, s->econ); trade_tick(s->econ, s->net);
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
+        /* DIPLOMATIE annuelle : usure de guerre, FONTE des trêves & du momentum
+         * (la guerre peut reprendre après le répit), et le SCORE DE GUERRE (bras-de-fer
+         * + attrition qui saigne les armes). */
+        diplo_tick(s->dp, 365.f);
+        diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }
     if (++s->day % 365 == 0) s->year++;
 }

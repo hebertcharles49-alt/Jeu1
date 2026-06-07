@@ -25,6 +25,13 @@ static inline float absf(float v){return v<0?-v:v;}
  * indépendant de l'échelle (les menaces vont de ~1 au début à ~500 en fin de partie). */
 #define HEGEMON_RATIO    1.8f
 #define HEGEMON_FLOOR    0.5f
+/* ---- Score de guerre (§2) -------------------------------------------- */
+#define WAR_BATTLE_W     14.f   /* vitesse du battle_score vers ±50 (par an, à avantage net) */
+#define WAR_BATTLE_CAP   50.f   /* les batailles SEULES ne gagnent pas la guerre (la moitié) */
+#define WAR_OCCUPY_PER   12.f   /* points d'occupation par région prise (l'autre moitié) */
+#define WAR_ATTRITION    0.18f  /* part d'armes perdue/an (saigne les deux ; le perdant ×plus) */
+#define WAR_ATTR_LOSER   1.6f
+#define WAR_ATTR_WINNER  0.6f
 
 void diplo_init(DiploState *d){ memset(d,0,sizeof(*d)); }
 
@@ -60,6 +67,8 @@ void diplo_make_peace   (DiploState *d,int a,int b){
         d->truce[a][b]=d->truce[b][a]=dur;
         d->war_years[a][b]=d->war_years[b][a]=0.f;
         d->cb[a][b]=d->cb[b][a]=CB_NONE;   /* le but de guerre s'éteint avec la guerre */
+        d->battle_score[a][b]=d->battle_score[b][a]=0.f;   /* le bras-de-fer se solde */
+        d->conquered[a][b]=d->conquered[b][a]=0;
     }
 }
 bool diplo_can_declare(const DiploState *d,int a,int b){
@@ -223,8 +232,11 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     re->owner = conqueror;            /* transfert : la diversité suit (compute_profile) */
     re->colonized = true;
     re->revolt_scar = 1.0f;           /* la conquête CONVULSE : −50 % dévelop. quelques années */
-    if (conqueror<SCPS_MAX_COUNTRY)
+    if (conqueror<SCPS_MAX_COUNTRY){
         d->momentum[conqueror] += MOMENTUM_PER_CONQ;   /* la fulgurance EFFRAIE (→ coalition) */
+        if (defender>=0 && defender<SCPS_MAX_COUNTRY)
+            d->conquered[conqueror][defender]++;        /* OCCUPATION : pousse le score de guerre */
+    }
     legitimacy_on_conquest(wl, region);   /* L au plancher, intégration à zéro */
     return true;
 }
@@ -252,6 +264,41 @@ int diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
      * lecture de menace de CHACUN ; quand un même pays domine pour plusieurs, ils se
      * comportent de facto en coalition). */
     return (best>=0 && t1 > HEGEMON_RATIO*fmaxf(t2, HEGEMON_FLOOR)) ? best : -1;
+}
+
+/* ---- Score de guerre : le bras-de-fer + l'attrition ------------------- */
+static void deplete_arms(WorldEconomy *econ, int cid, float frac){
+    frac = clampf(frac, 0.f, 0.95f);
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
+        econ->region[r].stock[RES_ARMS]          *= (1.f-frac);
+        econ->region[r].stock[RES_GUNPOWDER]      *= (1.f-frac);
+        econ->region[r].stock[RES_ENCHANTED_ARMS] *= (1.f-frac);
+    }
+}
+void diplo_war_tick(DiploState *d, World *w, WorldEconomy *econ,
+                    const WorldProsperity *wp, float dt){
+    (void)wp;
+    for (int a=0;a<w->n_countries;a++) for (int b=0;b<w->n_countries;b++){
+        if (a==b || d->status[a][b]!=DIPLO_WAR) continue;
+        if (d->cb[a][b]==CB_NONE) continue;             /* a est l'ATTAQUANT (il porte le CB) */
+        float pA=diplo_mil_power(w,econ,a), pB=diplo_mil_power(w,econ,b);
+        float ratio = pA/(pA+pB+0.01f);                  /* avantage militaire de l'attaquant */
+        /* BATAILLES : l'avantage pousse le battle_score vers +50 ; un attaquant plus
+         * FAIBLE le voit chuter (la voie défensive de l'adversaire vers −100). */
+        d->battle_score[a][b] = clampf(d->battle_score[a][b] + WAR_BATTLE_W*(ratio-0.5f)*2.f*dt,
+                                       -100.f, WAR_BATTLE_CAP);
+        d->battle_score[b][a] = d->battle_score[a][b];   /* miroir lisible */
+        /* ATTRITION : la guerre SAIGNE les armes des deux ; le perdant de l'échange
+         * en perd plus → mil_power baisse → la guerre s'épuise (pression à la paix). */
+        float lossA = WAR_ATTRITION*dt*(ratio<0.5f?WAR_ATTR_LOSER:WAR_ATTR_WINNER);
+        float lossB = WAR_ATTRITION*dt*(ratio>0.5f?WAR_ATTR_LOSER:WAR_ATTR_WINNER);
+        deplete_arms(econ,a,lossA); deplete_arms(econ,b,lossB);
+    }
+}
+float diplo_war_score(const DiploState *d, int a, int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0.f;
+    float occ = fminf(50.f, WAR_OCCUPY_PER*(float)d->conquered[a][b]);  /* +50→+100 par l'occupation */
+    return clampf(d->battle_score[a][b] + occ, -100.f, 100.f);
 }
 
 void diplo_tick(DiploState *d, float dt){

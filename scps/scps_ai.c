@@ -19,6 +19,7 @@
 #define AI_PEACE_LOCK     1825   /* 5 ans de consolidation forcée (hystérésis) */
 #define AI_ARMY_MARGIN    0.75f  /* n'attaque que si armée ≥ 0.75× la cible  */
 #define AI_WIDEN_W        0.5f    /* friction : poids du coût d'élargissement (alliés de la cible) */
+#define AI_SURRENDER      55.f    /* score de guerre adverse au-delà duquel un défenseur sans espoir capitule */
 #define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on propose l'alliance */
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
@@ -397,6 +398,17 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
             a->stats.consolidations++;
         }
         return;
+    }
+
+    /* REDDITION (§3) : si l'on est DÉFENSEUR dans une guerre nettement PERDUE (le
+     * bras-de-fer penche fort vers l'attaquant) et militairement sans espoir → on
+     * CAPITULE plutôt que de se faire anéantir. (L'IA lit le score + l'armée + le frein.) */
+    for (int b=0; b<w->n_countries; b++){
+        if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_WAR) continue;
+        if (diplo_war_goal(diplo,b,a->cid)==CB_NONE) continue;          /* b est l'attaquant */
+        float their_score = diplo_war_score(diplo, b, a->cid);
+        if (their_score >= AI_SURRENDER && v->armee < AI_ARMY_MARGIN*diplo_mil_power(w,econ,b))
+            diplo_make_peace(diplo, a->cid, b);                         /* capitulation */
     }
 
     if (day < a->peace_lock_until) return;                  /* on tient la paix (digestion) */
