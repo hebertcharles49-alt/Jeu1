@@ -290,11 +290,12 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
                 bP  += econ->region[r].build.P_open;
                 bH  += econ->region[r].build.H_coerc;
                 bPE += econ->region[r].build.PE_infra;   /* marchés/entrepôts → PE capté */
+                bPE += econ->region[r].route_pe;         /* routes commerciales (cloche f(D̄)) */
             }
             st.K = clampf(st.K + clampf(bK,0.f,5.f), 0.f, 10.f);
             st.P = clampf(st.P + clampf(bP,0.f,5.f), 0.f, 10.f);
             st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
-            cp->P_potentiel += clampf(bPE,0.f,5.f);    /* l'infrastructure capte le carrefour */
+            cp->P_potentiel += clampf(bPE,0.f,8.f);    /* infrastructure + carrefour commercial */
         }
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;

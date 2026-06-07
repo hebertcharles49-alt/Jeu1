@@ -114,6 +114,7 @@ typedef struct {
     PopStratum strata[CLASS_COUNT];
     PopCulture culture;   /* profil culturel de la population locale */
     ProvBuild  build;     /* densité institutionnelle bâtie par le joueur */
+    float      route_pe;  /* PE apporté par les routes commerciales (transitoire) */
 
     float      raw_cap[RES_COUNT];   /* extraction max/tick par matière première */
     Building   bld[ECON_MAX_BLD];

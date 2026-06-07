@@ -286,7 +286,8 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
      * (Marché/Entrepôt) + la prospérité locale font le pôle ; la surchauffe du
      * pays le déchire (le seuil de déréalisation). */
     {
-        float hub = re ? (re->build.PE_infra + rclampf(re->prosperity*2.f, 0.f, 3.f)) : 0.f;
+        float hub = re ? (re->build.PE_infra + re->route_pe
+                          + rclampf(re->prosperity*2.f, 0.f, 3.f)) : 0.f;
         int   cc  = w->province[pid].country;
         bool  overheat = (cc>=0 && cc<wp->n_countries && wp->country[cc].surchauffe > 2.f);
         if      (hub < 1.0f) pr.carrefour = CF_NONE;

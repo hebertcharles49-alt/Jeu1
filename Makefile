@@ -138,13 +138,24 @@ DIPLO_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 diplo_demo: $(DIPLO_DEMO_OBJS)
 	$(CC) $(DIPLO_DEMO_OBJS) -o $@ -lm
 
+# ---- Routes commerciales : la cloche f(D̄) faite action (§7) --------------
+ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
+                    $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_routes_demo.o
+routes_demo: $(ROUTES_DEMO_OBJS)
+	$(CC) $(ROUTES_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
-	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo core_demo readout_demo species_demo \
+	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo core_demo readout_demo species_demo \
 	       out_*.ppm montage.bmp
 
 .PHONY: all scps run_scps clean core_demo readout_demo species_demo scps_dump scps_batch \
-        econ_demo tech_demo culture_demo prosperity_demo agency_demo diplo_demo
+        econ_demo tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur
 # absence au premier build.
