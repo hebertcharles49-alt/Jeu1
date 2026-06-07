@@ -11,6 +11,12 @@
  * de la légitimité (Partie 1/1.5).
  */
 #include "scps_readout.h"
+#include <stddef.h>   /* NULL */
+#include <string.h>   /* memset */
+
+static inline float rclampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
 
 /* ===================================================================== */
 /* SEUILLAGE                                                              */
@@ -175,3 +181,126 @@ const char *hover_humeur(void){ return
     "Le cœur de la province envers la couronne ; loyale, elle paie sans broncher — frondeuse, elle attend l'étincelle."; }
 const char *hover_lignee(void){ return
     "Ce qui la lie à la culture du trône ; le même sang se gouverne aisément, l'inassimilable jamais sans la force."; }
+
+/* ===================================================================== */
+/* ENVELOPPES SIM — lisent les sorties STOCKÉES, jamais scps_core         */
+/* ===================================================================== */
+/* Miroir des valeurs de ScpsMode (scps_core.h) — non inclus ici (cloison). */
+enum { RD_CONSENTI = 0, RD_COERC_FRAGILE, RD_SUBMERGE_REVOL, RD_SUBMERGE_SECESS };
+
+static float pc_content_dist(const PopCulture *a, const PopCulture *b) {
+    float dv = a->valeurs-b->valeurs;       if (dv<0) dv=-dv;
+    float ds = a->subsistance-b->subsistance; if (ds<0) ds=-ds;
+    float dp = a->parente-b->parente;       if (dp<0) dp=-dp;
+    float dr = a->religion-b->religion;     if (dr<0) dr=-dr;
+    float m = dv; if (ds>m) m=ds; if (dp>m) m=dp; if (dr>m) m=dr;
+    return m;
+}
+static const PopCulture *pc_ruling(const World *w, const WorldEconomy *econ, int cid) {
+    if (cid < 0 || cid >= w->n_countries) return NULL;
+    int cp = w->country[cid].capital_prov;
+    if (cp < 0 || cp >= w->n_provinces) return NULL;
+    int cr = w->province[cp].region;
+    if (cr < 0 || cr >= econ->n_regions) return NULL;
+    return &econ->region[cr].culture;
+}
+static const char *vocation_word(Resource res, bool coastal, Biome b) {
+    switch (res) {
+        case RES_GRAIN: case RES_COTTON:           return "Grenier";
+        case RES_LIVESTOCK: case RES_WOOL:         return "Pâtures";
+        case RES_FISH:                             return "Pêcheries";
+        case RES_COPPER: case RES_IRON: case RES_COAL:
+        case RES_GOLD: case RES_PRECIOUS_METAL:
+        case RES_SULFUR: case RES_SALTPETER:       return "Mine";
+        case RES_WOOD:                             return "Atelier";
+        default: break;
+    }
+    if (coastal) return "Comptoir";
+    if (b == BIO_FOREST || b == BIO_WOODS || b == BIO_JUNGLE) return "Sanctuaire";
+    return "Marche";
+}
+
+CountryReadout country_readout(const WorldProsperity *wp, const TechState *ts,
+                               const World *w, int cid) {
+    CountryReadout r; memset(&r, 0, sizeof r);
+    if (cid < 0 || cid >= wp->n_countries) { r.augure = NULL; return r; }
+    const CountryProsperity *cp = &wp->country[cid];
+
+    r.stabilite  = band_stab(cp->SI, cp->fragilite);
+    r.assise     = band_assise(cp->fragilite);
+    r.legitimite = band_legit(cp->L);
+    r.concorde   = band_concorde(cp->fracture, cp->mode == RD_SUBMERGE_SECESS);
+    r.prosperite = band_prosp(rclampf(cp->P_realise, 0.f, 10.f));
+    r.savoir     = band_savoir(cp->Lumiere);
+    float charge = (ts && cid < w->n_countries) ? rclampf(ts[cid].charge, 0.f, 10.f) : 0.f;
+    r.presage    = band_presage(charge);
+
+    switch (cp->mode) {
+        case RD_SUBMERGE_SECESS: r.augure = "Les marges parlent de se gouverner seules."; break;
+        case RD_SUBMERGE_REVOL:  r.augure = "La rue gronde contre le trône.";            break;
+        case RD_COERC_FRAGILE:   r.augure = "L'ordre tient — mais par la peur seule.";   break;
+        default:                 r.augure = NULL;
+    }
+    return r;
+}
+
+ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
+                                 const WorldProsperity *wp, const WorldLegitimacy *wl,
+                                 int pid) {
+    ProvinceReadout pr; memset(&pr, 0, sizeof pr);
+    (void)wp;
+    if (pid < 0 || pid >= w->n_provinces) { pr.nom = "—"; pr.terrain = "—"; return pr; }
+    const Province *p = &w->province[pid];
+    int reg = p->region;
+
+    pr.nom       = (reg >= 0 && w->region[reg].name[0]) ? w->region[reg].name : "—";
+    pr.terrain   = biome_name(p->biome_dominant);
+    pr.ressource = (p->resource > RES_NONE) ? resource_name(p->resource) : "—";
+
+    const RegionEconomy *re = (reg >= 0 && reg < econ->n_regions) ? &econ->region[reg] : NULL;
+    float pop = 0.f;
+    if (re) pop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                + re->strata[CLASS_ELITE].pop;
+    pr.ames = (long)pop;
+
+    if      (pop <   50.f) pr.stature = STA_DESERT;
+    else if (pop <  500.f) pr.stature = STA_HAMEAU;
+    else if (pop < 2000.f) pr.stature = STA_BOURG;
+    else if (pop < 6000.f) pr.stature = STA_CITE;
+    else                   pr.stature = STA_METROPOLE;
+
+    float sat = re ? re->satisfaction : 0.5f;
+    if      (sat < 0.30f) pr.aisance = AI_MISERE;
+    else if (sat < 0.55f) pr.aisance = AI_SUFFISANCE;
+    else if (sat < 0.80f) pr.aisance = AI_AISANCE;
+    else                  pr.aisance = AI_FASTE;
+
+    /* Flux : proxy (la migration crée de la diaspora à destination → afflux).
+     * La vraie balance migratoire par province viendra avec la prospérité locale. */
+    float dia = re ? re->diaspora_pop : 0.f;
+    pr.flux     = (dia > 50.f) ? FX_RUEE : (dia > 5.f) ? FX_AFFLUX : FX_STABLE;
+    pr.diaspora = (dia > 0.5f);
+
+    pr.vocation  = vocation_word(p->resource, p->coastal, p->biome_dominant);
+    pr.carrefour = CF_NONE;   /* PE concentrée par province : Partie 4 (à venir) */
+
+    /* Allégeance — les lectures les plus proches du SCPS. */
+    float L_local = (wl && reg >= 0 && reg < SCPS_MAX_REG) ? wl->L[reg] : 5.f;
+    pr.humeur = band_humeur(L_local);
+
+    int cid = re ? re->owner : -1;
+    const PopCulture *ruling = (cid >= 0) ? pc_ruling(w, econ, cid) : NULL;
+    if (re && ruling) {
+        const PopCulture *rc = &re->culture;
+        float clock   = rc->langue - ruling->langue; if (clock < 0) clock = -clock;
+        float content = pc_content_dist(rc, ruling);
+        bool same_branch  = (rc->rel_branch == ruling->rel_branch);
+        bool both_zealous = (rc->credo != CREDO_PLURALISTE && ruling->credo != CREDO_PLURALISTE);
+        float dr = rc->religion - ruling->religion; if (dr < 0) dr = -dr;
+        bool schism = same_branch && both_zealous && dr < 4.f;
+        pr.lignee = band_lignee(clock, content, schism);
+    } else {
+        pr.lignee = LI_MEME_SANG;
+    }
+    return pr;
+}

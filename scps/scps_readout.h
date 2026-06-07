@@ -18,6 +18,11 @@
  * (stabilité, légitimité, fracture, fragilité, prospérité) : JAMAIS un chiffre.
  */
 #include <stdbool.h>
+/* Types de la SIM (pas scps_core) : le renderer peut tenir les pointeurs, mais
+ * la règle « ne lis jamais un flottant SCPS » reste vérifiée par grep (#1).
+ * scps_prosperity.h n'inclut PAS scps_core.h → la cloison tient. */
+#include "scps_world.h"
+#include "scps_prosperity.h"   /* WorldProsperity, WorldLegitimacy, WorldEconomy */
 
 /* ===================================================================== */
 /* BANDES QUALITATIVES — jamais un nombre                                 */
@@ -58,6 +63,23 @@ typedef struct {
     BandLignee lignee;
 } AllegeanceReadout;
 
+/* Panneau de province complet (ce que le renderer dessine). Chaînes + bandes,
+ * jamais un flottant SCPS. `ames` est une quantité tangible : un nombre est OK. */
+typedef struct {
+    const char   *nom;
+    const char   *terrain;     /* mot (biome nommé) */
+    BandStature   stature;
+    long          ames;        /* population — nombre tangible */
+    BandFlux      flux;
+    const char   *vocation;    /* mot (spécialisation) */
+    const char   *ressource;   /* mot */
+    BandAisance   aisance;
+    BandCarrefour carrefour;   /* CF_NONE si pas un pôle */
+    BandHumeur    humeur;
+    BandLignee    lignee;
+    bool          diaspora;
+} ProvinceReadout;
+
 /* ===================================================================== */
 /* SEUILLAGE — flottants NUS → bandes (la membrane testable)              */
 /* ===================================================================== */
@@ -87,6 +109,17 @@ CountryReadout country_readout_from_floats(
 
 AllegeanceReadout allegeance_from_floats(
     float L_local, float clock_dist, float content_dist, bool religious_schism);
+
+/* ===================================================================== */
+/* ENVELOPPES RENDERER — les SEULES fonctions que viewer.c/render.c appellent */
+/* ===================================================================== */
+/* Lisent les sorties STOCKÉES (prospérité §2.4 + légitimité) → bandes. Aucun
+ * appel à scps_core ici : tout a déjà été calculé par prosperity_tick. */
+CountryReadout  country_readout (const WorldProsperity *wp, const TechState *ts,
+                                 const World *w, int cid);
+ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
+                                 const WorldProsperity *wp, const WorldLegitimacy *wl,
+                                 int province_id);
 
 /* ===================================================================== */
 /* LEXIQUE — un mot (label) + une définition (hover) par bande            */

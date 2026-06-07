@@ -261,6 +261,7 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         cp->SI        = o.SI;
         cp->fragilite = o.fragilite;
         cp->fracture  = o.fracture;
+        cp->L         = Lg;                  /* exposé pour la membrane (légitimité pays) */
         cp->mode      = (int)scps_mode(&o);
         cp->rendement = clampf((o.SI / 10.f) * (1.f - LAMBDA * o.fragilite / 10.f), 0.f, 1.f);
         cp->P_realise = cp->P_potentiel * cp->rendement;

@@ -50,6 +50,7 @@ typedef struct {
     /* Sorties du moteur vérifié scps_order (§2.4) — la vraie stabilité. */
     float fragilite;       /* part de l'ordre tenue par la contrainte [0..10] */
     float fracture;        /* sécession latente : diverse ET non consentie     */
+    float L;               /* légitimité pays agrégée (entrée vivante, exposée) */
     int   mode;            /* ScpsMode (stocké en int : n'expose pas scps_core) */
 } CountryProsperity;
 
