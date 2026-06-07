@@ -47,6 +47,27 @@ static float society_with_drink(WorldEconomy *e, int r, float subsistance, Resou
     return re->society_sat;
 }
 
+/* Recherche accumulée en un tick pour un niveau de SAVOIR bâti donné (toutes
+ * choses égales par ailleurs : mêmes élites, même satisfaction). */
+static float tech_with_savoir(WorldEconomy *e, int r, float savoir){
+    RegionEconomy *re=&e->region[r];
+    re->active=true; re->colonized=true; re->culture.settled=true; re->owner=0;
+    re->culture.subsistance=8.f; re->coercion=0.f; re->over_tax=0.f;
+    re->n_bld=0;
+    for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
+    re->strata[CLASS_LABORER].pop=500.f; re->strata[CLASS_LABORER].wealth=1e6f;
+    re->strata[CLASS_BOURGEOIS].pop=100.f;re->strata[CLASS_BOURGEOIS].wealth=1e6f;
+    re->strata[CLASS_ELITE].pop=100.f;    re->strata[CLASS_ELITE].wealth=1e5f;  /* les élites font le savoir */
+    re->stock[RES_GRAIN]=1e5f; re->stock[RES_FISH]=1e5f; re->stock[RES_WOOD]=1e5f;
+    re->stock[RES_CLOTH]=1e5f; re->stock[RES_PAPER]=1e5f; re->stock[RES_SALT]=1e5f;
+    re->stock[RES_FUR]=1e5f; re->stock[RES_PRECIOUS_WARE]=1e5f; re->stock[RES_PRECIOUS_CLOTH]=1e5f;
+    re->stock[RES_WINE]=1e5f;
+    memset(&re->build,0,sizeof re->build); re->build.savoir=savoir;
+    re->tech=0.f;
+    econ_tick(e, 1.f);
+    return re->tech;
+}
+
 int main(int argc, char **argv){
     uint32_t seed=(argc>1)?(uint32_t)strtoul(argv[1],NULL,10):42u;
     World *w=malloc(sizeof(World));
@@ -114,6 +135,15 @@ int main(int argc, char **argv){
         float Lf = wl->L[RF], Ln = wl->L[RN];
         printf("   légitimité : avec Temple = %.2f  vs  sans = %.2f\n", Lf, Ln);
         ok("un Temple bâti SOUTIENT la légitimité locale (L plus haute)", Lf > Ln + 0.5f);
+    }
+
+    /* ═══ 4. SAVOIR — la Bibliothèque accélère la recherche ═════════════ */
+    printf("\n── 4. Le savoir : une Bibliothèque accélère la recherche ──\n");
+    {
+        float t_lib = tech_with_savoir(e, 1, 2.0f);   /* bibliothèque/monastère bâtis */
+        float t_non = tech_with_savoir(e, 2, 0.0f);   /* sans savoir bâti */
+        printf("   recherche en un tick : avec savoir bâti = %.3f  vs  sans = %.3f\n", t_lib, t_non);
+        ok("une Bibliothèque ACCÉLÈRE la recherche (savoir bâti → +tech)", t_lib > t_non + 1e-4f);
     }
 
     printf("\n══════════════════════════════════════════════════════════════\n");

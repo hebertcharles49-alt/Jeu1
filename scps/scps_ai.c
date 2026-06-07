@@ -211,12 +211,21 @@ static Edifice ai_next_h_edifice(const WorldEconomy *econ, int region){
     if (h < 3.0f) return EDI_FORTERESSE;
     return EDI_CITADELLE;
 }
-/* Progression de foi : Sanctuaire → Temple (sacraliser le trône → SOUTIENT L). */
+/* Progression de foi : Sanctuaire → Temple → Cathédrale (sacraliser → SOUTIENT L). */
 static Edifice ai_next_faith_edifice(const WorldEconomy *econ, int region){
     if (region<0 || region>=econ->n_regions) return EDI_SANCTUAIRE;
-    return (econ->region[region].build.faith < 1.0f) ? EDI_SANCTUAIRE : EDI_TEMPLE;
+    float f = econ->region[region].build.faith;
+    if (f < 1.0f) return EDI_SANCTUAIRE;
+    if (f < 3.0f) return EDI_TEMPLE;
+    return EDI_CATHEDRALE;
 }
-#define AI_FAITH_L 4.5f   /* sous ce consentement, le trône se SACRALISE (bâtit la foi) */
+/* Progression du savoir : Bibliothèque → Monastère (recherche ; le monastère aussi foi). */
+static Edifice ai_next_savoir_edifice(const WorldEconomy *econ, int region){
+    if (region<0 || region>=econ->n_regions) return EDI_BIBLIOTHEQUE;
+    return (econ->region[region].build.savoir < 1.5f) ? EDI_BIBLIOTHEQUE : EDI_MONASTERE;
+}
+#define AI_FAITH_L 3.0f   /* consentement DÉFAILLANT (Légit<30) → le trône se SACRALISE */
+#define AI_SAVOIR_K 5.0f  /* institutions MÛRES (K élevé) → on investit le SAVOIR (recherche) */
 
 /* ===================================================================== */
 /* TOURS DE DÉCISION                                                       */
@@ -247,17 +256,20 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
             if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)) a->stats.builds_h++;
         } else {
             /* RÉFORME : on métabolise (K). Mais un trône au consentement bas se
-             * SACRALISE d'abord (la foi soutient L sans réprimer — §4 catalogue). */
+             * SACRALISE d'abord (la foi soutient L) ; institutions mûres, on
+             * investit le SAVOIR (la recherche). §4-§5 du catalogue. */
             Edifice e;
-            if (v->L < AI_FAITH_L && a->home_region>=0
-                && econ->region[a->home_region].build.faith < 3.0f)
-                e = ai_next_faith_edifice(econ, a->home_region);
+            int hr = a->home_region;
+            const ProvBuild *bd = (hr>=0&&hr<econ->n_regions)?&econ->region[hr].build:NULL;
+            if (bd && v->L < AI_FAITH_L && bd->faith < 5.0f)
+                e = ai_next_faith_edifice(econ, hr);       /* consentement défaillant → foi */
+            else if (bd && bd->K_inst >= AI_SAVOIR_K && bd->savoir < 2.5f)
+                e = ai_next_savoir_edifice(econ, hr);      /* institutions mûres → savoir */
             else
-                e = ai_next_k_edifice(econ, a->home_region);
+                e = ai_next_k_edifice(econ, hr);           /* le métabolisme par défaut : K */
             if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)){
-                /* K de TEMPÉRAMENT (proactif, la marque du Bâtisseur) vs K de DIGESTION
-                 * (réactif, imposé par le frein quand on a trop avalé) — on ne les
-                 * confond pas : la personnalité se lit dans le premier. */
+                /* développement institutionnel PROACTIF (la marque du Bâtisseur)
+                 * vs DIGESTION imposée par le frein — on ne les confond pas. */
                 if (brake > AI_BRAKE_HARD) a->stats.builds_other++;
                 else                       a->stats.builds_k++;
             }

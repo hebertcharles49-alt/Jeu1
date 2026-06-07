@@ -87,7 +87,6 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
 static const float NEED[CLASS_COUNT][RES_COUNT] = {
     [CLASS_LABORER] = {
         [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.30f, [RES_CLOTH]=0.20f,
-        [RES_WINE]=0.18f,   /* palier MORAL : servi en bière OU vin selon la culture */
     },
     [CLASS_BOURGEOIS] = {
         [RES_GRAIN]=1.00f, [RES_CLOTH]=0.50f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
@@ -721,9 +720,11 @@ void econ_tick(WorldEconomy *e, float dt) {
         re->satisfaction *= (1.f - 0.45f*econ_off_culture_fraction(&re->pop));
         re->prosperity = re->gdp/(popsum+1.f);
 
-        /* Tech : les élites convertissent richesse × satisfaction en savoir. */
+        /* Tech : les élites convertissent richesse × satisfaction en savoir. La
+         * bibliothèque/le monastère BÂTI (densité de savoir) accélère la cadence. */
         PopStratum *el=&re->strata[CLASS_ELITE];
-        re->tech += el->wealth*TECH_RATE*el->satisfaction*dt;
+        float savoir_mult = 1.f + 0.25f*re->build.savoir;   /* +25 % de recherche / point bâti */
+        re->tech += el->wealth*TECH_RATE*el->satisfaction*savoir_mult*dt;
 
         /* Bourgeois réinvestissent une part du profit dans les manufactures
          * (croissance de capacité plafonnée par leur richesse). */

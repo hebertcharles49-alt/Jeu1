@@ -23,12 +23,20 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     /* Prospérité → PE local (capte le carrefour). */
     [EDI_MARCHE]       = { "Marché",        180,  { .PE_infra=1.0f } },
     [EDI_ENTREPOT]     = { "Entrepôt",      270,  { .PE_infra=0.7f } },
-    /* Croissance → food (nourrit la pop). */
+    /* Croissance → food (nourrit la pop ; l'aqueduc : santé urbaine → croissance). */
     [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f } },
     [EDI_IRRIGATION]   = { "Irrigation",    270,  { .food_cap=1.5f } },
+    [EDI_AQUEDUC]      = { "Aqueduc",       540,  { .food_cap=1.2f } },
     /* Foi → SOUTIENT L (sacraliser le trône apaise sans réprimer — §4 du catalogue). */
     [EDI_SANCTUAIRE]   = { "Sanctuaire",    150,  { .faith=1.0f } },
     [EDI_TEMPLE]       = { "Temple",        600,  { .faith=2.0f } },
+    [EDI_CATHEDRALE]   = { "Cathédrale",    2000, { .faith=3.5f } },
+    /* Savoir → recherche (le monastère sacralise ET étudie — §5 du catalogue). */
+    [EDI_BIBLIOTHEQUE] = { "Bibliothèque",  500,  { .savoir=1.5f } },
+    [EDI_MONASTERE]    = { "Monastère",     900,  { .savoir=1.0f, .faith=1.0f } },
+    /* Commerce → PE local (capte le flux ; la banque finance l'État). */
+    [EDI_COMPTOIR]     = { "Comptoir",      200,  { .PE_infra=0.8f } },
+    [EDI_BANQUE]       = { "Banque",        700,  { .PE_infra=1.4f } },
 };
 
 const EdificeDef *edifice_def(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?&EDIFICES[e]:NULL; }

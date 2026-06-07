@@ -141,6 +141,7 @@ typedef struct {
     float PE_infra;  /* prospérité     → capte plus de PE local */
     float food_cap;  /* rendement/stockage alimentaire → croissance */
     float faith;     /* foi (temple/sanctuaire) → SOUTIENT L local (apaise l'agitation) */
+    float savoir;    /* savoir bâti (bibliothèque/monastère) → ACCÉLÈRE la recherche locale */
 } ProvBuild;
 
 /* ---- Économie d'une région -------------------------------------------- */

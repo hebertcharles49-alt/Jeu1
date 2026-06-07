@@ -27,8 +27,10 @@ typedef enum {
     EDI_GARNISON, EDI_FORTERESSE, EDI_CITADELLE,        /* → H (ronge L) */
     EDI_PORT, EDI_CARAVANSERAIL,                        /* → P */
     EDI_MARCHE, EDI_ENTREPOT,                           /* → PE local */
-    EDI_GRENIER, EDI_IRRIGATION,                        /* → food */
-    EDI_SANCTUAIRE, EDI_TEMPLE,                         /* → foi (SOUTIENT L) */
+    EDI_GRENIER, EDI_IRRIGATION, EDI_AQUEDUC,           /* → food (santé urbaine → croissance) */
+    EDI_SANCTUAIRE, EDI_TEMPLE, EDI_CATHEDRALE,         /* → foi (SOUTIENT L) */
+    EDI_BIBLIOTHEQUE, EDI_MONASTERE,                    /* → savoir (recherche ; le monastère aussi foi) */
+    EDI_COMPTOIR, EDI_BANQUE,                           /* → PE (commerce) */
     EDIFICE_COUNT
 } Edifice;
 
