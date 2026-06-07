@@ -46,6 +46,8 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_PRECIOUS_WARE] = 22.0f,
     [RES_PRECIOUS_CLOTH]= 18.0f,
     [RES_PAPER]         = 5.5f,
+    [RES_ARCANE_CRYSTAL]= 16.0f,   /* résidu rare des nœuds telluriques */
+    [RES_ESSENCE]       = 34.0f,   /* mana raffiné — très haute valeur */
 };
 
 /* Recette d'une manufacture : jusqu'à 2 intrants → 1 produit. */
@@ -63,6 +65,9 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     [BLD_WINERY]    = { RES_SUGAR, 2.0f, RES_NONE,          0.f, RES_WINE,           1.0f, 0.9f },
     [BLD_JEWELER]   = { RES_GOLD,  1.0f, RES_PRECIOUS_METAL,1.0f, RES_PRECIOUS_WARE, 1.0f, 1.2f },
     [BLD_WEAVER_LUX]= { RES_CLOTH, 2.0f, RES_NONE,          0.f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f },
+    /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
+     * nourrit la Brèche (couplée plus bas dans econ_tick → arcane_charge). */
+    [BLD_MAGE_WORKSHOP]={ RES_ARCANE_CRYSTAL, 1.0f, RES_NONE, 0.f, RES_ESSENCE,    1.0f, 1.3f },
 };
 
 /* Besoins par tête et par strate (unités/100 hab/tick). Le grain (vivres)
@@ -146,7 +151,8 @@ const char *social_class_name(SocialClass c) {
 const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
         "Manufacture textile","Scierie navale","Papeterie",
-        "Domaine viticole","Joaillerie","Atelier d'étoffe précieuse"
+        "Domaine viticole","Joaillerie","Atelier d'étoffe précieuse",
+        "Atelier de mage"
     };
     return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
 }
@@ -303,6 +309,13 @@ void econ_init(WorldEconomy *e, const World *w) {
         re->raw_cap[RES_WOOD]  += subsist * 0.40f;
         if (coastal) re->raw_cap[RES_FISH] += subsist * 0.30f;
 
+        /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux
+         * failles profondes/volcaniques (proxy : présence de soufre ou de métal
+         * précieux). Seule une fraction des régions concernées porte un nœud. */
+        if ((re->raw_cap[RES_SULFUR]>0.f || re->raw_cap[RES_PRECIOUS_METAL]>0.f)
+            && ((uint32_t)(rid*2654435761u) % 4u)==0u)
+            re->raw_cap[RES_ARCANE_CRYSTAL] += 1.0f;
+
         /* ---- Manufactures : implantées là où l'intrant est extrait dans
          *      la région (cohérence géographique de la chaîne de prod). */
         if (re->raw_cap[RES_WOOL] > 0.f)  region_ensure_building(re,BLD_TEXTILE);
@@ -315,6 +328,8 @@ void econ_init(WorldEconomy *e, const World *w) {
             region_ensure_building(re,BLD_JEWELER);
         /* L'atelier de luxe a besoin de tissu : présent si on file la laine. */
         if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
+        /* ARCANE : un atelier de mage s'élève au nœud tellurique (cristal). */
+        if (re->raw_cap[RES_ARCANE_CRYSTAL] > 0.f) region_ensure_building(re,BLD_MAGE_WORKSHOP);
 
         /* Niveau initial des manufactures : dimensionné sur la capacité
          * d'accueil (l'infrastructure latente du site). */
@@ -458,6 +473,7 @@ void econ_tick(WorldEconomy *e, float dt) {
         }
 
         /* ---- 2. MANUFACTURE -------------------------------------------- */
+        re->arcane_charge=0.f;   /* essence brûlée CE tick (→ flux faustien) */
         for (int i=0;i<re->n_bld;i++) {
             Building *b=&re->bld[i];
             const Recipe *rc=&RECIPE[b->type];
@@ -481,6 +497,8 @@ void econ_tick(WorldEconomy *e, float dt) {
             supply[rc->out]+=out;
             b->workers=rc->labor*lim;
             labor_used+=b->workers;
+            /* ARCANE : brûler le cristal pour l'essence nourrit la Brèche. */
+            if (b->type==BLD_MAGE_WORKSHOP) re->arcane_charge += out;
 
             /* Valeur ajoutée = valeur sortie − valeur intrants */
             float val_out=out*re->price[rc->out];

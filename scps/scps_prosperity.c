@@ -276,18 +276,22 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
          * agrège les édifices du pays sur K/P/H, plafond ±5 (rendements
          * décroissants). Un Tribunal monte K, une Citadelle monte H. */
         {
-            float bK=0.f, bP=0.f, bH=0.f, bPE=0.f;
+            float bK=0.f, bP=0.f, bH=0.f, bPE=0.f, bArcane=0.f;
             for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid) {
                 bK  += econ->region[r].build.K_inst;
                 bP  += econ->region[r].build.P_open;
                 bH  += econ->region[r].build.H_coerc;
                 bPE += econ->region[r].build.PE_infra;   /* marchés/entrepôts → PE capté */
                 bPE += econ->region[r].route_pe;         /* routes commerciales (cloche f(D̄)) */
+                bArcane += econ->region[r].arcane_charge;/* essence brûlée → Brèche */
             }
             st.K = clampf(st.K + clampf(bK,0.f,5.f), 0.f, 10.f);
             st.P = clampf(st.P + clampf(bP,0.f,5.f), 0.f, 10.f);
             st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
             cp->P_potentiel += clampf(bPE,0.f,8.f);    /* infrastructure + carrefour commercial */
+            /* ARCANE (le fil faustien) : brûler le cristal/essence MONTE le flux
+             * faustien → surchauffe → déréalisation → rapproche la Brèche. */
+            st.flux_faustien = clampf(st.flux_faustien + clampf(bArcane*0.5f,0.f,6.f), 0.f, 10.f);
         }
 
         /* ---- ÂGES STRUCTURELS : on POUSSE les entrées globales du moteur ---- *

@@ -144,6 +144,7 @@ typedef enum {
     RES_SALTPETER,      /* arides / grottes (→ poudre)  */
     RES_GOLD,           /* montagnes (parfois artefact) */
     RES_PRECIOUS_METAL, /* mithril, adamantium — profond/rare */
+    RES_ARCANE_CRYSTAL, /* cristal arcanique — RÉSIDU de la Conjonction, nœuds telluriques (TRÈS rare) */
 
     /* === Frontière : tout ce qui suit est un bien de PRODUCTION === */
     RES_PROD_FIRST,
@@ -153,6 +154,7 @@ typedef enum {
     RES_PRECIOUS_WARE,          /* bien précieux des 4 races (porcelaine, bière…) */
     RES_PRECIOUS_CLOTH,         /* étoffe précieuse des 4 races */
     RES_PAPER,                  /* transformation           */
+    RES_ESSENCE,                /* ARCANE : mana raffiné (cristal brûlé) → sa combustion MONTE la Brèche */
     RES_COUNT
 } Resource;
 

@@ -59,6 +59,7 @@ typedef enum {
     BLD_WINERY,        /* sucre   → vin                 */
     BLD_JEWELER,       /* or+métal précieux → joaillerie (bien d'élite) */
     BLD_WEAVER_LUX,    /* tissu   → étoffe précieuse    */
+    BLD_MAGE_WORKSHOP, /* ARCANE : cristal → essence (mana) — sa combustion MONTE la Brèche */
     BLD_TYPE_COUNT
 } BuildingType;
 
@@ -169,6 +170,10 @@ typedef struct {
 
     /* Coercition temporaire (relocalisation forcée) — décroît chaque tick */
     float      coercion;             /* [0..1] : 0=libre, 1=état d'urgence */
+
+    /* ARCANE (§ fil arcane) : essence brûlée ce tick par les ateliers de mage.
+     * prosperity_tick l'agrège dans le flux faustien → déréalisation/Brèche. */
+    float      arcane_charge;
 
     float      habitability;          /* habitabilité moyenne [0..1] — héritée des provinces */
     bool       active;               /* terre habitable (colonisable) */
