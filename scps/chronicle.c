@@ -105,6 +105,29 @@ static int wars_active(const World *w, const DiploState *dp){
         if (diplo_status(dp,a,b)==DIPLO_WAR) n++;
     return n;
 }
+/* Compte les rôles : empires (joueur + antagonistes) et cités-états. */
+static void role_counts(const World *w, int *emp, int *city){
+    *emp=*city=0;
+    for (int c=0;c<w->n_countries;c++){
+        PolityRole r=w->country[c].role;
+        if (r==POLITY_PLAYER||r==POLITY_ANTAGONIST) (*emp)++;
+        else if (r==POLITY_CITY_STATE) (*city)++;
+    }
+}
+/* Prospérité & stabilité MOYENNES des empires vivants (lues par la membrane). */
+static void empire_avg(const World *w, const WorldEconomy *e, const WorldProsperity *wp,
+                       const TechState *ts, int *prosp, int *stab){
+    long sp=0,ss=0; int n=0;
+    for (int c=0;c<w->n_countries;c++){
+        PolityRole rl=w->country[c].role;
+        if ((rl==POLITY_PLAYER||rl==POLITY_ANTAGONIST) && regions_of(e,c)>0){
+            CountryReadout r=country_readout(wp,ts,w,c);
+            sp+=r.m_prosperite.value; ss+=r.m_stabilite.value; n++;
+        }
+    }
+    *prosp = n? (int)(sp/n):0;
+    *stab  = n? (int)(ss/n):0;
+}
 
 int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
@@ -140,31 +163,43 @@ int main(int argc, char **argv){
         /* silence le bruit de génération : on a déjà tout imprimé par monde plus bas */
         sim_init(&s, w);
 
+        int cont = w->n_continents;
+        int n_emp, n_city; role_counts(w, &n_emp, &n_city);
         int c0 = living_countries(w, s.econ);
-        int cont = w->n_continents, ncty = w->n_countries;
 
-        /* suivi année par année */
         int age_year[AGE_COUNT]; for (int a=0;a<AGE_COUNT;a++) age_year[a]=-1;
         int war_onsets=0, prev_wars=0, peak_wars=0;
         int peak_rev=0, peak_rev_year=0;
         int min_living=c0;
 
+        printf("\n── Monde %d (graine %u) — %d empires, %d cités-états, %d continents, %d régions ──\n",
+               k+1, seed, n_emp, n_city, cont, s.econ->n_regions);
+
+        int snap[4]={50,100,150,200}, si=0;
         for (int yr=0; yr<years; yr++){
             for (int d=0; d<365; d++) sim_day(&s, w);
-            /* âges */
+            /* âges : on imprime À L'AVÈNEMENT → la ligne du temps est chronologique */
             for (int a=0;a<AGE_COUNT;a++)
-                if (age_year[a]<0 && ages_dawned(s.ev,(AgeId)a)) age_year[a]=s.year;
-            /* guerres */
+                if (age_year[a]<0 && ages_dawned(s.ev,(AgeId)a)){
+                    age_year[a]=s.year;
+                    printf("   an %3d  ÂGE : %s\n", s.year, age_name((AgeId)a));
+                }
             int wa = wars_active(w, s.dp);
             if (wa>prev_wars) war_onsets += (wa-prev_wars);
             if (wa>peak_wars) peak_wars=wa;
             prev_wars = wa;
-            /* révoltes */
             int rv = events_count_revolutionary(w, s.wp);
             if (rv>peak_rev){ peak_rev=rv; peak_rev_year=s.year; }
-            /* conquêtes/effondrements */
             int lv = living_countries(w, s.econ);
             if (lv<min_living) min_living=lv;
+            /* instantané tous les 50 ans : où en est le monde ? */
+            if (si<4 && s.year>=snap[si]){
+                int treg=0; top_power(w,s.econ,&treg);
+                int ap,as_; empire_avg(w,s.econ,s.wp,s.ts,&ap,&as_);
+                printf("   an %3d : %2d pays vivants | 1er empire %2d rég | empires : prospérité %2d stab %2d | %d guerre(s), %d révolté(s)\n",
+                       snap[si], lv, treg, ap, as_, wa, rv);
+                si++;
+            }
         }
 
         int c1 = living_countries(w, s.econ);
@@ -172,26 +207,17 @@ int main(int argc, char **argv){
         CountryReadout r = (tp>=0)? country_readout(s.wp,s.ts,w,tp)
                                   : country_readout(s.wp,s.ts,w,0);
         int absorbed = c0 - c1; if (absorbed<0) absorbed=0;
+        int share = (s.econ->n_regions>0)? treg*100/s.econ->n_regions : 0;
+        int nages=0; for (int a=0;a<AGE_COUNT;a++) if (age_year[a]>=0) nages++;
 
-        /* ── chronique du monde ── */
-        printf("\n── Monde %d (graine %u) — %d pays, %d continents ──\n", k+1, seed, ncty, cont);
-        /* timeline des âges, dans l'ordre où ils sont apparus */
-        for (int a=0;a<AGE_COUNT;a++) if (age_year[a]>=0){
-            printf("   an %3d  Âge : %s\n", age_year[a], age_name((AgeId)a));
-            tot_ages++;
-        }
-        if (peak_rev>0)
-            printf("   an %3d  pic de révolte : %d pays questionnés\n", peak_rev_year, peak_rev);
-        if (peak_wars>0)
-            printf("   guerres : %d déclenchées, jusqu'à %d conflits simultanés\n", war_onsets, peak_wars);
-        printf("   BILAN an %d : %d pays subsistent (%d absorbés ; plancher %d)\n",
-               years, c1, absorbed, min_living);
+        printf("   BILAN an %d : %d pays subsistent (%d absorbés ; plancher %d) | %d âge(s) ; %d guerre(s) au total, pic %d ; pic de révolte %d (an %d)\n",
+               years, c1, absorbed, min_living, nages, war_onsets, peak_wars, peak_rev, peak_rev_year);
         if (tp>=0)
-            printf("              1er empire « %s » : %d régions | Stabilité %d  Prospérité %d  Légitimité %d  — Assise %s\n",
-                   w->country[tp].name, treg, r.m_stabilite.value, r.m_prosperite.value,
-                   r.m_legitimite.value, label_assise(r.assise));
+            printf("              1er empire « %s » : %d régions (%d%% des terres) | Stabilité %d  Prospérité %d  Légitimité %d  Cohésion %d — Assise %s\n",
+                   w->country[tp].name, treg, share, r.m_stabilite.value, r.m_prosperite.value,
+                   r.m_legitimite.value, r.m_cohesion.value, label_assise(r.assise));
 
-        tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev;
+        tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
         if (age_year[AGE_SOULEVEMENTS]>=0) worlds_with_uprising++;
     }

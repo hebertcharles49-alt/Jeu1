@@ -118,13 +118,13 @@ int main(int argc, char **argv){
         s.wp->country[c].mode=2; /* révolution */ s.wp->country[c].fracture=5.f;
         s.wp->country[c].dereal=2.f; s.wp->country[c].SI=3.f; s.wp->country[c].Lumiere=0.f; s.wp->country[c].C=0.f;
     }
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     ok("sans les Lumières, l'Âge des Soulèvements ne peut PAS s'éveiller", !ages_dawned(s.ev,AGE_SOULEVEMENTS));
     ok("sans les Lumières, l'Âge de l'Ordre de Fer ne peut PAS s'éveiller", !ages_dawned(s.ev,AGE_ORDRE_FER));
     /* Maintenant la société accumule savoir + connexion → les Lumières adviennent,
      * et alors seulement la chaîne peut se dérouler. */
     light_the_world(&s);
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     ok("les Lumières s'éveillent (savoir mondial + connexion atteints)", ages_dawned(s.ev,AGE_LUMIERES));
     ok("APRÈS les Lumières, la chaîne causale peut se dérouler (Soulèvements éveillé)",
        ages_dawned(s.ev,AGE_SOULEVEMENTS));
@@ -143,7 +143,7 @@ int main(int argc, char **argv){
     /* Avènement des Lumières (savoir+C atteints) → +I et dissolution coercitive. */
     light_the_world(&s);
     shape(&s, cOpen, 1.f,7.f,8.f,6.f); shape(&s, cCoer, 9.f,4.f,2.f,6.f);  /* re-fige les cas */
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     tickP(&s);
     float SIo1=s.wp->country[cOpen].SI, FRc1=s.wp->country[cCoer].fragilite;
     printf("   société OUVERTE : SI %.1f→%.1f (pression de réforme) ; régime COERCITIF : fragilité %.1f→%.1f (amorcé)\n",
@@ -171,7 +171,7 @@ int main(int argc, char **argv){
     s.wp->age_I_bonus=1.5f;   /* l'effervescence des idées (Lumières en cours) */
     tickP(&s);
     int rev0=events_count_revolutionary(s.w,s.wp);
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);   /* masse critique atteinte → Soulèvements */
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);   /* masse critique atteinte → Soulèvements */
     bool soulev = ages_dawned(s.ev,AGE_SOULEVEMENTS);
     tickP(&s);
     int rev1=events_count_revolutionary(s.w,s.wp);

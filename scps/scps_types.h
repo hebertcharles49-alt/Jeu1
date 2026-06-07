@@ -23,13 +23,13 @@
  *   continent = masse continentale géographique (séparée par l'océan),
  *   hébergeant ~4-7 pays. */
 #define SCPS_MAX_PROV      320
-#define SCPS_MAX_REG       110
-#define SCPS_MAX_COUNTRY    48
+#define SCPS_MAX_REG       130
+#define SCPS_MAX_COUNTRY    56
 #define SCPS_MAX_CONTINENT  16
-#define SCPS_REG_TARGET_MIN 3   /* territoires par région */
-#define SCPS_REG_TARGET_MAX 5
-#define SCPS_CTY_TARGET_MIN 3   /* régions par pays */
-#define SCPS_CTY_TARGET_MAX 5
+#define SCPS_REG_TARGET_MIN 2   /* territoires par région (unités plus fines → plus de pays) */
+#define SCPS_REG_TARGET_MAX 3
+#define SCPS_CTY_TARGET_MIN 1   /* régions par pays : viser ~40 pays (15 empires + 20 cités) */
+#define SCPS_CTY_TARGET_MAX 3
 #define SCPS_RIVER_MAXLEN 768
 
 /* ---- Seuils de hauteur (0..1) ----------------------------------------- */

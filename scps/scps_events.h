@@ -97,6 +97,8 @@ typedef struct {
     float research_mult;             /* palier de la Raison : recherche plus vive */
     float integration_mult;          /* palier des Empires : intégration accélérée */
     int   last_dawned;               /* -1 ou AgeId du dernier avènement */
+    int   days_elapsed;              /* temps de jeu écoulé (cumul des ticks) */
+    int   last_dawn_year;            /* an du dernier avènement (rythme : 1 âge / 30 ans mini) */
 } AgesState;
 
 /* ===================================================================== */

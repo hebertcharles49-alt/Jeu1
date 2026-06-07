@@ -203,7 +203,7 @@ int main(int argc, char **argv){
     for (int c=0;c<SCPS_MAX_COUNTRY;c++){ s.ts[c].charge=0.f; if(c<s.wp->n_countries) s.wp->country[c].Lumiere=0.f; }
     events_init(s.ev,s.w,seed);
     s.wp->age_C_bonus=0.f; s.wp->age_breach_flux=0.f;
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     ok("monde « éteint » : aucun âge ne s'éveille",
        !ages_dawned(s.ev,AGE_COMMERCE)&&!ages_dawned(s.ev,AGE_REASON)
        &&!ages_dawned(s.ev,AGE_EMPIRES)&&!ages_dawned(s.ev,AGE_BREACH));
@@ -212,7 +212,7 @@ int main(int argc, char **argv){
     { int settled[64], ns=0;
       for (int r=0;r<s.econ->n_regions && ns<6;r++) if (s.econ->region[r].culture.settled) settled[ns++]=r;
       for (int k=0;k<ns;k++) s.econ->region[settled[k]].route_pe=2.0f; }   /* 6 carrefours riches */
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     printf("   Commerce : éveillé=%d  C mondial=+%.1f  palier Société/3 ouvert=%d\n",
            ages_dawned(s.ev,AGE_COMMERCE), s.wp->age_C_bonus, ages_tier_open(s.ev,TBR_SOCIETY,3));
     ok("l'Âge du Commerce s'éveille quand X nœuds dépassent la valeur Y", ages_dawned(s.ev,AGE_COMMERCE));
@@ -221,14 +221,14 @@ int main(int argc, char **argv){
 
     /* Âge de la Raison : Lumière mondiale cumulée. */
     for (int c=0;c<s.wp->n_countries && c<4;c++) s.wp->country[c].Lumiere=9.f;
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     ok("l'Âge de la Raison s'éveille au seuil de Lumière mondiale (recherche ↑)",
        ages_dawned(s.ev,AGE_REASON) && s.ev->ages.research_mult>1.f);
 
     /* Âge des Empires : régions bien intégrées. */
     { int n=0; for (int r=0;r<s.econ->n_regions && n<12;r++)
         if (s.econ->region[r].owner>=0 && s.econ->region[r].culture.settled && r<SCPS_MAX_REG){ s.wl->years_held[r]=60.f; n++; } }
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     ok("l'Âge des Empires s'éveille sur l'intégration cumulée (intégration ↑)",
        ages_dawned(s.ev,AGE_EMPIRES) && s.ev->ages.integration_mult>1.f);
 
@@ -236,7 +236,7 @@ int main(int argc, char **argv){
     printf("\n── 5. Pousser la Magie fait advenir la Brèche (pression mondiale) ──\n");
     ok("avant : la Brèche dort", !ages_dawned(s.ev,AGE_BREACH));
     s.ts[0].charge=6.0f;                              /* une démesure faustienne quelque part */
-    events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
+    s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     printf("   Brèche : éveillée=%d  pression mondiale=%.1f  flux faustien mondial=%.1f  palier Magie/5=%d\n",
            ages_dawned(s.ev,AGE_BREACH), ages_breach_pressure(s.ev), s.wp->age_breach_flux,
            ages_tier_open(s.ev,TBR_MAGIC,5));

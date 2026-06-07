@@ -66,7 +66,8 @@ static const float DDIST[8]={1.f,1.414f,1.f,1.414f,1.f,1.414f,1.f,1.414f};
  * Plaques tectoniques (Voronoï) + FBM → relief de base
  * ====================================================================== */
 #define N_PLATES   18
-#define DRIFT_PX   210.f   /* déplacement d'une plaque continentale (px) à dérive=1 */
+#define DRIFT_PX   45.f    /* dérive FAIBLE : les masses restent SOUDÉES (peu de continents,
+                            * du contact → de l'interaction) ; on garde la taille (R0m). */
 
 /* La plaque a une MÉMOIRE : elle dérive d'une position d'origine (le
  * supercontinent) vers sa position actuelle. cx,cy = ce que voit tout l'aval ;
@@ -322,7 +323,7 @@ static void continents_init(int n, float seed_f) {
     }
 
     /* Archipels : 0-3 chaînes d'îles indépendantes */
-    int nchains=(int)(rng_f()*4.f);
+    int nchains=(int)(rng_f()*2.f);   /* peu d'archipels : ils gonflent le compte de continents */
     for (int c=0;c<nchains;c++) {
         int nisles=1+(int)(rng_f()*3.f);
         float bx=rng_f()*SCPS_W;
@@ -912,7 +913,8 @@ static void step_coastline(float *height, float seed_f) {
  * récifs dispersés qui peuplent les mers vides. La terre principale n'est
  * pas touchée (on ne modifie que les cellules sous le niveau de mer). */
 static void step_ghost_layer(float *height, float seed_f) {
-    const float GSEA = 0.30f;   /* niveau de mer fantôme bas → archipels généreux */
+    const float GSEA = 0.62f;   /* niveau de mer fantôme HAUT → archipels RARES (moins de bruit
+                                 * = moins de continents-fantômes ; on veut du contact, pas des îlots) */
     const float AMP  = 0.34f;   /* amplitude d'émergence */
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int i=scps_idx(x,y);
@@ -1913,16 +1915,16 @@ static void build_hierarchy(World *w) {
         }
         if (ncty>0) {
             w->country[ord[0]].role=POLITY_PLAYER;
-            int n_antag = (ncty>=8)? (ncty/4) : (ncty>=3?1:0);
-            for (int i=1;i<=n_antag && i<ncty;i++)
+            /* Cible FIXE : 15 empires (joueur + 14 antagonistes) puis 20 cités-états ;
+             * tout le reste = terres vierges à coloniser. Indépendant de la taille
+             * du monde — on prend les plus PESANTS comme empires, les suivants comme
+             * cités. (Compte de pays calibré pour atteindre 35 ; sinon dégradation
+             * gracieuse : on en assigne autant qu'il y en a.) */
+            const int N_EMPIRE=15, N_CITY=20;
+            for (int i=1; i<N_EMPIRE && i<ncty; i++)
                 w->country[ord[i]].role=POLITY_ANTAGONIST;
-            /* cités-états : ~15% des pays restants, mini-pays côtiers/riches */
-            int rest_start=1+n_antag;
-            int n_city = (ncty-rest_start)*15/100;
-            for (int i=0;i<n_city;i++) {
-                int idx=rest_start+i;
-                if (idx<ncty) w->country[ord[idx]].role=POLITY_CITY_STATE;
-            }
+            for (int i=N_EMPIRE; i<N_EMPIRE+N_CITY && i<ncty; i++)
+                w->country[ord[i]].role=POLITY_CITY_STATE;
         }
     }
 
