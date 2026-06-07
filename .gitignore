@@ -12,16 +12,4 @@ SDL2.dll
 *.pdb
 *.ilk
 .vs/
-scps_viewer
-scps_viewer.exe
-scps_dump
-out_*.ppm
-out_*.png
-scps_batch
-econ_demo
-tech_demo
-culture_demo
-montage.bmp
-prosperity_demo
-core_demo
 .claude/
