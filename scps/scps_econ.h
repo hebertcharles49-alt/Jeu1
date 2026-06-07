@@ -35,6 +35,7 @@
 
 #include "scps_types.h"
 #include "scps_culture.h"   /* PopCulture embarque les traits dérivés (Ethos, …) */
+#include "scps_species.h"   /* couche biologique : race + traits (leviers) */
 
 /* ---- Strates sociales ------------------------------------------------- */
 typedef enum {
@@ -90,6 +91,9 @@ typedef struct {
     EconTrait    econ;
     int  age;       /* ticks d'existence (dérive) */
     bool settled;   /* false = région vierge, pas encore peuplée */
+    /* Couche BIOLOGIQUE (superposée à la culture) : la race et ses leviers
+     * (démographie, K, P, H, dérive, fracture…). Posée par worldgen_seed_peoples. */
+    SpeciesArchetype race;
 } PopCulture;
 
 /* ---- Économie d'une région -------------------------------------------- */

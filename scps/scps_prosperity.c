@@ -259,6 +259,23 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         st.I     = econ_fiscal_pressure(econ, cid);
         st.L     = Lg;                            /* ← l'entrée vivante                   */
         st.flux_faustien = flux_f;
+
+        /* Couche BIOLOGIQUE : les leviers de la RACE du pays (lus sur la région-
+         * capitale) déplacent les entrées — Nain bâtisseur K+ mais factieux
+         * fracture+, Orque coercition+, Halfelin perméabilité+, etc. */
+        {
+            int cap_prov = w->country[cid].capital_prov;
+            int cap_reg  = (cap_prov>=0 && cap_prov<w->n_provinces)
+                         ? w->province[cap_prov].region : -1;
+            if (cap_reg>=0 && cap_reg<econ->n_regions) {
+                SpeciesBuild   sb  = species_default_build(econ->region[cap_reg].culture.race);
+                SpeciesLeviers lev = build_leviers(&sb);
+                st.K     = clampf(st.K     + lev.capacite,     0.f, 10.f);
+                st.P     = clampf(st.P     + lev.permeabilite, 0.f, 10.f);
+                st.H     = clampf(st.H     + lev.coercition,   0.f, 10.f);
+                st.D_bar = clampf(st.D_bar + lev.fracture,     0.f, 10.f);  /* fracture interne */
+            }
+        }
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;
         cp->fragilite = o.fragilite;

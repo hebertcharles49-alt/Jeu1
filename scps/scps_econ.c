@@ -528,7 +528,11 @@ void econ_tick(WorldEconomy *e) {
          * entre 1000 et 6000 selon la capacité du site). */
         float food_s = re->food_sat;
         float soc_s  = re->society_sat;
-        float net_growth = BIRTH_RATE*food_s - DEATH_RATE + SOCIETY_BONUS*soc_s;
+        /* Démographie modulée par la RACE (Prolifique/Régénérant → + de naissances ;
+         * Lent à croître → moins). Levier de la couche biologique. */
+        SpeciesBuild sb_demo = species_default_build(re->culture.race);
+        float demo = build_leviers(&sb_demo).demographie;
+        float net_growth = BIRTH_RATE*(1.f+demo)*food_s - DEATH_RATE + SOCIETY_BONUS*soc_s;
         if (food_s < 0.35f)
             net_growth -= (0.35f - food_s) * 0.12f;   /* pic de mortalité famine */
         net_growth = clampf(net_growth, -0.10f, 0.06f);

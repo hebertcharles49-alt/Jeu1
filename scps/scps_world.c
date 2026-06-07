@@ -19,6 +19,7 @@
 #include "stb_perlin.h"
 #include "scps_world.h"
 #include "scps_culture.h"   /* culture_make(), lifeway_*, ethos_nearest() */
+#include "scps_species.h"   /* race + leviers (worldgen_seed_peoples, dérive) */
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1895,10 +1896,87 @@ void world_tick(World *w, WorldEconomy *econ, float dt) {
         PopCulture *pc=&econ->region[r].culture;
         Culture tmp; memset(&tmp,0,sizeof(tmp));
         tmp.langue=pc->langue; tmp.age=pc->age;
-        culture_age_tick(&tmp, 0.002f*dt);
+        /* Dérive modulée par la race : Adaptable/Éphémère vite, Longévif/
+         * Traditionaliste lent (levier « dérive » de la couche biologique). */
+        SpeciesBuild sb=species_default_build(pc->race);
+        float drift=0.002f*dt*(1.f + build_leviers(&sb).derive);
+        if (drift < 0.f) drift = 0.f;
+        culture_age_tick(&tmp, drift);
         pc->langue=tmp.langue;
         pc->age   =tmp.age;
     }
+}
+
+/* ========================================================================
+ * PEUPLES — assignation des races en GRADIENT (v3 §3.3)
+ *
+ * Le joueur est l'ancre. Chaque pays reçoit une race dont la distance de
+ * SPHÈRE à celle du joueur suit sa distance GÉOGRAPHIQUE (proches près,
+ * lointaines loin). Les cités-états sont des isolats exotiques (sphère la plus
+ * distante). La race est posée sur toutes les régions du pays. À appeler après
+ * gen_population.
+ * ====================================================================== */
+static float country_geo_dist(const World *w, int ca, int cb) {
+    int pa=w->country[ca].capital_prov, pb=w->country[cb].capital_prov;
+    if (pa<0||pb<0||pa>=w->n_provinces||pb>=w->n_provinces) return 1e9f;
+    float dx=(float)(w->province[pa].seed_x-w->province[pb].seed_x);
+    float dy=(float)(w->province[pa].seed_y-w->province[pb].seed_y);
+    return sqrtf(dx*dx+dy*dy);
+}
+
+void worldgen_seed_peoples(World *w, WorldEconomy *econ, SpeciesArchetype player_race) {
+    if (!econ || w->n_countries<=0) return;
+
+    /* 1. Pays joueur (ancre). */
+    int player=0;
+    for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){ player=c; break; }
+    Sphere psph = species_sphere(player_race);
+
+    /* 2. Races ordonnées par distance de SPHÈRE au joueur (player_race en tête). */
+    SpeciesArchetype race_order[RACE_COUNT];
+    for (int r=0;r<RACE_COUNT;r++) race_order[r]=(SpeciesArchetype)r;
+    for (int i=0;i<RACE_COUNT;i++) for (int j=i+1;j<RACE_COUNT;j++)
+        if (sphere_distance(psph,species_sphere(race_order[j]))
+          < sphere_distance(psph,species_sphere(race_order[i]))){
+            SpeciesArchetype t=race_order[i]; race_order[i]=race_order[j]; race_order[j]=t; }
+    for (int i=0;i<RACE_COUNT;i++) if (race_order[i]==player_race){
+        SpeciesArchetype t=race_order[0]; race_order[0]=race_order[i]; race_order[i]=t; break; }
+
+    /* 3. Pays (hors joueur, hors cité-état) triés par distance GÉO au joueur. */
+    int ord[SCPS_MAX_COUNTRY], nm=0;
+    for (int c=0;c<w->n_countries;c++)
+        if (c!=player && w->country[c].role!=POLITY_CITY_STATE) ord[nm++]=c;
+    for (int i=0;i<nm;i++) for (int j=i+1;j<nm;j++)
+        if (country_geo_dist(w,player,ord[j]) < country_geo_dist(w,player,ord[i])){
+            int t=ord[i]; ord[i]=ord[j]; ord[j]=t; }
+
+    /* 4. Race par pays : joueur ancré, majeurs en gradient (~2/race), cités-états exotiques. */
+    SpeciesArchetype crace[SCPS_MAX_COUNTRY];
+    for (int c=0;c<w->n_countries;c++) crace[c]=player_race;
+    for (int k=0;k<nm;k++){
+        int ridx=1 + k/2;                       /* saute player_race, ~2 pays par race */
+        if (ridx>=RACE_COUNT) ridx=RACE_COUNT-1;
+        crace[ord[k]]=race_order[ridx];
+    }
+    SpeciesArchetype exotic=race_order[RACE_COUNT-1];   /* sphère la plus distante */
+    for (int c=0;c<w->n_countries;c++)
+        if (w->country[c].role==POLITY_CITY_STATE) crace[c]=exotic;
+
+    /* 5. Pose la race sur toutes les régions (substrat couvert par le gradient). */
+    for (int r=0;r<w->n_regions;r++){
+        int cc=w->region[r].country;
+        econ->region[r].culture.race = (cc>=0&&cc<w->n_countries) ? crace[cc] : player_race;
+    }
+
+    /* Diagnostic : la distance de sphère croît avec la distance géo. */
+    int n_cs=0;
+    for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_CITY_STATE) n_cs++;
+    printf("[peuples] joueur=%s/%s ; gradient géo→sphère :",
+           species_name(player_race), sphere_name(psph));
+    for (int k=0;k<nm && k<5;k++)
+        printf(" %s(%.0f)", species_name(crace[ord[k]]),
+               sphere_distance(psph,species_sphere(crace[ord[k]])));
+    printf(" … %d cités-états isolats→%s\n", n_cs, species_name(exotic));
 }
 
 /* ========================================================================

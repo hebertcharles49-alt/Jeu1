@@ -258,6 +258,7 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     pr.ressource = (p->resource > RES_NONE) ? resource_name(p->resource) : "—";
 
     const RegionEconomy *re = (reg >= 0 && reg < econ->n_regions) ? &econ->region[reg] : NULL;
+    pr.race = re ? species_name(re->culture.race) : "—";
     float pop = 0.f;
     if (re) pop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
                 + re->strata[CLASS_ELITE].pop;

@@ -201,6 +201,7 @@ static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
+    worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);   /* races en gradient */
     legitimacy_init(s->wl, w, s->econ);
     prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
@@ -292,6 +293,9 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     zone_add((SDL_Rect){x-2,y-2,rw,19}, hover_stature()); y += 22;
 
     ui_section(ren, x, &y, "PEUPLE");
+    ui_row(ren,x,&y,rw,"Race", p.race, COL_PARCH,
+           "L'espèce de la population : sa couche biologique (démographie, "
+           "tempérament) superposée à la culture.");
     snprintf(line,sizeof line, "Âmes %ld", p.ames);
     draw_text(ren, g_font, x, y, COL_PARCH, line);
     zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre d'habitants."); y += 20;

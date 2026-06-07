@@ -51,7 +51,7 @@ core_demo: $(CORE_DEMO_OBJS)
 # Prouve le test décisif « Tenue · Contrainte » et la couverture du lexique.
 READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
                      $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
-                     $(OBJDIR)/scps_readout_demo.o
+                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_readout_demo.o
 readout_demo: $(READOUT_DEMO_OBJS)
 	$(CC) $(READOUT_DEMO_OBJS) -o $@ -lm
 
@@ -68,7 +68,7 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_tech.o \
              $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
              $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
-             $(OBJDIR)/scps_viewer.o
+             $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
@@ -80,20 +80,20 @@ run_scps: scps
 # ---- Générateur d'images headless (sans SDL) -----------------------------
 SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
-                  $(OBJDIR)/scps_dump.o
+                  $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_dump.o
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
 # ---- Planche-contact de 5 mondes (montage.bmp) ---------------------------
 SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_batch.o
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_batch.o
 scps_batch: $(SCPS_BATCH_OBJS)
 	$(CC) $(SCPS_BATCH_OBJS) -o $@ -lm
 
 # ---- Banc d'essai économie + commerce ------------------------------------
 ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
-                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_econ_demo.o
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_demo.o
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
@@ -112,7 +112,7 @@ PROSPERITY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o
                         $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
                         $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                         $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                        $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_prosperity_demo.o
+                        $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_prosperity_demo.o
 prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 	$(CC) $(PROSPERITY_DEMO_OBJS) -o $@ -lm
 

@@ -32,6 +32,11 @@ void gen_population(World *w, WorldEconomy *econ);
  * l'instant la dérive de l'horloge linguistique des régions peuplées. */
 void world_tick(World *w, WorldEconomy *econ, float dt);
 
+/* Assigne une race à chaque pays en GRADIENT autour du joueur (distance de
+ * sphère ~ distance géographique) ; cités-états = isolats exotiques. Pose la
+ * race sur RegionEconomy.culture.race. À appeler après gen_population. */
+void worldgen_seed_peoples(World *w, WorldEconomy *econ, SpeciesArchetype player_race);
+
 /* Utilitaires biome */
 uint32_t biome_base_color(Biome b);
 const char *biome_name(Biome b);

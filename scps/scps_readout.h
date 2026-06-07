@@ -68,6 +68,7 @@ typedef struct {
 typedef struct {
     const char   *nom;
     const char   *terrain;     /* mot (biome nommé) */
+    const char   *race;        /* mot (espèce de la population) */
     BandStature   stature;
     long          ames;        /* population — nombre tangible */
     BandFlux      flux;
