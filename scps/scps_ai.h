@@ -53,7 +53,8 @@ typedef struct {
     int wars;            /* guerres DÉCLARÉES */
     int conquests;       /* régions conquises */
     int routes;          /* routes ouvertes */
-    int builds_k;        /* édifices institutionnels (→ K) bâtis */
+    int builds_k;        /* édifices institutionnels (→ K) bâtis — RÉFORME */
+    int builds_h;        /* citadelles (→ H) bâties sous la crise — SERRER (Ordre de Fer) */
     int builds_other;    /* greniers/marchés (food/PE) bâtis */
     int consolidations;  /* paix faites sous le frein (digestion) */
 } AiStats;

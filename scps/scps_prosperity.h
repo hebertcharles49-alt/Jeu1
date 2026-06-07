@@ -50,6 +50,7 @@ typedef struct {
     /* Sorties du moteur vérifié scps_order (§2.4) — la vraie stabilité. */
     float fragilite;       /* part de l'ordre tenue par la contrainte [0..10] */
     float fracture;        /* sécession latente : diverse ET non consentie     */
+    float dereal;          /* déréalisation (§2.3 faustien) — lue par les Âges  */
     float L;               /* légitimité pays agrégée (entrée vivante, exposée) */
     float K;               /* capacité EFFECTIVE (tech+race+bâti) — lue par l'IA */
     int   mode;            /* ScpsMode (stocké en int : n'expose pas scps_core) */
@@ -63,6 +64,13 @@ typedef struct {
      * l'Âge de la Brèche injecte un flux faustien mondial (la fin cosmologique). */
     float             age_C_bonus;      /* + connectivité mondiale [0..5] */
     float             age_breach_flux;  /* + flux faustien mondial → déréalisation */
+    /* Âges STRUCTURELS (Lumières/Soulèvements/Ordre de Fer) — poussent les
+     * ENTRÉES du moteur d'ordre ; le verdict §2.4 fait les conséquences. */
+    float             age_I_bonus;      /* Lumières : surgissement des idées (+ I) */
+    float             age_lumiere_solvent;/* Lumières : la légitimité COERCITIVE se dissout (− L ∝ H) */
+    float             age_L_penalty;    /* Soulèvements : la légitimité ne porte plus (− L) */
+    float             age_H_bonus;      /* Ordre de Fer : la poigne (+ H) */
+    float             age_myth_homogen; /* Ordre de Fer : le mythe nie la diversité (− D̄ effectif) */
 } WorldProsperity;
 
 void prosperity_init(WorldProsperity *wp, const World *w);

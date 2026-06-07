@@ -382,11 +382,78 @@ int events_match_political(const EventsState *ev, World *w, WorldEconomy *econ,
 #define LUM_TOTAL_Y   25.f     /* Lumière mondiale cumulée → Âge de la Raison      */
 #define EMPIRES_INTEG  10      /* régions bien intégrées → Âge des Empires         */
 #define BREACH_CHARGE  5.f     /* charge faustienne quelque part → Âge de la Brèche*/
+/* ---- Âges structurels : seuils & poussées (la surface d'équilibrage) ---- */
+#define LUM_SAVOIR_Y  40.f     /* société de MASSE : savoir mondial cumulé          */
+#define LUM_C_Y        4.f     /* … ET connectée (les idées circulent)              */
+#define MASSE_CRITIQUE 2       /* pays en révolution → contagion des Soulèvements   */
+#define OF_FRAC_Y      3.0f    /* monde qui se fracture …                            */
+#define OF_DEREAL_Y    1.0f    /* … sous charge faustienne …                         */
+#define OF_SI_CRISE    5.0f    /* … en crise ouverte → l'Ordre de Fer répond         */
+#define AGE_DELTA_I    2.0f    /* Lumières : surgissement des idées (+ I)            */
+#define AGE_DELTA_SOLV 2.0f    /* Lumières : dissolution de la légitimité coercitive */
+#define AGE_DELTA_L    2.0f    /* Soulèvements : la légitimité ne porte plus (− L)   */
+#define AGE_DELTA_H    2.5f    /* Ordre de Fer : la poigne (+ H)                     */
+#define AGE_DELTA_MYTH 3.0f    /* Ordre de Fer : le mythe nie la diversité (− D̄)     */
+
+/* Verdict du moteur, mode « révolution » = SCPS_SUBMERGE_REVOLUTION (miroir, on
+ * n'inclut PAS scps_core : on lit l'int déjà stocké dans CountryProsperity). */
+enum { EV_MODE_CONSENTI=0, EV_MODE_COERC_FRAGILE, EV_MODE_REVOLUTION, EV_MODE_SECESSION };
 
 static const char *AGE_NAMES[AGE_COUNT]={
-    "Âge du Commerce Mondial","Âge de la Raison","Âge des Empires","Âge de la Brèche"
+    "Âge du Commerce Mondial","Âge de la Raison","Âge des Empires","Âge de la Brèche",
+    "Âge des Lumières","Âge des Soulèvements","Âge de l'Ordre de Fer"
 };
 const char *age_name(AgeId a){ return (a>=0&&a<AGE_COUNT)?AGE_NAMES[a]:"?"; }
+
+/* ---- Lecteurs de l'état AGRÉGÉ du monde (sur les pays non-vierges) ------ */
+static int nc_loop(const World *w, const WorldProsperity *wp){
+    return (w->n_countries < wp->n_countries) ? w->n_countries : wp->n_countries;
+}
+static float w_total_savoir(const World *w, const WorldProsperity *wp){
+    float s=0.f;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED) s+=wp->country[c].Lumiere;
+    return s;
+}
+static float w_mean_C(const World *w, const WorldProsperity *wp){
+    float s=0.f; int n=0;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED){ s+=wp->country[c].C; n++; }
+    return n? s/(float)n : 0.f;
+}
+static float w_mean_fracture(const World *w, const WorldProsperity *wp){
+    float s=0.f; int n=0;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED){ s+=wp->country[c].fracture; n++; }
+    return n? s/(float)n : 0.f;
+}
+static float w_mean_dereal(const World *w, const WorldProsperity *wp){
+    float s=0.f; int n=0;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED){ s+=wp->country[c].dereal; n++; }
+    return n? s/(float)n : 0.f;
+}
+static float w_mean_SI(const World *w, const WorldProsperity *wp){
+    float s=0.f; int n=0;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED){ s+=wp->country[c].SI; n++; }
+    return n? s/(float)n : 10.f;
+}
+int events_count_revolutionary(const World *w, const WorldProsperity *wp){
+    int n=0;
+    for (int c=0;c<nc_loop(w,wp);c++)
+        if (w->country[c].role!=POLITY_UNCLAIMED && wp->country[c].mode==EV_MODE_REVOLUTION) n++;
+    return n;
+}
+/* Le mythe homogénéisant se diffuse : la foi du trône devient exclusive. */
+static void spread_credo_purificateur(World *w, WorldEconomy *econ){
+    for (int c=0;c<w->n_countries;c++){
+        int cr=cap_region(w,c);
+        if (cr>=0 && cr<econ->n_regions && econ->region[cr].culture.settled
+            && econ->region[cr].culture.credo==CREDO_PLURALISTE)
+            econ->region[cr].culture.credo=CREDO_PURIFICATEUR;
+    }
+}
 
 static bool age_trig_commerce(World *w, WorldEconomy *econ, WorldProsperity *wp, const TechState ts[]){
     (void)w;(void)wp;(void)ts; int rich=0;
@@ -411,15 +478,42 @@ static bool age_trig_breach(World *w, WorldEconomy *econ, WorldProsperity *wp, c
     for (int c=0;c<SCPS_MAX_COUNTRY;c++) if (ts[c].charge > BREACH_CHARGE) return true;
     return false;
 }
+/* ---- Âges STRUCTURELS (chaîne causale : Lumières d'abord) --------------- */
+static bool age_trig_lumieres(World *w, WorldProsperity *wp){
+    if (!wp) return false;
+    return w_total_savoir(w,wp) > LUM_SAVOIR_Y && w_mean_C(w,wp) > LUM_C_Y;
+}
+static bool age_trig_soulevements(const EventsState *ev, World *w, WorldProsperity *wp){
+    if (!ev->ages.dawned[AGE_LUMIERES] || !wp) return false;       /* précondition causale */
+    return events_count_revolutionary(w,wp) >= MASSE_CRITIQUE;     /* verdict du moteur */
+}
+static bool age_trig_ordrefer(const EventsState *ev, World *w, WorldProsperity *wp){
+    if (!ev->ages.dawned[AGE_LUMIERES] || !wp) return false;       /* société de masse */
+    return w_mean_fracture(w,wp) > OF_FRAC_Y
+        && w_mean_dereal(w,wp)   > OF_DEREAL_Y
+        && w_mean_SI(w,wp)       < OF_SI_CRISE;                    /* crise ouverte */
+}
 
-static void age_dawn(EventsState *ev, AgeId a, WorldProsperity *wp){
-    EventCtx cx={ev,NULL,NULL,NULL,wp,NULL,NULL,NULL};
+static void age_dawn(EventsState *ev, AgeId a, World *w, WorldEconomy *econ, WorldProsperity *wp){
+    EventCtx cx={ev,w,econ,NULL,wp,NULL,NULL,NULL};
     EvEffect e; memset(&e,0,sizeof e); e.pop_mult=1.f; e.unlock_branch=-1;
     switch(a){
         case AGE_COMMERCE: e.d_C_global=1.0f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=3; break;
         case AGE_REASON:   ev->ages.research_mult += 0.5f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=4; break;
         case AGE_EMPIRES:  ev->ages.integration_mult += 0.5f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=5; break;
         case AGE_BREACH:   e.d_breach=2.0f; e.unlock_branch=TBR_MAGIC; e.unlock_tier=5; break;
+        /* Structurels : on déplace une ENTRÉE GLOBALE du moteur (le verdict suit). */
+        case AGE_LUMIERES:
+            if (wp){ wp->age_I_bonus += AGE_DELTA_I;            /* les idées surgissent */
+                     wp->age_lumiere_solvent += AGE_DELTA_SOLV; }/* la légitimité coercitive se dissout */
+            e.unlock_branch=TBR_SOCIETY; e.unlock_tier=4;       /* le boon : le savoir */
+            break;
+        case AGE_SOULEVEMENTS: if(wp) wp->age_L_penalty += AGE_DELTA_L; break;   /* L ↓ partout (contagion) */
+        case AGE_ORDRE_FER:
+            if (wp){ wp->age_H_bonus      += AGE_DELTA_H;          /* la poigne */
+                     wp->age_myth_homogen += AGE_DELTA_MYTH; }     /* le mythe nie la diversité */
+            if (w && econ) spread_credo_purificateur(w,econ);
+            break;
         default: break;
     }
     apply_effect(&cx, EV_WORLD, 0, &e);
@@ -429,10 +523,15 @@ static void age_dawn(EventsState *ev, AgeId a, WorldProsperity *wp){
 bool events_check_ages(EventsState *ev, World *w, WorldEconomy *econ,
                        WorldProsperity *wp, WorldLegitimacy *wl, const TechState ts[]){
     bool any=false;
-    if (!ev->ages.dawned[AGE_COMMERCE] && age_trig_commerce(w,econ,wp,ts)){ age_dawn(ev,AGE_COMMERCE,wp); any=true; }
-    if (!ev->ages.dawned[AGE_REASON]   && age_trig_reason  (w,econ,wp,ts)){ age_dawn(ev,AGE_REASON,wp);   any=true; }
-    if (!ev->ages.dawned[AGE_EMPIRES]  && age_trig_empires (w,econ,wp,ts,wl)){ age_dawn(ev,AGE_EMPIRES,wp);any=true; }
-    if (!ev->ages.dawned[AGE_BREACH]   && age_trig_breach  (w,econ,wp,ts)){ age_dawn(ev,AGE_BREACH,wp);   any=true; }
+    if (!ev->ages.dawned[AGE_COMMERCE] && age_trig_commerce(w,econ,wp,ts)){ age_dawn(ev,AGE_COMMERCE,w,econ,wp); any=true; }
+    if (!ev->ages.dawned[AGE_REASON]   && age_trig_reason  (w,econ,wp,ts)){ age_dawn(ev,AGE_REASON,w,econ,wp);   any=true; }
+    /* Lumières AVANT les âges politiques (la société de masse d'abord). */
+    if (!ev->ages.dawned[AGE_LUMIERES] && age_trig_lumieres(w,wp))        { age_dawn(ev,AGE_LUMIERES,w,econ,wp); any=true; }
+    if (!ev->ages.dawned[AGE_EMPIRES]  && age_trig_empires (w,econ,wp,ts,wl)){ age_dawn(ev,AGE_EMPIRES,w,econ,wp);any=true; }
+    if (!ev->ages.dawned[AGE_BREACH]   && age_trig_breach  (w,econ,wp,ts)){ age_dawn(ev,AGE_BREACH,w,econ,wp);   any=true; }
+    /* Politiques : exigent que les Lumières aient eu lieu (causalité). */
+    if (!ev->ages.dawned[AGE_SOULEVEMENTS] && age_trig_soulevements(ev,w,wp)){ age_dawn(ev,AGE_SOULEVEMENTS,w,econ,wp); any=true; }
+    if (!ev->ages.dawned[AGE_ORDRE_FER]    && age_trig_ordrefer   (ev,w,wp)){ age_dawn(ev,AGE_ORDRE_FER,w,econ,wp);    any=true; }
     return any;
 }
 bool  ages_dawned(const EventsState *ev, AgeId a){ return (a>=0&&a<AGE_COUNT)?ev->ages.dawned[a]:false; }
@@ -489,6 +588,18 @@ void world_events_tick(EventsState *ev, World *w, WorldEconomy *econ,
 
     /* 3. ÂGES — scan d'interprétation du monde. */
     events_check_ages(ev,w,econ,wp,wl,ts);
+
+    /* Résorption TRANSITOIRE de l'amplification structurelle : la crise aiguë
+     * retombe à mesure que les pays tranchent (réforme / poigne / effondrement)
+     * — résolution émergente, pas un minuteur. Les acquis (palier, credo) restent. */
+    if (wp){
+        float k = clampf(0.0004f*(float)days, 0.f, 1.f);
+        wp->age_I_bonus         -= wp->age_I_bonus         * k;
+        wp->age_lumiere_solvent -= wp->age_lumiere_solvent * k;
+        wp->age_L_penalty       -= wp->age_L_penalty       * k;
+        wp->age_H_bonus         -= wp->age_H_bonus         * k;
+        wp->age_myth_homogen    -= wp->age_myth_homogen    * k;
+    }
 }
 
 /* ===================================================================== */

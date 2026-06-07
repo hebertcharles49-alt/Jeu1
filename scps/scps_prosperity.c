@@ -300,12 +300,33 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
             st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
             cp->P_potentiel += clampf(bPE,0.f,8.f);    /* infrastructure + carrefour commercial */
         }
+
+        /* ---- ÂGES STRUCTURELS : on POUSSE les entrées globales du moteur ---- *
+         * Aucun mécanisme de révolution/fascisme codé : le verdict §2.4
+         * (révolution/sécession/coercitif-fragile, fragilité) produit les
+         * conséquences pays par pays. L'âge n'est qu'une pression sur une
+         * coordonnée mondiale ; la catastrophe est émergente.
+         *   Lumières     : + I  (les idées surgissent)
+         *   Soulèvements : − L  (la légitimité ne porte plus l'ordre — contagion)
+         *   Ordre de Fer : + H  (la poigne) ET − D̄ effectif (le mythe NIE la
+         *                  diversité au lieu de la métaboliser) → ordre APPARENT
+         *                  haut mais fragilité maxée : le géant cassant. */
+        st.I     = clampf(st.I     + wp->age_I_bonus,      0.f, 10.f);
+        st.H     = clampf(st.H     + wp->age_H_bonus,      0.f, 10.f);
+        st.D_bar = clampf(st.D_bar - wp->age_myth_homogen, 0.f, 10.f);
+        /* Les Lumières DISSOLVENT la légitimité coercitive : un ordre qui reposait
+         * sur la poigne (H haut) en perd d'autant plus — sa fragilité monte. Un
+         * ordre consenti (H bas) n'y perd presque rien. */
+        st.L     = clampf(Lg - wp->age_L_penalty - wp->age_lumiere_solvent*(st.H/10.f),
+                          0.f, 10.f);
+
         cp->K = st.K;   /* capacité EFFECTIVE (tech+race+bâti) — lue par l'IA (frein D∞/K) */
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;
         cp->fragilite = o.fragilite;
         cp->fracture  = o.fracture;
-        cp->L         = Lg;                  /* exposé pour la membrane (légitimité pays) */
+        cp->dereal    = o.dereal;            /* déréalisation faustienne — lue par les Âges */
+        cp->L         = st.L;                /* exposé pour la membrane (légitimité EFFECTIVE) */
         cp->mode      = (int)scps_mode(&o);
         cp->rendement = clampf((o.SI / 10.f) * (1.f - LAMBDA * o.fragilite / 10.f), 0.f, 1.f);
         cp->P_realise = cp->P_potentiel * cp->rendement * (1.f + race_prod);  /* productivité de race */

@@ -190,6 +190,20 @@ EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 events_demo: $(EVENTS_DEMO_OBJS)
 	$(CC) $(EVENTS_DEMO_OBJS) -o $@ -lm
 
+# ---- Âges structurels : Lumières, Soulèvements, l'Ordre de Fer ------------
+# Ils poussent les ENTRÉES du moteur d'ordre ; le verdict §2.4 fait le reste.
+STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                    $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
+                    $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
+                    $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
+                    $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_events.o \
+                    $(OBJDIR)/scps_structural_demo.o
+structural_demo: $(STRUCTURAL_DEMO_OBJS)
+	$(CC) $(STRUCTURAL_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \

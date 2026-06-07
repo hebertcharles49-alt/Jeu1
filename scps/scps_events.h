@@ -80,7 +80,15 @@ typedef enum {
 /* ===================================================================== */
 /* ÂGES — déclenchés par une LECTURE du monde (§4)                        */
 /* ===================================================================== */
-typedef enum { AGE_COMMERCE = 0, AGE_REASON, AGE_EMPIRES, AGE_BREACH, AGE_COUNT } AgeId;
+typedef enum {
+    AGE_COMMERCE = 0, AGE_REASON, AGE_EMPIRES, AGE_BREACH,
+    /* Âges STRUCTURELS — lisent la crise & les idées, poussent les ENTRÉES du
+     * moteur d'ordre (I/L/H), laissent le verdict §2.4 faire les conséquences.
+     * Chaîne causale : les Lumières d'abord (société de masse), puis le fork
+     * Soulèvements (le consentement renverse) ↔ Ordre de Fer (la poigne écrase). */
+    AGE_LUMIERES, AGE_SOULEVEMENTS, AGE_ORDRE_FER,
+    AGE_COUNT
+} AgeId;
 
 typedef struct {
     bool  dawned[AGE_COUNT];
@@ -161,6 +169,10 @@ bool  ages_dawned(const EventsState *ev, AgeId a);
 bool  ages_tier_open(const EventsState *ev, TechBranch br, int tier);
 float ages_breach_pressure(const EventsState *ev);
 const char *age_name(AgeId a);
+/* Verdict du MOTEUR agrégé : combien de pays sont en mode révolutionnaire
+ * (SI<5 & pression≥fracture) — la masse critique des Soulèvements, sans aucun
+ * code de révolution dédié. */
+int   events_count_revolutionary(const World *w, const WorldProsperity *wp);
 
 /* ---- Garde-fou membrane : aucun nom SCPS dans les textes joueur -------- */
 bool  events_text_clean(void);

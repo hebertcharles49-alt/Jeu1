@@ -202,6 +202,15 @@ static Edifice ai_next_k_edifice(const WorldEconomy *econ, int region){
     if (k < 2.5f) return EDI_CHANCELLERIE;
     return EDI_ACADEMIE;
 }
+/* Progression coercitive H : Garnison → Forteresse → Citadelle (le chemin de
+ * l'Ordre de Fer : tenir par la force au lieu de métaboliser). */
+static Edifice ai_next_h_edifice(const WorldEconomy *econ, int region){
+    if (region<0 || region>=econ->n_regions) return EDI_GARNISON;
+    float h = econ->region[region].build.H_coerc;
+    if (h < 1.0f) return EDI_GARNISON;
+    if (h < 3.0f) return EDI_FORTERESSE;
+    return EDI_CITADELLE;
+}
 
 /* ===================================================================== */
 /* TOURS DE DÉCISION                                                       */
@@ -221,13 +230,24 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
     /* On décharge le seau le plus plein (≥ 1). */
     if (a->credit_build>=1.f && a->credit_build>=a->credit_trade){
         a->credit_build -= 1.f;
-        Edifice e = ai_next_k_edifice(econ, a->home_region);
-        if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)){
-            /* K de TEMPÉRAMENT (proactif, la marque du Bâtisseur) vs K de DIGESTION
-             * (réactif, imposé par le frein quand on a trop avalé) — on ne les
-             * confond pas : la personnalité se lit dans le premier. */
-            if (brake > AI_BRAKE_HARD) a->stats.builds_other++;
-            else                       a->stats.builds_k++;
+        /* LE FORK (§ Soulèvements/Ordre de Fer) : sous une crise OUVERTE, un
+         * tempérament COERCITIF (appétit de conquête haut) SERRE — il bâtit du H
+         * (Garnison→Citadelle : tenir par la force, le chemin de l'Ordre de Fer)
+         * au lieu de métaboliser. Les autres RÉFORMENT — ils bâtissent du K.
+         * Aucun « si révolution alors » : c'est le même levier (bâtir), choisi
+         * par la fiche ; le moteur d'ordre fait le verdict. */
+        if (brake > AI_BRAKE_HARD && a->w_expand >= 0.60f){
+            Edifice e = ai_next_h_edifice(econ, a->home_region);
+            if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)) a->stats.builds_h++;
+        } else {
+            Edifice e = ai_next_k_edifice(econ, a->home_region);
+            if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)){
+                /* K de TEMPÉRAMENT (proactif, la marque du Bâtisseur) vs K de DIGESTION
+                 * (réactif, imposé par le frein quand on a trop avalé) — on ne les
+                 * confond pas : la personnalité se lit dans le premier. */
+                if (brake > AI_BRAKE_HARD) a->stats.builds_other++;
+                else                       a->stats.builds_k++;
+            }
         }
     } else if (a->credit_trade>=1.f){
         a->credit_trade -= 1.f;
