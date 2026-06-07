@@ -1,0 +1,289 @@
+/*
+ * scps_demography.c — la clé de voûte : la province contient des groupes
+ *
+ * D interne PAR province (entre groupes), H jouable (suppression réversible),
+ * assimilation incarnée (dérive durable via scps_modifier), L/fracture vécues.
+ * On RÉUTILISE la formule de légitimité existante (mêmes constantes) → une
+ * province mono-groupe reproduit les nombres d'aujourd'hui (non-régression).
+ */
+#include "scps_demography.h"
+#include "scps_culture.h"   /* ethos_name */
+#include <string.h>
+#include <math.h>
+#include <stdio.h>
+
+/* ---- Constantes de légitimité (miroir de scps_legitimacy : non-régression) */
+#define K_ALIGN          1.0f
+#define W_ALIGN          0.55f
+#define W_AISANCE        0.45f
+#define K_COERC          3.0f
+#define K_H              0.4f
+#define K_BUILD_H        0.6f
+#define RELAX_RATE       0.04f
+/* ---- Coercition (§3) — surface d'équilibrage -------------------------- */
+#define COERCE_L_THRESH  4.0f   /* on ne réprime que les groupes restifs (L basse) */
+#define SUPPRESS_PER_H   8.0f   /* baisse d'agitation par point de H (réversible) */
+#define L_DROP_PER_H     0.06f  /* régner par la force ronge la L du groupe */
+#define FRAG_PER_H       0.5f
+/* ---- Assimilation (§5) ------------------------------------------------ */
+#define YEARS_PER_DINF   10.0f  /* timer ∝ D∞ (gouffre) */
+#define ASSIM_MIN_YEARS  12.0f
+#define ASSIM_MAX_YEARS  200.0f
+#define FUSE_EPS         0.30f   /* distance de contenu sous laquelle on fusionne */
+
+static inline float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
+static inline float absf(float v){ return v<0?-v:v; }
+
+/* Distance de CONTENU (L∞, langue exclue) — la friction. */
+static float content_dist(const PopCulture *a, const PopCulture *b){
+    float dv=absf(a->valeurs-b->valeurs), ds=absf(a->subsistance-b->subsistance);
+    float dp=absf(a->parente-b->parente), dr=absf(a->religion-b->religion);
+    float m=dv; if(ds>m)m=ds; if(dp>m)m=dp; if(dr>m)m=dr; return m;
+}
+static float agit_from_L(float L){ return clampf((6.f - L)*15.f, 0.f, 100.f); }
+
+/* ===================================================================== */
+/* FICHE EFFECTIVE = origine + dérive (recalcul, jamais mutation)         */
+/* ===================================================================== */
+PopCulture group_culture_effective(const PopGroup *g, const ModifierStack *drift){
+    PopCulture c = g->origin;
+    if (drift){
+        GroupDrift d = modstack_group_drift(drift, g->drift_id);
+        c.valeurs     = clampf(c.valeurs     + d.dCv, 0.f, 10.f);
+        c.subsistance = clampf(c.subsistance + d.dCs, 0.f, 10.f);
+        c.parente     = clampf(c.parente     + d.dCp, 0.f, 10.f);
+        c.religion    = clampf(c.religion    + d.dCr, 0.f, 10.f);
+    }
+    return c;
+}
+float group_agitation_effective(const PopGroup *g, const ModifierStack *drift){
+    float suppress = drift ? modstack_group_drift(drift, g->drift_id).dAgit : 0.f;
+    return clampf(g->agit_base - suppress, 0.f, 100.f);   /* la suppression MASQUE l'agitation vraie */
+}
+
+/* ===================================================================== */
+/* LECTURES DE PROVINCE (§2)                                              */
+/* ===================================================================== */
+const PopGroup *province_dominant(const ProvincePop *pp){
+    if (pp->n_groups<=0) return NULL;
+    int best=0; for (int i=1;i<pp->n_groups;i++) if (pp->groups[i].count>pp->groups[best].count) best=i;
+    return &pp->groups[best];
+}
+long province_total_pop(const ProvincePop *pp){
+    long t=0; for (int i=0;i<pp->n_groups;i++) t+=pp->groups[i].count; return t;
+}
+/* D̄ interne = moyenne PONDÉRÉE des distances inter-groupes. */
+float province_Dbar(const ProvincePop *pp, const ModifierStack *drift){
+    double sw=0, sd=0;
+    for (int i=0;i<pp->n_groups;i++){
+        PopCulture ci=group_culture_effective(&pp->groups[i],drift);
+        for (int j=i+1;j<pp->n_groups;j++){
+            PopCulture cj=group_culture_effective(&pp->groups[j],drift);
+            double w=(double)pp->groups[i].count*pp->groups[j].count;
+            sd += w*content_dist(&ci,&cj); sw += w;
+        }
+    }
+    return sw>0 ? (float)(sd/sw) : 0.f;
+}
+/* D∞ interne = MAILLON FAIBLE (max distance inter-groupes). */
+float province_Dinf(const ProvincePop *pp, const ModifierStack *drift){
+    float m=0;
+    for (int i=0;i<pp->n_groups;i++){
+        PopCulture ci=group_culture_effective(&pp->groups[i],drift);
+        for (int j=i+1;j<pp->n_groups;j++){
+            PopCulture cj=group_culture_effective(&pp->groups[j],drift);
+            float d=content_dist(&ci,&cj); if(d>m)m=d;
+        }
+    }
+    return m;
+}
+float province_L(const ProvincePop *pp){
+    double num=0, den=0;
+    for (int i=0;i<pp->n_groups;i++){ num+=(double)pp->groups[i].count*pp->groups[i].L; den+=pp->groups[i].count; }
+    return den>0 ? (float)(num/den) : 5.f;
+}
+float province_agitation(const ProvincePop *pp, const ModifierStack *drift){
+    double num=0, den=0;
+    for (int i=0;i<pp->n_groups;i++){
+        num+=(double)pp->groups[i].count*group_agitation_effective(&pp->groups[i],drift);
+        den+=pp->groups[i].count;
+    }
+    return den>0 ? (float)(num/den) : 0.f;
+}
+
+/* ===================================================================== */
+/* LÉGITIMITÉ PAR GROUPE (formule existante, clé sur culture vs couronne) */
+/* ===================================================================== */
+float group_L_target(const PopGroup *g, const ModifierStack *drift, const PopCulture *crown,
+                     float satisfaction, float integ, float country_H, float coercion, float build_H){
+    PopCulture eff = group_culture_effective(g, drift);
+    float align   = crown ? (10.f - K_ALIGN*content_dist(&eff, crown)) : 5.f;
+    float aisance = clampf(satisfaction*10.f, 0.f, 10.f);
+    float ombre   = K_COERC*coercion + K_H*country_H + K_BUILD_H*build_H;
+    float Lstar   = (W_ALIGN*align + W_AISANCE*aisance)*integ - ombre;
+    return clampf(Lstar, 0.f, 10.f);
+}
+void group_L_tick(PopGroup *g, const ModifierStack *drift, const PopCulture *crown,
+                  float satisfaction, float country_H, float coercion, float build_H){
+    float Lstar = group_L_target(g, drift, crown, satisfaction, g->integration, country_H, coercion, build_H);
+    g->L += (Lstar - g->L)*RELAX_RATE;
+    g->L = clampf(g->L, 0.f, 10.f);
+    g->agit_base = agit_from_L(g->L);
+}
+
+/* ===================================================================== */
+/* H JOUABLE — SUPPRIME (réversible), n'assimile pas (§3)                  */
+/* ===================================================================== */
+CoercionEffect province_apply_coercion(ProvincePop *pp, ModifierStack *drift, float H){
+    CoercionEffect e={0,0,0};
+    const PopGroup *dom=province_dominant(pp);
+    for (int i=0;i<pp->n_groups;i++){
+        PopGroup *g=&pp->groups[i];
+        if (g==dom || g->L>=COERCE_L_THRESH) continue;     /* on ne réprime que le restif */
+        GroupDrift s={0,0,0,0, H*SUPPRESS_PER_H};
+        modstack_accumulate_drift(drift, g->drift_id, s, true);   /* RÉVERSIBLE (saute si H tombe) */
+        g->L = clampf(g->L - H*L_DROP_PER_H, 0.f, 10.f);          /* régner par la force ronge L */
+        g->agit_base = agit_from_L(g->L);                         /* l'agitation VRAIE monte (masquée) */
+        e.agitation_drop += H*SUPPRESS_PER_H; e.L_drop += H*L_DROP_PER_H; e.fragility_rise += H*FRAG_PER_H;
+    }
+    return e;
+}
+void province_lift_coercion(ProvincePop *pp, ModifierStack *drift){
+    for (int i=0;i<pp->n_groups;i++) modstack_drop_reversible(drift, pp->groups[i].drift_id);
+}
+
+/* ===================================================================== */
+/* ASSIMILATION — dérive DURABLE, timer ∝ D∞ (gouffre §5)                 */
+/* ===================================================================== */
+float assimilation_years(float Dinf, float P, float K){
+    float metab = 0.5f + (P+K)/20.f;          /* P+K accélèrent (la capacité métabolise) */
+    return clampf(Dinf*YEARS_PER_DINF/metab, ASSIM_MIN_YEARS, ASSIM_MAX_YEARS);
+}
+int assimilation_tick(ProvincePop *pp, ModifierStack *drift, float P, float K, float ypt){
+    if (pp->n_groups<2) return 0;
+    const PopGroup *dom=province_dominant(pp);
+    int dom_idx=(int)(dom-pp->groups);
+    PopCulture target=group_culture_effective(dom, drift);
+    int fused=0;
+    for (int i=pp->n_groups-1;i>=0;i--){
+        if (i==dom_idx) continue;
+        PopGroup *g=&pp->groups[i];
+        PopCulture eff=group_culture_effective(g, drift);
+        float d=content_dist(&eff,&target);
+        if (d<FUSE_EPS){                                   /* fusion dans le dominant */
+            pp->groups[dom_idx].count += g->count;
+            int last=pp->n_groups-1;
+            pp->groups[i]=pp->groups[last]; pp->n_groups--;
+            if (dom_idx==last) dom_idx=i;
+            fused++; continue;
+        }
+        float years=assimilation_years(d,P,K);
+        float rate=ypt/fmaxf(years,1.f);
+        GroupDrift step={ (target.valeurs    -eff.valeurs)    *rate,
+                          (target.subsistance-eff.subsistance)*rate,
+                          (target.parente    -eff.parente)    *rate,
+                          (target.religion   -eff.religion)   *rate, 0.f };
+        modstack_accumulate_drift(drift, g->drift_id, step, false);   /* DURABLE (métabolisé) */
+        g->integration = clampf(g->integration + ypt/years, 0.f, 1.f);
+    }
+    return fused;
+}
+
+/* ===================================================================== */
+/* MIGRATION PASSIVE — emporte race + culture (§4)                        */
+/* ===================================================================== */
+bool migration_move(ProvincePop *from, ProvincePop *to, int gi, long amount, int new_drift_id){
+    if (gi<0||gi>=from->n_groups) return false;
+    PopGroup *src=&from->groups[gi];
+    if (amount>src->count) amount=src->count;
+    if (amount<=0) return false;
+    /* groupe d'accueil = même race ET même culture d'origine ? sinon DIASPORA. */
+    int dst=-1;
+    for (int i=0;i<to->n_groups;i++)
+        if (to->groups[i].race==src->race && content_dist(&to->groups[i].origin,&src->origin)<FUSE_EPS){ dst=i; break; }
+    if (dst<0){
+        if (to->n_groups>=DEMO_MAX_GROUPS) return false;
+        PopGroup ng=*src;                    /* garde species/culture → minorité à l'arrivée */
+        ng.count=amount; ng.diaspora=true; ng.integration=0.f; ng.drift_id=new_drift_id;
+        to->groups[to->n_groups++]=ng;       /* crée du D interne dans la cible */
+    } else {
+        to->groups[dst].count += amount;
+    }
+    src->count -= amount;
+    if (src->count<=0){ from->groups[gi]=from->groups[from->n_groups-1]; from->n_groups--; }
+    return true;
+}
+
+/* ===================================================================== */
+/* AGRÉGATION PAYS (§2, §6) — alimente scps_order (inchangé)              */
+/* ===================================================================== */
+/* On rassemble toutes les fiches effectives du pays, puis maillon faible. */
+static int collect(const ProvincePop *provs, int n, const ModifierStack *drift,
+                   PopCulture out[], long w[], int max){
+    int k=0;
+    for (int p=0;p<n && k<max;p++) for (int i=0;i<provs[p].n_groups && k<max;i++){
+        out[k]=group_culture_effective(&provs[p].groups[i],drift); w[k]=provs[p].groups[i].count; k++;
+    }
+    return k;
+}
+float country_Dbar(const ProvincePop *provs, int n, const ModifierStack *drift){
+    PopCulture c[DEMO_MAX_GROUPS*16]; long w[DEMO_MAX_GROUPS*16];
+    int k=collect(provs,n,drift,c,w,DEMO_MAX_GROUPS*16);
+    double sw=0,sd=0;
+    for (int i=0;i<k;i++) for (int j=i+1;j<k;j++){ double ww=(double)w[i]*w[j]; sd+=ww*content_dist(&c[i],&c[j]); sw+=ww; }
+    return sw>0?(float)(sd/sw):0.f;
+}
+float country_Dinf(const ProvincePop *provs, int n, const ModifierStack *drift){
+    PopCulture c[DEMO_MAX_GROUPS*16]; long w[DEMO_MAX_GROUPS*16];
+    int k=collect(provs,n,drift,c,w,DEMO_MAX_GROUPS*16);
+    float m=0;
+    for (int i=0;i<k;i++) for (int j=i+1;j<k;j++){ float d=content_dist(&c[i],&c[j]); if(d>m)m=d; }
+    return m;
+}
+float country_L(const ProvincePop *provs, int n){
+    double num=0,den=0;
+    for (int p=0;p<n;p++) for (int i=0;i<provs[p].n_groups;i++){
+        num+=(double)provs[p].groups[i].count*provs[p].groups[i].L; den+=provs[p].groups[i].count;
+    }
+    return den>0?(float)(num/den):5.f;
+}
+
+/* ===================================================================== */
+/* COMPOSITION (§6) — la membrane : des mots, jamais de SCPS brut         */
+/* ===================================================================== */
+const char *labor_class_word(SocialClass k){
+    switch(k){ case CLASS_ELITE: return "Noblesse"; case CLASS_BOURGEOIS: return "Artisans";
+               default: return "Laboureurs"; }
+}
+int province_composition(const ProvincePop *pp, const ModifierStack *drift,
+                         const PopCulture *crown, float P, float K,
+                         GroupReadout out[], int max){
+    static char etat_buf[DEMO_MAX_GROUPS][48];
+    long total=province_total_pop(pp); if(total<1)total=1;
+    const PopGroup *dom=province_dominant(pp);
+    PopCulture domc=group_culture_effective(dom,drift);
+    int n=0;
+    for (int i=0;i<pp->n_groups && n<max;i++){
+        const PopGroup *g=&pp->groups[i];
+        PopCulture eff=group_culture_effective(g,drift);
+        GroupReadout *r=&out[n];
+        r->race    = species_name(g->race);
+        r->culture = ethos_name(eff.ethos);
+        r->klass   = labor_class_word(g->klass);
+        r->percent = (int)(100*g->count/total);
+        r->loyaute = band_humeur(g->L);
+        if (g->diaspora){ r->etat="diaspora"; }
+        else if (g==dom){ r->etat="natif"; }
+        else {
+            float d=content_dist(&eff, crown?crown:&domc);
+            if (d<0.6f){ r->etat="natif"; }
+            else {
+                int yrs=(int)(assimilation_years(d,P,K)+0.5f);
+                snprintf(etat_buf[n],sizeof etat_buf[n], "en assimilation (%d ans)", yrs);
+                r->etat=etat_buf[n];
+            }
+        }
+        n++;
+    }
+    return n;
+}

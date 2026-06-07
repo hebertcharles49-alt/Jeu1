@@ -219,6 +219,17 @@ ARMY_DEMO_OBJS := $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_army.o \
 army_demo: $(ARMY_DEMO_OBJS)
 	$(CC) $(ARMY_DEMO_OBJS) -o $@ -lm
 
+# ---- Le refactor démographique : la province contient des GROUPES (clé de voûte)
+# Branche scps_modifier (pile de dérive). Alimente scps_order (inchangé).
+DEMOGRAPHY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o \
+                    $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
+                    $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
+                    $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_modifier.o \
+                    $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_demography_demo.o
+demography_demo: $(DEMOGRAPHY_DEMO_OBJS)
+	$(CC) $(DEMOGRAPHY_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \
