@@ -297,6 +297,7 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
             st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
             cp->P_potentiel += clampf(bPE,0.f,8.f);    /* infrastructure + carrefour commercial */
         }
+        cp->K = st.K;   /* capacité EFFECTIVE (tech+race+bâti) — lue par l'IA (frein D∞/K) */
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;
         cp->fragilite = o.fragilite;
