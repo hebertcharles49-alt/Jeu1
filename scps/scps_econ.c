@@ -116,6 +116,29 @@ static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
 
 static inline float clampf(float v,float lo,float hi){return v<lo?lo:(v>hi?hi:v);}
 
+/* §4 (catalogue des biens) — DEMANDE par VARIANTE CULTURELLE. Les biens d'un
+ * peuple ne sont pas d'autres biens : ce sont les variantes d'un même palier.
+ * Une minorité d'une autre SPHÈRE réclame SES variantes (un orque méprise le
+ * verre fin, un nain boude le vin) ; lui servir celles du dominant la satisfait
+ * MAL. L'ASSIMILATION (integration↑, via le refactor démographique) fait DÉRIVER
+ * sa demande vers la dominante → la pénalité s'efface sur les générations.
+ * Renvoie la fraction de pop « mal servie » [0..1] (0 si province homogène). */
+float econ_off_culture_fraction(const ProvincePop *pp){
+    if (!pp || pp->n_groups<=1) return 0.f;
+    int dom=-1; long best=-1;
+    for (int i=0;i<pp->n_groups;i++) if (pp->groups[i].count>best){ best=pp->groups[i].count; dom=i; }
+    if (dom<0) return 0.f;
+    Sphere doms = pp->groups[dom].origin_sphere;
+    long total=0; float off=0.f;
+    for (int i=0;i<pp->n_groups;i++){
+        total += pp->groups[i].count;
+        float sd   = sphere_distance(doms, pp->groups[i].origin_sphere)/7.f; /* normalisé 0..1 */
+        float mism = sd * (1.f - clampf(pp->groups[i].integration,0.f,1.f)); /* l'assimilation efface */
+        off += mism * (float)pp->groups[i].count;
+    }
+    return (total>0)? off/(float)total : 0.f;
+}
+
 const char *social_class_name(SocialClass c) {
     static const char *N[CLASS_COUNT]={"Laborers","Bourgeois","Élites"};
     return (c>=0&&c<CLASS_COUNT)?N[c]:"?";
@@ -559,6 +582,12 @@ void econ_tick(WorldEconomy *e, float dt) {
             }
             re->food_sat   = (food_need>0.f)?clampf(food_met/food_need,0.f,1.f):0.5f;
             re->society_sat= (soc_need >0.f)?clampf(soc_met /soc_need ,0.f,1.f):0.5f;
+            /* §4 — pénalité OFF-CULTURE : une minorité d'une autre sphère est MAL
+             * servie par les biens (confort/moral/luxe) de la culture dominante.
+             * Frappe la satisfaction SOCIALE — PAS les vivres (food_sat épargné,
+             * universel) → la survie/croissance ne sont pas punies par la
+             * diversité ; l'assimilation efface la pénalité. */
+            re->society_sat *= (1.f - 0.60f*econ_off_culture_fraction(&re->pop));
         }
 
         /* Croissance calibrée : doublement ~30 ans à food_sat=1, soc=0.5
@@ -593,6 +622,9 @@ void econ_tick(WorldEconomy *e, float dt) {
             satsum+=st->satisfaction*st->pop; popsum+=st->pop;
         }
         re->satisfaction=(popsum>0.f)?satsum/popsum:0.f;
+        /* l'insatisfaction off-culture pèse sur la satisfaction GÉNÉRALE (donc
+         * prospérité/légitimité/impôt) — mais food_sat reste intact (la survie). */
+        re->satisfaction *= (1.f - 0.45f*econ_off_culture_fraction(&re->pop));
         re->prosperity = re->gdp/(popsum+1.f);
 
         /* Tech : les élites convertissent richesse × satisfaction en savoir. */

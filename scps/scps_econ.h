@@ -204,6 +204,11 @@ void econ_tick(WorldEconomy *e, float dt);
  * au-delà duquel on fuit l'impôt et l'on gronde. Exposé pour les bancs d'essai. */
 float econ_tax_tolerance(Ethos e, SocialClass c);
 
+/* §4 (catalogue des biens) — fraction de pop « mal servie » d'une province :
+ * une minorité d'une autre SPHÈRE réclame ses variantes ; l'assimilation efface
+ * la pénalité. 0 si la province est homogène. Frappe la satisfaction SOCIALE. */
+float econ_off_culture_fraction(const ProvincePop *pp);
+
 /* Pas de colonisation : joueur et antagonistes essaiment vers les régions
  * vierges voisines ; les cités-états colonisent leurs propres territoires
  * non encore peuplés. À appeler après econ_tick(). Renvoie le nb de régions
