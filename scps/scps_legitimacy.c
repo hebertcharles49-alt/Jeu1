@@ -16,6 +16,7 @@
 #define YEARS_INTEGRATE  40.f     /* durée pleine d'intégration        */
 #define RELAX_RATE       0.04f    /* inertie : L tend lentement vers L* */
 #define L_CONQUEST_FLOOR 1.5f
+#define K_BUILD_H        0.6f     /* la coercition BÂTIE (garnisons) ronge L */
 
 static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -86,7 +87,10 @@ void legitimacy_tick(WorldLegitimacy *wl, const World *w,
         float aisance = clampf(re->satisfaction * 10.f, 0.f, 10.f);
 
         float country_H = (ts && cid >= 0 && cid < w->n_countries) ? ts[cid].H : 0.f;
-        float ombre = K_COERC * re->coercion + K_H * country_H;
+        /* coercition reçue + densité coercitive BÂTIE (garnisons/citadelles)
+         * → tenir par la force baisse le consentement local. */
+        float ombre = K_COERC * re->coercion + K_H * country_H
+                    + K_BUILD_H * re->build.H_coerc;
 
         float Lstar = (W_ALIGN * align + W_AISANCE * aisance) * integ - ombre;
         Lstar = clampf(Lstar, 0.f, 10.f);

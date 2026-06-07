@@ -96,10 +96,24 @@ typedef struct {
     SpeciesArchetype race;
 } PopCulture;
 
+/* ---- Densité institutionnelle bâtie (couche d'agency) ----------------- *
+ * Un bâtiment n'est pas un bonus : c'est de la densité institutionnelle
+ * RÉALISÉE qui déplace une coordonnée que le moteur d'ordre LIT. Ces
+ * accumulateurs sont remplis par scps_agency (à l'achèvement d'un édifice) et
+ * relus par prosperity_tick (K/P/H) et legitimacy_tick (H ronge L). */
+typedef struct {
+    float K_inst;    /* institutionnel → monte K du pays */
+    float H_coerc;   /* coercitif      → monte H, RONGE L local */
+    float P_open;    /* ouverture      → monte P (perméabilité) */
+    float PE_infra;  /* prospérité     → capte plus de PE local */
+    float food_cap;  /* rendement/stockage alimentaire → croissance */
+} ProvBuild;
+
 /* ---- Économie d'une région -------------------------------------------- */
 typedef struct {
     PopStratum strata[CLASS_COUNT];
     PopCulture culture;   /* profil culturel de la population locale */
+    ProvBuild  build;     /* densité institutionnelle bâtie par le joueur */
 
     float      raw_cap[RES_COUNT];   /* extraction max/tick par matière première */
     Building   bld[ECON_MAX_BLD];

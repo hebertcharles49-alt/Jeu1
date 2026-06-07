@@ -276,6 +276,21 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
                 st.D_bar = clampf(st.D_bar + lev.fracture,     0.f, 10.f);  /* fracture interne */
             }
         }
+
+        /* Densité institutionnelle BÂTIE par le joueur (couche d'agency) :
+         * agrège les édifices du pays sur K/P/H, plafond ±5 (rendements
+         * décroissants). Un Tribunal monte K, une Citadelle monte H. */
+        {
+            float bK=0.f, bP=0.f, bH=0.f;
+            for (int r=0;r<econ->n_regions;r++) if (w->region[r].country==cid) {
+                bK += econ->region[r].build.K_inst;
+                bP += econ->region[r].build.P_open;
+                bH += econ->region[r].build.H_coerc;
+            }
+            st.K = clampf(st.K + clampf(bK,0.f,5.f), 0.f, 10.f);
+            st.P = clampf(st.P + clampf(bP,0.f,5.f), 0.f, 10.f);
+            st.H = clampf(st.H + clampf(bH,0.f,5.f), 0.f, 10.f);
+        }
         ScpsOrder o = scps_order(&st);
         cp->SI        = o.SI;
         cp->fragilite = o.fragilite;
