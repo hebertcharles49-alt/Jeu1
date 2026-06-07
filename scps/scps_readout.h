@@ -100,6 +100,10 @@ typedef struct {
     bool          diaspora;
     MetricReadout agitation;   /* 0-100 : L bas + coercition + tension de diversité */
     bool          seuil_revolte;/* l'agitation a franchi le seuil de révolte */
+    /* LISIBILITÉ DES BÂTIMENTS (0-100 + mot) — ce que les édifices font, en
+     * clair : Logements (capacité à loger/nourrir), Services (admin/savoir/foi/
+     * biens sociaux), Ordre (consentement + garnison − agitation). */
+    MetricReadout logements, services, ordre;
 } ProvinceReadout;
 
 /* ===================================================================== */

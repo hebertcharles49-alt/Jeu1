@@ -151,6 +151,11 @@ static MetricReadout mk_metric(int value, const char *word, const char *hover) {
     MetricReadout m; m.value = value; m.word = word; m.hover = hover; return m;
 }
 
+/* ---- Lisibilité des bâtiments : un nombre 0-100 → un MOT de quatre bandes -- */
+static const char *word4(int v, const char *a, const char *b, const char *c, const char *d){
+    return (v < 25) ? a : (v < 50) ? b : (v < 75) ? c : d;
+}
+
 /* ===================================================================== */
 /* ASSEMBLAGE                                                             */
 /* ===================================================================== */
@@ -410,5 +415,38 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
                                   country_stab, garrison);
     pr.agitation     = mk_metric(agit, label_agitation(band_agitation(agit)), hover_agitation());
     pr.seuil_revolte = revolt_threshold_reached(agit);
+
+    /* ── LISIBILITÉ DES BÂTIMENTS (0-100) — ce que les édifices font, en clair ──
+     * On surface les coordonnées BÂTIES (ProvBuild) que le moteur LIT déjà, sans
+     * jamais exposer un flottant SCPS : le joueur voit l'effet de ses chantiers. */
+    {
+        float food_sat   = re ? re->food_sat    : 0.5f;
+        float society_sat= re ? re->society_sat : 0.5f;
+        float food_cap   = re ? re->build.food_cap : 0.f;
+        float K_inst     = re ? re->build.K_inst   : 0.f;
+        float savoir     = re ? re->build.savoir   : 0.f;
+        float faith      = re ? re->build.faith    : 0.f;
+        float cap_pop    = re ? re->cap_pop        : 0.f;
+        /* LOGEMENTS : nourrir (food_sat) + infrastructure vivrière (greniers/
+         * irrigation/aqueducs) + marge d'accueil (cap_pop vs population). */
+        float headroom = (cap_pop > 1.f) ? rclampf((cap_pop - pop) / cap_pop, 0.f, 1.f) : 0.5f;
+        int log_v = iclamp((int)roundf(55.f*food_sat + 30.f*rclampf(food_cap/3.f,0.f,1.f)
+                                       + 15.f*headroom), 0, 100);
+        pr.logements = mk_metric(log_v,
+            word4(log_v, "surpeuplé", "à l'étroit", "convenable", "spacieux"),
+            "La capacité de la province à loger et nourrir sa population — greniers, irrigation, aqueducs.");
+        /* SERVICES : administration (K bâti) + savoir + foi + biens sociaux servis. */
+        int srv_v = iclamp((int)roundf(30.f*rclampf(K_inst/4.f,0.f,1.f) + 22.f*rclampf(savoir/3.f,0.f,1.f)
+                                       + 18.f*rclampf(faith/4.f,0.f,1.f) + 30.f*society_sat), 0, 100);
+        pr.services = mk_metric(srv_v,
+            word4(srv_v, "délaissé", "sommaire", "pourvu", "florissant"),
+            "Les services rendus aux habitants : administration, savoir, foi, biens sociaux.");
+        /* ORDRE : consentement (L) + garnison bâtie (H) − agitation. */
+        int ord_v = iclamp((int)roundf(50.f*rclampf(L_local/10.f,0.f,1.f) + 28.f*rclampf(garrison/4.f,0.f,1.f)
+                                       + 22.f*(1.f - agit/100.f)), 0, 100);
+        pr.ordre = mk_metric(ord_v,
+            word4(ord_v, "anarchique", "troublé", "tenu", "ferme"),
+            "La fermeté avec laquelle la province est tenue — consentement, garnison, calme.");
+    }
     return pr;
 }
