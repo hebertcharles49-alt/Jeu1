@@ -427,20 +427,25 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
         float savoir     = re ? re->build.savoir   : 0.f;
         float faith      = re ? re->build.faith    : 0.f;
         float cap_pop    = re ? re->cap_pop        : 0.f;
-        /* LOGEMENTS : nourrir (food_sat) + infrastructure vivrière (greniers/
-         * irrigation/aqueducs) + marge d'accueil (cap_pop vs population). */
-        float headroom = (cap_pop > 1.f) ? rclampf((cap_pop - pop) / cap_pop, 0.f, 1.f) : 0.5f;
-        int log_v = iclamp((int)roundf(55.f*food_sat + 30.f*rclampf(food_cap/3.f,0.f,1.f)
-                                       + 15.f*headroom), 0, 100);
+        /* L'infrastructure se mesure PAR TÊTE : plus la province est peuplée, plus
+         * il faut bâtir pour la servir (une métropole avec un seul tribunal est
+         * sous-équipée ; un hameau avec le même tribunal est bien pourvu). */
+        float pop_u = fmaxf(1.f, pop/1500.f);   /* ~1 unité d'édifice pour 1500 âmes */
+        /* LOGEMENTS : nourrir (food_sat) + infrastructure vivrière PAR TÊTE (greniers/
+         * irrigation/aqueducs suffisants pour la population) + marge d'accueil. */
+        float headroom  = (cap_pop > 1.f) ? rclampf((cap_pop - pop) / cap_pop, 0.f, 1.f) : 0.5f;
+        float food_infra= rclampf((food_cap/pop_u)/2.0f, 0.f, 1.f);
+        int log_v = iclamp((int)roundf(50.f*food_sat + 30.f*food_infra + 20.f*headroom), 0, 100);
         pr.logements = mk_metric(log_v,
             word4(log_v, "surpeuplé", "à l'étroit", "convenable", "spacieux"),
-            "La capacité de la province à loger et nourrir sa population — greniers, irrigation, aqueducs.");
-        /* SERVICES : administration (K bâti) + savoir + foi + biens sociaux servis. */
-        int srv_v = iclamp((int)roundf(30.f*rclampf(K_inst/4.f,0.f,1.f) + 22.f*rclampf(savoir/3.f,0.f,1.f)
-                                       + 18.f*rclampf(faith/4.f,0.f,1.f) + 30.f*society_sat), 0, 100);
+            "La capacité de la province à loger et nourrir SA population — greniers, irrigation, aqueducs (rapportés au nombre d'âmes).");
+        /* SERVICES : densité institutionnelle PAR TÊTE (admin K + savoir + foi
+         * suffisants pour la population) + biens sociaux servis. */
+        float inst_pc = rclampf((0.30f*K_inst + 0.25f*savoir + 0.22f*faith)/pop_u, 0.f, 1.f);
+        int srv_v = iclamp((int)roundf(55.f*inst_pc + 45.f*society_sat), 0, 100);
         pr.services = mk_metric(srv_v,
             word4(srv_v, "délaissé", "sommaire", "pourvu", "florissant"),
-            "Les services rendus aux habitants : administration, savoir, foi, biens sociaux.");
+            "Les services rendus à SA population : administration, savoir, foi, biens sociaux (rapportés au nombre d'âmes).");
         /* ORDRE : consentement (L) + garnison bâtie (H) − agitation. */
         int ord_v = iclamp((int)roundf(50.f*rclampf(L_local/10.f,0.f,1.f) + 28.f*rclampf(garrison/4.f,0.f,1.f)
                                        + 22.f*(1.f - agit/100.f)), 0, 100);
