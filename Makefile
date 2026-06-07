@@ -123,6 +123,12 @@ ECON_ARCANE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.
 econ_arcane_demo: $(ECON_ARCANE_DEMO_OBJS)
 	$(CC) $(ECON_ARCANE_DEMO_OBJS) -o $@ -lm
 
+ECON_PRODUCTION_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_production_demo.o
+econ_production_demo: $(ECON_PRODUCTION_DEMO_OBJS)
+	$(CC) $(ECON_PRODUCTION_DEMO_OBJS) -o $@ -lm
+
 # ---- Banc d'essai de l'arbre de technologies -----------------------------
 TECH_DEMO_OBJS := $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_tech_demo.o
 tech_demo: $(TECH_DEMO_OBJS)

@@ -50,6 +50,8 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_ESSENCE]       = 34.0f,   /* mana raffiné — très haute valeur */
     [RES_CELESTIAL_IRON]= 20.0f,   /* météorique — très rare */
     [RES_ENCHANTED_ARMS]= 46.0f,   /* armes enchantées — la Forge supérieure */
+    [RES_METAL]         = 5.0f,    /* fonte/acier — intrant */
+    [RES_TOOLS]         = 8.5f,    /* outils — le multiplicateur de productivité */
 };
 
 /* Recette d'une manufacture : jusqu'à 2 intrants → 1 produit. */
@@ -73,6 +75,9 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* ARCANE militaire : le fer céleste + l'essence → armes enchantées (la Forge
      * supérieure). Consomme donc l'essence de l'atelier de mage (chaîne arcane). */
     [BLD_CELESTIAL_FORGE]={ RES_CELESTIAL_IRON, 1.0f, RES_ESSENCE, 1.0f, RES_ENCHANTED_ARMS, 1.0f, 1.4f },
+    /* Épine dorsale de production : fer + charbon → métal → (métal + bois) outils. */
+    [BLD_FOUNDRY]   = { RES_IRON,  1.5f, RES_COAL, 1.0f, RES_METAL, 1.0f, 1.0f },
+    [BLD_TOOLWORKS] = { RES_METAL, 1.0f, RES_WOOD, 1.0f, RES_TOOLS, 1.0f, 0.9f },
 };
 
 /* Besoins par tête et par strate (unités/100 hab/tick). Le grain (vivres)
@@ -157,7 +162,7 @@ const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
         "Manufacture textile","Scierie navale","Papeterie",
         "Domaine viticole","Joaillerie","Atelier d'étoffe précieuse",
-        "Atelier de mage","Forge céleste"
+        "Atelier de mage","Forge céleste","Haut-fourneau","Atelier d'outillage"
     };
     return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
 }
@@ -337,6 +342,11 @@ void econ_init(WorldEconomy *e, const World *w) {
             region_ensure_building(re,BLD_JEWELER);
         /* L'atelier de luxe a besoin de tissu : présent si on file la laine. */
         if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
+        /* Épine dorsale : fonderie + atelier d'outillage là où fer ET charbon. */
+        if (re->raw_cap[RES_IRON] > 0.f && re->raw_cap[RES_COAL] > 0.f){
+            region_ensure_building(re,BLD_FOUNDRY);
+            region_ensure_building(re,BLD_TOOLWORKS);
+        }
         /* ARCANE : un atelier de mage s'élève au nœud tellurique (cristal). */
         if (re->raw_cap[RES_ARCANE_CRYSTAL] > 0.f) region_ensure_building(re,BLD_MAGE_WORKSHOP);
         /* ARCANE militaire : une forge céleste là où tombe le fer céleste. */
@@ -463,6 +473,12 @@ void econ_tick(WorldEconomy *e, float dt) {
         float profit_pool = 0.f;   /* → bourgeois */
         float tax_pool    = 0.f;   /* → rente d'élite */
         float over_tax[CLASS_COUNT]={0};   /* surtaxe par classe (grogne, §6) */
+        /* OUTILS = le MULTIPLICATEUR de productivité : leur stock (par tête) booste
+         * l'extraction ET la manufacture (rendements décroissants, +30% max). Les
+         * outils s'USENT (décroissance) → il faut les entretenir (Atelier). */
+        float tools_pc  = re->stock[RES_TOOLS] / (labor_avail*0.1f + 1.f);
+        float prod_mult = 1.f + 0.30f*(1.f - 1.f/(1.f + tools_pc));
+        re->stock[RES_TOOLS] *= 0.97f;   /* usure */
 
         /* ---- 1. EXTRACTION des matières premières ----------------------
          * Emploie des laborers ; chaque unité extraite demande 0.5 de
@@ -472,7 +488,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             float want_labor = re->raw_cap[r]*0.5f;
             float avail = labor_avail-labor_used;
             float ratio = (want_labor>0.f)? clampf(avail/want_labor,0.f,1.f) : 0.f;
-            float out = re->raw_cap[r]*ratio;
+            float out = re->raw_cap[r]*ratio*prod_mult;   /* outils → productivité */
             labor_used += want_labor*ratio;
             re->stock[r] += out;
             supply[r]    += out;
@@ -503,7 +519,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             /* Consomme intrants, produit sortie */
             if (rc->in1!=RES_NONE){ re->stock[rc->in1]-=lim*rc->q1; demand[rc->in1]+=lim*rc->q1; }
             if (rc->in2!=RES_NONE){ re->stock[rc->in2]-=lim*rc->q2; demand[rc->in2]+=lim*rc->q2; }
-            float out=lim*rc->qout;
+            float out=lim*rc->qout*prod_mult;   /* outils → productivité */
             re->stock[rc->out]+=out;
             supply[rc->out]+=out;
             b->workers=rc->labor*lim;
