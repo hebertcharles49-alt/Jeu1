@@ -349,15 +349,39 @@ CultureRelation culture_relation(const Culture *a, const Culture *b){
 }
 
 /* ===================================================================== */
-/* SYNCRÉTISME (§9)                                                       */
+/* SYNCRÉTISME (§9 + correction « gouffre » v3)                          */
 /* ===================================================================== */
+/* Correction du gouffre : rien n'est inintégrable. La porte du moteur ne
+ * s'annule jamais (terme en K), donc une capacité institutionnelle assez
+ * forte métabolise n'importe quelle distance. L'assimilation est difficile
+ * (forte P+K) et lente (temps ∝ D∞), jamais impossible. Calibrable. */
+#define SYNC_TIME_BASE   30.f   /* ticks plancher d'une fusion (générations) */
+#define SYNC_TIME_SLOPE  18.f   /* ticks ajoutés par point de D∞             */
+
+/* La même porte que la prospérité de contact (§2.3) : σ(0.8(P−D∞)+0.35(K−5)). */
+static float sync_gate(float P, float K, float dinf){
+    return 1.f / (1.f + expf(-(0.8f*(P - dinf) + 0.35f*(K - 5.f))));
+}
+
+SyncFeasibility culture_can_syncretize(const Culture *a, const Culture *b,
+                                       float P, float K){
+    float dinf  = culture_content_distance(a,b);   /* D∞ = friction de contenu */
+    float porte = sync_gate(P, K, dinf);
+    SyncFeasibility f;
+    f.openness  = porte;
+    f.feasible  = (porte >= 0.5f);   /* ouverte : jamais un mur — il suffit de plus de P+K */
+    /* Temps ∝ D∞, accéléré par une porte large : une fusion lointaine prend des
+     * générations même la porte ouverte. */
+    f.time_ticks = (SYNC_TIME_BASE + SYNC_TIME_SLOPE * dinf) / (porte < 0.1f ? 0.1f : porte);
+    return f;
+}
+
 /* Tiens A sous une élite B assez longtemps → fusion en hybride aux traits
- * combinés et MUTÉS (pas une moyenne tiède). On exige un contenu pas trop
- * lointain (sinon mur de parenté / friction → pas de fusion). */
+ * combinés et MUTÉS (pas une moyenne tiède). Plus de mur de distance (v3) :
+ * la porte (P,K) et le temps sont jugés par culture_can_syncretize ; ici on
+ * produit la fiche hybride une fois la fusion advenue. */
 bool culture_syncretize(const Culture *a, const Culture *b, Culture *out){
     if (!out) return false;
-    if (culture_content_distance(a,b) > 6.0f) return false;  /* trop éloignés */
-
     Culture h; memset(&h,0,sizeof(h));
     /* Héritage (collant) vient surtout de A (le substrat populaire) ;
      * la forme (valeurs/credo) penche vers l'élite B. */

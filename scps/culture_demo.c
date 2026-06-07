@@ -79,17 +79,37 @@ int main(void){
     Culture zealB = culture_make(BIO_DESERT, ETHOS_DOMINATEUR, REL_ABRAHAMIQUE, CREDO_PURIFICATEUR);
     print_relation(&zealA, &zealB);             /* ennemis-schismatiques */
 
-    /* 4. Syncrétisme (§9) ------------------------------------------------- */
-    printf("\n── 4. SYNCRÉTISME (substrat A + élite B → hybride muté) ──\n");
+    /* 4. Syncrétisme : le GOUFFRE est un continuum, pas un mur (v3) -------- */
+    printf("\n── 4. SYNCRÉTISME — tout s'assimile, à différentes échelles ──\n");
     Culture substrat = culture_make(BIO_PLAINS, ETHOS_HONNEUR, REL_DHARMIQUE, CREDO_PLURALISTE);
     Culture elite    = culture_make(BIO_PLAINS, ETHOS_BUREAUCRATE, REL_SINIQUE, CREDO_EVANGELISTE);
-    print_culture(&substrat,"substrat");
-    print_culture(&elite,   "élite");
+    /* paire LOINTAINE (le « gouffre ») : forêt pacifiste ↔ désert dominateur purificateur */
+    Culture doux = culture_make(BIO_FOREST, ETHOS_PACIFISTE,  REL_ANIMISTE,    CREDO_PLURALISTE);
+    Culture dur  = culture_make(BIO_DESERT, ETHOS_DOMINATEUR, REL_ABRAHAMIQUE, CREDO_PURIFICATEUR);
+
+    struct { const char *tag; const Culture *a, *b; } pr[] = {
+        { "proche  (demi-elfes)",  &substrat, &elite },
+        { "lointain (le gouffre)", &doux,     &dur   },
+    };
+    struct { const char *who; float P, K; } st[] = {
+        { "État moyen (P=5,K=5)",            5.f, 5.f },
+        { "empire ouvert+capable (P=9,K=9)", 9.f, 9.f },
+    };
+    for (unsigned i=0;i<2;i++){
+        printf("\n  %s — D∞=%.1f\n", pr[i].tag, culture_content_distance(pr[i].a, pr[i].b));
+        for (unsigned j=0;j<2;j++){
+            SyncFeasibility f = culture_can_syncretize(pr[i].a, pr[i].b, st[j].P, st[j].K);
+            printf("     %-34s porte=%.2f  %-18s  temps≈%.0f ticks\n",
+                   st[j].who, f.openness,
+                   f.feasible ? "OUVERTE" : "fermée (monte P+K)", f.time_ticks);
+        }
+    }
+    printf("\n  → jamais un « impossible » : le gouffre s'ouvre à forte P+K, lentement (temps ∝ D∞).\n");
     Culture fused;
-    if (culture_syncretize(&substrat, &elite, &fused)){
-        printf("  → fusion réussie :\n");
+    if (culture_syncretize(&doux, &dur, &fused)){   /* la fusion produit toujours une fiche */
+        printf("  fusion forêt↔désert (porte ouverte, après le temps requis) :\n");
         print_culture(&fused,"hybride");
-    } else printf("  → fusion impossible (contenu trop éloigné, mur de parenté).\n");
+    }
 
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" La friction lit D_inf sur le contenu ; le cousinage lit l'horloge.\n");

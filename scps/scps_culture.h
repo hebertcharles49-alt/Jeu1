@@ -173,9 +173,27 @@ float culture_clock_distance(const Culture *a, const Culture *b);
 /* Classe la relation en vocabulaire lisible. */
 CultureRelation culture_relation(const Culture *a, const Culture *b);
 
-/* ---- Syncrétisme (§9) ------------------------------------------------ */
-/* Fusionne A (sous élite B) en une hybride aux traits combinés/mutés.
- * Renvoie true si la fusion est possible (contenu pas trop lointain). */
+/* ---- Syncrétisme (§9 + correction « gouffre » v3) -------------------- *
+ * SCPS est NON-ESSENTIALISTE : rien n'est inintégrable. Le gouffre est le
+ * HAUT d'une échelle, pas un mur. La porte σ(0.8(P−D∞)+0.35(K−5)) ne s'annule
+ * jamais (le terme en K reste) → la capacité institutionnelle métabolise
+ * n'importe quelle distance, POURVU qu'il y en ait assez. L'assimilation
+ * devient difficile (forte P+K) et lente (temps ∝ D∞), jamais impossible. */
+typedef struct {
+    bool  feasible;     /* la porte est-elle ouverte ? (jamais un mur : monte P/K) */
+    float openness;     /* σ de la porte [0..1] */
+    float time_ticks;   /* durée de fusion ∝ D∞ — lointain = des générations */
+} SyncFeasibility;
+
+/* Juge la faisabilité d'une fusion sous une perméabilité P et une capacité K.
+ * Ne renvoie JAMAIS un « impossible » catégorique : la porte s'ouvre à forte
+ * P+K, et le temps requis croît avec la distance de contenu D∞. */
+SyncFeasibility culture_can_syncretize(const Culture *a, const Culture *b,
+                                       float P, float K);
+
+/* Réalise la fusion : A (substrat) sous élite B → hybride aux traits mutés.
+ * Ne refuse plus pour cause de distance (cf. culture_can_syncretize pour la
+ * porte et le temps). Renvoie false seulement si out est nul. */
 bool culture_syncretize(const Culture *a, const Culture *b, Culture *out);
 
 /* ---- Dérive lente de l'horloge (§10) --------------------------------- */
