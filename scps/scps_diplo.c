@@ -238,7 +238,34 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
             d->conquered[conqueror][defender]++;        /* OCCUPATION : pousse le score de guerre */
     }
     legitimacy_on_conquest(wl, region);   /* L au plancher, intégration à zéro */
+    /* SACCAGE : la prise DÉPOUILLE la province (or + production → trésor de
+     * l'occupant), 1×/5 ans. Le butin afflue vers la capitale du conquérant. */
+    int dst=-1, cp=w->country[conqueror].capital_prov;
+    if (cp>=0 && cp<w->n_provinces) dst=w->province[cp].region;
+    diplo_pillage_region(econ, region, dst);
     return true;
+}
+
+/* ---- guerre : SACCAGE (§4) — dépouiller la province prise -------------- */
+#define PILLAGE_COOLDOWN_Y 5.0f    /* 1 saccage / 5 ans / province (note utilisateur) */
+#define PILLAGE_GOLD_FRAC  0.6f    /* part du trésor provincial raflée d'un coup */
+#define PILLAGE_STOCK_FRAC 0.5f    /* ~6 mois de production en entrepôt, fondus en or */
+float diplo_pillage_region(WorldEconomy *econ, int region, int dst_region){
+    if (!econ || region<0 || region>=econ->n_regions) return 0.f;
+    RegionEconomy *re=&econ->region[region];
+    if (re->pillage_cd > 0.f) return 0.f;          /* déjà dépouillée → plus rien à prendre */
+    float loot = PILLAGE_GOLD_FRAC * re->treasury; /* l'or des coffres */
+    re->treasury *= (1.f - PILLAGE_GOLD_FRAC);
+    for (int g=1; g<RES_COUNT; g++){               /* l'entrepôt, valorisé au prix courant */
+        float take = PILLAGE_STOCK_FRAC * re->stock[g];
+        loot += take * re->price[g];
+        re->stock[g] -= take;
+    }
+    re->revolt_scar = 1.0f;                         /* le sac CONVULSE : gel du développement */
+    re->pillage_cd  = PILLAGE_COOLDOWN_Y;           /* ne pourra être re-saccagée avant ~5 ans */
+    if (dst_region>=0 && dst_region<econ->n_regions && dst_region!=region)
+        econ->region[dst_region].treasury += loot;  /* fondu dans le trésor de l'occupant */
+    return loot;
 }
 
 /* ---- Diplomatie d'ÉQUILIBRE — friction & coalition -------------------- */

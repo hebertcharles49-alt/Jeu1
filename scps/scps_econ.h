@@ -183,6 +183,9 @@ typedef struct {
     /* Cicatrice de révolte [0..1] : une province récemment soulevée se développe
      * MAL (−50 % de croissance ET de production) ; décroît sur quelques années. */
     float      revolt_scar;
+    /* Anti-saccage (§4 guerre) : une province DÉPOUILLÉE ne peut l'être à nouveau
+     * avant ~5 ans (plus rien à prendre) — compteur en années, décroît chaque tick. */
+    float      pillage_cd;
 
     /* ARCANE (§ fil arcane) : essence brûlée ce tick par les ateliers de mage.
      * prosperity_tick l'agrège dans le flux faustien → déréalisation/Brèche. */

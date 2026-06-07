@@ -97,6 +97,14 @@ int   diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
 bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
                           WorldLegitimacy *wl, int conqueror, int region);
 
+/* SACCAGE (§4) — une province PRISE est DÉPOUILLÉE une fois : l'or de ses coffres
+ * et ~6 mois de production (entrepôt valorisé) sont fondus dans le trésor de
+ * l'occupant (région `dst_region`, sa capitale) ; 1×/5 ans/province (plus rien à
+ * prendre avant). Le sac convulse la province (cicatrice au plancher → gel du
+ * développement). Renvoie la valeur pillée (or-équivalent) ; 0 si encore à vif.
+ * Appelé automatiquement par diplo_conquer_region ; exposé pour le banc d'essai. */
+float diplo_pillage_region(WorldEconomy *econ, int region, int dst_region);
+
 void diplo_tick(DiploState *d, float dt);   /* usure de guerre (war_years++) + trêve/momentum */
 
 /* ---- SCORE DE GUERRE (§2) — le bras-de-fer, à ticker chaque an ---------- *

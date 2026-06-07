@@ -218,6 +218,28 @@ int main(int argc,char**argv){
         }
     }
 
+    /* ---- 6. Saccage (§4) : la prise DÉPOUILLE la province (1×/5 ans) ---- */
+    printf("\n── 6. Saccage (or + production → trésor de l'occupant · 1×/5 ans) ──\n");
+    if(econ->n_regions>=2){
+        int vic=0, occ=1;
+        RegionEconomy *rv=&econ->region[vic], *ro=&econ->region[occ];
+        rv->pillage_cd=0.f; rv->revolt_scar=0.f; rv->treasury=1000.f;
+        for(int g=1;g<RES_COUNT;g++){ rv->stock[g]=10.f; rv->price[g]=1.f; }
+        float occ0=ro->treasury, vic0=rv->treasury;
+        float loot=diplo_pillage_region(econ,vic,occ);
+        printf("   sac de la région %d → %d : butin = %.0f or-équiv.\n",vic,occ,loot);
+        ok("le saccage rapporte un butin (or des coffres + entrepôt valorisé)", loot>600.f);
+        ok("le trésor de l'OCCUPANT enfle du butin entier",
+           ro->treasury > occ0+loot-1.f && ro->treasury < occ0+loot+1.f);
+        ok("la province pillée est VIDÉE de son or", rv->treasury < vic0);
+        ok("le sac CONVULSE la province (cicatrice au plancher → gel)", rv->revolt_scar > 0.99f);
+        float loot2=diplo_pillage_region(econ,vic,occ);
+        ok("on ne RE-saccage pas avant 5 ans (plus rien à prendre)", loot2==0.f);
+        ok("le compteur anti-saccage est armé (~5 ans)", rv->pillage_cd > 4.5f);
+        for(int t=0;t<6;t++) econ_tick(econ,1.f);   /* 6 ans s'écoulent (cd décroît par an) */
+        ok("après ~5 ans, la province REDEVIENT saccageable", rv->pillage_cd <= 0.f);
+    } else ok("(monde trop petit pour le test de saccage)", true);
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

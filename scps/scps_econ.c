@@ -757,6 +757,7 @@ void econ_tick(WorldEconomy *e, float dt) {
         /* CICATRICE DE RÉVOLTE : une province récemment soulevée se développe mal —
          * −50 % de croissance tant que la plaie n'est pas refermée (fade ~4 ans). */
         re->revolt_scar = fmaxf(0.f, re->revolt_scar - 0.25f*dt);
+        re->pillage_cd  = fmaxf(0.f, re->pillage_cd  - dt);   /* le saccage se rouvre après ~5 ans */
         net_growth *= (1.f - 0.5f*re->revolt_scar);
         net_growth *= dt;   /* cumulatif → suit le pas (mensuel : 1/12 d'an) */
 
