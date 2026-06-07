@@ -166,6 +166,19 @@ AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 ai_demo: $(AI_DEMO_OBJS)
 	$(CC) $(AI_DEMO_OBJS) -o $@ -lm
 
+CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                  $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
+                  $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
+                  $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
+                  $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_species.o \
+                  $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                  $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
+                  $(OBJDIR)/scps_scps_events.o $(OBJDIR)/scps_scps_demography.o \
+                  $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_modifier.o \
+                  $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
+chronicle: $(CHRONICLE_OBJS)
+	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
+
 # ---- Métriques de jeu (0-100), Influence, Diplomates & Révolte -----------
 # La membrane projette les coordonnées en nombres+mots ; le statecraft est SIM
 # (il lit des flottants), son API ne rend que des entiers de jeu.
