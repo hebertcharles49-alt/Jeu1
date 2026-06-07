@@ -42,7 +42,7 @@ typedef struct {
 static void run_days(Sim *s, int days){
     for (int d=0; d<days; d++){
         econ_tick(s->econ);
-        agency_advance(s->ag, s->econ, 1);
+        agency_advance(s->ag, s->w, s->econ, s->wl, 1);
         legitimacy_tick(s->wl, s->w, s->econ, s->ts);
         prosperity_tick(s->wp, s->w, s->econ, s->net, s->ts, s->wl);
     }
@@ -119,6 +119,28 @@ int main(int argc, char **argv){
     run_days(&s, 8*SCPS_DAYS_PER_YEAR);   /* la Citadelle met ~6 ans */
     snapshot(&s, "après citadelles (H↑, L↓)", &SI2,&F2,&L2);
 
+    /* Phase 3 — DÉFRICHEMENT (§4) sur une niche forestière + EXPLOITATION (§3). */
+    int forest=-1;
+    for (int r=0;r<s.econ->n_regions;r++){
+        const PopCulture *c=&s.econ->region[r].culture;
+        if (c->settled && (c->lifeway==LIFE_HUNTER||c->lifeway==LIFE_HORTICULTURE)){ forest=r; break; }
+    }
+    bool is_forest=(forest>=0);
+    if (forest<0) forest=s.cap_reg;
+    float subs0=s.econ->region[forest].culture.subsistance;
+    float food0=s.econ->region[forest].build.food_cap;
+    float Lf0=s.wl->L[forest];
+    float iron0=s.econ->region[s.cap_reg].raw_cap[RES_IRON];
+    agency_order_clear(s.ag, forest);                 /* §4 défrichement */
+    agency_order_exploit(s.ag, s.cap_reg, RES_IRON);  /* §3 exploitation */
+    run_days(&s, 210);                                /* défrichement 200j, exploit 180j */
+    float subs1=s.econ->region[forest].culture.subsistance;
+    float food1=s.econ->region[forest].build.food_cap;
+    float Lf1=s.wl->L[forest];
+    float iron1=s.econ->region[s.cap_reg].raw_cap[RES_IRON];
+    printf("  An %-3d défrichement (région %d%s) : subsistance %.1f→%.1f  food_cap +%.1f  L %.1f→%.1f\n",
+           agency_year(s.ag), forest, is_forest?" forestière":"", subs0,subs1, food1-food0, Lf0,Lf1);
+
     /* ---- Contrôles ---------------------------------------------------- */
     printf("\n── Vérification : l'action est un levier ──\n");
     ok("le temps passe en années (≥ 16 ans écoulés)", agency_year(s.ag) >= 16);
@@ -135,6 +157,12 @@ int main(int argc, char **argv){
     ok("stockage alimentaire bâti (food_cap, Grenier)",     b->food_cap >= 1.0f);
     printf("     capitale : K_inst=%.1f  H_coerc=%.1f  PE_infra=%.1f  food_cap=%.1f\n",
            b->K_inst, b->H_coerc, b->PE_infra, b->food_cap);
+    /* §4 défrichement + §3 exploitation */
+    ok("défricher monte la nourriture (food_cap)",            food1 > food0);
+    ok("défricher dérive la subsistance vers l'agriculture",  subs1 > subs0 + 0.3f);
+    if (is_forest)
+        ok("défricher en niche forestière ronge L local",     Lf1 < Lf0);
+    ok("exploiter monte l'extraction (raw_cap fer)",          iron1 > iron0 + 0.5f);
 
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);

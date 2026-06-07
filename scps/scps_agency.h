@@ -14,7 +14,9 @@
  * Ce module est l'ÉCRIVAIN de ces accumulateurs ; prosperity/legitimacy les
  * relisent. Le joueur voit des bâtiments nommés (membrane), dessous K/H/P bouge.
  */
-#include "scps_econ.h"   /* ProvBuild, WorldEconomy */
+#include "scps_econ.h"        /* ProvBuild, WorldEconomy, Resource */
+#include "scps_world.h"       /* World (biome) */
+#include "scps_legitimacy.h"  /* WorldLegitimacy (défrichement ronge L) */
 
 #define SCPS_DAYS_PER_YEAR 365
 #define SCPS_GAME_YEARS    250
@@ -38,12 +40,16 @@ typedef struct {
 const EdificeDef *edifice_def(Edifice e);
 const char       *edifice_name(Edifice e);
 
-/* Une construction en cours (file par pays/province). */
+/* Trois familles d'action de province (le motif s'étend). */
+typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT } ActionKind;
+
+/* Une action en cours (file par pays/province). */
 typedef struct {
-    int     region;
-    Edifice type;
-    int     days_total, days_done;
-    bool    active;
+    ActionKind kind;
+    int        region;
+    int        param;     /* Edifice (BUILD) | Resource (EXPLOIT) | inutilisé (CLEAR) */
+    int        days_total, days_done;
+    bool       active;
 } BuildOrder;
 
 #define SCPS_MAX_BUILDS 512
@@ -54,11 +60,20 @@ typedef struct {
 } AgencyState;
 
 void agency_init(AgencyState *a);
-/* Met une construction en file (false si pleine). */
-bool agency_order_build(AgencyState *a, int region, Edifice e);
-/* Avance de `days` jours : progresse les chantiers ; à l'achèvement, écrit le
- * delta dans econ->region[r].build (la coordonnée monte alors, lue au tick). */
-void agency_advance(AgencyState *a, WorldEconomy *econ, int days);
+/* Met une action en file (false si pleine). */
+bool agency_order_build  (AgencyState *a, int region, Edifice e);
+/* §4 Défrichement : convertit la terre → food, dérive la SUBSISTANCE locale vers
+ * l'agriculture (impérialisme culturel sur la terre), et ronge L en niche
+ * forestière (les peuples de la forêt voient leur monde rasé). */
+bool agency_order_clear  (AgencyState *a, int region);
+/* §3 Exploitation : un aménagement (mine/carrière…) monte l'extraction d'une
+ * ressource (matériaux pour bâtir/armer, stratégiques pour la tech/valeur). */
+bool agency_order_exploit(AgencyState *a, int region, Resource res);
+
+/* Avance de `days` jours : progresse les chantiers ; à l'achèvement, applique
+ * l'effet (déplace une coordonnée que le moteur LIT). */
+void agency_advance(AgencyState *a, World *w, WorldEconomy *econ,
+                    WorldLegitimacy *wl, int days);
 /* Nombre de chantiers actifs sur une région (pour l'UI). */
 int  agency_active_in_region(const AgencyState *a, int region);
 int  agency_year(const AgencyState *a);

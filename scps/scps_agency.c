@@ -31,14 +31,34 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
 const EdificeDef *edifice_def(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?&EDIFICES[e]:NULL; }
 const char       *edifice_name(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?EDIFICES[e].name:"?"; }
 
+/* Constantes des actions non-bâtiment (calibrables). */
+#define CLEAR_DAYS        200
+#define EXPLOIT_DAYS      180
+#define CLEAR_FOOD_GAIN   1.5f
+#define CLEAR_SUBS_TARGET 6.0f    /* mode de vie agricole (FARMER) */
+#define CLEAR_SUBS_SHIFT  0.40f   /* fraction du chemin à l'achèvement (le reste dérive) */
+#define CLEAR_L_HIT       2.0f
+#define EXPLOIT_CAP_GAIN  3.0f
+
 void agency_init(AgencyState *a){ memset(a,0,sizeof(*a)); }
 
-bool agency_order_build(AgencyState *a, int region, Edifice e){
-    if (a->n>=SCPS_MAX_BUILDS || e<0 || e>=EDIFICE_COUNT) return false;
+static bool enqueue(AgencyState *a, ActionKind k, int region, int param, int days){
+    if (a->n>=SCPS_MAX_BUILDS) return false;
     BuildOrder *o=&a->order[a->n++];
-    o->region=region; o->type=e;
-    o->days_total=EDIFICES[e].days; o->days_done=0; o->active=true;
+    o->kind=k; o->region=region; o->param=param;
+    o->days_total=days; o->days_done=0; o->active=true;
     return true;
+}
+bool agency_order_build(AgencyState *a, int region, Edifice e){
+    if (e<0||e>=EDIFICE_COUNT) return false;
+    return enqueue(a, AGY_BUILD, region, (int)e, EDIFICES[e].days);
+}
+bool agency_order_clear(AgencyState *a, int region){
+    return enqueue(a, AGY_CLEAR, region, 0, CLEAR_DAYS);
+}
+bool agency_order_exploit(AgencyState *a, int region, Resource res){
+    if (res<=RES_NONE||res>=RES_COUNT) return false;
+    return enqueue(a, AGY_EXPLOIT, region, (int)res, EXPLOIT_DAYS);
 }
 
 static void apply_delta(ProvBuild *b, const ProvBuild *d){
@@ -46,15 +66,40 @@ static void apply_delta(ProvBuild *b, const ProvBuild *d){
     b->PE_infra+= d->PE_infra; b->food_cap += d->food_cap;
 }
 
-void agency_advance(AgencyState *a, WorldEconomy *econ, int days){
+static void apply_action(WorldEconomy *econ, WorldLegitimacy *wl, const BuildOrder *o){
+    int reg=o->region;
+    if (reg<0 || reg>=econ->n_regions) return;
+    RegionEconomy *re=&econ->region[reg];
+    switch (o->kind){
+        case AGY_BUILD:
+            apply_delta(&re->build, &EDIFICES[(Edifice)o->param].delta);
+            break;
+        case AGY_CLEAR:
+            re->build.food_cap += CLEAR_FOOD_GAIN;
+            /* dérive du substrat vers l'agriculture (impérialisme sur la terre) */
+            re->culture.subsistance += (CLEAR_SUBS_TARGET - re->culture.subsistance)*CLEAR_SUBS_SHIFT;
+            /* niche forestière (chasseurs/horticulteurs) : leur monde rasé → L↓ */
+            if ((re->culture.lifeway==LIFE_HUNTER || re->culture.lifeway==LIFE_HORTICULTURE)
+                && wl && reg<SCPS_MAX_REG)
+                wl->L[reg] = (wl->L[reg]>CLEAR_L_HIT) ? wl->L[reg]-CLEAR_L_HIT : 0.f;
+            break;
+        case AGY_EXPLOIT:
+            if (o->param>RES_NONE && o->param<RES_COUNT)
+                re->raw_cap[o->param] += EXPLOIT_CAP_GAIN;
+            break;
+    }
+}
+
+void agency_advance(AgencyState *a, World *w, WorldEconomy *econ,
+                    WorldLegitimacy *wl, int days){
+    (void)w;
     a->day += days;
     for (int i=a->n-1; i>=0; i--){
         BuildOrder *o=&a->order[i];
         if (!o->active) continue;
         o->days_done += days;
         if (o->days_done >= o->days_total){
-            if (o->region>=0 && o->region<econ->n_regions)
-                apply_delta(&econ->region[o->region].build, &EDIFICES[o->type].delta);
+            apply_action(econ, wl, o);
             a->order[i]=a->order[--a->n];   /* achevé : swap-remove */
         }
     }
