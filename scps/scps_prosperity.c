@@ -213,8 +213,11 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
         float Lt= ts_c ? ts_c->L        : 3.f;   /* tech L (ordre consenti) → croissance */
         float P = ts_c ? ts_c->puissance: 3.f;   /* puissance → porte PE (§2.3)          */
         float H = ts_c ? ts_c->H        : 0.f;
-        float C = cp->C;
-        float flux_f = ts_c ? tech_flux(ts_c) : 0.f;
+        /* Connectivité EFFECTIVE = C du pays + bonus mondial des Âges (Commerce).
+         * Offset de lecture (non cumulatif) : le contact devient plus fécond pour
+         * tout le monde quand le monde devient commerçant. */
+        float C = clampf(cp->C + wp->age_C_bonus, 0.f, 10.f);
+        float flux_f = (ts_c ? tech_flux(ts_c) : 0.f) + wp->age_breach_flux;
 
         /* PE interne */
         float d_bar_int = cp->profile.D_bar_int;

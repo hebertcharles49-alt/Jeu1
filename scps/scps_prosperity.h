@@ -58,6 +58,11 @@ typedef struct {
 typedef struct {
     CountryProsperity country[SCPS_MAX_COUNTRY];
     int               n_countries;
+    /* Coordonnées GLOBALES déplacées par les Âges (§4) — lues par le moteur, pas
+     * des buffs plats : l'Âge du Commerce monte C partout (contact plus fécond),
+     * l'Âge de la Brèche injecte un flux faustien mondial (la fin cosmologique). */
+    float             age_C_bonus;      /* + connectivité mondiale [0..5] */
+    float             age_breach_flux;  /* + flux faustien mondial → déréalisation */
 } WorldProsperity;
 
 void prosperity_init(WorldProsperity *wp, const World *w);
