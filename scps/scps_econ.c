@@ -565,6 +565,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             re->treasury += collected;
             over_tax[c]   = (STATE_TAX_AMBITION>seuil)?(STATE_TAX_AMBITION-seuil):0.f;
         }
+        re->over_tax = clampf(over_tax[CLASS_LABORER], 0.f, 1.f);   /* grief des laboureurs → révolte */
 
         /* ---- 4. DEMANDE de consommation par strate --------------------- */
         for (int c=0;c<CLASS_COUNT;c++) {

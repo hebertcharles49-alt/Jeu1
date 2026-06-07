@@ -164,6 +164,7 @@ typedef struct {
     float      satisfaction;         /* satisfaction générale [0..1] */
     float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */
     float      society_sat;          /* satisfaction sociale [0..1] (cloth+wine+…) */
+    float      over_tax;             /* surtaxe ressentie par les laboureurs [0..1] (grief → révolte) */
     float      cap_pop;              /* capacité d'accueil (pop cible à terme) */
     float      prosperity;           /* PIB/tête normalisé — cache pour migration */
 

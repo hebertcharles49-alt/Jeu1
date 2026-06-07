@@ -202,6 +202,7 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
                   $(OBJDIR)/scps_scps_events.o $(OBJDIR)/scps_scps_demography.o \
                   $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_modifier.o \
+                  $(OBJDIR)/scps_scps_revolt.o \
                   $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
 chronicle: $(CHRONICLE_OBJS)
 	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
@@ -283,6 +284,20 @@ DEMOGRAPHY_INTEG_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o 
                     $(OBJDIR)/scps_demography_integ_demo.o
 demography_integ_demo: $(DEMOGRAPHY_INTEG_OBJS)
 	$(CC) $(DEMOGRAPHY_INTEG_OBJS) -o $@ -lm
+
+# ---- La révolte INCARNÉE : un soulèvement est un acteur ancré sur un groupe -
+# QUI se lève (pire déficit), COMBIEN (fraction mobilisée qui quitte le travail),
+# ce qu'il VEUT (jacquerie/sécession/coup), ce qu'il ADVIENT (écrasé/né/concession).
+REVOLT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                    $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
+                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_modifier.o \
+                    $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_revolt.o \
+                    $(OBJDIR)/scps_revolt_demo.o
+revolt_demo: $(REVOLT_DEMO_OBJS)
+	$(CC) $(REVOLT_DEMO_OBJS) -o $@ -lm
 
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \

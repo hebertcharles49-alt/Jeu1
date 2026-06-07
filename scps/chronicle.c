@@ -22,6 +22,7 @@
 #include "scps_events.h"
 #include "scps_modifier.h"
 #include "scps_demography.h"
+#include "scps_revolt.h"
 #include "scps_labor.h"
 #include "scps_ai.h"
 #include "scps_species.h"
@@ -34,8 +35,12 @@ typedef struct {
     WorldEconomy *econ; WorldProsperity *wp; WorldLegitimacy *wl; TradeNetwork *net;
     TechState *ts; Statecraft *sc; AgencyState *ag; EventsState *ev; ModifierStack *drift;
     LaborEcon *labor; DiploState *dp; RouteNetwork *rn; AiActor *ai; bool *ai_on;
+    RevoltState *rs;
+    int16_t prev_owner_mo[SCPS_MAX_REG];   /* propriétaires au mois précédent (détection de conquête) */
     int day, year, player;
 } Sim;
+
+static int regions_of(const WorldEconomy *e, int c);   /* défini plus bas */
 
 static void sim_day(Sim *s, World *w) {
     agency_advance(s->ag, w, s->econ, s->wl, 1);
@@ -49,6 +54,39 @@ static void sim_day(Sim *s, World *w) {
         econ_tick(s->econ, 1.f/12.f);
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
+        /* — conquête du mois : un peuple passé sous une couronne ÉTRANGÈRE devient
+         *   restif (intégration à zéro, L au plancher) → terreau de sécession. */
+        for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++){
+            int16_t no=s->econ->region[r].owner, po=s->prev_owner_mo[r];
+            if (po>=0 && no>=0 && no!=po){
+                demography_on_conquest(w, s->econ, s->drift, r, no);
+                revolt_on_conquest(s->rs, r);    /* subir la conquête arme le séparatisme (≈10 ans) */
+            }
+            s->prev_owner_mo[r]=no;
+        }
+        /* — la révolte INCARNÉE : la misère SOUTENUE d'une région (le pire déficit
+         *   de groupe : faim, sur-taxe, aliénation, non-intégration) allume un
+         *   soulèvement, puis on tranche (sécession, coup, jacquerie, écrasement).
+         *   Un pays NÉ d'une sécession prend vie. */
+        revolt_scan(s->rs, w, s->econ, s->drift, 30);
+        revolt_tick(s->rs, w, s->econ, s->drift, s->wl, s->wp, 30);
+        if (s->rs->last_spawned>=0){
+            /* un pays vient de naître : on donne vie (IA) à tout sécessionniste
+             * vivant pas encore piloté (plusieurs peuvent éclore le même mois). */
+            for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+                if (c==s->player || s->ai_on[c]) continue;
+                if (w->country[c].role==POLITY_ANTAGONIST && w->country[c].capital_prov>=0
+                    && regions_of(s->econ,c)>0){
+                    s->ai_on[c]=true;
+                    ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
+                }
+            }
+            /* une SÉCESSION a changé des propriétaires CE mois : resynchroniser, sinon
+             * la détection de conquête du mois prochain prendrait l'indépendance pour
+             * une invasion (le peuple libéré deviendrait restif envers SON propre État). */
+            for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)
+                s->prev_owner_mo[r]=s->econ->region[r].owner;
+        }
     }
     if (s->day % 365 == 364) {
         econ_colonize_tick(s->econ, w); econ_migrate_tick(s->econ, w);
@@ -75,6 +113,9 @@ static void sim_init(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);
+    revolt_init(s->rs);
+    for (int r=0;r<SCPS_MAX_REG;r++)
+        s->prev_owner_mo[r] = (r<s->econ->n_regions)? s->econ->region[r].owner : -1;
     events_init(s->ev, w, w->seed);
     labor_init(s->labor, w); labor_seed_from_world(s->labor, w, s->econ, s->player);
     s->day=0; s->year=0;
@@ -191,8 +232,9 @@ int main(int argc, char **argv){
     s.drift=malloc(sizeof(ModifierStack)); s.labor=malloc(sizeof(LaborEcon));
     s.dp=malloc(sizeof(DiploState)); s.rn=malloc(sizeof(RouteNetwork));
     s.ai=calloc(SCPS_MAX_COUNTRY,sizeof(AiActor)); s.ai_on=calloc(SCPS_MAX_COUNTRY,sizeof(bool));
+    s.rs=malloc(sizeof(RevoltState));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
-        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on){ fprintf(stderr,"OOM\n"); return 1; }
+        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs){ fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
     printf(" CHRONIQUE — balayage : %d sims, %d ans (empires 2→%d, cités 5→%d ; sans joueur)\n",
@@ -201,6 +243,7 @@ int main(int argc, char **argv){
 
     /* Agrégats sur toutes les sims */
     long tot_wars=0, tot_absorbed=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
+    long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
     for (int k=0;k<nsims;k++){
@@ -298,9 +341,14 @@ int main(int argc, char **argv){
                    "vs %d stables (Légit %.1f · K %.1f · SI %.1f)\n",
                    nr,Lr,Kr,SIr, ns,Ls,Ks,SIs);
         }
+        /* SOULÈVEMENTS INCARNÉS : qui s'est levé et ce qu'il est advenu (acteurs réels). */
+        printf("              soulèvements : %d allumés → %d sécession(s) · %d coup(s) · %d concession(s) · %d écrasé(s) (%ld morts au combat)\n",
+               s.rs->n_ignited, s.rs->n_seceded, s.rs->n_coup, s.rs->n_concession, s.rs->n_crushed, s.rs->pop_lost);
 
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
         tot_conq += conq_prov;
+        tot_ignited += s.rs->n_ignited; tot_seceded += s.rs->n_seceded; tot_coup += s.rs->n_coup;
+        tot_concession += s.rs->n_concession; tot_crushed += s.rs->n_crushed; tot_revdead += s.rs->pop_lost;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
         if (age_year[AGE_SOULEVEMENTS]>=0) worlds_with_uprising++;
     }
@@ -312,12 +360,15 @@ int main(int argc, char **argv){
     printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
     printf("   pays absorbés (total) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
+    printf("   soulèvements incarnés ....... %ld allumés → %ld sécession(s) · %ld coup(s) · %ld concession(s) · %ld écrasé(s)\n",
+           tot_ignited, tot_seceded, tot_coup, tot_concession, tot_crushed);
+    printf("   morts au combat (révoltes) .. %ld   (moy. %.0f/sim)\n", tot_revdead, (double)tot_revdead/nsims);
     printf("   sims atteignant les Soulèvements : %d/%d   l'Ordre de Fer : %d/%d\n",
            worlds_with_uprising, nsims, worlds_with_ironorder, nsims);
     printf("══════════════════════════════════════════════════════════════════════\n");
 
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);
     free(s.ag); free(s.ev); free(s.drift); free(s.labor); free(s.dp); free(s.rn);
-    free(s.ai); free(s.ai_on);
+    free(s.ai); free(s.ai_on); free(s.rs);
     return 0;
 }
