@@ -14,6 +14,18 @@
 static inline float clampf(float v,float lo,float hi){return v<lo?lo:(v>hi?hi:v);}
 static inline float absf(float v){return v<0?-v:v;}
 
+/* ---- Diplomatie d'équilibre — surface d'équilibrage ------------------- */
+#define TRUCE_BASE       (3.f*365.f)   /* trêve de base après une paix (3 ans) */
+#define TRUCE_PER_YEAR   (365.f)       /* + 1 an de trêve par an de guerre menée */
+#define TRUCE_MAX        (12.f*365.f)  /* plafond (une vie de génération) */
+#define MOMENTUM_PER_CONQ 1.0f         /* +1 fulgurance par région prise */
+#define MOMENTUM_DECAY   (1.2f/365.f)  /* la fulgurance s'oublie (~ -1.2/an) */
+#define MOMENTUM_W       0.7f          /* poids de la fulgurance sur la menace */
+/* Hégémon = menace qui ÉCRASE le champ (domine NETTEMENT la 2e) — critère RELATIF,
+ * indépendant de l'échelle (les menaces vont de ~1 au début à ~500 en fin de partie). */
+#define HEGEMON_RATIO    1.8f
+#define HEGEMON_FLOOR    0.5f
+
 void diplo_init(DiploState *d){ memset(d,0,sizeof(*d)); }
 
 DiploStatus diplo_status(const DiploState *d, int a, int b){
@@ -28,8 +40,21 @@ void diplo_declare_war  (DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_WAR); }
 void diplo_form_alliance(DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_ALLIED); }
 void diplo_make_peace   (DiploState *d,int a,int b){
     set_sym(d,a,b,DIPLO_NEUTRAL);
-    if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY)
+    if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY){
+        /* TRÊVE : une longue guerre → une longue trêve. On ne peut redéclarer
+         * avant qu'elle fonde — l'enchaînement conquête→reconquête est cassé. */
+        float dur = clampf(TRUCE_BASE + TRUCE_PER_YEAR*d->war_years[a][b], 0.f, TRUCE_MAX);
+        d->truce[a][b]=d->truce[b][a]=dur;
         d->war_years[a][b]=d->war_years[b][a]=0.f;
+    }
+}
+bool diplo_can_declare(const DiploState *d,int a,int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return false;
+    return d->truce[a][b] <= 0.f;
+}
+float diplo_truce_days(const DiploState *d,int a,int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0.f;
+    return d->truce[a][b];
 }
 
 /* ---- accesseurs ------------------------------------------------------- */
@@ -95,12 +120,16 @@ float diplo_mil_power(const World *w, const WorldEconomy *econ, int cid){
 }
 
 static float threat_of(const World *w, const WorldEconomy *econ,
-                       const WorldProsperity *wp, int a, int b){
+                       const WorldProsperity *wp, const DiploState *d, int a, int b){
     float eco=diplo_eco_power(wp,b), mil=diplo_mil_power(w,econ,b);
     float dist=geo_dist(w,a,b);
     float infl=race_influence(w,econ,b);          /* l'influence étend la portée */
     float eff=dist/(1.f+0.10f*infl);
-    return (eco+mil)/(eff*0.02f + 1.f);
+    float base=(eco+mil)/(eff*0.02f + 1.f);
+    /* MOMENTUM : la FULGURANCE effraie plus que la masse — un empire qui snowballe
+     * alarme bien plus qu'un grand empire immobile à puissance égale. */
+    float momentum = (d && b<SCPS_MAX_COUNTRY) ? d->momentum[b] : 0.f;
+    return base * (1.f + MOMENTUM_W*momentum);
 }
 
 Relation diplo_relation(const World *w, const WorldEconomy *econ,
@@ -108,7 +137,7 @@ Relation diplo_relation(const World *w, const WorldEconomy *econ,
     Relation r; memset(&r,0,sizeof r);
     if (a<0||a>=w->n_countries||b<0||b>=w->n_countries||a==b) return r;
 
-    r.threat = threat_of(w,econ,wp,a,b);
+    r.threat = threat_of(w,econ,wp,d,a,b);
 
     unsigned ra=country_res_mask(w,econ,a), rb=country_res_mask(w,econ,b);
     int uni=popcount(ra|rb), inter=popcount(ra&rb);
@@ -128,13 +157,12 @@ Relation diplo_relation(const World *w, const WorldEconomy *econ,
      *          − ν·distance de valeurs − ξ·schisme. */
     float shared=0.f;
     for (int c=0;c<w->n_countries;c++) if (c!=a&&c!=b){
-        float t=threat_of(w,econ,wp,a,c), u=threat_of(w,econ,wp,b,c);
+        float t=threat_of(w,econ,wp,d,a,c), u=threat_of(w,econ,wp,d,b,c);
         float m=(t<u)?t:u; if (m>shared) shared=m;
     }
     float val_dist = (ca&&cb) ? absf(ca->valeurs-cb->valeurs) : 0.f;
     float fk = r.kinship*(10.f-r.kinship)/25.f;     /* cloche sur la parenté */
     r.alliance = shared + 2.0f*r.complement + 1.0f*fk - 0.3f*val_dist - 2.0f*r.schism;
-    (void)d;
     return r;
 }
 
@@ -151,13 +179,49 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     re->owner = conqueror;            /* transfert : la diversité suit (compute_profile) */
     re->colonized = true;
     re->revolt_scar = 1.0f;           /* la conquête CONVULSE : −50 % dévelop. quelques années */
+    if (conqueror<SCPS_MAX_COUNTRY)
+        d->momentum[conqueror] += MOMENTUM_PER_CONQ;   /* la fulgurance EFFRAIE (→ coalition) */
     legitimacy_on_conquest(wl, region);   /* L au plancher, intégration à zéro */
     return true;
 }
 
+/* ---- Diplomatie d'ÉQUILIBRE — friction & coalition -------------------- */
+float diplo_war_widening_cost(const World *w, const WorldEconomy *econ,
+                              const DiploState *d, int attacker, int target){
+    float c=0.f;
+    for (int k=0;k<w->n_countries;k++){
+        if (k==attacker || k==target) continue;
+        if (diplo_status(d,target,k)==DIPLO_ALLIED)     /* allié susceptible d'entrer en guerre */
+            c += diplo_mil_power(w,econ,k);
+    }
+    return c;   /* renchérit la cible : frapper un protégé d'une puissance ÉLARGIT la guerre */
+}
+int diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
+                            const WorldProsperity *wp, const DiploState *d, int self){
+    int best=-1; float t1=0.f, t2=0.f;            /* les deux plus fortes menaces perçues */
+    for (int b=0;b<w->n_countries;b++){
+        if (b==self || w->country[b].role==POLITY_UNCLAIMED) continue;
+        float t=threat_of(w,econ,wp,d,self,b);
+        if (t>t1){ t2=t1; t1=t; best=b; } else if (t>t2) t2=t;
+    }
+    /* hégémon = une menace qui DOMINE nettement la suivante (aucun script : c'est la
+     * lecture de menace de CHACUN ; quand un même pays domine pour plusieurs, ils se
+     * comportent de facto en coalition). */
+    return (best>=0 && t1 > HEGEMON_RATIO*fmaxf(t2, HEGEMON_FLOOR)) ? best : -1;
+}
+
 void diplo_tick(DiploState *d, float dt){
-    for (int a=0;a<SCPS_MAX_COUNTRY;a++) for (int b=a+1;b<SCPS_MAX_COUNTRY;b++)
-        if (d->status[a][b]==DIPLO_WAR){
-            d->war_years[a][b]+=dt/365.f; d->war_years[b][a]=d->war_years[a][b];
+    for (int a=0;a<SCPS_MAX_COUNTRY;a++){
+        /* la fulgurance s'oublie : un conquérant arrêté cesse d'effrayer. */
+        d->momentum[a] = fmaxf(0.f, d->momentum[a] - MOMENTUM_DECAY*dt);
+        for (int b=a+1;b<SCPS_MAX_COUNTRY;b++){
+            if (d->status[a][b]==DIPLO_WAR){
+                d->war_years[a][b]+=dt/365.f; d->war_years[b][a]=d->war_years[a][b];
+            }
+            if (d->truce[a][b]>0.f){            /* la trêve fond comme le revanchisme */
+                d->truce[a][b]=fmaxf(0.f, d->truce[a][b]-dt);
+                d->truce[b][a]=d->truce[a][b];
+            }
         }
+    }
 }

@@ -115,6 +115,50 @@ int main(int argc,char**argv){
         ok("la diversité non métabolisée monte la fracture", frac1 > frac0);
     }
 
+    /* ---- 3. Diplomatie d'ÉQUILIBRE : trêve · momentum · friction · coalition ---- */
+    printf("\n── 3. Diplomatie d'équilibre (rétroaction négative, pas d'interdit) ──\n");
+    {
+        /* B = un voisin ; C = un pays avec une FORCE réelle (l'allié dont l'entrée
+         * pèse) — sinon le coût d'élargissement serait nul (pays vide). */
+        int A=player, B=-1, C=-1;
+        for(int c=0;c<w->n_countries;c++){ if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+            if(B<0){B=c;continue;}
+            if(diplo_mil_power(w,econ,c)>0.01f){ C=c; break; } }
+        if(B>=0 && C>=0){
+            /* TRÊVE : une longue guerre → une longue trêve ; on n'enchaîne plus. */
+            diplo_init(dp); dp->war_years[A][B]=dp->war_years[B][A]=4.f;
+            diplo_make_peace(dp,A,B);
+            float tr4=diplo_truce_days(dp,A,B);
+            ok("après la paix, on ne peut PAS redéclarer (trêve)", !diplo_can_declare(dp,A,B));
+            diplo_init(dp); dp->war_years[A][B]=dp->war_years[B][A]=8.f;
+            diplo_make_peace(dp,A,B);
+            ok("une plus LONGUE guerre → une plus longue trêve", diplo_truce_days(dp,A,B) > tr4);
+            diplo_tick(dp, 365.f*15.f);
+            ok("la trêve FOND : la guerre redevient possible après le répit", diplo_can_declare(dp,A,B));
+
+            /* MOMENTUM : la fulgurance effraie plus que la masse statique. */
+            diplo_init(dp);
+            float th0=diplo_relation(w,econ,wp,dp,A,B).threat;
+            dp->momentum[B]=6.f;
+            float th1=diplo_relation(w,econ,wp,dp,A,B).threat;
+            ok("un conquérant FULGURANT menace plus qu'à puissance statique égale", th1 > th0+0.01f);
+
+            /* FRICTION : un protégé d'un allié puissant renchérit (coût d'élargissement). */
+            diplo_init(dp);
+            float wno=diplo_war_widening_cost(w,econ,dp,A,B);
+            diplo_form_alliance(dp,B,C);
+            ok("frapper un protégé d'allié ÉLARGIT la guerre (coût ↑)",
+               diplo_war_widening_cost(w,econ,dp,A,B) > wno);
+
+            /* COALITION : un hégémon (fulgurance extrême) est perçu comme menace dominante. */
+            diplo_init(dp); dp->momentum[B]=40.f;
+            ok("un hégémon fulgurant est PERÇU (posture de coalition, sans script)",
+               diplo_perceived_hegemon(w,econ,wp,dp,A)==B);
+        } else {
+            ok("(monde trop petit pour le test d'équilibre)", true);
+        }
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

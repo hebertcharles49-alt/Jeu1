@@ -32,6 +32,8 @@ typedef enum { DIPLO_NEUTRAL = 0, DIPLO_ALLIED, DIPLO_WAR } DiploStatus;
 typedef struct {
     DiploStatus status[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       war_years[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
+    float       truce[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* jours d'interdiction de guerre (fond) */
+    float       momentum[SCPS_MAX_COUNTRY];                 /* conquêtes RÉCENTES (décroît) → fulgurance perçue */
 } DiploState;
 
 void diplo_init(DiploState *d);
@@ -47,6 +49,20 @@ void        diplo_declare_war (DiploState *d, int a, int b);
 void        diplo_form_alliance(DiploState *d, int a, int b);
 void        diplo_make_peace  (DiploState *d, int a, int b);
 DiploStatus diplo_status      (const DiploState *d, int a, int b);
+/* Peut-on déclarer la guerre ? false pendant la TRÊVE (espace l'enchaînement). */
+bool        diplo_can_declare (const DiploState *d, int a, int b);
+float       diplo_truce_days  (const DiploState *d, int a, int b);   /* lecture (UI/IA) */
+
+/* ---- Diplomatie d'ÉQUILIBRE (rétroaction négative, pas d'interdiction) ----- *
+ * Coût d'élargissement : frapper un protégé d'alliés puissants risque d'étendre
+ * la guerre → renchérit la cible (somme des forces alliées susceptibles d'entrer). */
+float diplo_war_widening_cost(const World *w, const WorldEconomy *econ,
+                              const DiploState *d, int attacker, int target);
+/* La menace dominante perçue par `self` ; renvoie -1 si aucune ne franchit le
+ * seuil de coalition. Une coalition ÉMERGE quand un même hégémon dépasse ce seuil
+ * pour plusieurs royaumes (aucun script, juste des lectures de menace sommées). */
+int   diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
+                              const WorldProsperity *wp, const DiploState *d, int self);
 
 /* Conquête (§5) : transfère une région ennemie au conquérant (suppose la guerre
  * et l'issue militaire favorable). L'owner change → la diversité du conquérant

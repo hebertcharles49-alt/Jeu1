@@ -18,6 +18,8 @@
 #define AI_STRAT_CADENCE  1100   /* ~3 ans entre décisions stratégiques     */
 #define AI_PEACE_LOCK     1825   /* 5 ans de consolidation forcée (hystérésis) */
 #define AI_ARMY_MARGIN    0.75f  /* n'attaque que si armée ≥ 0.75× la cible  */
+#define AI_WIDEN_W        0.5f    /* friction : poids du coût d'élargissement (alliés de la cible) */
+#define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on propose l'alliance */
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 
@@ -194,18 +196,50 @@ static int ai_pick_rival(const AiActor *a, const World *w, const WorldEconomy *e
         if (b==a->cid) continue;
         if (w->country[b].role==POLITY_UNCLAIMED) continue;
         if (!countries_adjacent(econ, a->cid, b)) continue;
+        if (diplo_status(diplo, a->cid, b)==DIPLO_ALLIED) continue;  /* on ne frappe pas un allié */
+        if (!diplo_can_declare(diplo, a->cid, b)) continue;          /* TRÊVE : on n'enchaîne pas */
         float their_army = diplo_mil_power(w, econ, b);
         if (my_army < AI_ARMY_MARGIN*their_army) continue;     /* on n'attaque pas plus fort */
         Relation rel = diplo_relation(w, econ, wp, diplo, a->cid, b);
         float opportunism = my_army - their_army;              /* une proie faible = une occasion */
+        /* FRICTION : frapper un protégé d'alliés puissants risque d'ÉLARGIR la
+         * guerre → la cible se renchérit de la force alliée susceptible d'entrer.
+         * Moins de guerres marginales ; le besoin aigu en vaut encore le risque. */
+        float widen = diplo_war_widening_cost(w, econ, diplo, a->cid, b);
         /* On frappe ce qui MENACE — et, à proportion de l'appétit de conquête, ce
-         * qui est FAIBLE. Un peuple pacifique ne préda­te pas un voisin sans défense ;
-         * un Dominateur, si. La « parenté/alliance » retient (un peu) la main. */
+         * qui est FAIBLE. La parenté/alliance et le risque d'élargissement retiennent. */
         float score = rel.threat
                     + a->w_expand * 3.0f * (opportunism>0.f ? opportunism : 0.f)
                     + a->w_faith  * 5.0f * rel.schism
-                    - rel.alliance;
+                    - rel.alliance
+                    - AI_WIDEN_W * widen;
         if (score > bestscore){ bestscore=score; best=b; }
+    }
+    return best;
+}
+
+/* ---- Diplomatie d'équilibre : alliés, coalition (lectures, pas de script) -- */
+static float allied_power(const World *w, const WorldEconomy *econ, const DiploState *d, int self){
+    float p=0.f;
+    for (int k=0;k<w->n_countries;k++) if (k!=self && diplo_status(d,self,k)==DIPLO_ALLIED)
+        p += diplo_mil_power(w,econ,k);
+    return p;
+}
+static bool country_at_war(const World *w, const DiploState *d, int c){
+    for (int k=0;k<w->n_countries;k++) if (k!=c && diplo_status(d,c,k)==DIPLO_WAR) return true;
+    return false;
+}
+/* L'allié naturel le plus fort (score d'alliance au-delà du seuil) — la friction
+ * préventive : on se lie aux complémentaires/parents/menacés-communs. */
+static int ai_pick_ally(const AiActor *a, const World *w, const WorldEconomy *econ,
+                        const WorldProsperity *wp, const DiploState *d){
+    int best=-1; float bestsc=AI_ALLY_SEUIL;
+    for (int b=0;b<w->n_countries;b++){
+        if (b==a->cid || w->country[b].role==POLITY_UNCLAIMED) continue;
+        if (diplo_status(d,a->cid,b)!=DIPLO_NEUTRAL) continue;     /* déjà allié ou en guerre */
+        if (!countries_adjacent(econ,a->cid,b)) continue;
+        Relation rel=diplo_relation(w,econ,wp,d,a->cid,b);
+        if (rel.alliance>bestsc){ bestsc=rel.alliance; best=b; }
     }
     return best;
 }
@@ -382,7 +416,33 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         return;
     }
 
-    /* En paix : on OUVRE une guerre contre la meilleure cible (lue, pas scriptée). */
+    /* En paix : ÉQUILIBRE avant prédation (rétroaction négative, jamais d'interdit). */
+
+    /* (1) COALITION — se liguer contre l'HÉGÉMON perçu (anti-runaway, émergent des
+     * menaces sommées). On se joint si l'hégémon GUERROIE déjà (pile-on) et que
+     * notre camp (soi + alliés) pèse assez. Le frein gouverne : un fragile n'ose pas. */
+    int heg = diplo_perceived_hegemon(w, econ, wp, diplo, a->cid);
+    if (heg>=0 && heg!=a->cid && diplo_status(diplo,a->cid,heg)==DIPLO_NEUTRAL
+        && diplo_can_declare(diplo,a->cid,heg) && country_at_war(w,diplo,heg)){
+        float my_side = v->armee + allied_power(w,econ,diplo,a->cid);
+        if (my_side >= AI_ARMY_MARGIN*diplo_mil_power(w,econ,heg)){
+            diplo_declare_war(diplo, a->cid, heg);
+            a->credit_war -= 1.f; a->stats.wars++;
+            return;
+        }
+    }
+
+    /* (2) ALLIANCE EN ACTE — se lier à l'allié naturel le plus fort (friction
+     * préventive : la menace partagée et le complément écrasent la prédation mutuelle). */
+    int ally = ai_pick_ally(a, w, econ, wp, diplo);
+    if (ally>=0){
+        diplo_form_alliance(diplo, a->cid, ally);
+        a->credit_war = fmaxf(0.f, a->credit_war - 0.5f);    /* l'énergie passe à se lier */
+        return;
+    }
+
+    /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, friction
+     * d'élargissement comprise (on évite les guerres marginales). */
     int rival = ai_pick_rival(a, w, econ, wp, diplo, v->armee);
     if (rival>=0){
         diplo_declare_war(diplo, a->cid, rival);
