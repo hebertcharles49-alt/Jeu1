@@ -163,11 +163,23 @@ static void revolt_cause(const World *w, const WorldEconomy *e, const WorldProsp
     if (*ns){ *Ls/=*ns; *Ks/=*ns; *SIs/=*ns; }
 }
 
+/* Armée TOTALE du monde (somme des puissances militaires). */
+static float total_army(const World *w, const WorldEconomy *e){
+    float a=0.f; for (int c=0;c<w->n_countries;c++) a+=diplo_mil_power(w,e,c); return a;
+}
+/* Provinces COLONISÉES (régions peuplées × leurs provinces). */
+static int colonized_provinces(const World *w, const WorldEconomy *e){
+    int n=0;
+    for (int r=0;r<e->n_regions && r<w->n_regions;r++)
+        if (e->region[r].colonized) n+=w->region[r].n_provinces;
+    return n;
+}
+
 int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
-    int nworlds   = (argc>2)?atoi(argv[2]):10;
+    int nsims     = (argc>2)?atoi(argv[2]):11;   /* sim i : 2+i empires, 5+i cités (2→12 / 5→15) */
     int years     = (argc>3)?atoi(argv[3]):200;
-    if (nworlds<1) nworlds=1;
+    if (nsims<1) nsims=1;
     if (years<1) years=1;
 
     World *w = malloc(sizeof(World));
@@ -183,18 +195,21 @@ int main(int argc, char **argv){
         ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on){ fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
-    printf(" CHRONIQUE — %d mondes, %d ans chacun (le moteur vivant, sans joueur)\n", nworlds, years);
+    printf(" CHRONIQUE — balayage : %d sims, %d ans (empires 2→%d, cités 5→%d ; sans joueur)\n",
+           nsims, years, 1+nsims, 4+nsims);
     printf("══════════════════════════════════════════════════════════════════════\n");
 
-    /* Agrégats sur tous les mondes */
-    long tot_wars=0, tot_absorbed=0, tot_peakrev=0, tot_ages=0;
+    /* Agrégats sur toutes les sims */
+    long tot_wars=0, tot_absorbed=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
-    for (int k=0;k<nworlds;k++){
+    for (int k=0;k<nsims;k++){
         uint32_t seed = base + (uint32_t)k*101u;
         WorldParams p = worldparams_default(seed);
+        p.n_empires     = 2 + k;      /* sim 1 : 2 empires … sim 11 : 12 */
+        p.n_city_states = 5 + k;      /* sim 1 : 5 cités  … sim 11 : 15  */
         world_generate(w, &p);
-        /* silence le bruit de génération : on a déjà tout imprimé par monde plus bas */
+        /* silence le bruit de génération : on a déjà tout imprimé par sim plus bas */
         sim_init(&s, w);
 
         int cont = w->n_continents;
@@ -205,13 +220,23 @@ int main(int argc, char **argv){
         int war_onsets=0, prev_wars=0, peak_wars=0;
         int peak_rev=0, peak_rev_year=0;
         int min_living=c0;
+        /* suivi des transferts de propriété : conquête vs colonisation */
+        int conq_prov=0;                              /* provinces PRISES de force (cumul) */
+        int16_t prev_owner[SCPS_MAX_REG];
+        for (int r=0;r<s.econ->n_regions && r<SCPS_MAX_REG;r++) prev_owner[r]=s.econ->region[r].owner;
 
-        printf("\n── Monde %d (graine %u) — %d empires, %d cités-états, %d continents, %d régions ──\n",
+        printf("\n── Sim %d (graine %u) — %d empires · %d cités-états · %d continents · %d régions ──\n",
                k+1, seed, n_emp, n_city, cont, s.econ->n_regions);
 
         int snap[4]={50,100,150,200}, si=0;
         for (int yr=0; yr<years; yr++){
             for (int d=0; d<365; d++) sim_day(&s, w);
+            /* conquêtes de l'année : régions passées d'un PAYS à un autre (de force) */
+            for (int r=0;r<s.econ->n_regions && r<SCPS_MAX_REG;r++){
+                int16_t no=s.econ->region[r].owner, po=prev_owner[r];
+                if (po>=0 && no>=0 && no!=po) conq_prov += w->region[r].n_provinces;
+                prev_owner[r]=no;
+            }
             /* âges : on imprime À L'AVÈNEMENT → la ligne du temps est chronologique */
             for (int a=0;a<AGE_COUNT;a++)
                 if (age_year[a]<0 && ages_dawned(s.ev,(AgeId)a)){
@@ -226,12 +251,14 @@ int main(int argc, char **argv){
             if (rv>peak_rev){ peak_rev=rv; peak_rev_year=s.year; }
             int lv = living_countries(w, s.econ);
             if (lv<min_living) min_living=lv;
-            /* instantané tous les 50 ans : où en est le monde ? */
+            /* instantané tous les 50 ans — les courbes DANS LE TEMPS :
+             * population · armée totale · provinces colonisées · prises de force */
             if (si<4 && s.year>=snap[si]){
                 int treg=0; top_power(w,s.econ,&treg);
                 int ap,as_; empire_avg(w,s.econ,s.wp,s.ts,&ap,&as_);
-                printf("   an %3d : %2d pays vivants | pop %.0fk | 1er empire %2d rég | empires : prospérité %2d stab %2d | %d guerre(s), %d révolté(s)\n",
-                       snap[si], lv, total_pop(s.econ)/1000.0, treg, ap, as_, wa, rv);
+                printf("   an %3d : %2d pays | pop %5.0fk | armée %5.0f | colonisées %3d prov | prises %3d prov | 1er empire %2d rég | prosp %2d stab %2d | %2d révolté(s)\n",
+                       snap[si], lv, total_pop(s.econ)/1000.0, total_army(w,s.econ),
+                       colonized_provinces(w,s.econ), conq_prov, treg, ap, as_, rv);
                 si++;
             }
         }
@@ -260,6 +287,9 @@ int main(int argc, char **argv){
             for (int i=0;i<cont && i<4;i++) printf(" C%d %.0fk", ord[i], pc[ord[i]]/1000.0);
             printf("\n");
         }
+        /* EXPANSION : provinces colonisées (vierges peuplées) vs PRISES de force. */
+        printf("              expansion : %d prov colonisées · %d prov PRISES de force · armée finale %.0f\n",
+               colonized_provinces(w,s.econ), conq_prov, total_army(w,s.econ));
         /* POURQUOI les révoltes : la cause LUE (légitimité ? capacité ?). */
         {
             int nr,ns; float Lr,Kr,SIr,Ls,Ks,SIs;
@@ -270,18 +300,20 @@ int main(int argc, char **argv){
         }
 
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
+        tot_conq += conq_prov;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
         if (age_year[AGE_SOULEVEMENTS]>=0) worlds_with_uprising++;
     }
 
     printf("\n══════════════════════════════════════════════════════════════════════\n");
-    printf(" SYNTHÈSE (%d mondes × %d ans)\n", nworlds, years);
-    printf("   âges éveillés (total) ....... %ld   (moy. %.1f/monde)\n", tot_ages, (double)tot_ages/nworlds);
-    printf("   guerres déclenchées (total) . %ld   (moy. %.1f/monde)\n", tot_wars, (double)tot_wars/nworlds);
-    printf("   pays absorbés (total) ....... %ld   (moy. %.1f/monde)\n", tot_absorbed, (double)tot_absorbed/nworlds);
-    printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nworlds);
-    printf("   mondes atteignant les Soulèvements : %d/%d   l'Ordre de Fer : %d/%d\n",
-           worlds_with_uprising, nworlds, worlds_with_ironorder, nworlds);
+    printf(" SYNTHÈSE (%d sims × %d ans)\n", nsims, years);
+    printf("   âges éveillés (total) ....... %ld   (moy. %.1f/sim)\n", tot_ages, (double)tot_ages/nsims);
+    printf("   guerres déclenchées (total) . %ld   (moy. %.1f/sim)\n", tot_wars, (double)tot_wars/nsims);
+    printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
+    printf("   pays absorbés (total) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
+    printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
+    printf("   sims atteignant les Soulèvements : %d/%d   l'Ordre de Fer : %d/%d\n",
+           worlds_with_uprising, nsims, worlds_with_ironorder, nsims);
     printf("══════════════════════════════════════════════════════════════════════\n");
 
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);

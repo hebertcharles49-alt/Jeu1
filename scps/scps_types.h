@@ -51,6 +51,8 @@ typedef struct {
     float    mountains;      /* 0..1  — amplitude du relief                 */
     float    temperature;    /* 0..1  — 0.5 neutre ; haut = monde chaud     */
     float    humidity;       /* 0..1  — 0.5 neutre ; haut = monde humide    */
+    int      n_empires;      /* empires (joueur + antagonistes) visés ; 0 = défaut (15) */
+    int      n_city_states;  /* cités-états visées ; 0 = défaut (20)                    */
 } WorldParams;
 
 /* ---- Biomes ------------------------------------------------------------ */

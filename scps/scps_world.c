@@ -1811,7 +1811,7 @@ static void gen_region_names(World *w) {
     }
 }
 
-static void build_hierarchy(World *w) {
+static void build_hierarchy(World *w, int want_empires, int want_cities) {
     int np=w->n_provinces;
     if (np<1){ w->n_regions=w->n_countries=0; return; }
 
@@ -1920,7 +1920,8 @@ static void build_hierarchy(World *w) {
              * du monde — on prend les plus PESANTS comme empires, les suivants comme
              * cités. (Compte de pays calibré pour atteindre 35 ; sinon dégradation
              * gracieuse : on en assigne autant qu'il y en a.) */
-            const int N_EMPIRE=15, N_CITY=20;
+            const int N_EMPIRE = want_empires>0 ? want_empires : 15;
+            const int N_CITY   = want_cities >0 ? want_cities  : 20;
             for (int i=1; i<N_EMPIRE && i<ncty; i++)
                 w->country[ord[i]].role=POLITY_ANTAGONIST;
             for (int i=N_EMPIRE; i<N_EMPIRE+N_CITY && i<ncty; i++)
@@ -2695,6 +2696,8 @@ WorldParams worldparams_default(uint32_t seed) {
     p.mountains    = 0.5f;
     p.temperature  = 0.5f;
     p.humidity     = 0.5f;
+    p.n_empires    = 15;
+    p.n_city_states= 20;
     return p;
 }
 
@@ -2823,7 +2826,7 @@ void world_generate(World *w, const WorldParams *P) {
     printf("ok (%d cont.)\n",w->n_continents);
 
     printf("[scps] hiérarchie...   "); fflush(stdout);
-    build_hierarchy(w);
+    build_hierarchy(w, P->n_empires, P->n_city_states);
     printf("ok (%d rég. %d pays)\n",w->n_regions,w->n_countries);
 
     printf("[scps] flags rendu...  "); fflush(stdout);
