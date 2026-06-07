@@ -55,6 +55,11 @@ READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
 readout_demo: $(READOUT_DEMO_OBJS)
 	$(CC) $(READOUT_DEMO_OBJS) -o $@ -lm
 
+# ---- Roster de races & système de traits (autonome) ----------------------
+SPECIES_DEMO_OBJS := $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_species_demo.o
+species_demo: $(SPECIES_DEMO_OBJS)
+	$(CC) $(SPECIES_DEMO_OBJS) -o $@
+
 # ---- Visualiseur de carte + UI diégétique (SDL2 + SDL_ttf) ---------------
 # Le viewer lie toute la chaîne sim (la membrane scps_readout traduit en mots),
 # mais N'inclut PAS scps_core.h (cloison vérifiée par grep).
@@ -113,10 +118,11 @@ prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
-	       tech_demo culture_demo prosperity_demo core_demo readout_demo out_*.ppm montage.bmp
+	       tech_demo culture_demo prosperity_demo core_demo readout_demo species_demo \
+	       out_*.ppm montage.bmp
 
-.PHONY: all scps run_scps clean core_demo readout_demo scps_dump scps_batch econ_demo \
-        tech_demo culture_demo prosperity_demo
+.PHONY: all scps run_scps clean core_demo readout_demo species_demo scps_dump scps_batch \
+        econ_demo tech_demo culture_demo prosperity_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur
 # absence au premier build.
