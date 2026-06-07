@@ -16,7 +16,7 @@
  *  12. Tracé des rivières principales
  */
 #define STB_PERLIN_IMPLEMENTATION
-#include "../src/stb_perlin.h"
+#include "stb_perlin.h"
 #include "scps_world.h"
 #include "scps_culture.h"   /* culture_make(), lifeway_*, ethos_nearest() */
 #include <stdlib.h>

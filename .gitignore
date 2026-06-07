@@ -2,26 +2,23 @@ build/
 *.o
 *.obj
 *.exe
-crucible
-crucible.exe
-element_dungeon
-element_dungeon.exe
-crucible_save.dat
-crucible_settings.dat
-SDL2.dll
 *.pdb
 *.ilk
 .vs/
+
+# Binaires des bancs d'essai et du visualiseur
 scps_viewer
-scps_viewer.exe
 scps_dump
-out_*.ppm
-out_*.png
 scps_batch
 econ_demo
 tech_demo
 culture_demo
-montage.bmp
 prosperity_demo
 core_demo
+
+# Sorties générées
+out_*.ppm
+out_*.png
+montage.bmp
+
 .claude/
