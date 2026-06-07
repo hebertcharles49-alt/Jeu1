@@ -15,6 +15,7 @@ tech_demo
 culture_demo
 prosperity_demo
 core_demo
+readout_demo
 
 # Sorties générées
 out_*.ppm

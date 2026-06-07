@@ -47,6 +47,13 @@ CORE_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_core_demo.o
 core_demo: $(CORE_DEMO_OBJS)
 	$(CC) $(CORE_DEMO_OBJS) -o $@ -lm
 
+# ---- Membrane diégétique (flottants SCPS → mots) — banc d'essai headless --
+# Prouve le test décisif « Tenue · Contrainte » et la couverture du lexique.
+READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
+                     $(OBJDIR)/scps_readout_demo.o
+readout_demo: $(READOUT_DEMO_OBJS)
+	$(CC) $(READOUT_DEMO_OBJS) -o $@ -lm
+
 # ---- Visualiseur de carte procédurale (SDL2/OpenGL) ----------------------
 SCPS_SRCS := scps/scps_world.c scps/scps_render.c scps/scps_culture.c scps/viewer.c
 SCPS_OBJS := $(SCPS_SRCS:scps/%.c=$(OBJDIR)/scps_%.o)
@@ -98,9 +105,9 @@ prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
-	       tech_demo culture_demo prosperity_demo core_demo out_*.ppm montage.bmp
+	       tech_demo culture_demo prosperity_demo core_demo readout_demo out_*.ppm montage.bmp
 
-.PHONY: all scps run_scps clean core_demo scps_dump scps_batch econ_demo \
+.PHONY: all scps run_scps clean core_demo readout_demo scps_dump scps_batch econ_demo \
         tech_demo culture_demo prosperity_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur
