@@ -37,6 +37,19 @@ static void set_sym(DiploState *d, int a, int b, DiploStatus s){
     d->status[a][b]=d->status[b][a]=s;
 }
 void diplo_declare_war  (DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_WAR); }
+void diplo_declare_war_cb(DiploState *d,int a,int b,CasusBelli cb){
+    set_sym(d,a,b,DIPLO_WAR);
+    if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY) d->cb[a][b]=(int8_t)cb;  /* le but de l'AGRESSEUR */
+}
+CasusBelli diplo_war_goal(const DiploState *d,int a,int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return CB_NONE;
+    return (CasusBelli)d->cb[a][b];
+}
+const char *diplo_cb_name(CasusBelli cb){
+    switch(cb){ case CB_TERRITORIAL: return "territorial"; case CB_RELIGIOUS: return "religieux";
+                case CB_ECONOMIC: return "économique"; case CB_SUBJUGATION: return "assujettissement";
+                default: return "aucun"; }
+}
 void diplo_form_alliance(DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_ALLIED); }
 void diplo_make_peace   (DiploState *d,int a,int b){
     set_sym(d,a,b,DIPLO_NEUTRAL);
@@ -46,6 +59,7 @@ void diplo_make_peace   (DiploState *d,int a,int b){
         float dur = clampf(TRUCE_BASE + TRUCE_PER_YEAR*d->war_years[a][b], 0.f, TRUCE_MAX);
         d->truce[a][b]=d->truce[b][a]=dur;
         d->war_years[a][b]=d->war_years[b][a]=0.f;
+        d->cb[a][b]=d->cb[b][a]=CB_NONE;   /* le but de guerre s'éteint avec la guerre */
     }
 }
 bool diplo_can_declare(const DiploState *d,int a,int b){
@@ -164,6 +178,36 @@ Relation diplo_relation(const World *w, const WorldEconomy *econ,
     float fk = r.kinship*(10.f-r.kinship)/25.f;     /* cloche sur la parenté */
     r.alliance = shared + 2.0f*r.complement + 1.0f*fk - 0.3f*val_dist - 2.0f*r.schism;
     return r;
+}
+
+/* ---- CASUS BELLI — la raison de la guerre (lue, jamais posée) ---------- */
+static bool country_extracts(const WorldEconomy *econ, int cid, Resource g){
+    if (g<=RES_NONE||g>=RES_COUNT) return false;
+    for (int r=0;r<econ->n_regions;r++)
+        if (econ->region[r].owner==cid && econ->region[r].raw_cap[g]>0.1f) return true;
+    return false;
+}
+static bool diplo_adjacent(const WorldEconomy *econ, int a, int b){
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==a)
+        for (int s=0;s<econ->n_regions;s++)
+            if (econ->region[s].owner==b && econ->adj[r][s]) return true;
+    return false;
+}
+CasusBelli diplo_casus_belli(const World *w, const WorldEconomy *econ, const WorldProsperity *wp,
+                             const DiploState *d, int a, int b, Resource want){
+    if (a<0||a>=w->n_countries||b<0||b>=w->n_countries||a==b) return CB_NONE;
+    /* ÉCONOMIQUE — le bien AIGU que la cible extrait et que nous n'avons pas (monopole) :
+     * le casus belli du Mercantile bloqué (il vise la province-source). */
+    if (want>RES_NONE && want<RES_COUNT && country_extracts(econ,b,want) && !country_extracts(econ,a,want))
+        return CB_ECONOMIC;
+    /* RELIGIEUX — schisme (branche proche + prosélytisme = ennemi naturel). */
+    Relation rel = diplo_relation(w,econ,wp,d,a,b);
+    if (rel.schism > 0.45f) return CB_RELIGIOUS;
+    /* TERRITORIAL — adjacence / revendication de frontière (la raison la plus commune). */
+    if (diplo_adjacent(econ,a,b)) return CB_TERRITORIAL;
+    /* ASSUJETTISSEMENT — on PROJETTE nettement plus de puissance que la cible. */
+    if (diplo_mil_power(w,econ,a) > 1.6f*diplo_mil_power(w,econ,b)+1.f) return CB_SUBJUGATION;
+    return CB_NONE;   /* aucune raison ne tient → pas de guerre */
 }
 
 /* ---- guerre : conquête ------------------------------------------------ */

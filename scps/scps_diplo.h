@@ -29,11 +29,22 @@ typedef struct {
 
 typedef enum { DIPLO_NEUTRAL = 0, DIPLO_ALLIED, DIPLO_WAR } DiploStatus;
 
+/* CASUS BELLI — la guerre a une RAISON (lue de la relation) ; son type fixe le
+ * BUT de guerre et ce qui est exigible à la paix (un frein de plus). */
+typedef enum {
+    CB_NONE = 0,
+    CB_TERRITORIAL,   /* adjacence / revendication / province perdue → prend des provinces */
+    CB_RELIGIOUS,     /* schisme + prosélytisme → humiliation (peu/pas de terre) */
+    CB_ECONOMIC,      /* un bien aigu MONOPOLISÉ par la cible → la province-source */
+    CB_SUBJUGATION    /* menace + projection → vassalité (pas d'annexion massive) */
+} CasusBelli;
+
 typedef struct {
     DiploStatus status[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       war_years[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       truce[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* jours d'interdiction de guerre (fond) */
     float       momentum[SCPS_MAX_COUNTRY];                 /* conquêtes RÉCENTES (décroît) → fulgurance perçue */
+    int8_t      cb[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];     /* casus belli ACTIF de a contre b (but de guerre) */
 } DiploState;
 
 void diplo_init(DiploState *d);
@@ -46,6 +57,16 @@ Relation diplo_relation (const World *w, const WorldEconomy *econ,
 
 /* ---- Actions ----------------------------------------------------------- */
 void        diplo_declare_war (DiploState *d, int a, int b);
+/* Le CASUS BELLI inhérent le plus pertinent de a contre b (lu de la relation +
+ * du besoin `want` : un bien aigu monopolisé par b → CB économique). CB_NONE si
+ * aucune raison ne tient → l'IA ne peut pas déclarer (elle renonce ou attend). */
+CasusBelli  diplo_casus_belli (const World *w, const WorldEconomy *econ,
+                               const WorldProsperity *wp, const DiploState *d,
+                               int a, int b, Resource want);
+/* Déclare la guerre AVEC un but (le CB est mémorisé → il gate la paix). */
+void        diplo_declare_war_cb(DiploState *d, int a, int b, CasusBelli cb);
+CasusBelli  diplo_war_goal     (const DiploState *d, int a, int b);
+const char *diplo_cb_name      (CasusBelli cb);
 void        diplo_form_alliance(DiploState *d, int a, int b);
 void        diplo_make_peace  (DiploState *d, int a, int b);
 DiploStatus diplo_status      (const DiploState *d, int a, int b);

@@ -190,7 +190,8 @@ static bool countries_adjacent(const WorldEconomy *econ, int a, int b){
 /* Meilleure cible de guerre : voisine, qu'on peut battre (pas de suicide),
  * pondérée par la menace qu'elle fait peser + un schisme si l'on est zélote. */
 static int ai_pick_rival(const AiActor *a, const World *w, const WorldEconomy *econ,
-                         const WorldProsperity *wp, const DiploState *diplo, float my_army){
+                         const WorldProsperity *wp, const DiploState *diplo, float my_army,
+                         Resource want){
     int best=-1; float bestscore=0.f;
     for (int b=0; b<w->n_countries; b++){
         if (b==a->cid) continue;
@@ -198,6 +199,7 @@ static int ai_pick_rival(const AiActor *a, const World *w, const WorldEconomy *e
         if (!countries_adjacent(econ, a->cid, b)) continue;
         if (diplo_status(diplo, a->cid, b)==DIPLO_ALLIED) continue;  /* on ne frappe pas un allié */
         if (!diplo_can_declare(diplo, a->cid, b)) continue;          /* TRÊVE : on n'enchaîne pas */
+        if (diplo_casus_belli(w,econ,wp,diplo,a->cid,b,want)==CB_NONE) continue;  /* PAS DE CB → pas de guerre */
         float their_army = diplo_mil_power(w, econ, b);
         if (my_army < AI_ARMY_MARGIN*their_army) continue;     /* on n'attaque pas plus fort */
         Relation rel = diplo_relation(w, econ, wp, diplo, a->cid, b);
@@ -371,6 +373,14 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
     }
 }
 
+/* Le BIEN que l'IA veut arracher (pour le casus belli économique) : son trou le
+ * plus aigu (stratégique → demande → chaîne). */
+static Resource ai_war_want(const AiView *v){
+    if (v->strat_gap !=RES_NONE) return v->strat_gap;
+    if (v->demand_gap!=RES_NONE) return v->demand_gap;
+    return v->chain_gap;
+}
+
 /* Stratégie : conquérir, déclarer la guerre, ou CONSOLIDER (le frein). */
 static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
                           WorldLegitimacy *wl, DiploState *diplo, const AiView *v,
@@ -401,10 +411,18 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
     for (int b=0; b<w->n_countries; b++)
         if (b!=a->cid && diplo_status(diplo, a->cid, b)==DIPLO_WAR) at_war++;
     if (at_war>0){
+        int enemy=-1;
+        for (int b=0; b<w->n_countries; b++)
+            if (b!=a->cid && diplo_status(diplo, a->cid, b)==DIPLO_WAR){ enemy=b; break; }
+        CasusBelli goal = (enemy>=0)? diplo_war_goal(diplo, a->cid, enemy) : CB_TERRITORIAL;
         int er = ai_pick_enemy_region(econ, diplo, a->cid);
         if (er>=0){
             if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er)){
                 a->credit_war -= 1.f; a->stats.conquests++;
+                /* BUT GATÉ PAR LE CB : un casus belli religieux/économique/assujettissement
+                 * est SATISFAIT par une prise (la source / l'humiliation) → on impose la paix.
+                 * Seul le territorial autorise l'annexion étendue (province après province). */
+                if (goal!=CB_TERRITORIAL && enemy>=0) diplo_make_peace(diplo, a->cid, enemy);
             }
         } else {
             /* plus de territoire ennemi adjacent : la guerre est GAGNÉE → on signe
@@ -425,8 +443,9 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
     if (heg>=0 && heg!=a->cid && diplo_status(diplo,a->cid,heg)==DIPLO_NEUTRAL
         && diplo_can_declare(diplo,a->cid,heg) && country_at_war(w,diplo,heg)){
         float my_side = v->armee + allied_power(w,econ,diplo,a->cid);
-        if (my_side >= AI_ARMY_MARGIN*diplo_mil_power(w,econ,heg)){
-            diplo_declare_war(diplo, a->cid, heg);
+        CasusBelli cb = diplo_casus_belli(w,econ,wp,diplo,a->cid,heg, ai_war_want(v));
+        if (cb!=CB_NONE && my_side >= AI_ARMY_MARGIN*diplo_mil_power(w,econ,heg)){
+            diplo_declare_war_cb(diplo, a->cid, heg, cb);   /* la ligue a une raison (souvent territoriale) */
             a->credit_war -= 1.f; a->stats.wars++;
             return;
         }
@@ -441,11 +460,13 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         return;
     }
 
-    /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, friction
-     * d'élargissement comprise (on évite les guerres marginales). */
-    int rival = ai_pick_rival(a, w, econ, wp, diplo, v->armee);
+    /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, AVEC un
+     * casus belli qui colle au but, friction d'élargissement comprise. */
+    Resource want = ai_war_want(v);
+    int rival = ai_pick_rival(a, w, econ, wp, diplo, v->armee, want);
     if (rival>=0){
-        diplo_declare_war(diplo, a->cid, rival);
+        CasusBelli cb = diplo_casus_belli(w,econ,wp,diplo,a->cid,rival, want);
+        diplo_declare_war_cb(diplo, a->cid, rival, cb);   /* la guerre a une RAISON (gate la paix) */
         a->credit_war -= 1.f; a->stats.wars++;
     }
 }

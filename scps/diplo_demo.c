@@ -159,6 +159,36 @@ int main(int argc,char**argv){
         }
     }
 
+    /* ---- 4. Casus belli : la guerre a une RAISON (lue) ; son type gate la paix ---- */
+    printf("\n── 4. Casus belli (la guerre a une raison ; son type fixe le but) ──\n");
+    {
+        int A=player, B=-1, Badj=-1;
+        for(int c=0;c<w->n_countries;c++){
+            if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+            if(B<0)B=c;
+            bool adj=false;
+            for(int r=0;r<econ->n_regions&&!adj;r++) if(econ->region[r].owner==A)
+                for(int s=0;s<econ->n_regions;s++) if(econ->region[s].owner==c&&econ->adj[r][s]){adj=true;break;}
+            if(adj&&Badj<0)Badj=c;
+        }
+        if(B>=0){
+            diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_ECONOMIC);
+            ok("déclarer avec un casus belli MÉMORISE le but de guerre", diplo_war_goal(dp,A,B)==CB_ECONOMIC);
+            diplo_make_peace(dp,A,B);
+            ok("la paix ÉTEINT le but de guerre", diplo_war_goal(dp,A,B)==CB_NONE);
+            int Br=-1; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B){Br=r;break;}
+            if(Br>=0){
+                for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==A) econ->region[r].raw_cap[RES_SALTPETER]=0.f;
+                econ->region[Br].raw_cap[RES_SALTPETER]=2.f;   /* B monopolise un bien stratégique */
+                ok("un bien aigu MONOPOLISÉ par la cible → casus belli ÉCONOMIQUE",
+                   diplo_casus_belli(w,econ,wp,dp,A,B,RES_SALTPETER)==CB_ECONOMIC);
+            }
+        }
+        if(Badj>=0)
+            ok("un voisin (adjacence) fournit un casus belli — une raison existe (≠ aucun)",
+               diplo_casus_belli(w,econ,wp,dp,A,Badj,RES_NONE)!=CB_NONE);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");
