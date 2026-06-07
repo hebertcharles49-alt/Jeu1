@@ -107,6 +107,13 @@ CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_culture_demo.o
 culture_demo: $(CULTURE_DEMO_OBJS)
 	$(CC) $(CULTURE_DEMO_OBJS) -o $@ -lm
 
+# Moteur SCPS headless (§2 + annexe) — colonne vertébrale VÉRIFIÉE, autonome
+# (aucune dépendance hors <math.h>). Banc d'essai auto-vérifiant contre des
+# cas de référence calculés à la main (étape 0 de §14).
+CORE_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_core_demo.o
+core_demo: $(CORE_DEMO_OBJS)
+	$(CC) $(CORE_DEMO_OBJS) -o $@ -lm
+
 PROSPERITY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                         $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
                         $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
@@ -117,9 +124,9 @@ prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 clean:
 	rm -rf $(OBJDIR) $(TARGET) crucible crucible.exe element_dungeon element_dungeon.exe \
 	       scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo tech_demo culture_demo \
-	       prosperity_demo out_*.ppm montage.bmp
+	       prosperity_demo core_demo out_*.ppm montage.bmp
 
-.PHONY: all run scps run_scps clean prosperity_demo
+.PHONY: all run scps run_scps clean prosperity_demo core_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore
 # leur absence au premier build.
@@ -136,3 +143,5 @@ clean:
 -include $(OBJDIR)/scps_culture_demo.d
 -include $(OBJDIR)/scps_scps_prosperity.d
 -include $(OBJDIR)/scps_prosperity_demo.d
+-include $(OBJDIR)/scps_scps_core.d
+-include $(OBJDIR)/scps_core_demo.d
