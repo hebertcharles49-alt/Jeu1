@@ -13,8 +13,12 @@
 #include "scps_readout.h"
 #include <stddef.h>   /* NULL */
 #include <string.h>   /* memset */
+#include <math.h>     /* roundf */
 
 static inline float rclampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+static inline int   iclamp(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
@@ -78,6 +82,12 @@ BandHumeur band_humeur(float L) {
     if (L < 8.0f) return HU_LOYALE;
     return HU_DEVOUEE;
 }
+BandAgitation band_agitation(int a) {
+    if (a < 25) return AG_CALME;
+    if (a < 50) return AG_FREMISSANTE;
+    if (a < AGIT_REVOLT_SEUIL) return AG_AGITEE;
+    return AG_INSURGEE;
+}
 BandLignee band_lignee(float clock_dist, float content_dist, bool schism) {
     /* Narcissisme des petites différences : un cousin schismatique fait un
      * pire ennemi qu'un infidèle lointain (cf. doc des pools). */
@@ -89,6 +99,56 @@ BandLignee band_lignee(float clock_dist, float content_dist, bool schism) {
     if ( clock_near && !content_near) return LI_COUSINE;        /* horloge proche, contenu dérivé */
     if (!clock_near &&  content_near) return LI_SOEUR_LOINTAINE;/* horloge loin, contenu jumeau */
     return LI_ETRANGERE;
+}
+
+/* ===================================================================== */
+/* PROJECTIONS — coordonnée [0..10] → métrique [0..100]                   */
+/* ===================================================================== */
+int metric_from_coord(float x) { return iclamp((int)roundf(rclampf(x,0.f,10.f)*10.f), 0, 100); }
+
+int metric_stability(float SI, float war_exhaustion) {
+    /* Composite légitime : l'usure de guerre RONGE la stabilité apparente. */
+    float s = SI - 2.0f * rclampf(war_exhaustion, 0.f, 1.f);
+    return iclamp((int)roundf(rclampf(s,0.f,10.f)*10.f), 0, 100);
+}
+int metric_prosperity(float p)  { return metric_from_coord(p); }
+int metric_legitimacy(float L)  { return metric_from_coord(L); }
+int metric_cohesion(float frac) { return metric_from_coord(10.f - rclampf(frac,0.f,10.f)); }
+int metric_savoir(float lum)    { return metric_from_coord(lum); }
+
+int metric_agitation(float L_local, float coercion, float diversity_tension,
+                     float recent_shock, int country_stability, float garrison_H) {
+    /* Ce qui SOULÈVE : un consentement bas, la coercition subie, une culture
+     * étrangère sous la couronne, un choc récent (conquête, famine). */
+    float raise = (10.f - rclampf(L_local,0.f,10.f)) * 4.5f      /* L bas : jusqu'à +45 */
+                + rclampf(coercion,0.f,1.f) * 25.f                /* coercition : +25     */
+                + rclampf(diversity_tension,0.f,10.f) * 2.0f      /* lignée étrangère : +20 */
+                + rclampf(recent_shock,0.f,1.f) * 20.f;           /* choc : +20            */
+    /* Ce qui CALME : la stabilité du royaume, la garnison (H bâti). C'est l'effet
+     * EXISTANT de H/SI sur l'ordre, lu ici en abattement d'agitation. */
+    float calm = (country_stability/100.f) * 20.f                /* Stabilité 100 : −20   */
+               + rclampf(garrison_H,0.f,8.f) * 4.0f;             /* citadelle : jusqu'à −32 */
+    return iclamp((int)roundf(raise - calm), 0, 100);
+}
+
+/* ===================================================================== */
+/* EFFETS — une courbe LUE d'une métrique (jamais un modificateur plat)   */
+/* ===================================================================== */
+float prod_multiplier(int prosperity)   { return 1.f + (prosperity-50)/50.f * 0.15f; }
+float agitation_modifier(int stability) { return -(stability/100.f) * 2.0f; }
+bool  can_enact_reform(int stability)   { return stability >= STAB_REFORM_MIN; }
+float aggression_stability_cost(int stability) {
+    /* Un État déjà fragile paie cher l'aventure : surcoût décroissant avec la
+     * stabilité (lecture de « la guerre ronge l'ordre tenu »). */
+    return rclampf(1.5f - (stability/100.f)*1.2f, 0.3f, 1.5f);
+}
+float integration_speed(int legitimacy) { return 0.5f + (legitimacy/100.f) * 1.5f; } /* ×0.5..×2 */
+float research_pace(int savoir)         { return 0.6f + (savoir/100.f) * 1.4f; }       /* ×0.6..×2 */
+bool  revolt_threshold_reached(int agitation) { return agitation >= AGIT_REVOLT_SEUIL; }
+
+/* Petit constructeur de métrique (valeur + mot + déf déjà résolus). */
+static MetricReadout mk_metric(int value, const char *word, const char *hover) {
+    MetricReadout m; m.value = value; m.word = word; m.hover = hover; return m;
 }
 
 /* ===================================================================== */
@@ -111,6 +171,14 @@ CountryReadout country_readout_from_floats(
     r.prosperite = band_prosp(prosperity_0_10);
     r.savoir     = band_savoir(lumiere_0_10);
     r.presage    = band_presage(charge_0_10);
+
+    /* Métriques (nombre 0-100 + mot + déf) — projetées des mêmes flottants. */
+    r.m_stabilite  = mk_metric(metric_stability(SI, 0.f),         label_stab(r.stabilite),   hover_stab());
+    r.m_prosperite = mk_metric(metric_prosperity(prosperity_0_10),label_prosp(r.prosperite), hover_prosp());
+    r.m_legitimite = mk_metric(metric_legitimacy(L),              label_legit(r.legitimite), hover_legit());
+    r.m_cohesion   = mk_metric(metric_cohesion(fracture),         label_concorde(r.concorde),hover_concorde());
+    r.m_savoir     = mk_metric(metric_savoir(lumiere_0_10),       label_savoir(r.savoir),    hover_savoir());
+    r.influence    = 0;   /* posée par le statecraft (réserve de réputation) */
 
     /* Augure : ligne d'ambiance, jamais une jauge — seulement en péril. */
     if      (secession_mode) r.augure = "Les marges parlent de se gouverner seules.";
@@ -150,6 +218,7 @@ LBL(label_carrefour,BandCarrefour,"—","Florissante","Bouillonnante","En surcha
 LBL(label_humeur,   BandHumeur,   "Révoltée","Frondeuse","Tiède","Loyale","Dévouée")
 LBL(label_lignee,   BandLignee,   "Du même sang","Cousine","Sœur lointaine","Étrangère",
                                   "Hérétique proche","Inassimilable")
+LBL(label_agitation,BandAgitation,"Calme","Frémissante","Agitée","Insurgée")
 #undef LBL
 
 /* ===================================================================== */
@@ -181,6 +250,8 @@ const char *hover_humeur(void){ return
     "Le cœur de la province envers la couronne ; loyale, elle paie sans broncher — frondeuse, elle attend l'étincelle."; }
 const char *hover_lignee(void){ return
     "Ce qui la lie à la culture du trône ; le même sang se gouverne aisément, l'inassimilable jamais sans la force."; }
+const char *hover_agitation(void){ return
+    "La colère qui monte dans la province ; soutenue, elle vire à la révolte — qu'apaisent la stabilité du royaume, la garnison et la légitimité."; }
 
 /* ===================================================================== */
 /* ENVELOPPES SIM — lisent les sorties STOCKÉES, jamais scps_core         */
@@ -234,6 +305,14 @@ CountryReadout country_readout(const WorldProsperity *wp, const TechState *ts,
     r.savoir     = band_savoir(cp->Lumiere);
     float charge = (ts && cid < w->n_countries) ? rclampf(ts[cid].charge, 0.f, 10.f) : 0.f;
     r.presage    = band_presage(charge);
+
+    /* Métriques de jeu (0-100) — la même coordonnée, surfacée en nombre. */
+    r.m_stabilite  = mk_metric(metric_stability(cp->SI, 0.f),               label_stab(r.stabilite),   hover_stab());
+    r.m_prosperite = mk_metric(metric_prosperity(rclampf(cp->P_realise,0.f,10.f)), label_prosp(r.prosperite), hover_prosp());
+    r.m_legitimite = mk_metric(metric_legitimacy(cp->L),                    label_legit(r.legitimite), hover_legit());
+    r.m_cohesion   = mk_metric(metric_cohesion(cp->fracture),               label_concorde(r.concorde),hover_concorde());
+    r.m_savoir     = mk_metric(metric_savoir(cp->Lumiere),                  label_savoir(r.savoir),    hover_savoir());
+    r.influence    = 0;   /* posée par le statecraft */
 
     switch (cp->mode) {
         case RD_SUBMERGE_SECESS: r.augure = "Les marges parlent de se gouverner seules."; break;
@@ -314,5 +393,22 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     } else {
         pr.lignee = LI_MEME_SANG;
     }
+
+    /* Agitation (0-100) : L bas + coercition + tension de diversité (lignée
+     * étrangère) + choc récent (conquête, coercition), ABATTUE par la stabilité
+     * du pays et la garnison (H bâti) — révolte au-dessus du seuil. C'est l'effet
+     * EXISTANT de L/H sur l'ordre, surfacé en un nombre lisible. */
+    float div_tension = (re && ruling) ? pc_content_dist(&re->culture, ruling) : 0.f;
+    float garrison    = re ? re->build.H_coerc : 0.f;
+    float coercion    = re ? re->coercion : 0.f;
+    float yh          = (wl && reg >= 0 && reg < SCPS_MAX_REG) ? wl->years_held[reg] : 50.f;
+    float recent_shock= (yh < 5.f) ? (1.f - yh/5.f) : 0.f;
+    if (coercion > recent_shock) recent_shock = coercion;
+    int   country_stab= (cid >= 0 && cid < wp->n_countries)
+                        ? metric_stability(wp->country[cid].SI, 0.f) : 50;
+    int   agit = metric_agitation(L_local, coercion, div_tension, recent_shock,
+                                  country_stab, garrison);
+    pr.agitation     = mk_metric(agit, label_agitation(band_agitation(agit)), hover_agitation());
+    pr.seuil_revolte = revolt_threshold_reached(agit);
     return pr;
 }

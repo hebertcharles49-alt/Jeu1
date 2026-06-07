@@ -43,11 +43,26 @@ typedef enum { CF_NONE, CF_FLORISSANTE, CF_BOUILLONNANTE, CF_SURCHAUFFE }       
 typedef enum { HU_REVOLTEE, HU_FRONDEUSE, HU_TIEDE, HU_LOYALE, HU_DEVOUEE }       BandHumeur;
 typedef enum { LI_MEME_SANG, LI_COUSINE, LI_SOEUR_LOINTAINE, LI_ETRANGERE,
                LI_HERETIQUE_PROCHE, LI_INASSIMILABLE }                            BandLignee;
+typedef enum { AG_CALME, AG_FREMISSANTE, AG_AGITEE, AG_INSURGEE }                 BandAgitation;
+
+/* ===================================================================== */
+/* MÉTRIQUE 0-100 — le NOMBRE de jeu (projection d'une coordonnée cachée) */
+/* ===================================================================== */
+/* Le joueur voit « Stabilité 78 — Tenue » : un nombre ET un mot. Jamais le
+ * flottant SCPS (SI/PE/K/H/L/D∞) ni son nom — la métrique est une PROJECTION
+ * de la coordonnée, le mot sa bande, et les effets (§effets) sont ce que la
+ * coordonnée FAIT déjà, rendu lisible en courbe. */
+typedef struct {
+    int         value;   /* 0-100 (ou −100..100 pour l'opinion) */
+    const char *word;    /* le mot de bande, déjà résolu (le renderer ignore l'enum) */
+    const char *hover;   /* la définition du concept — jamais sa valeur */
+} MetricReadout;
 
 /* ===================================================================== */
 /* READOUTS — ce que le renderer reçoit (bandes + chaînes, AUCUN float)   */
 /* ===================================================================== */
 typedef struct {
+    /* Bandes (le MOT) — conservées : lexique typé + compat des bancs d'essai. */
     BandStab     stabilite;
     BandAssise   assise;        /* la SIGNATURE : sur quoi repose l'obéissance */
     BandLegit    legitimite;
@@ -56,6 +71,10 @@ typedef struct {
     BandSavoir   savoir;
     BandPresage  presage;       /* masqué si PG_CALME */
     const char  *augure;        /* ligne d'ambiance de péril, ou NULL */
+    /* MÉTRIQUES (le NOMBRE 0-100 + le mot + la déf) — la couche de jeu lisible.
+     * Cohésion = l'inverse de la fracture (mot emprunté à Concorde). */
+    MetricReadout m_stabilite, m_prosperite, m_legitimite, m_cohesion, m_savoir;
+    int           influence;    /* 0-100 — réputation diplomatique (posée par le statecraft) */
 } CountryReadout;
 
 typedef struct {
@@ -79,6 +98,8 @@ typedef struct {
     BandHumeur    humeur;
     BandLignee    lignee;
     bool          diaspora;
+    MetricReadout agitation;   /* 0-100 : L bas + coercition + tension de diversité */
+    bool          seuil_revolte;/* l'agitation a franchi le seuil de révolte */
 } ProvinceReadout;
 
 /* ===================================================================== */
@@ -97,6 +118,40 @@ BandPresage  band_presage(float charge_0_10);
 BandHumeur   band_humeur(float L_local);
 /* Lignée : horloge (cousinage) ET contenu (friction), + schisme religieux. */
 BandLignee   band_lignee(float clock_dist, float content_dist, bool religious_schism);
+BandAgitation band_agitation(int agitation_0_100);
+
+/* ===================================================================== */
+/* PROJECTIONS — coordonnée NUE [0..10] → métrique de jeu [0..100]        */
+/* ===================================================================== */
+/* La SEULE arithmétique qui touche les flottants. Composites légitimes (la
+ * stabilité encaisse l'usure de guerre) ; jamais l'inverse (pas de stat libre). */
+int  metric_from_coord(float x_0_10);                       /* x·10, borné, arrondi */
+int  metric_stability (float SI, float war_exhaustion_0_1); /* SI − 2·usure, projeté */
+int  metric_prosperity(float prosperity_0_10);
+int  metric_legitimacy(float L);
+int  metric_cohesion  (float fracture);                     /* (10 − fracture)·10 */
+int  metric_savoir    (float lumiere_0_10);
+/* Agitation d'une province : L bas + coercition + chocs récents + tension de
+ * diversité, ABATTUE par la stabilité du pays et la garnison (H bâti). */
+int  metric_agitation (float L_local, float coercion_0_1, float diversity_tension_0_10,
+                       float recent_shock_0_1, int country_stability_0_100, float garrison_H);
+
+/* ===================================================================== */
+/* EFFETS — une COURBE LUE d'une métrique, jamais un modificateur plat     */
+/* ===================================================================== */
+/* Ces fonctions NE s'ajoutent PAS au moteur : elles SONT ce que les
+ * coordonnées font déjà (le rendement de prospérité, la pression de fracture),
+ * surfacé au joueur. Un lecteur, pas un bonus. */
+#define STAB_REFORM_MIN   40    /* sous ce seuil, certaines réformes sont gâtées */
+#define AGIT_REVOLT_SEUIL 70    /* agitation soutenue au-dessus → révolte         */
+
+float prod_multiplier        (int prosperity);   /* 1 + (P−50)/50·0.15  (±15 %) */
+float agitation_modifier     (int stability);    /* −(Stab/100)·2  (−2 à 100)   */
+bool  can_enact_reform       (int stability);    /* gate : Stab ≥ seuil          */
+float aggression_stability_cost(int stability);  /* surcoût des actes agressifs  */
+float integration_speed      (int legitimacy);   /* vitesse de montée de L        */
+float research_pace          (int savoir);       /* pacing de la recherche        */
+bool  revolt_threshold_reached(int agitation);   /* agitation ≥ seuil de révolte  */
 
 /* ===================================================================== */
 /* ASSEMBLAGE — depuis flottants nus (testable sans la sim)               */
@@ -140,5 +195,6 @@ const char *label_aisance(BandAisance b);  const char *hover_aisance(void);
 const char *label_carrefour(BandCarrefour b); const char *hover_carrefour(void);
 const char *label_humeur(BandHumeur b);    const char *hover_humeur(void);
 const char *label_lignee(BandLignee b);    const char *hover_lignee(void);
+const char *label_agitation(BandAgitation b); const char *hover_agitation(void);
 
 #endif /* SCPS_READOUT_H */

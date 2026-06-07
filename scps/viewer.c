@@ -26,6 +26,7 @@
 #include "scps_prosperity.h"
 #include "scps_readout.h"   /* la membrane : viewer ne voit QUE des bandes + mots.
                              * (n'inclut PAS scps_core.h — cloison vérifiée par grep) */
+#include "scps_statecraft.h"/* Influence/Opinion/Diplomates : API en ENTIERS de jeu */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -194,17 +195,19 @@ typedef struct {
     WorldLegitimacy *wl;
     TradeNetwork    *net;
     TechState       *ts;
+    Statecraft      *sc;
     bool             ready;
 } Sim;
 
 static void sim_rebuild(Sim *s, World *w) {
-    if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts) return;
+    if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);   /* races en gradient */
     legitimacy_init(s->wl, w, s->econ);
     prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
+    statecraft_init(s->sc, w);
     for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
     for (int t=0;t<30;t++) {                 /* snapshot : 30 ans de simulation */
         econ_tick(s->econ);
@@ -215,6 +218,7 @@ static void sim_rebuild(Sim *s, World *w) {
         if (t%5==0) trade_network_build(s->net, w, s->econ);
         trade_tick(s->econ, s->net);
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
+        statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, NULL, NULL, 365); /* Influence/Opinion/Agitation */
     }
     s->ready = true;
 }
@@ -228,36 +232,45 @@ static int country_for_panel(const World *w, int selected) {
     return 0;
 }
 
-/* Une lecture « Catégorie Mot » : la catégorie en cuivre sourd, le mot coloré
- * par son sens ; toute la pastille est survolable (définition). */
+/* Une lecture « Catégorie NN » : la catégorie en cuivre sourd, puis le NOMBRE de
+ * jeu (0-100, sur 100 — le joueur le sait) coloré par le sens ; toute la pastille
+ * est survolable (la définition au survol). Une métrique chiffrée se lit au seul
+ * nombre : pas de mot redondant derrière. value < 0 ⇒ un MOT seul (signature sans
+ * échelle : Assise, Présage). */
 static int draw_reading(SDL_Renderer *ren, int x, int y, const char *cat,
-                        const char *word, SDL_Color wc, const char *def) {
+                        int value, const char *word, SDL_Color wc, const char *def) {
     draw_text(ren, g_font, x, y, COL_DIM, cat);
-    int cw = text_w(g_font, cat);
-    draw_text(ren, g_font, x+cw+6, y, wc, word);
-    int total = cw + 6 + text_w(g_font, word);
+    int xx = x + text_w(g_font, cat) + 6;
+    char num[16];
+    const char *shown = word;
+    if (value >= 0) { snprintf(num, sizeof num, "%d", value); shown = num; }
+    draw_text(ren, g_font, xx, y, wc, shown);
+    int total = (xx - x) + text_w(g_font, shown);
     SDL_Rect z = { x-3, y-2, total+6, 21 };
     zone_add(z, def);
-    return x + total + 20;
+    return x + total + 18;
 }
 
 static void draw_bandeau(SDL_Renderer *ren, int win_w, const WorldProsperity *wp,
-                         const TechState *ts, const World *w, int cid) {
+                         const TechState *ts, const Statecraft *sc, const World *w, int cid) {
     CountryReadout r = country_readout(wp, ts, w, cid);
+    if (sc) r.influence = statecraft_influence(sc, cid);
     int bh = 30;
     fill_rect(ren, 0,0, win_w, bh, COL_PANEL);
     fill_rect(ren, 0,bh, win_w, 2, COL_COPPER);
     int x=12, y=6;
     const char *name = (cid>=0 && cid<w->n_countries) ? w->country[cid].name : "—";
     draw_text(ren, g_font, x, y, COL_COPPER, name); x += text_w(g_font,name) + 22;
-    x = draw_reading(ren,x,y,"Stabilité",  label_stab(r.stabilite),   band_good(r.stabilite,5,true),  hover_stab());
-    x = draw_reading(ren,x,y,"Assise",     label_assise(r.assise),    band_good(r.assise,4,false),    hover_assise());
-    x = draw_reading(ren,x,y,"Légitimité", label_legit(r.legitimite), band_good(r.legitimite,5,true), hover_legit());
-    x = draw_reading(ren,x,y,"Concorde",   label_concorde(r.concorde),band_good(r.concorde,4,false),  hover_concorde());
-    x = draw_reading(ren,x,y,"Prospérité", label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
-    x = draw_reading(ren,x,y,"Savoir",     label_savoir(r.savoir),    band_good(r.savoir,4,true),     hover_savoir());
+    x = draw_reading(ren,x,y,"Stabilité", r.m_stabilite.value, label_stab(r.stabilite),   band_good(r.stabilite,5,true),  hover_stab());
+    x = draw_reading(ren,x,y,"Assise",    -1,                  label_assise(r.assise),    band_good(r.assise,4,false),    hover_assise());
+    x = draw_reading(ren,x,y,"Légitimité",r.m_legitimite.value,label_legit(r.legitimite), band_good(r.legitimite,5,true), hover_legit());
+    x = draw_reading(ren,x,y,"Cohésion",  r.m_cohesion.value,  label_concorde(r.concorde),band_good(r.concorde,4,false),  hover_concorde());
+    x = draw_reading(ren,x,y,"Prospérité",r.m_prosperite.value,label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
+    x = draw_reading(ren,x,y,"Savoir",    r.m_savoir.value,    label_savoir(r.savoir),    band_good(r.savoir,4,true),     hover_savoir());
+    x = draw_reading(ren,x,y,"Influence", r.influence,         "",                        COL_PARCH,
+                     "La réputation diplomatique : prospérité, taille et accords tenus la nourrissent ; elle plafonne le nombre de diplomates en mission.");
     if (r.presage != PG_CALME)
-        draw_reading(ren,x,y,"Présage",    label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
+        draw_reading(ren,x,y,"Présage",   -1,                  label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
     if (r.augure) {  /* ligne d'alerte sous le bandeau, uniquement en péril */
         fill_rect(ren, 0,bh+2, win_w, 20, COL_PANEL2);
         draw_text(ren, g_font, 12, bh+3, sense_color(0.12f), r.augure);
@@ -319,6 +332,14 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     ui_section(ren, x, &y, "ALLÉGEANCE");
     ui_row(ren,x,&y,rw,"Humeur", label_humeur(p.humeur), band_good(p.humeur,5,true), hover_humeur());
     ui_row(ren,x,&y,rw,"Lignée", label_lignee(p.lignee), band_good(p.lignee,6,false), hover_lignee());
+    snprintf(line,sizeof line, "%d", p.agitation.value);
+    ui_row(ren,x,&y,rw,"Agitation", line, band_good(band_agitation(p.agitation.value),4,false), hover_agitation());
+    if (p.seuil_revolte) {
+        draw_text(ren, g_font, x, y, sense_color(0.06f), "⚑ Au bord de la révolte");
+        zone_add((SDL_Rect){x-2,y-2,rw,19},
+                 "L'agitation a franchi le seuil : maintenue, elle vire à la révolte ouverte.");
+        y += 20;
+    }
 }
 
 /* Survol = définition : le hover de la zone sous le curseur, en pied d'écran. */
@@ -394,6 +415,7 @@ int main(int argc, char **argv) {
     sim.wl   = (WorldLegitimacy*) malloc(sizeof(WorldLegitimacy));
     sim.net  = (TradeNetwork*)    malloc(sizeof(TradeNetwork));
     sim.ts   = (TechState*)       calloc(SCPS_MAX_COUNTRY, sizeof(TechState));
+    sim.sc   = (Statecraft*)      malloc(sizeof(Statecraft));
 
     int win_w = WIN_W, win_h = WIN_H;
     PixBuf pb = pixbuf_create(ren, win_w, win_h);
@@ -444,7 +466,7 @@ int main(int argc, char **argv) {
         if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
         if (sim.ready && g_font) {
             zone_reset();
-            draw_bandeau(ren, win_w, sim.wp, sim.ts, world, cid);
+            draw_bandeau(ren, win_w, sim.wp, sim.ts, sim.sc, world, cid);
             draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, selected);
         }
         SDL_RenderPresent(ren);
@@ -595,7 +617,7 @@ int main(int argc, char **argv) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
             zone_reset();
             int cid = country_for_panel(world, selected);
-            draw_bandeau(ren, win_w, sim.wp, sim.ts, world, cid);
+            draw_bandeau(ren, win_w, sim.wp, sim.ts, sim.sc, world, cid);
             if (selected >= 0)
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, selected);
             draw_hover_footer(ren, win_w, win_h, mx2, my2);
@@ -613,7 +635,7 @@ int main(int argc, char **argv) {
     printf("\n");
     pixbuf_destroy(&pb);
     free(world);
-    free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts);
+    free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
     TTF_Quit();

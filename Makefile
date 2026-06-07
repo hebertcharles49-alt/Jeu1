@@ -68,7 +68,9 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_tech.o \
              $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
              $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
-             $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_viewer.o
+             $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_diplo.o \
+             $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_statecraft.o \
+             $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
@@ -161,13 +163,26 @@ AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 ai_demo: $(AI_DEMO_OBJS)
 	$(CC) $(AI_DEMO_OBJS) -o $@ -lm
 
+# ---- Métriques de jeu (0-100), Influence, Diplomates & Révolte -----------
+# La membrane projette les coordonnées en nombres+mots ; le statecraft est SIM
+# (il lit des flottants), son API ne rend que des entiers de jeu.
+STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                        $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
+                        $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
+                        $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
+                        $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
+                        $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                        $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_statecraft_demo.o
+statecraft_demo: $(STATECRAFT_DEMO_OBJS)
+	$(CC) $(STATECRAFT_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
-	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo core_demo readout_demo species_demo \
+	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo core_demo readout_demo species_demo \
 	       out_*.ppm montage.bmp
 
 .PHONY: all scps run_scps clean core_demo readout_demo species_demo scps_dump scps_batch \
-        econ_demo tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo
+        econ_demo tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur
 # absence au premier build.

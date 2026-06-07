@@ -97,6 +97,7 @@ int main(void) {
     COVER(label_carrefour,hover_carrefour,4);
     COVER(label_humeur,   hover_humeur,   5);
     COVER(label_lignee,   hover_lignee,   6);
+    COVER(label_agitation,hover_agitation,4);
     #undef COVER
     ok("chaque bande a un mot ET une définition non vides", all_labeled);
 
