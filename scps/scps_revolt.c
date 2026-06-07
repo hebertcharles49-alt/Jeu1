@@ -31,7 +31,7 @@
 #define IGNITE_DEFICIT 0.20f
 #define MIN_REBELS     20L
 /* ---- Scan : la misère SOUTENUE finit par lever une région ------------- */
-#define SCAN_DEFICIT   0.36f   /* au-delà : la région se désespère */
+#define SCAN_DEFICIT   0.48f   /* au-delà : CRISE aiguë (pas la pauvreté chronique douce) */
 #define SCAN_SUSTAIN   120     /* jours de désespérance avant le soulèvement */
 /* ---- Revanchisme : subir la conquête arme le séparatisme --------------- */
 #define REVANCHISM_DAYS  (10*365)  /* la blessure de la conquête (≈10 ans) */
@@ -51,7 +51,7 @@
 #define REINFORCE     8.f      /* renforts de la couronne par point de mil_power (l'empire
                                 * n'est pas partout : une province lointaine se défend seule) */
 #define REINFORCE_CAP 600.f    /* la couronne ne peut projeter qu'une part de son armée ici */
-#define CRUSH_COOLDOWN 240.f   /* après l'écrasement, la province matée tarde à se relever */
+#define REVOLT_COOLDOWN 1095.f /* après TOUT soulèvement (maté ou apaisé), la province se tait ~3 ans */
 #define CRUSH_KILL    0.55f    /* part des mobilisés tués si écrasés */
 
 static inline float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
@@ -305,10 +305,7 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
             if (gi>=0){ re->pop.groups[gi].L=clampf(re->pop.groups[gi].L-2.f,0.f,10.f);
                         re->pop.groups[gi].agit_base=clampf(re->pop.groups[gi].agit_base+15.f,0.f,100.f); }
             re->coercion=1.f;                                   /* loi martiale durable */
-            if (rb->region<SCPS_MAX_REG){
-                wl->L[rb->region]*=0.75f;                       /* régner par la peur ronge L */
-                rs->desperation_days[rb->region] = -CRUSH_COOLDOWN;  /* la province matée se tait un temps */
-            }
+            if (rb->region<SCPS_MAX_REG) wl->L[rb->region]*=0.75f;  /* régner par la peur ronge L */
             rb->outcome=OUT_CRUSHED;
         } else {
             /* ── LES REBELLES L'EMPORTENT : le verdict suit leur nature ───── */
@@ -343,6 +340,10 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
                     break; }
             }
         }
+        /* après TOUT soulèvement résolu, la province est épuisée : elle se tait
+         * quelques années (le grief doit se reconstruire) — fin des re-flambées. */
+        if (rb->region<SCPS_MAX_REG && rb->outcome!=OUT_SECEDED)
+            rs->desperation_days[rb->region] = -REVOLT_COOLDOWN;
         /* usure : le slot se libère (la liste se compacte au prochain allumage) */
         rb->active=false;
     }
