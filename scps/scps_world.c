@@ -263,7 +263,7 @@ static void continents_init(int n, float seed_f) {
         {
             ContLobe *cl=&cs->lobe[0];
             cl->cx=cx; cl->cy=cy;
-            float R0m=R0*1.10f;           /* masses distinctes et vastes (assez de pays + de terres) */
+            float R0m=R0*1.28f;           /* grandes masses (les civ s'étendent + mers internes) */
             float sq=sqrtf(aniso);
             cl->ax=R0m/sq;                /* court  : largeur E/O */
             cl->ay=R0m*sq;                /* long   : hauteur N/S */
@@ -431,6 +431,16 @@ static float continental_mask(int x, int y, float seed_f) {
         lobe=lobe*lobe*(3.f-2.f*lobe)*0.55f;
         if (lobe>best) best=lobe;
     }
+    /* MERS INTERNES : on creuse des bassins INTÉRIEURS aux grandes masses (type
+     * Méditerranée / Caspienne / Tethys) — bruit basse fréquence, seuillé pour
+     * rester localisé. La masse reste vaste (plus de terres), mais ENCLOT des
+     * mers au lieu d'un intérieur plein. CAUSAL (provinces côtières, détroits). */
+    float basin=stb_perlin_fbm_noise3(fx*0.0105f+11.f, fy*0.0105f+7.f, seed_f+1900.f,2.f,0.5f,4);
+    if (best>0.24f && basin>0.30f) {
+        float ex=basin-0.30f;
+        best -= ex*ex*7.0f;          /* quadratique : centre franchement NOYÉ (mer interne) */
+    }
+    if (best<0.f) best=0.f;
     /* Monde ROND : plus d'atténuation aux bords E/O (les continents se
      * prolongent d'un bord à l'autre) ; on garde seulement le fondu polaire N/S. */
     float edge=clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1);
