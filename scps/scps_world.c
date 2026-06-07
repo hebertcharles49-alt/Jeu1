@@ -2307,6 +2307,83 @@ static void gen_resources(World *w) {
 }
 
 /* ========================================================================
+ * SITES DE DÉPART — placement Civ-like (eau + nourriture, §3.2 v3)
+ *
+ * Une civilisation commence près d'un point d'EAU DOUCE (jamais mer seule) et
+ * sur des terres NOURRICIÈRES (le early game est food-gated). On déplace la
+ * capitale de chaque pays vers son meilleur site selon ces proxys (estuaire >
+ * eau douce, plaines/côtes fertiles), sans toucher au reste de la hiérarchie.
+ * ====================================================================== */
+static float biome_food(Biome b) {
+    switch (b) {
+        case BIO_PLAINS: case BIO_FARMLAND: case BIO_GRASSLAND:        return 1.00f;
+        case BIO_MARSH:  case BIO_COAST:    case BIO_SHALLOW:
+        case BIO_MANGROVE:                                            return 0.70f;
+        case BIO_SAVANNA: case BIO_STEPPE:  case BIO_WOODS:
+        case BIO_HILLS:   case BIO_JUNGLE:                            return 0.50f;
+        case BIO_FOREST:  case BIO_HIGHLANDS: case BIO_DRYLANDS:
+        case BIO_COASTAL_DESERT:                                      return 0.35f;
+        default:  return 0.10f;  /* désert, montagne, pic, glacier, volcan, tourbière */
+    }
+}
+
+#define START_FOOD_MIN 0.30f
+#define START_W_WATER  0.35f
+#define START_W_FOOD   0.50f
+#define START_W_RES    0.15f
+
+static void refine_capitals(World *w) {
+    /* Eau par province : un seul passage de cellules (river/lake déjà calculés). */
+    static bool has_river[SCPS_MAX_PROV], has_lake[SCPS_MAX_PROV];
+    for (int p=0;p<w->n_provinces;p++){ has_river[p]=false; has_lake[p]=false; }
+    for (int i=0;i<SCPS_N;i++){
+        int p=w->cell[i].province;
+        if (p<0||p>=w->n_provinces) continue;
+        if (w->cell[i].river > 76) has_river[p]=true;   /* > 0.30·255 : vrai cours d'eau */
+        if (w->cell[i].lake)       has_lake[p]=true;
+    }
+
+    int est=0, fresh=0, dry=0, foodok=0, ncap=0;
+    for (int c=0;c<w->n_countries;c++){
+        int best=-1; float bs=-1.f;
+        for (int ri=0; ri<w->country[c].n_regions; ri++){
+            int rid=w->country[c].region_ids[ri];
+            if (rid<0||rid>=w->n_regions) continue;
+            for (int pi=0; pi<w->region[rid].n_provinces; pi++){
+                int pid=w->region[rid].province_ids[pi];
+                if (pid<0||pid>=w->n_provinces) continue;
+                const Province *pv=&w->province[pid];
+                float water = (has_river[pid] && pv->coastal) ? 1.0f
+                            : (has_river[pid] || has_lake[pid]) ? 0.7f : 0.0f;  /* estuaire/eau douce/sec */
+                float food = 0.5f*biome_food(pv->biome_dominant) + 0.5f*pv->habitability;
+                if (pv->coastal) food += 0.10f;          /* pêche côtière */
+                if (food > 1.f)  food = 1.f;
+                float resval = 0.f;
+                if (pv->resource > RES_NONE)
+                    resval = (pv->resource==RES_GOLD || pv->resource==RES_PRECIOUS_METAL
+                              || pv->resource>=RES_PROD_FIRST) ? 0.30f : 0.15f;
+                float s = START_W_WATER*water + START_W_FOOD*food + START_W_RES*resval;
+                if (s > bs){ bs=s; best=pid; }
+            }
+        }
+        if (best<0) continue;
+        w->country[c].capital_prov = best;
+        const Province *pv=&w->province[best];
+        float water = (has_river[best] && pv->coastal) ? 1.0f
+                    : (has_river[best] || has_lake[best]) ? 0.7f : 0.0f;
+        float food = 0.5f*biome_food(pv->biome_dominant) + 0.5f*pv->habitability
+                   + (pv->coastal ? 0.10f : 0.f);
+        ncap++;
+        if      (water >= 1.0f) est++;
+        else if (water >  0.0f) fresh++;
+        else                    dry++;
+        if (food >= START_FOOD_MIN) foodok++;
+    }
+    printf("ok (%d estuaires, %d eau douce, %d secs ; food≥%.2f : %d/%d)\n",
+           est, fresh, dry, START_FOOD_MIN, foodok, ncap);
+}
+
+/* ========================================================================
  * POINT D'ENTRÉE
  * ====================================================================== */
 WorldParams worldparams_default(uint32_t seed) {
@@ -2460,6 +2537,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] ressources...   "); fflush(stdout);
     gen_resources(w);                     printf("ok\n");
+
+    printf("[scps] sites départ... "); fflush(stdout);
+    refine_capitals(w);   /* capitales aux meilleurs sites eau+nourriture (§3.2 v3) */
 
     printf("[scps] rivières...     "); fflush(stdout);
     trace_rivers(w,height);
