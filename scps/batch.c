@@ -77,6 +77,9 @@ int main(int argc, char **argv) {
     int n = (argc>2) ? atoi(argv[2]) : 5;
     if (n<1) n=1;
     if (n>12) n=12;
+    /* argv[3] optionnel : âge du monde [0..1] = dérive des plaques
+     * (0 = supercontinent non dérivé ; 1 = continents dispersés). */
+    float age = (argc>3) ? (float)atof(argv[3]) : -1.f;
 
     int VW=SCPS_W, VH=SCPS_H;                 /* taille d'une vignette */
     int DW = VW*2 + GAP*3;                    /* 2 colonnes + gouttières */
@@ -96,6 +99,7 @@ int main(int argc, char **argv) {
     for (int k=0;k<n;k++) {
         uint32_t seed = base + (uint32_t)k;
         WorldParams p = worldparams_default(seed);
+        if (age>=0.f) p.world_age = age;        /* dérive imposée (test causal §5) */
         world_generate(w, &p);
         int oy = GAP + k*(VH+GAP);
 

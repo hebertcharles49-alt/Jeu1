@@ -208,10 +208,12 @@ int main(int argc, char **argv){
     int rRevolt=rFar>=0?rFar:rClose;
     s.econ->region[rRevolt].owner=(int16_t)player; s.econ->region[rRevolt].culture.settled=true;
     s.econ->region[rRevolt].culture.valeurs=(rul->valeurs<5.f)?rul->valeurs+9.f:rul->valeurs-9.f;
-    s.econ->region[rRevolt].build.H_coerc=0.f; s.econ->region[rRevolt].coercion=0.7f;
-    if (rRevolt<SCPS_MAX_REG){ s.wl->L[rRevolt]=1.0f; s.wl->years_held[rRevolt]=40.f; }
+    s.econ->region[rRevolt].build.H_coerc=0.f; s.econ->region[rRevolt].coercion=1.0f;
+    /* Conquête FRAÎCHE, zéro légitimité (déterministe) : la frondeuse franchit
+     * le seuil quelle que soit la géographie — on teste la RÉVOLTE, pas le monde. */
+    if (rRevolt<SCPS_MAX_REG){ s.wl->L[rRevolt]=0.0f; s.wl->years_held[rRevolt]=0.f; }
     bool fired=false; int day_fired=-1;
-    for (int d=0; d<500 && !fired; d+=10){
+    for (int d=0; d<800 && !fired; d+=10){
         statecraft_tick(s.sc,s.w,s.econ,s.wp,s.wl,s.dp,s.rn,10);
         if (statecraft_revolt_fired(s.sc,rRevolt)){ fired=true; day_fired=d; }
     }

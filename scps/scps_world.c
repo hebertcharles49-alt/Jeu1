@@ -65,20 +65,111 @@ static const float DDIST[8]={1.f,1.414f,1.f,1.414f,1.f,1.414f,1.f,1.414f};
  * COUCHE 1 — GÉOLOGIE
  * Plaques tectoniques (Voronoï) + FBM → relief de base
  * ====================================================================== */
-#define N_PLATES 18
+#define N_PLATES   18
+#define DRIFT_PX   210.f   /* déplacement d'une plaque continentale (px) à dérive=1 */
 
-typedef struct { float cx,cy; int oceanic; float dx,dy; } Plate;
+/* La plaque a une MÉMOIRE : elle dérive d'une position d'origine (le
+ * supercontinent) vers sa position actuelle. cx,cy = ce que voit tout l'aval ;
+ * cx0,cy0 = l'origine empaquetée ; rift_partner = l'ex-voisine séparée. */
+typedef struct {
+    float cx,  cy;        /* position ACTUELLE (après dérive) */
+    float cx0, cy0;       /* position d'ORIGINE (dans le supercontinent) */
+    float dx,  dy;        /* vecteur de dérive (biaisé N/S) */
+    int   oceanic;
+    float axis, aniso;    /* axe d'élongation + facteur (>1 = étiré le long de l'axe) */
+    int   rift_partner;   /* plaque ex-voisine riftée (Wegener) ; -1 sinon */
+} Plate;
 static Plate g_plates[N_PLATES];
+static float g_cluster_cx, g_cluster_cy;   /* centre du supercontinent (px) */
 
-static void plates_init(void) {
+/* La carte est un cylindre : on enroule en X (E/O), on borne en Y (pas de pôle). */
+static inline float wrap_x(float x){ while(x<0.f)x+=SCPS_W; while(x>=SCPS_W)x-=SCPS_W; return x; }
+/* Plus petit écart en X sur le cylindre (un continent au bord se prolonge de
+ * l'autre côté) : le « monde rond ». */
+static inline float wrap_dx(float dx){
+    if (dx> SCPS_W*0.5f) dx-=SCPS_W;
+    if (dx<-SCPS_W*0.5f) dx+=SCPS_W;
+    return dx;
+}
+
+/* Supercontinent → rift → dérive (doc §2) :
+ *  (A) graines CONTINENTALES serrées en un amas (Pangée) ; océaniques dispersées.
+ *  (B) chaque continentale s'apparie à sa plus proche voisine continentale (rift).
+ *  (C) dérive : cx = cx0 + dx·DRIFT, enroulée en X, bornée en Y ; biais N/S.
+ * drift ∈ [0..1] (réutilise world_age) ; à 0 on retrouve le supercontinent. */
+static void plates_init(float seed_f, float drift) {
+    (void)seed_f;
+    float ccx = SCPS_W*0.50f, ccy = SCPS_H*(0.40f+0.20f*rng_f());
+    float cluster_r = SCPS_H*0.20f;            /* compacité du supercontinent (Pangée) */
+    g_cluster_cx = ccx; g_cluster_cy = ccy;
+    int kc=0;  /* compteur de plaques continentales */
     for (int i=0;i<N_PLATES;i++) {
-        g_plates[i].cx = rng_f()*SCPS_W;
-        g_plates[i].cy = rng_f()*SCPS_H;
-        g_plates[i].oceanic = (rng_f()<0.38f)?1:0;
-        float a = rng_f()*6.2832f;
-        g_plates[i].dx = cosf(a);
-        g_plates[i].dy = sinf(a);
+        Plate *p=&g_plates[i];
+        p->oceanic = (rng_f()<0.42f)?1:0;
+        p->rift_partner = -1;
+        if (!p->oceanic) {
+            /* graines continentales en SPIRALE d'angle d'or dans l'amas : les
+             * morceaux du supercontinent dérivent (radialement) dans des
+             * directions DISTINCTES, pas tous du même côté → éventail équilibré. */
+            float ang = kc*2.39996323f + (rng_f()-0.5f)*0.5f;
+            float rr  = cluster_r*(0.30f+0.62f*sqrtf((kc+0.5f)/6.f));
+            if (rr>cluster_r) rr=cluster_r;
+            p->cx0 = ccx + cosf(ang)*rr;
+            p->cy0 = ccy + sinf(ang)*rr*0.85f;
+            p->axis  = 1.5708f + (rng_f()-0.5f)*1.0f;  /* axe ≈ vertical → continents hauts */
+            p->aniso = 1.45f + rng_f()*1.15f;          /* 1.45 .. 2.60 */
+            kc++;
+        } else {
+            p->cx0 = rng_f()*SCPS_W;
+            p->cy0 = rng_f()*SCPS_H;
+            p->axis  = rng_f()*6.2832f;
+            p->aniso = 1.f;
+        }
     }
+    /* (B) rifts : apparier chaque continentale à sa plus proche voisine contin. */
+    for (int i=0;i<N_PLATES;i++) {
+        if (g_plates[i].oceanic || g_plates[i].rift_partner>=0) continue;
+        int best=-1; float bd=1e30f;
+        for (int j=0;j<N_PLATES;j++) {
+            if (j==i || g_plates[j].oceanic || g_plates[j].rift_partner>=0) continue;
+            float dx=g_plates[j].cx0-g_plates[i].cx0, dy=g_plates[j].cy0-g_plates[i].cy0;
+            float d=dx*dx+dy*dy;
+            if (d<bd){bd=d;best=j;}
+        }
+        if (best>=0){ g_plates[i].rift_partner=best; g_plates[best].rift_partner=i; }
+    }
+    /* (C) dérive : radiale depuis le centre de l'amas (les continentales se
+     * séparent), biaisée N/S + jitter (pour garder des fronts de collision) ;
+     * les océaniques gardent une dérive ambiante propre (→ subduction/Andes). */
+    for (int i=0;i<N_PLATES;i++) {
+        Plate *p=&g_plates[i];
+        if (!p->oceanic) {
+            float ux=p->cx0-ccx, uy=p->cy0-ccy, ul=sqrtf(ux*ux+uy*uy); if(ul<1.f)ul=1.f;
+            ux/=ul; uy/=ul;
+            float jit=(rng_f()-0.5f)*1.0f;              /* ±0.5 rad : fronts variés */
+            float ca=cosf(jit), sa=sinf(jit);
+            float rx=ux*ca-uy*sa, ry=ux*sa+uy*ca;
+            ry*=1.25f;                                   /* léger biais N/S (sans exiler aux pôles) */
+            float dl=sqrtf(rx*rx+ry*ry); if(dl<1e-3f)dl=1.f;
+            p->dx=rx/dl; p->dy=ry/dl;
+            float D=drift*DRIFT_PX;
+            p->cx=wrap_x(p->cx0+p->dx*D);
+            p->cy=clampf(p->cy0+p->dy*D, SCPS_H*0.06f, SCPS_H*0.94f);
+        } else {
+            float a=rng_f()*6.2832f;
+            p->dx=cosf(a); p->dy=sinf(a);
+            p->cx=p->cx0; p->cy=p->cy0;                  /* le plancher dérive peu */
+        }
+    }
+}
+
+/* Distance ANISOTROPE au centre d'une plaque : étirée d'un facteur aniso le
+ * long de l'axe → cellule de Voronoï (et donc chaîne de montagnes) élongée. */
+static inline float plate_dist(const Plate *p, float dx, float dy) {
+    float ex= dx*cosf(p->axis)+dy*sinf(p->axis);   /* ∥ axe */
+    float ey=-dx*sinf(p->axis)+dy*cosf(p->axis);   /* ⊥ axe */
+    ex/=p->aniso;
+    return sqrtf(ex*ex+ey*ey);
 }
 
 /* Score de frontière [0..1] et indices des deux plaques les plus proches.
@@ -95,8 +186,7 @@ static float plate_boundary(int px, int py, int *pa, int *pb, float seed_f) {
     float d1=1e30f, d2=1e30f;
     *pa=0; *pb=1;
     for (int i=0;i<N_PLATES;i++) {
-        float dx=x-g_plates[i].cx, dy=y-g_plates[i].cy;
-        float d=sqrtf(dx*dx+dy*dy);
+        float d=plate_dist(&g_plates[i], x-g_plates[i].cx, y-g_plates[i].cy);
         if (d<d1){d2=d1;*pb=*pa;d1=d;*pa=i;}
         else if(d<d2){d2=d;*pb=i;}
     }
@@ -115,10 +205,23 @@ typedef struct {
     float ax, ay;        /* demi-axes en px     */
     float cosA, sinA;    /* rotation            */
     float strength;      /* [0.5..1.0]          */
+    float tdx, tdy;      /* direction d'effilement (vers la pointe de dérive) */
+    float tamt;          /* amplitude d'effilement [0..1] ; 0 = pas d'effilement */
 } ContLobe;
 
 #define MAX_CONTSHAPE 8
-typedef struct { ContLobe lobe[MAX_LOBES]; int n; } ContShape;
+typedef struct {
+    ContLobe lobe[MAX_LOBES]; int n;
+    int   rift;          /* 1 = bord riftée (Wegener) avec un continent partenaire */
+    float dvx, dvy;      /* dérive de CE continent (cx-cx0, dé-enroulée) */
+    float rcx, rcy;      /* centre d'ORIGINE de ce continent */
+    float rnx, rny;      /* normale vers le partenaire (le bord qui fait face) */
+    float rtx, rty;      /* tangente PARTAGÉE de la déchirure */
+    float rmx, rmy;      /* point de référence PARTAGÉ du profil (milieu des origines) */
+    float rrad;          /* rayon du bord qui fait face */
+    float rseed;         /* graine du profil de déchirure PARTAGÉ */
+    float rside;         /* +1 / −1 : miroir (cap d'un côté = baie de l'autre) */
+} ContShape;
 static ContShape g_cshape[MAX_CONTSHAPE];
 static int       g_ncont = 3;
 
@@ -135,40 +238,87 @@ static void continents_init(int n, float seed_f) {
     float R0=(0.78f/sqrtf((float)n))*SCPS_H;  /* +50% : masses plus vastes →
                                                  place pour les mers intérieures */
 
+    /* Lier chaque continent à une plaque CONTINENTALE : la masse chevauche la
+     * plaque et HÉRITE de sa position dérivée, de son axe et de son effilement
+     * → les continents dérivent du supercontinent, hauts et effilés (Afrique /
+     * Amérique du Sud), au lieu d'une rangée horizontale. */
+    int cpl[N_PLATES], ncp=0;
+    for (int i=0;i<N_PLATES;i++) if(!g_plates[i].oceanic) cpl[ncp++]=i;
+
     for (int i=0;i<n;i++) {
         ContShape *cs=&g_cshape[i];
-        float u=(i+0.5f)/(float)n;
-        float cx=(0.10f+0.80f*u)*SCPS_W+(rng_f()-0.5f)*0.08f*SCPS_W;
-        float cy=(0.28f+0.44f*rng_f())*SCPS_H;
+        int   cp   = ncp>0 ? cpl[i % ncp] : 0;
+        float cx   = ncp>0 ? g_plates[cp].cx    : SCPS_W*0.5f;
+        float cy   = ncp>0 ? g_plates[cp].cy    : SCPS_H*0.5f;
+        float axis = ncp>0 ? g_plates[cp].axis  : 1.5708f;
+        float aniso= ncp>0 ? g_plates[cp].aniso : 1.8f;
+        float tdx  = ncp>0 ? g_plates[cp].dx    : 0.f;
+        float tdy  = ncp>0 ? g_plates[cp].dy    : 1.f;
 
         cs->n=1+(int)(rng_f()*4.f);
         if(cs->n>MAX_LOBES)cs->n=MAX_LOBES;
 
-        /* Lobe principal */
+        /* Lobe principal — ÉTIRÉ le long de l'axe de la plaque (≈ vertical) et
+         * EFFILÉ vers la pointe de dérive (broad base, narrow tip). */
         {
             ContLobe *cl=&cs->lobe[0];
             cl->cx=cx; cl->cy=cy;
-            float asp=0.75f+rng_f()*0.30f;   /* max 1.05 → moins de "saucisse" */
-            cl->ax=R0*asp; cl->ay=R0;
-            float a=rng_f()*6.2832f;
-            cl->cosA=cosf(a); cl->sinA=sinf(a);
+            float R0m=R0*1.10f;           /* masses distinctes et vastes (assez de pays + de terres) */
+            float sq=sqrtf(aniso);
+            cl->ax=R0m/sq;                /* court  : largeur E/O */
+            cl->ay=R0m*sq;                /* long   : hauteur N/S */
+            cl->cosA= sinf(axis);         /* aligne le grand axe (ay) sur l'axe plaque */
+            cl->sinA=-cosf(axis);
             cl->strength=1.0f;
+            cl->tdx=tdx; cl->tdy=tdy; cl->tamt=0.45f;
         }
-        /* Péninsules / bras — trapus et bien RECOUVRANTS (sinon ils pointent
-         * hors du corps en fines « oreilles de lapin »). Portée réduite (ils
-         * chevauchent le corps), aspect modéré, rayon court plus large. */
+        /* Péninsules / bras — recouvrants, soudés au corps, sans effilement propre. */
         for (int l=1;l<cs->n;l++) {
             ContLobe *cl=&cs->lobe[l];
             float angle=rng_f()*6.2832f;
-            float reach=R0*(0.30f+rng_f()*0.40f);    /* recouvre le corps */
+            float reach=R0*(0.28f+rng_f()*0.38f);
             cl->cx=cx+cosf(angle)*reach;
-            cl->cy=cy+sinf(angle)*reach;
-            float asp=1.10f+rng_f()*0.55f;           /* max 1.65 — péninsules moins filiformes */
-            float shortR=R0*(0.26f+rng_f()*0.22f);   /* plus large */
+            cl->cy=cy+sinf(angle)*reach*1.15f;       /* léger biais vertical */
+            float asp=1.10f+rng_f()*0.55f;
+            float shortR=R0*(0.24f+rng_f()*0.20f);
             cl->ax=shortR*asp; cl->ay=shortR;
             cl->cosA=cosf(angle); cl->sinA=sinf(angle);
-            cl->strength=0.70f+rng_f()*0.28f;        /* assez fort pour fusionner */
+            cl->strength=0.70f+rng_f()*0.28f;
+            cl->tdx=0.f; cl->tdy=0.f; cl->tamt=0.f;
         }
+        /* Géométrie de dérive de CE continent (réf. pour le rift Wegener) */
+        cs->rift=0;
+        if (ncp>0) {
+            cs->rcx=g_plates[cp].cx0; cs->rcy=g_plates[cp].cy0;
+            float dvx=g_plates[cp].cx-g_plates[cp].cx0;
+            if (dvx> SCPS_W*0.5f) dvx-=SCPS_W;       /* dé-enrouler le cylindre */
+            if (dvx<-SCPS_W*0.5f) dvx+=SCPS_W;
+            cs->dvx=dvx; cs->dvy=g_plates[cp].cy-g_plates[cp].cy0;
+        } else { cs->rcx=cx; cs->rcy=cy; cs->dvx=0.f; cs->dvy=0.f; }
+    }
+
+    /* ── Wegener : apparier les continents dont les PLAQUES se sont riftées.
+     * Les deux bords qui se faisaient face partagent un profil de déchirure
+     * MIROIR — là où l'un fait saillie (cap), l'autre se creuse (baie) : on voit
+     * qu'ils étaient joints, et les rapprocher les fait s'imbriquer. ── */
+    int plate2cont[N_PLATES];
+    for (int i=0;i<N_PLATES;i++) plate2cont[i]=-1;
+    for (int i=0;i<n && ncp>0;i++) plate2cont[cpl[i%ncp]]=i;
+    for (int i=0;i<n && ncp>0;i++) {
+        int pa=cpl[i%ncp], pb=g_plates[pa].rift_partner;
+        if (pb<0) continue;
+        int j=plate2cont[pb];
+        if (j<0 || j<=i) continue;                   /* une seule fois par paire (i<j) */
+        ContShape *A=&g_cshape[i], *B=&g_cshape[j];
+        float nx=B->rcx-A->rcx, ny=B->rcy-A->rcy, nl=sqrtf(nx*nx+ny*ny); if(nl<1.f)nl=1.f;
+        nx/=nl; ny/=nl;                              /* normale A→B (partagée) */
+        float tx=-ny, ty=nx;                         /* tangente partagée */
+        float mx=(A->rcx+B->rcx)*0.5f, my=(A->rcy+B->rcy)*0.5f;
+        float rs=(g_plates[pa].cx0+g_plates[pb].cy0)*0.013f+(float)i*2.3f+seed_f;
+        A->rift=1; A->rnx= nx; A->rny= ny; A->rtx=tx; A->rty=ty;
+        A->rmx=mx; A->rmy=my; A->rseed=rs; A->rside=+1.f; A->rrad=A->lobe[0].ay;
+        B->rift=1; B->rnx=-nx; B->rny=-ny; B->rtx=tx; B->rty=ty;
+        B->rmx=mx; B->rmy=my; B->rseed=rs; B->rside=-1.f; B->rrad=B->lobe[0].ay;
     }
 
     /* Archipels : 0-3 chaînes d'îles indépendantes */
@@ -237,11 +387,34 @@ static float continental_mask(int x, int y, float seed_f) {
         /* Union LISSE des lobes d'un MÊME continent (corps + péninsules) :
          * les bras se soudent au corps sans pointe. */
         float cval=0.f;
+        /* Wegener : décalage du bord qui FAIT FACE au partenaire riftée, suivant
+         * un profil de déchirure PARTAGÉ et MIROIR (cap d'un côté ↔ baie de l'autre). */
+        float wedge=0.f;
+        if (cs->rift) {
+            float ox=fx-cs->dvx, oy=fy-cs->dvy;          /* ramener en espace ORIGINE */
+            float dax=wrap_dx(ox-cs->rcx), day=oy-cs->rcy;
+            float along=dax*cs->rnx+day*cs->rny;
+            if (along>0.f) {
+                float tang=wrap_dx(ox-cs->rmx)*cs->rtx+(oy-cs->rmy)*cs->rty;
+                float w=stb_perlin_fbm_noise3(tang*0.020f,cs->rseed,cs->rseed*0.5f+1.7f,2.f,0.5f,4);
+                float facing=clampf(along/(cs->rrad>1.f?cs->rrad:1.f),0.f,1.f);
+                wedge=cs->rside*w*0.30f*facing;          /* ≈ ±0.30 en unités de d */
+            }
+        }
         for (int l=0;l<cs->n;l++) {
             ContLobe *cl=&cs->lobe[l];
-            float rx=(fx-cl->cx)*cl->cosA+(fy-cl->cy)*cl->sinA;
-            float ry=-(fx-cl->cx)*cl->sinA+(fy-cl->cy)*cl->cosA;
+            float ddx=wrap_dx(fx-cl->cx), ddy=fy-cl->cy;   /* écart cylindrique en X */
+            float rx=ddx*cl->cosA+ddy*cl->sinA;
+            float ry=-ddx*cl->sinA+ddy*cl->cosA;
             float d=sqrtf((rx/cl->ax)*(rx/cl->ax)+(ry/cl->ay)*(ry/cl->ay));
+            if (l==0) d-=wedge;          /* Wegener : pousse/creuse le bord qui fait face */
+            /* Effilement : la côte recule vers la pointe de dérive → base large,
+             * pointe étroite (silhouette Amérique du Sud / pointe sud africaine). */
+            if (cl->tamt>0.f) {
+                float along=(ddx*cl->tdx+ddy*cl->tdy)/cl->ay;
+                float t=clampf(along,0.f,1.f);
+                d*=1.f+cl->tamt*t*1.3f;
+            }
             float lobe=1.f-clampf(d,0.f,1.f);
             lobe=lobe*lobe*(3.f-2.f*lobe)*cl->strength;
             cval = (l==0) ? lobe : smaxf(cval,lobe,0.28f);
@@ -250,15 +423,17 @@ static float continental_mask(int x, int y, float seed_f) {
     }
     for (int i=0;i<g_nislet;i++) {
         Islet *il=&g_islet[i];
-        float rx=(fx-il->cx)*il->cosA+(fy-il->cy)*il->sinA;
-        float ry=-(fx-il->cx)*il->sinA+(fy-il->cy)*il->cosA;
+        float ddx=wrap_dx(fx-il->cx), ddy=fy-il->cy;
+        float rx=ddx*il->cosA+ddy*il->sinA;
+        float ry=-ddx*il->sinA+ddy*il->cosA;
         float d=sqrtf((rx/il->ax)*(rx/il->ax)+(ry/il->ay)*(ry/il->ay));
         float lobe=1.f-clampf(d,0.f,1.f);
         lobe=lobe*lobe*(3.f-2.f*lobe)*0.55f;
         if (lobe>best) best=lobe;
     }
-    float edge=clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1)
-              *clampf(nx*8.f,0,1)*clampf((1.f-nx)*8.f,0,1);
+    /* Monde ROND : plus d'atténuation aux bords E/O (les continents se
+     * prolongent d'un bord à l'autre) ; on garde seulement le fondu polaire N/S. */
+    float edge=clampf(ny*6.f,0,1)*clampf((1.f-ny)*6.f,0,1);
     return best*edge;
 }
 
@@ -441,7 +616,7 @@ static void volcanoes_mark(World *w, const float *height) {
 }
 
 static void step_geology(float *height, float seed_f, const WorldParams *P) {
-    plates_init();
+    plates_init(seed_f, P->world_age);
     continents_init(P->n_continents, seed_f);
 
     /* land_bias : décale la mer (0.5 neutre). mountains : amplitude. */
@@ -1060,10 +1235,16 @@ static void fill_lakes(float *height, Cell *cells) {
 
     for (int y=2;y<SCPS_H-2;y++) for (int x=2;x<SCPS_W-2;x++) {
         int i=scps_idx(x,y);
-        if (height[i]<SEA_LEVEL+0.020f||inlake[i]) continue;
-        /* Dépression cardinale stricte */
+        if (height[i]<SEA_LEVEL+0.030f||inlake[i]) continue;
+        /* Un lac a besoin d'un APPORT d'eau : pas de lac dans un bassin SEC
+         * (désert, steppe) — il devient cuvette/salant, pas de l'eau libre.
+         * C'est ce qui faisait « gruyère » : chaque creux de bruit, même aride,
+         * se remplissait. On le conditionne désormais à l'humidité locale. */
+        if (cells[i].moisture<0.42f) continue;
+        /* Dépression STRICTE sur les 8 voisins : un vrai creux fermé, pas une
+         * simple ride de bruit (l'ancien test 4-cardinal en retenait trop). */
         bool dep=true;
-        for (int d=0;d<8;d+=2) {
+        for (int d=0;d<8;d++) {
             if (height[scps_idx(x+DDX[d],y+DDY[d])]<height[i]){dep=false;break;}
         }
         if (!dep) continue;
@@ -2467,7 +2648,7 @@ static void refine_capitals(World *w) {
 WorldParams worldparams_default(uint32_t seed) {
     WorldParams p;
     p.seed         = seed;
-    p.n_continents = 4;      /* doc §3 — assez pour archipels & ponts type Béringie */
+    p.n_continents = 6;      /* doc §3 — assez pour archipels & ponts type Béringie */
     p.land_amount  = 0.5f;
     p.world_age    = 0.5f;
     p.erosion      = 0.5f;

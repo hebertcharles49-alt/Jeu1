@@ -119,14 +119,22 @@ int main(int argc, char **argv){
     run_days(&s, 8*SCPS_DAYS_PER_YEAR);   /* la Citadelle met ~6 ans */
     snapshot(&s, "après citadelles (H↑, L↓)", &SI2,&F2,&L2);
 
-    /* Phase 3 — DÉFRICHEMENT (§4) sur une niche forestière + EXPLOITATION (§3). */
+    /* Phase 3 — DÉFRICHEMENT (§4) sur une niche forestière + EXPLOITATION (§3).
+     * On choisit une niche forestière existante ; s'il n'y en a pas dans le monde
+     * généré, on en FABRIQUE une (déterministe) sur une région ≠ capitale → le
+     * test mesure l'EFFET du défrichement, pas la flore de la graine. */
     int forest=-1;
     for (int r=0;r<s.econ->n_regions;r++){
         const PopCulture *c=&s.econ->region[r].culture;
         if (c->settled && (c->lifeway==LIFE_HUNTER||c->lifeway==LIFE_HORTICULTURE)){ forest=r; break; }
     }
-    bool is_forest=(forest>=0);
+    if (forest<0)
+        for (int r=0;r<s.econ->n_regions;r++)
+            if (s.econ->region[r].culture.settled && r!=s.cap_reg){ forest=r; break; }
     if (forest<0) forest=s.cap_reg;
+    s.econ->region[forest].culture.lifeway=LIFE_HORTICULTURE;  /* niche forestière franche */
+    s.econ->region[forest].culture.subsistance=2.5f;            /* marge nette pour la dérive agricole */
+    bool is_forest=true;
     float subs0=s.econ->region[forest].culture.subsistance;
     float food0=s.econ->region[forest].build.food_cap;
     float Lf0=s.wl->L[forest];

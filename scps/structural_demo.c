@@ -199,6 +199,12 @@ int main(int argc, char **argv){
         if (rD>=0) s.econ->region[rD].culture=fd;
         s.wp->age_I_bonus=2.0f;                       /* la pression des idées (crise ouverte) */
         tickP(&s);
+        /* La crise est la PRÉCONDITION du fork : on la force directement (SI bas,
+         * fragilité haute) sur les deux États, indépendamment de la géographie —
+         * le test mesure alors la RÉPONSE (serrer vs réformer), pas le hasard du
+         * monde. L'IA lit ces valeurs telles quelles (ai_observe, sans re-tick). */
+        if (cidB<s.wp->n_countries){ s.wp->country[cidB].SI=2.0f; s.wp->country[cidB].fragilite=7.0f; }
+        if (cidD<s.wp->n_countries){ s.wp->country[cidD].SI=2.0f; s.wp->country[cidD].fragilite=7.0f; }
         AgencyState ag; agency_init(&ag);
         AiActor aB, aD;
         ai_actor_init(&aB, s.w, s.econ, cidB, seed^0xBu);
