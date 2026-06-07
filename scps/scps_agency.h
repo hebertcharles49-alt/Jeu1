@@ -28,6 +28,7 @@ typedef enum {
     EDI_PORT, EDI_CARAVANSERAIL,                        /* → P */
     EDI_MARCHE, EDI_ENTREPOT,                           /* → PE local */
     EDI_GRENIER, EDI_IRRIGATION,                        /* → food */
+    EDI_SANCTUAIRE, EDI_TEMPLE,                         /* → foi (SOUTIENT L) */
     EDIFICE_COUNT
 } Edifice;
 

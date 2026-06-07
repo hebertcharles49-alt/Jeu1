@@ -211,6 +211,12 @@ static Edifice ai_next_h_edifice(const WorldEconomy *econ, int region){
     if (h < 3.0f) return EDI_FORTERESSE;
     return EDI_CITADELLE;
 }
+/* Progression de foi : Sanctuaire → Temple (sacraliser le trône → SOUTIENT L). */
+static Edifice ai_next_faith_edifice(const WorldEconomy *econ, int region){
+    if (region<0 || region>=econ->n_regions) return EDI_SANCTUAIRE;
+    return (econ->region[region].build.faith < 1.0f) ? EDI_SANCTUAIRE : EDI_TEMPLE;
+}
+#define AI_FAITH_L 4.5f   /* sous ce consentement, le trône se SACRALISE (bâtit la foi) */
 
 /* ===================================================================== */
 /* TOURS DE DÉCISION                                                       */
@@ -240,7 +246,14 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
             Edifice e = ai_next_h_edifice(econ, a->home_region);
             if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)) a->stats.builds_h++;
         } else {
-            Edifice e = ai_next_k_edifice(econ, a->home_region);
+            /* RÉFORME : on métabolise (K). Mais un trône au consentement bas se
+             * SACRALISE d'abord (la foi soutient L sans réprimer — §4 catalogue). */
+            Edifice e;
+            if (v->L < AI_FAITH_L && a->home_region>=0
+                && econ->region[a->home_region].build.faith < 3.0f)
+                e = ai_next_faith_edifice(econ, a->home_region);
+            else
+                e = ai_next_k_edifice(econ, a->home_region);
             if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)){
                 /* K de TEMPÉRAMENT (proactif, la marque du Bâtisseur) vs K de DIGESTION
                  * (réactif, imposé par le frein quand on a trop avalé) — on ne les

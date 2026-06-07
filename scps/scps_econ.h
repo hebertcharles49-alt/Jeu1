@@ -57,6 +57,7 @@ typedef enum {
     BLD_SAWMILL,       /* bois    → fournitures navales */
     BLD_PAPERMILL,     /* bois    → papier              */
     BLD_WINERY,        /* sucre   → vin                 */
+    BLD_BREWERY,       /* grain   → bière (palier moral des Clans/Souterrain) */
     BLD_JEWELER,       /* or+métal précieux → joaillerie (bien d'élite) */
     BLD_WEAVER_LUX,    /* tissu   → étoffe précieuse    */
     BLD_MAGE_WORKSHOP, /* ARCANE : cristal → essence (mana) — sa combustion MONTE la Brèche */
@@ -139,6 +140,7 @@ typedef struct {
     float P_open;    /* ouverture      → monte P (perméabilité) */
     float PE_infra;  /* prospérité     → capte plus de PE local */
     float food_cap;  /* rendement/stockage alimentaire → croissance */
+    float faith;     /* foi (temple/sanctuaire) → SOUTIENT L local (apaise l'agitation) */
 } ProvBuild;
 
 /* ---- Économie d'une région -------------------------------------------- */

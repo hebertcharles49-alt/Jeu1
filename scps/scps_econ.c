@@ -43,6 +43,7 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_CLOTH]         = 4.5f,
     [RES_NAVAL_SUPPLIES]= 4.0f,
     [RES_WINE]          = 5.0f,
+    [RES_BEER]          = 3.0f,    /* la boisson du commun — moins chère que le vin */
     [RES_PRECIOUS_WARE] = 22.0f,
     [RES_PRECIOUS_CLOTH]= 18.0f,
     [RES_PAPER]         = 5.5f,
@@ -67,6 +68,7 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     [BLD_SAWMILL]   = { RES_WOOD,  2.0f, RES_NONE,          0.f, RES_NAVAL_SUPPLIES, 1.0f, 0.8f },
     [BLD_PAPERMILL] = { RES_WOOD,  1.5f, RES_NONE,          0.f, RES_PAPER,          1.0f, 0.7f },
     [BLD_WINERY]    = { RES_SUGAR, 2.0f, RES_NONE,          0.f, RES_WINE,           1.0f, 0.9f },
+    [BLD_BREWERY]   = { RES_GRAIN, 1.2f, RES_NONE,          0.f, RES_BEER,           1.0f, 0.8f },
     [BLD_JEWELER]   = { RES_GOLD,  1.0f, RES_PRECIOUS_METAL,1.0f, RES_PRECIOUS_WARE, 1.0f, 1.2f },
     [BLD_WEAVER_LUX]= { RES_CLOTH, 2.0f, RES_NONE,          0.f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f },
     /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
@@ -85,6 +87,7 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
 static const float NEED[CLASS_COUNT][RES_COUNT] = {
     [CLASS_LABORER] = {
         [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.30f, [RES_CLOTH]=0.20f,
+        [RES_WINE]=0.18f,   /* palier MORAL : servi en bière OU vin selon la culture */
     },
     [CLASS_BOURGEOIS] = {
         [RES_GRAIN]=1.00f, [RES_CLOTH]=0.50f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
@@ -98,6 +101,16 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
 
 /* Part de chaque strate dans la population à l'initialisation. */
 static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
+
+/* ---- Le palier MORAL est une VARIANTE culturelle (catalogue des biens) ----
+ * Les cultures de basse subsistance (clans, montagnards nains, sauvages orques)
+ * brassent la BIÈRE ; les cultures agraires/urbaines (cités, sylve elfique,
+ * mercantile) pressent le VIN. Servir la MAUVAISE boisson ne contente qu'à
+ * moitié (un nain boude le vin, un orque méprise le verre fin). */
+#define DRINK_OFFCULT 0.5f
+static inline Resource preferred_drink(const PopCulture *c){
+    return (c->subsistance < 5.f) ? RES_BEER : RES_WINE;
+}
 
 #define TAX_RATE     0.15f   /* part de la valeur produite captée par les élites */
 #define WAGE_SHARE   0.55f   /* part de la valeur → salaires (laborers) */
@@ -161,7 +174,7 @@ const char *social_class_name(SocialClass c) {
 const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
         "Manufacture textile","Scierie navale","Papeterie",
-        "Domaine viticole","Joaillerie","Atelier d'étoffe précieuse",
+        "Domaine viticole","Brasserie","Joaillerie","Atelier d'étoffe précieuse",
         "Atelier de mage","Forge céleste","Haut-fourneau","Atelier d'outillage"
     };
     return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
@@ -342,6 +355,8 @@ void econ_init(WorldEconomy *e, const World *w) {
             region_ensure_building(re,BLD_PAPERMILL);
         }
         if (re->raw_cap[RES_SUGAR] > 0.f) region_ensure_building(re,BLD_WINERY);
+        /* Brasserie : la bière naît du grain — boisson du commun, partout où l'on cultive. */
+        if (re->raw_cap[RES_GRAIN] > 0.f) region_ensure_building(re,BLD_BREWERY);
         if (re->raw_cap[RES_GOLD] > 0.f && re->raw_cap[RES_PRECIOUS_METAL] > 0.f)
             region_ensure_building(re,BLD_JEWELER);
         /* L'atelier de luxe a besoin de tissu : présent si on file la laine. */
@@ -600,6 +615,29 @@ void econ_tick(WorldEconomy *e, float dt) {
             for (int r=0;r<RES_COUNT;r++) {
                 float need=NEED[c][r]*units;
                 if (need<=0.f) continue;
+                /* ── Palier MORAL (boisson) : VARIANTE culturelle bière/vin ──
+                 * On sert la boisson PRÉFÉRÉE de la culture locale d'abord ; la
+                 * mauvaise ne comble qu'à moitié (un nain boude le vin). */
+                if (r==RES_WINE){
+                    float w_d=BASE_PRICE[RES_WINE]*need;   /* valeur du palier (réf. vin) */
+                    need_w+=w_d;
+                    Resource pref=preferred_drink(&re->culture);
+                    Resource alt =(pref==RES_BEER)?RES_WINE:RES_BEER;
+                    float cs_p=clampf(re->stock[pref]/(need+EPS),0.f,1.f);
+                    float cost_p=need*cs_p*re->price[pref];
+                    float cb_p=(cost_p>0.f)?clampf(budget/cost_p,0.f,1.f):1.f;
+                    float got_p=cs_p*cb_p;
+                    re->stock[pref]-=need*got_p; budget-=need*got_p*re->price[pref];
+                    float rem=1.f-got_p;                   /* comblé par la mauvaise boisson */
+                    float cs_a=clampf(re->stock[alt]/(need*rem+EPS),0.f,1.f)*rem;
+                    float cost_a=need*cs_a*re->price[alt];
+                    float cb_a=(cost_a>0.f)?clampf(budget/cost_a,0.f,1.f):1.f;
+                    float got_a=cs_a*cb_a;
+                    re->stock[alt]-=need*got_a; budget-=need*got_a*re->price[alt];
+                    float got=clampf(got_p + DRINK_OFFCULT*got_a, 0.f, 1.f);
+                    met_w+=w_d*got; r_soc_need+=need; r_soc_got+=need*got;
+                    continue;
+                }
                 float w=BASE_PRICE[r]*need;          /* importance ~ valeur */
                 need_w+=w;
                 float can_stock=clampf(re->stock[r]/(need+EPS),0.f,1.f);

@@ -1,0 +1,124 @@
+/*
+ * social_demo.c — le tissu social : brasserie, boisson culturelle, foi
+ *
+ *   make social_demo && ./social_demo [graine]
+ *
+ * Première passe du catalogue SOCIAL (au-delà des chaînes matérielles déjà
+ * câblées). On vérifie :
+ *   1. BRASSERIE — le grain devient de la BIÈRE (la chaîne vivrière du commun).
+ *   2. VARIANTE CULTURELLE — le palier MORAL (boisson) est une variante : une
+ *      culture de basse subsistance (clans/nains/orques) est CONTENTE avec la
+ *      bière et BOUDE le vin ; une culture urbaine, l'inverse.
+ *   3. FOI — un Temple bâti SOUTIENT la légitimité locale (sacraliser le trône
+ *      apaise sans réprimer) — la coordonnée que la légitimité LIT.
+ */
+#include "scps_world.h"
+#include "scps_econ.h"
+#include "scps_legitimacy.h"
+#include "scps_agency.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int g_pass=0, g_fail=0;
+static void ok(const char *what, bool cond){
+    printf("   %s %s\n", cond?"✓":"✗", what);
+    if (cond) g_pass++; else g_fail++;
+}
+
+/* Société servie avec UNE boisson donnée, pour une culture de subsistance donnée.
+ * Tous les AUTRES biens sociaux sont abondants → la BOISSON est la variable. */
+static float society_with_drink(WorldEconomy *e, int r, float subsistance, Resource drink){
+    RegionEconomy *re=&e->region[r];
+    re->active=true; re->colonized=true; re->culture.settled=true;
+    re->culture.subsistance=subsistance; re->owner=0;
+    re->n_bld=0; re->coercion=0.f; re->over_tax=0.f;
+    for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
+    re->strata[CLASS_LABORER].pop=1000.f; re->strata[CLASS_LABORER].wealth=1e6f;
+    re->strata[CLASS_BOURGEOIS].pop=200.f;re->strata[CLASS_BOURGEOIS].wealth=1e6f;
+    re->strata[CLASS_ELITE].pop=50.f;     re->strata[CLASS_ELITE].wealth=1e6f;
+    /* vivres + tous les biens sociaux NON-boisson, abondants */
+    re->stock[RES_GRAIN]=1e5f; re->stock[RES_FISH]=1e5f; re->stock[RES_WOOD]=1e5f;
+    re->stock[RES_CLOTH]=1e5f; re->stock[RES_PAPER]=1e5f; re->stock[RES_SALT]=1e5f;
+    re->stock[RES_FUR]=1e5f;   re->stock[RES_PRECIOUS_WARE]=1e5f; re->stock[RES_PRECIOUS_CLOTH]=1e5f;
+    /* la SEULE boisson disponible = celle testée */
+    re->stock[drink]=1e5f;
+    econ_tick(e, 1.f);
+    return re->society_sat;
+}
+
+int main(int argc, char **argv){
+    uint32_t seed=(argc>1)?(uint32_t)strtoul(argv[1],NULL,10):42u;
+    World *w=malloc(sizeof(World));
+    WorldEconomy *e=malloc(sizeof(WorldEconomy));
+    WorldLegitimacy *wl=malloc(sizeof(WorldLegitimacy));
+    if(!w||!e||!wl){ fprintf(stderr,"OOM\n"); return 1; }
+
+    printf("══════════════════════════════════════════════════════════════\n");
+    printf(" LE TISSU SOCIAL — brasserie · boisson culturelle · foi — graine %u\n", seed);
+    printf("══════════════════════════════════════════════════════════════\n");
+
+    WorldParams p=worldparams_default(seed);
+    world_generate(w,&p); econ_init(e,w);
+    if (e->n_regions<4){ fprintf(stderr,"monde trop petit\n"); return 1; }
+
+    /* ═══ 1. BRASSERIE — grain → bière ══════════════════════════════════ */
+    printf("\n── 1. La brasserie : le grain devient de la bière ──\n");
+    {
+        RegionEconomy *re=&e->region[0];
+        re->active=true; re->colonized=true; re->culture.settled=true; re->owner=0;
+        for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
+        re->raw_cap[RES_GRAIN]=6.f;
+        re->n_bld=0;
+        re->bld[re->n_bld].type=BLD_BREWERY; re->bld[re->n_bld].level=3.f; re->n_bld++;
+        re->strata[CLASS_LABORER].pop=600.f; re->strata[CLASS_LABORER].wealth=400.f;
+        re->strata[CLASS_BOURGEOIS].pop=100.f; re->strata[CLASS_ELITE].pop=50.f;
+        for (int t=0;t<6;t++) econ_tick(e,1.f);
+        float beer=re->stock[RES_BEER];
+        printf("   après 6 mois de brassage : bière en stock = %.1f\n", beer);
+        ok("la Brasserie produit de la BIÈRE (grain → bière)", beer > 0.5f);
+    }
+
+    /* ═══ 2. VARIANTE CULTURELLE — la bonne boisson contente ════════════ */
+    printf("\n── 2. La variante culturelle : chacun sa boisson ──\n");
+    float clan_beer = society_with_drink(e, 1, 2.0f, RES_BEER);   /* basse subsistance → bière */
+    float clan_wine = society_with_drink(e, 1, 2.0f, RES_WINE);   /* … servi en vin (off-culture) */
+    float city_wine = society_with_drink(e, 2, 8.0f, RES_WINE);   /* haute subsistance → vin */
+    float city_beer = society_with_drink(e, 2, 8.0f, RES_BEER);   /* … servi en bière (off-culture) */
+    printf("   clan (bière=%.2f vs vin=%.2f) · cité (vin=%.2f vs bière=%.2f)\n",
+           clan_beer, clan_wine, city_wine, city_beer);
+    ok("un peuple de clans est PLUS content avec sa bière qu'avec du vin", clan_beer > clan_wine + 0.02f);
+    ok("un peuple des cités est PLUS content avec son vin qu'avec de la bière", city_wine > city_beer + 0.02f);
+
+    /* ═══ 3. FOI — un Temple soutient la légitimité ═════════════════════ */
+    printf("\n── 3. La foi : un Temple soutient le consentement ──\n");
+    {
+        /* Deux régions JUMELLES (même culture, propriétaire, satisfaction) ;
+         * SEULE différence : l'une a la foi bâtie. */
+        w->country[0].capital_prov = w->region[0].province_ids[0];
+        w->country[0].role = POLITY_ANTAGONIST;
+        for (int r=0;r<e->n_regions;r++){ e->region[r].owner=-1; }
+        int RF=0, RN=3;   /* RF = avec foi, RN = sans */
+        for (int two=0; two<2; two++){
+            int r=(two==0)?RF:RN;
+            RegionEconomy *re=&e->region[r];
+            re->active=true; re->colonized=true; re->culture.settled=true; re->owner=0;
+            re->culture.valeurs=5; re->culture.subsistance=5; re->culture.parente=5; re->culture.religion=5;
+            re->satisfaction=0.5f; re->coercion=0.f;
+            memset(&re->build,0,sizeof re->build);
+        }
+        e->region[RF].build.faith = 3.0f;          /* Temple bâti ici */
+        memset(wl,0,sizeof *wl);
+        legitimacy_init(wl, w, e);
+        for (int t=0;t<60;t++) legitimacy_tick(wl, w, e, NULL);
+        float Lf = wl->L[RF], Ln = wl->L[RN];
+        printf("   légitimité : avec Temple = %.2f  vs  sans = %.2f\n", Lf, Ln);
+        ok("un Temple bâti SOUTIENT la légitimité locale (L plus haute)", Lf > Ln + 0.5f);
+    }
+
+    printf("\n══════════════════════════════════════════════════════════════\n");
+    printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
+    printf("══════════════════════════════════════════════════════════════\n");
+    free(w); free(e); free(wl);
+    return g_fail?1:0;
+}

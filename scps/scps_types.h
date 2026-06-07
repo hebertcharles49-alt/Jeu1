@@ -151,7 +151,8 @@ typedef enum {
     RES_PROD_FIRST,
     RES_CLOTH = RES_PROD_FIRST, /* production               */
     RES_NAVAL_SUPPLIES,         /* production (bois+goudron) */
-    RES_WINE,                   /* production               */
+    RES_WINE,                   /* boisson des Cités/Sylvain (vin) — palier MORAL */
+    RES_BEER,                   /* boisson des Clans/Souterrain/Sauvage (bière) — palier MORAL */
     RES_PRECIOUS_WARE,          /* bien précieux des 4 races (porcelaine, bière…) */
     RES_PRECIOUS_CLOTH,         /* étoffe précieuse des 4 races */
     RES_PAPER,                  /* transformation           */

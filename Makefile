@@ -299,6 +299,19 @@ REVOLT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 revolt_demo: $(REVOLT_DEMO_OBJS)
 	$(CC) $(REVOLT_DEMO_OBJS) -o $@ -lm
 
+# ---- Le tissu social : brasserie + boisson culturelle + foi (Temple→L) -----
+# Première passe du catalogue SOCIAL : une chaîne (grain→bière), la variante
+# culturelle du palier moral (bière/vin), et la foi qui soutient la légitimité.
+SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+                    $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
+                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_modifier.o \
+                    $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_social_demo.o
+social_demo: $(SOCIAL_DEMO_OBJS)
+	$(CC) $(SOCIAL_DEMO_OBJS) -o $@ -lm
+
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \

@@ -17,6 +17,7 @@
 #define RELAX_RATE       0.04f    /* inertie : L tend lentement vers L* */
 #define L_CONQUEST_FLOOR 1.5f
 #define K_BUILD_H        0.6f     /* la coercition BÂTIE (garnisons) ronge L */
+#define K_FAITH          0.7f     /* la foi BÂTIE (temples) SOUTIENT L (contre l'ombre) */
 
 static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -92,7 +93,10 @@ void legitimacy_tick(WorldLegitimacy *wl, const World *w,
         float ombre = K_COERC * re->coercion + K_H * country_H
                     + K_BUILD_H * re->build.H_coerc;
 
-        float Lstar = (W_ALIGN * align + W_AISANCE * aisance) * integ - ombre;
+        /* la foi bâtie (temples) relève le consentement : elle CONTRE l'ombre
+         * coercitive (un trône qui sacralise tient sans tout réprimer). */
+        float lumiere = K_FAITH * re->build.faith;
+        float Lstar = (W_ALIGN * align + W_AISANCE * aisance) * integ - ombre + lumiere;
         Lstar = clampf(Lstar, 0.f, 10.f);
 
         wl->L[r] += (Lstar - wl->L[r]) * RELAX_RATE;   /* inertie : pas d'achat instantané */

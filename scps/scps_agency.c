@@ -26,6 +26,9 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     /* Croissance → food (nourrit la pop). */
     [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f } },
     [EDI_IRRIGATION]   = { "Irrigation",    270,  { .food_cap=1.5f } },
+    /* Foi → SOUTIENT L (sacraliser le trône apaise sans réprimer — §4 du catalogue). */
+    [EDI_SANCTUAIRE]   = { "Sanctuaire",    150,  { .faith=1.0f } },
+    [EDI_TEMPLE]       = { "Temple",        600,  { .faith=2.0f } },
 };
 
 const EdificeDef *edifice_def(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?&EDIFICES[e]:NULL; }
