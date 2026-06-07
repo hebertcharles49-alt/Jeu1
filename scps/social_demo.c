@@ -120,6 +120,28 @@ int main(int argc, char **argv){
         ok("la Brasserie produit de la BIÈRE (grain → bière)", beer > 0.5f);
     }
 
+    /* ═══ 1b. CHAÎNES MILITAIRES & SANTÉ — armurerie, poudrière, apothicaire ═ */
+    printf("\n── 1b. Les chaînes complétées : armes, poudre, remèdes ──\n");
+    {
+        RegionEconomy *re=&e->region[3];
+        re->active=true; re->colonized=true; re->culture.settled=true; re->owner=0;
+        for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; re->price[k]=1.0f; }
+        re->raw_cap[RES_IRON]=4.f; re->raw_cap[RES_SALTPETER]=4.f; re->raw_cap[RES_COAL]=4.f;
+        re->raw_cap[RES_MED_HERBS]=4.f;
+        re->n_bld=0;
+        re->bld[re->n_bld].type=BLD_ARMORY;     re->bld[re->n_bld].level=3.f; re->n_bld++;
+        re->bld[re->n_bld].type=BLD_POWDERMILL; re->bld[re->n_bld].level=3.f; re->n_bld++;
+        re->bld[re->n_bld].type=BLD_APOTHECARY; re->bld[re->n_bld].level=3.f; re->n_bld++;
+        re->strata[CLASS_LABORER].pop=600.f; re->strata[CLASS_LABORER].wealth=400.f;
+        re->strata[CLASS_BOURGEOIS].pop=100.f; re->strata[CLASS_ELITE].pop=50.f;
+        for (int t=0;t<6;t++) econ_tick(e,1.f);
+        printf("   après 6 mois : armes=%.1f · poudre=%.1f · remèdes=%.1f\n",
+               re->stock[RES_ARMS], re->stock[RES_GUNPOWDER], re->stock[RES_REMEDE]);
+        ok("l'Armurerie produit des ARMES (fer → armes)",            re->stock[RES_ARMS]>0.5f);
+        ok("la Poudrière produit de la POUDRE (salpêtre+charbon)",   re->stock[RES_GUNPOWDER]>0.5f);
+        ok("l'Apothicaire produit des REMÈDES (simples → remèdes)",  re->stock[RES_REMEDE]>0.5f);
+    }
+
     /* ═══ 2. VARIANTE CULTURELLE — la bonne boisson contente ════════════ */
     printf("\n── 2. La variante culturelle : chacun sa boisson ──\n");
     float clan_beer = society_with_drink(e, 1, 2.0f, RES_BEER);   /* basse subsistance → bière */

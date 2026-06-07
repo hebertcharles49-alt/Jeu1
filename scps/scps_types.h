@@ -160,6 +160,9 @@ typedef enum {
     RES_TOOLS,                  /* métal + bois → outils (Atelier) → MULTIPLICATEUR de productivité */
     RES_ESSENCE,                /* ARCANE : mana raffiné (cristal brûlé) → sa combustion MONTE la Brèche */
     RES_ENCHANTED_ARMS,         /* armes/armures enchantées (fer céleste + essence) → puissance militaire */
+    RES_ARMS,                   /* armes & armures (fer → Armurerie) → puissance militaire de BASE */
+    RES_GUNPOWDER,              /* poudre (salpêtre + charbon → Poudrière) → puissance militaire */
+    RES_REMEDE,                 /* remèdes (simples → Apothicaire) → santé (besoin de confort) */
     RES_COUNT
 } Resource;
 

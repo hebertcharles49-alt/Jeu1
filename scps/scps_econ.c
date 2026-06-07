@@ -53,6 +53,9 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_ENCHANTED_ARMS]= 46.0f,   /* armes enchantées — la Forge supérieure */
     [RES_METAL]         = 5.0f,    /* fonte/acier — intrant */
     [RES_TOOLS]         = 8.5f,    /* outils — le multiplicateur de productivité */
+    [RES_ARMS]          = 9.0f,    /* armes & armures — militaire de base */
+    [RES_GUNPOWDER]     = 11.0f,   /* poudre — militaire */
+    [RES_REMEDE]        = 7.0f,    /* remèdes — santé/confort */
 };
 
 /* Recette d'une manufacture : jusqu'à 2 intrants → 1 produit. */
@@ -80,6 +83,10 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* Épine dorsale de production : fer + charbon → métal → (métal + bois) outils. */
     [BLD_FOUNDRY]   = { RES_IRON,  1.5f, RES_COAL, 1.0f, RES_METAL, 1.0f, 1.0f },
     [BLD_TOOLWORKS] = { RES_METAL, 1.0f, RES_WOOD, 1.0f, RES_TOOLS, 1.0f, 0.9f },
+    /* Chaînes militaires de base + santé (compléter le roster de production). */
+    [BLD_ARMORY]    = { RES_IRON,      1.2f, RES_NONE, 0.f, RES_ARMS,      1.0f, 1.0f },
+    [BLD_POWDERMILL]= { RES_SALTPETER, 1.0f, RES_COAL, 0.8f, RES_GUNPOWDER, 1.0f, 1.0f },
+    [BLD_APOTHECARY]= { RES_MED_HERBS, 1.0f, RES_NONE, 0.f, RES_REMEDE,    1.0f, 0.8f },
 };
 
 /* Besoins par tête et par strate (unités/100 hab/tick). Le grain (vivres)
@@ -90,7 +97,7 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
     },
     [CLASS_BOURGEOIS] = {
         [RES_GRAIN]=1.00f, [RES_CLOTH]=0.50f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
-        [RES_SALT]=0.20f,
+        [RES_SALT]=0.20f, [RES_REMEDE]=0.15f,   /* santé urbaine (apothicaire) */
     },
     [CLASS_ELITE] = {
         [RES_GRAIN]=1.00f, [RES_WINE]=0.70f, [RES_PAPER]=0.35f, [RES_FUR]=0.30f,
@@ -184,7 +191,8 @@ const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
         "Manufacture textile","Scierie navale","Papeterie",
         "Domaine viticole","Brasserie","Joaillerie","Atelier d'étoffe précieuse",
-        "Atelier de mage","Forge céleste","Haut-fourneau","Atelier d'outillage"
+        "Atelier de mage","Forge céleste","Haut-fourneau","Atelier d'outillage",
+        "Armurerie","Poudrière","Apothicaire"
     };
     return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
 }
@@ -379,6 +387,12 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_ARCANE_CRYSTAL] > 0.f) region_ensure_building(re,BLD_MAGE_WORKSHOP);
         /* ARCANE militaire : une forge céleste là où tombe le fer céleste. */
         if (re->raw_cap[RES_CELESTIAL_IRON] > 0.f) region_ensure_building(re,BLD_CELESTIAL_FORGE);
+        /* Militaire de base : armurerie au fer, poudrière au salpêtre+charbon. */
+        if (re->raw_cap[RES_IRON] > 0.f) region_ensure_building(re,BLD_ARMORY);
+        if (re->raw_cap[RES_SALTPETER] > 0.f && re->raw_cap[RES_COAL] > 0.f)
+            region_ensure_building(re,BLD_POWDERMILL);
+        /* Santé : apothicaire là où poussent les simples (herbes médicinales). */
+        if (re->raw_cap[RES_MED_HERBS] > 0.f) region_ensure_building(re,BLD_APOTHECARY);
 
         /* Niveau initial des manufactures : dimensionné sur la capacité
          * d'accueil (l'infrastructure latente du site). */

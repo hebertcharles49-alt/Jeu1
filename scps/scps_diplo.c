@@ -69,12 +69,13 @@ float diplo_eco_power(const WorldProsperity *wp, int cid){
     return wp->country[cid].P_realise;
 }
 float diplo_mil_power(const World *w, const WorldEconomy *econ, int cid){
-    float pop=0.f, H=0.f, arms=0.f;
+    float pop=0.f, H=0.f, arms=0.f, kit=0.f;
     for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
         const RegionEconomy *re=&econ->region[r];
         pop += re->strata[CLASS_LABORER].pop+re->strata[CLASS_BOURGEOIS].pop+re->strata[CLASS_ELITE].pop;
         H   += re->build.H_coerc;
-        arms+= re->stock[RES_ENCHANTED_ARMS];   /* armes enchantées (Forge céleste) */
+        arms+= re->stock[RES_ENCHANTED_ARMS];                      /* armes enchantées (Forge céleste) */
+        kit += re->stock[RES_ARMS] + re->stock[RES_GUNPOWDER];     /* armes & poudre (Armurerie/Poudrière) */
     }
     const PopCulture *pc=cap_culture(w,econ,cid);
     float race_coerc=0.f, mart=0.f;
@@ -87,7 +88,10 @@ float diplo_mil_power(const World *w, const WorldEconomy *econ, int cid){
     /* Les armes enchantées sont un MULTIPLICATEUR de qualité (l'arcane nourrit la
      * guerre) — rendements décroissants, plafonnés. */
     float ench = 3.0f*(1.f - 1.f/(1.f + arms*0.05f));
-    return sqrtf(pop)*0.04f + H + race_coerc + mart + ench;
+    /* Armes & poudre de BASE : équipent la levée — rendements décroissants,
+     * plafonnés plus bas que l'arcane (le fer arme, l'arcane décide). */
+    float gear = 1.8f*(1.f - 1.f/(1.f + kit*0.03f));
+    return sqrtf(pop)*0.04f + H + race_coerc + mart + ench + gear;
 }
 
 static float threat_of(const World *w, const WorldEconomy *econ,
