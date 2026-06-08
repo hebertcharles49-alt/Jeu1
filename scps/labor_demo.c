@@ -220,6 +220,68 @@ int main(int argc, char **argv){
         free(econ);
     } else { ok("(OOM econ — ignoré)", true); ok("(idem)", true); }
 
+    /* ═══ §CAPITALE : bâtiment obligatoire AMÉLIORABLE + mobilité de classe ═══ */
+    printf("\n── §capitale : capitale obligatoire/améliorable (payante) + mobilité de classe ──\n");
+    {
+        LaborEcon *ce = malloc(sizeof(LaborEcon));
+        if (ce){
+            labor_init(ce, w);
+            labor_seed_start(ce, 0);
+            LProvince *cp = &ce->prov[0];
+            /* 1. OBLIGATOIRE + STATUT issu du TIER. */
+            ok("capitale OBLIGATOIRE ; le tier de départ suit la pop débloquée (4000→4 ; une fondation 500→1)",
+               cp->cap_tier==capitale_max_tier(4000) && cp->cap_tier>=1 && capitale_max_tier(500)==1);
+            ok("le STATUT vient du TIER : tier 1 « Hameau », 5 « Cité », 7 « Mégapole »",
+               !strcmp(capitale_status(1),"Hameau") && !strcmp(capitale_status(5),"Cité")
+               && !strcmp(capitale_status(7),"Mégapole"));
+            /* 2. la POP PLAFONNE le tier ; la RECETTE de plus en plus précieuse PAIE. */
+            ok("la population PLAFONNE le tier (500→1, 4000→4, 10000→7)",
+               capitale_max_tier(500)==1 && capitale_max_tier(4000)==4 && capitale_max_tier(10000)==7);
+            CapCost c2=capitale_upgrade_cost(2), c4=capitale_upgrade_cost(4), c7=capitale_upgrade_cost(7);
+            ok("la recette d'amélioration devient PLUS PRÉCIEUSE (bois → métal+outils → outils)",
+               c2.a==LR_BOIS && c4.a==LR_METAL && c4.b==LR_OUTILS && c7.a==LR_OUTILS);
+            ce->stock[LR_BOIS]=2000; ce->stock[LR_METAL]=2000; ce->stock[LR_OUTILS]=2000; cp->pop=4000; cp->cap_tier=1;
+            long bois0=ce->stock[LR_BOIS];
+            bool up=capitale_upgrade(cp,ce);
+            printf("   amélioration tier 1→2 : payée %ld bois (stock %ld→%ld) ; tier %d\n",
+                   bois0-ce->stock[LR_BOIS], bois0, ce->stock[LR_BOIS], cp->cap_tier);
+            ok("améliorer CONSOMME la recette et monte le tier (ce n'est pas gratuit)",
+               up && cp->cap_tier==2 && ce->stock[LR_BOIS]<bois0);
+            cp->pop=500; cp->cap_tier=1; ce->stock[LR_BOIS]=99999;
+            ok("la POP plafonne : 500 hab ne débloque RIEN au-delà du tier 1, même riche", !capitale_upgrade(cp,ce));
+            /* 3-5. PAQUETS DE 100 + GATING + productivité. */
+            ok("Nobles par PAQUETS de 100 : l'admin emploie tier·100 (tier 3 → 300)", capitale_admin_pop(3)==300);
+            ok("GATING : 0 paquet noble → 0 logement, +0 %, MÊME à haut tier",
+               capitale_housing(5,0)==0 && capitale_prodmult(5,0)==1.f);
+            ok("délivrance au PRORATA : 1 paquet/tier 5 → 1000 log. +5 % ; 3 paquets → 3000 log. +15 %",
+               capitale_housing(5,100)==1000 && capitale_prodmult(5,100)==1.05f
+               && capitale_housing(5,300)==3000 && capitale_prodmult(5,300)>1.149f);
+            /* 6. MOBILITÉ : les classes ÉMERGENT des emplois (par 100). */
+            cp->pop=3000; cp->cap_tier=3; cp->n_bld=0;
+            capitale_mobility_tick(cp);
+            ok("sans atelier : 0 Bourgeois ; les Nobles ÉMERGENT de la capitale (tier 3 → 300)",
+               cp->pop_by_class[LAB_ARTISAN]==0 && cp->pop_by_class[LAB_ELITE]==300);
+            cp->bld[0]=(LBuilding){LB_WORKSHOP,2,2}; cp->n_bld=1;
+            capitale_mobility_tick(cp);
+            printf("   3000 hab, capitale tier 3 + 1 atelier : Nobles %ld · Bourgeois %ld · Journaliers %ld\n",
+                   cp->pop_by_class[LAB_ELITE], cp->pop_by_class[LAB_ARTISAN], cp->pop_by_class[LAB_LABORER]);
+            ok("ouvrir un atelier fait ÉMERGER des Bourgeois (par 100) ; la somme reste le pool",
+               cp->pop_by_class[LAB_ARTISAN]==200 &&
+               cp->pop_by_class[LAB_ELITE]+cp->pop_by_class[LAB_ARTISAN]+cp->pop_by_class[LAB_LABORER]==3000);
+            /* DÉFENSE passive : un niveau de défense par tier (siège plus long, pas de bonus combat). */
+            ok("chaque tier de capitale apporte un niveau de DÉFENSE provinciale passive",
+               capitale_defense(1)==1 && capitale_defense(7)==7);
+            /* AGITATION : la pop SANS logement/service monte la grogne. */
+            cp->pop=5000; cp->house_cap=2000; cp->serv_cap=5000;
+            ok("la pop SANS LOGEMENT (surpeuplement) compte comme mal-lotie → agitation",
+               capitale_unhoused(cp)==3000 && capitale_unserved(cp)==0 && capitale_unrest(cp)>0.59f);
+            cp->house_cap=5000; cp->serv_cap=5000;
+            ok("bien logée ET servie : aucune grogne de capacité (unrest 0)",
+               capitale_unhoused(cp)==0 && capitale_unserved(cp)==0 && capitale_unrest(cp)==0.f);
+            free(ce);
+        } else ok("(OOM capitale — ignoré)", true);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

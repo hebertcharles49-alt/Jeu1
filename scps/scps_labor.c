@@ -54,6 +54,107 @@ int building_job_capacity_pop(int level){
 int building_job_slots(int level){ return building_job_capacity_pop(level)/POP_PER_SLOT; }
 
 /* ===================================================================== */
+/* LA CAPITALE & LA MOBILITÉ DE CLASSE (§capitale)                        */
+/* ===================================================================== */
+#define CAP_ADMIN_PER_TIER  100   /* pop de Nobles à l'administration, par tier (1 paquet/tier) */
+#define CAP_PROD_PER_TIER   0.05f /* +5 % de productivité par tier SERVI */
+
+/* Tier que la POPULATION débloque (plafond) — la pop OUVRE, la recette PAIE. */
+int capitale_max_tier(long pop){
+    if (pop>=10000) return 7;
+    if (pop>= 8000) return 6;
+    if (pop>= 5000) return 5;
+    if (pop>= 4000) return 4;
+    if (pop>= 3000) return 3;
+    if (pop>= 2000) return 2;
+    return 1;                       /* toute province : tier 1 dès la fondation */
+}
+/* Le STATUT d'urbanisation VIENT DU TIER bâti (pas seulement de la pop). */
+const char *capitale_status(int tier){
+    static const char *S[8]={ "Hameau","Hameau","Village","Bourg","Ville","Cité","Métropole","Mégapole" };
+    if (tier<1) tier=1;
+    if (tier>7) tier=7;
+    return S[tier];
+}
+/* DÉFENSE provinciale passive : un niveau par tier (allonge le SIÈGE comme un
+ * rempart — mais SANS le bonus défenseur au combat, cf. spec). */
+int capitale_defense(int tier){ return tier<0 ? 0 : tier; }
+long capitale_admin_pop(int tier){ return (long)tier * CAP_ADMIN_PER_TIER; }
+/* Logement/service délivré : min(paquets de Nobles en poste, tier) × 1000 (gaté). */
+long capitale_housing(int tier, long admin_pop){
+    long packs = admin_pop / POP_PER_SLOT;
+    long actifs = packs < tier ? packs : tier;
+    if (actifs<0) actifs=0;
+    return actifs * 1000;
+}
+float capitale_prodmult(int tier, long admin_pop){
+    long packs = admin_pop / POP_PER_SLOT;
+    long actifs = packs < tier ? packs : tier;
+    if (actifs<0) actifs=0;
+    return 1.f + CAP_PROD_PER_TIER * (float)actifs;
+}
+/* Recette d'amélioration vers `to_tier` : DE PLUS EN PLUS PRÉCIEUSE (bois → métal
+ * → outils ; les paliers exotiques approximés par l'outil, le plus précieux du
+ * module labor). Même BuildCost-logique que le reste. */
+CapCost capitale_upgrade_cost(int to_tier){
+    switch (to_tier){
+        case 2:  return (CapCost){ LR_BOIS,  LR_BOIS,   400, 0   };   /* bois */
+        case 3:  return (CapCost){ LR_BOIS,  LR_METAL,  400, 200 };   /* bois + métal */
+        case 4:  return (CapCost){ LR_METAL, LR_OUTILS, 400, 200 };   /* métal + outils */
+        case 5:  return (CapCost){ LR_METAL, LR_OUTILS, 600, 400 };   /* + (joaillerie) */
+        case 6:  return (CapCost){ LR_OUTILS,LR_METAL,  800, 600 };   /* + (fer céleste) */
+        case 7:  return (CapCost){ LR_OUTILS,LR_OUTILS, 1200,0   };   /* + (essence) : le plus précieux */
+        default: return (CapCost){ LR_BOIS,  LR_BOIS,   200, 0   };   /* tier 1 : fondation */
+    }
+}
+bool capitale_upgrade(LProvince *p, LaborEcon *e){
+    if (!p || !e) return false;
+    int maxt = capitale_max_tier(p->pop);
+    if (p->cap_tier >= maxt) return false;             /* la pop ne débloque pas plus haut */
+    int to = p->cap_tier + 1;
+    CapCost c = capitale_upgrade_cost(to);
+    if (e->stock[c.a] < c.qa) return false;            /* recette non payable (produire d'abord) */
+    if (c.qb>0 && e->stock[c.b] < c.qb) return false;
+    e->stock[c.a] -= c.qa;
+    if (c.qb>0) e->stock[c.b] -= c.qb;
+    p->cap_tier = to;                                  /* PAYÉ → tier monté */
+    return true;
+}
+/* Les classes ÉMERGENT des emplois (par paquets de 100) ; la capitale délivre
+ * logement/services/productivité au prorata des Nobles en poste. N'achète rien. */
+void capitale_mobility_tick(LProvince *p){
+    if (!p) return;
+    if (p->cap_tier < 1) p->cap_tier = 1;              /* obligatoire : toujours ≥ tier 1 */
+    long pool = p->pop; if (pool<0) pool=0;
+    long noble_jobs   = (capitale_admin_pop(p->cap_tier)/100)*100;   /* admin, par 100 */
+    long artisan_jobs = 0;
+    for (int b=0;b<p->n_bld;b++)
+        if (p->bld[b].type==LB_WORKSHOP) artisan_jobs += (long)p->bld[b].jobs_filled * POP_PER_SLOT;
+    artisan_jobs = (artisan_jobs/100)*100;
+    long elites   = noble_jobs   < pool ? noble_jobs : pool;          /* promotion → Nobles */
+    long rem      = pool - elites; if (rem<0) rem=0;
+    long artisans = artisan_jobs < rem ? artisan_jobs : rem;          /* → Bourgeois */
+    long laborers = pool - elites - artisans;                         /* le reste : Journaliers */
+    p->pop_by_class[LAB_ELITE]   = elites;
+    p->pop_by_class[LAB_ARTISAN] = artisans;
+    p->pop_by_class[LAB_LABORER] = laborers;
+    p->house_cap = capitale_housing(p->cap_tier, elites);             /* gaté par les paquets nobles */
+    p->serv_cap  = capitale_housing(p->cap_tier, elites);
+    p->prod_mult = capitale_prodmult(p->cap_tier, elites);
+}
+
+long capitale_unhoused(const LProvince *p){ long u=p->pop-p->house_cap; return u>0?u:0; }
+long capitale_unserved(const LProvince *p){ long u=p->pop-p->serv_cap; return u>0?u:0; }
+float capitale_unrest(const LProvince *p){
+    if (!p || p->pop<=0) return 0.f;
+    long worst = capitale_unhoused(p);
+    long us = capitale_unserved(p);
+    if (us>worst) worst=us;                       /* le pire des deux manques */
+    float f = (float)worst/(float)p->pop;
+    return f<0.f?0.f:(f>1.f?1.f:f);
+}
+
+/* ===================================================================== */
 /* labor_init — RELIT la géographie du worldgen en agrégats par province  */
 /* ===================================================================== */
 static bool biome_forest(Biome b){ return b==BIO_FOREST||b==BIO_WOODS||b==BIO_JUNGLE||b==BIO_MANGROVE; }
@@ -109,6 +210,7 @@ void labor_seed_start(LaborEcon *e, int prov0){
     memset(p,0,sizeof(*p));
     p->prov=prov0; p->colonized=true;
     p->pop=4000;
+    p->cap_tier=capitale_max_tier(p->pop); p->prod_mult=1.f;   /* capitale développée (la pop débloque) */
     p->pop_by_class[LAB_LABORER]=3200; p->pop_by_class[LAB_ARTISAN]=600; p->pop_by_class[LAB_ELITE]=200;
     /* 2 collecteurs + 2 ateliers, niveau 0 (1 slot chacun), REMPLIS. */
     p->bld[0]=(LBuilding){ LB_COLLECTOR, 0, 1 };
@@ -141,7 +243,8 @@ void labor_seed_from_world(LaborEcon *e, const World *w, const WorldEconomy *eco
         LProvince *p=&e->prov[e->n_prov++];
         memset(p,0,sizeof(*p));
         p->prov=pid; p->colonized=true; p->pop=pop;
-        p->pop_by_class[LAB_LABORER]=pop*8/10;
+        p->cap_tier=capitale_max_tier(pop); p->prod_mult=1.f;   /* capitale développée que la pop débloque */
+        p->pop_by_class[LAB_LABORER]=pop*8/10;       /* repli ; les classes ÉMERGENT au 1er tick (§5) */
         p->pop_by_class[LAB_ARTISAN]=pop*15/100;
         p->pop_by_class[LAB_ELITE]  =pop - p->pop_by_class[LAB_LABORER] - p->pop_by_class[LAB_ARTISAN];
         /* Bâtiments choisis sur la GÉO réelle : collecteur + marché + extraction. */
@@ -299,6 +402,7 @@ bool labor_colonize(LaborEcon *e, int prov){
     LProvince *p=&e->prov[e->n_prov++];
     memset(p,0,sizeof(*p));
     p->prov=prov; p->colonized=true; p->pop=500; p->pop_by_class[LAB_LABORER]=500;
+    p->cap_tier=1; p->prod_mult=1.f;                /* la capitale obligatoire dès la colonie (§1) */
     return true;
 }
 
@@ -344,6 +448,9 @@ static void pop_growth(LaborEcon *e){
         if (p->pop<=0) continue;
         long delta = famine ? -(p->pop/100 + 1) : (p->pop*GROWTH_PERMIL)/1000;
         if (delta==0 && !famine) delta=1;
+        /* LOGEMENT = capacité CONFORTABLE : au-delà, la pop croît encore (gatée par la
+         * nourriture) mais MOINS VITE, et le surpeuplement monte l'agitation (§agitation). */
+        if (!famine && p->house_cap>0 && p->pop >= p->house_cap) delta = (delta+1)/2;   /* surpeuplé : ralenti */
         long np=p->pop+delta; if (np<0) np=0;
         long d=np-p->pop; p->pop=np;
         p->pop_by_class[LAB_LABORER]+=d;                 /* la croissance gonfle la masse */
@@ -355,13 +462,20 @@ void labor_tick(LaborEcon *e){
     long before[LR_COUNT]; memcpy(before, e->stock, sizeof before);
     float supply_mat=0.f;
 
-    /* 1. EXTRACTION + collecte + marché : jobs remplis → sorties (lues de la géo). */
+    /* 0. CAPITALE : améliorer si la pop le débloque & la recette est payable, puis
+     *    faire ÉMERGER les classes des emplois (tier→Nobles, ateliers→Bourgeois) et
+     *    délivrer logement/services/productivité (gatés par les Nobles en poste). */
+    for (int i=0;i<e->n_prov;i++) capitale_upgrade(&e->prov[i], e);
+    for (int i=0;i<e->n_prov;i++) capitale_mobility_tick(&e->prov[i]);
+
+    /* 1. EXTRACTION + collecte + marché : jobs remplis → sorties (lues de la géo),
+     *    × la PRODUCTIVITÉ de la capitale (+5 %/tier servi). */
     for (int i=0;i<e->n_prov;i++){
         LProvince *p=&e->prov[i];
         for (int b=0;b<p->n_bld;b++){
             LBuilding *bd=&p->bld[b];
             if (bd->type==LB_WORKSHOP) continue;     /* les ateliers passent en 2 */
-            LRes o; float out=per_job_output(e,p->prov,bd->type,&o)*(float)bd->jobs_filled;
+            LRes o; float out=per_job_output(e,p->prov,bd->type,&o)*(float)bd->jobs_filled*p->prod_mult;
             if (o<LR_COUNT) e->stock[o]+=(long)(out+0.5f);
         }
     }
@@ -380,9 +494,10 @@ void labor_tick(LaborEcon *e){
     e->market.price  = labor_material_price(e);
     e->treasury      = e->stock[LR_GOLD];
 
-    /* 5. CROISSANCE de la pop, gatée par la nourriture (le pool entier, engagés
-     * compris). 6. flux/jour pour la topbar. */
+    /* 5. CROISSANCE de la pop, gatée par la nourriture ET par le LOGEMENT de la
+     * capitale (plafond). 6. on RE-ÉMERGE les classes (la pop a bougé). 7. flux. */
     pop_growth(e);
+    for (int i=0;i<e->n_prov;i++) capitale_mobility_tick(&e->prov[i]);
     for (int r=0;r<LR_COUNT;r++) e->flow[r]=e->stock[r]-before[r];
 }
 

@@ -57,10 +57,19 @@ typedef struct {
     int       prov;          /* id de province (pour les lectures géo) */
     bool      colonized;     /* possédée (développement plein) vs marge exploitée */
     long      pop;           /* le POOL démographique TOTAL (jamais réduit par l'emploi) */
-    long      pop_by_class[LAB_CLASS_COUNT];
+    long      pop_by_class[LAB_CLASS_COUNT];   /* ÉMERGE des emplois (§capitale §4), jamais posé */
     long      pop_in_army;   /* enrôlés (paquets de 100) — assignés, PAS retirés du pool */
     LBuilding bld[LAB_BUILDINGS_PER_PROV];
     int       n_bld;
+    /* ---- La CAPITALE (§capitale) : l'ossature administrative, OBLIGATOIRE et non
+     * destructible, sur un emplacement DÉDIÉ (hors des 6 slots). AMÉLIORABLE : on la
+     * paie de tier en tier (ressources de plus en plus précieuses) ; la POP ne fait
+     * que PLAFONNER le tier atteignable. Elle délivre logement + services +
+     * productivité, AU PRORATA des paquets de Nobles en poste à l'administration. */
+    int       cap_tier;      /* tier BÂTI/payé (1..7) — plafonné par la pop */
+    long      house_cap;     /* LOGEMENT délivré (plafond de pop) ; 0 si aucun Noble en poste */
+    long      serv_cap;      /* SERVICES délivrés ; 0 si aucun Noble en poste */
+    float     prod_mult;     /* PRODUCTIVITÉ locale (1 + 5 %/tier servi) */
 } LProvince;
 
 /* La pop est un POOL : un job ou un enrôlement est une AFFECTATION (une
@@ -104,6 +113,37 @@ float labor_prosperity_index(const LaborEcon *e);
 /* ---- Jobs & niveaux (§9) ---------------------------------------------- */
 int  building_job_capacity_pop(int level);   /* capacité CUMULÉE en pop (max niv.5 = 2200) */
 int  building_job_slots(int level);          /* en slots (= pop / 100) */
+
+/* ---- La CAPITALE & la MOBILITÉ DE CLASSE (§capitale) ------------------ *
+ * La capitale est OBLIGATOIRE (tier 1 dès la fondation) et AMÉLIORABLE : la pop
+ * DÉBLOQUE le tier (plafond), une recette de plus en plus PRÉCIEUSE le PAIE. Elle
+ * délivre logement + services + productivité AU PRORATA des paquets de NOBLES en
+ * poste (paquets de 100). Les classes ne sont jamais posées : elles ÉMERGENT des
+ * emplois (capitale → Nobles · ateliers → Bourgeois · le reste → Journaliers) ;
+ * une pop monte/descend de classe — par 100 — pour suivre les emplois.           */
+int  capitale_max_tier (long pop);            /* tier que la POP autorise : <2000→1 … 10000→7 */
+const char *capitale_status(int tier);        /* le STATUT vient du TIER : Hameau … Métropole */
+/* DÉFENSE provinciale PASSIVE apportée par la capitale : un niveau par tier (allonge
+ * le SIÈGE comme un rempart — MAIS sans le bonus défenseur au combat). */
+int  capitale_defense (int tier);
+long capitale_admin_pop(int tier);            /* pop de Nobles employée à l'administration (tier·100) */
+long capitale_housing  (int tier, long admin_pop); /* logement/service : min(paquets,tier)·1000 (gaté) */
+float capitale_prodmult(int tier, long admin_pop); /* productivité : 1 + 0.05·min(paquets,tier) */
+/* Coût d'amélioration vers `to_tier` (recette LRes de plus en plus précieuse). */
+typedef struct { LRes a, b; long qa, qb; } CapCost;
+CapCost capitale_upgrade_cost(int to_tier);
+/* Améliore la capitale d'un tier SI la pop le débloque ET la recette est payable
+ * (pompée au marché si manque). Renvoie true si l'amélioration a eu lieu. */
+bool capitale_upgrade(LProvince *p, LaborEcon *e);
+/* Fait ÉMERGER les classes des emplois (par 100) et délivre logement/services/
+ * productivité (gatés par les paquets de Nobles en poste). N'achète RIEN (lecture). */
+void capitale_mobility_tick(LProvince *p);
+
+/* Pop SANS LOGEMENT / SANS SERVICE (au-delà de la capacité délivrée) : elle MONTE
+ * l'agitation (surpeuplement & sous-service nourrissent la grogne). */
+long  capitale_unhoused(const LProvince *p);  /* max(0, pop − logement) */
+long  capitale_unserved(const LProvince *p);  /* max(0, pop − services) */
+float capitale_unrest  (const LProvince *p);  /* part de pop mal logée/servie [0..1] → agitation */
 
 /* ---- Sorties LUES de la géo (§5) — le hover montre ce +X réel --------- */
 /* Sortie d'un bâtiment d'une province (potentiel : per-job × jobs remplis). */
