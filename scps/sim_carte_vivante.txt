@@ -1,0 +1,115 @@
+════════════════════════════════════════════════════════════════════════════════
+ SCPS — CARTE POLITIQUE VIVANTE + TÉLÉMÉTRIE PAR ÂGE
+ Run : chronicle 20240607 10 200 (10 mondes × 200 ans, sans joueur)
+════════════════════════════════════════════════════════════════════════════════
+ Demandé : (1) casser l'invariant « 0 pays absorbé » (statique, peu dynamique) — au
+ contraire, que des pays émergent des rebellions de SUREXTENSION ; (2) un run avec
+ la visibilité, PAR ÂGE, du marché, de l'or par empire et de la tech.
+
+
+1. L'INVARIANT « 0 ABSORBÉ » EST TOMBÉ
+──────────────────────────────────────
+ Diagnostic : il n'y avait AUCUNE protection codée — un pays meurt dès qu'il perd
+ toutes ses régions. Mais (a) le chronicle MASQUAIT les morts (absorbed=max(0,c0−c1),
+ noyé par les sécessions qui ajoutent des pays) et (b) rien ne POUSSAIT les grands
+ empires à se fragmenter. On corrige les deux.
+
+ • Comptabilité HONNÊTE : on trace séparément les MORTS (pays vivant au départ →
+   0 région) et les NAISSANCES (nouveau pays vivant à l'arrivée), par sim et en
+   synthèse. Plus de chiffre masqué.
+
+ • SUREXTENSION → SÉCESSION (scps_revolt.c) : au-delà de 6 régions, chaque région
+   excédentaire pousse le déficit séparatiste (+0.035/rég, plafond 0.45). Le grief
+   est PONDÉRÉ par la non-intégration de la province :
+        overext ×(0.30 + 0.70·(1 − intégration_min))
+   → ce sont les MARCHES mal digérées (conquêtes étrangères) qui se détachent et
+   font NAÎTRE un pays (rôle ANTAGONIST, sa propre région, re-légitimé) ; le cœur
+   homogène ne subit qu'un tiers du grief (un empire compact fragmente peu).
+
+ RÉSULTAT (10 mondes × 200 ans) :
+        pays absorbés (morts) .... 4   (0.4/sim)     ← n'était JAMAIS > 0 avant
+        pays émergés (sécession) . 19  (1.9/sim)     ← la carte respire
+
+ Et ça ÉCHELLE avec la démesure — plus un monde a d'empires, plus il churn :
+        sim  1 (2 emp)  : 0 absorbé · 0 émergé
+        sim  5 (6 emp)  : 1 absorbé · 5 émergés
+        sim  6 (7 emp)  : 2 absorbés · 3 émergés
+        sim  8 (9 emp)  : 1 absorbé · 3 émergés
+   Les petits mondes restent stables ; les grands se font et se défont. Des nations
+   LIBRES (ex. « Orque libre ») naissent d'une sécession PUIS grandissent par conquête
+   jusqu'à 6-7 régions — un nouvel acteur de premier plan, né de la démesure d'un autre.
+
+
+2. TÉLÉMÉTRIE PAR ÂGE (la visibilité demandée)
+──────────────────────────────────────────────
+ À CHAQUE avènement d'âge, le chronicle fige et imprime (trié chronologiquement) :
+   • le MARCHÉ : prix moyens grain · étoffe · orfèvrerie · outils ;
+   • l'OR : trésor total Σ + PIB + l'OR PAR EMPIRE (top 3, avec régions) ;
+   • la TECH : nœuds déverrouillés cumulés ;
+   • + pays vivants & population.
+
+ EXTRAIT RÉEL (sim 6 du run — un monde à 17-18 pays) :
+
+   an  20 Âge du Commerce Mondial | pays 17 · pop 24k · or Σ  271206 · PIB 1714 · tech 127
+          marché : grain 0.47 · étoffe 18.81 · orfèvr. 91.43 · outils 1.70
+          or/empire : Pays 5 31473(5r) · Pays 32 43384(4r) · Pays 24 5805(3r)
+   an  50 Âge de la Raison        | pays 18 · pop 30k · or Σ 1037184 · PIB 2399 · tech 291
+          marché : grain 0.57 · étoffe 19.35 · orfèvr. 95.10 · outils 1.70
+          or/empire : Orque libre 64509(4r) · Pays 24 16332(4r) · Pays 32 105922(4r)
+   an  80 Âge des Lumières        | pays 18 · pop 36k · or Σ 1981011 · PIB 2741 · tech 415
+          marché : grain 0.58 · étoffe 18.94 · orfèvr. 95.42 · outils 1.70
+          or/empire : Orque libre 155082(6r) · Pays 32 207727(5r) · Pays 24 28434(4r)
+   an 110 Âge des Empires         | pays 18 · pop 39k · or Σ 3003042 · PIB 2853 · tech 501
+          marché : grain 0.58 · étoffe 19.50 · orfèvr. 96.86 · outils 1.70
+          or/empire : Orque libre 265265(6r) · Pays 32 318782(6r) · Pays 12 566378(4r)
+   an 140 Âge de la Brèche        | pays 18 · pop 47k · or Σ 4092949 · PIB 2992 · tech 527
+          marché : grain 0.59 · étoffe 19.83 · orfèvr. 97.63 · outils 1.70
+          or/empire : Pays 32 511432(7r) · Orque libre 371577(6r) · …
+
+ On LIT la civilisation monter : or ×15 (271k→4.1M), tech ×4 (127→527), pop ×2 — et
+ « Orque libre » (un sécessionniste) qui grimpe au sommet de la richesse âge après âge.
+
+
+3. SYNTHÈSE DU RUN (10 sims × 200 ans)
+──────────────────────────────────────
+   âges éveillés ............. 54   (5.4/sim)
+   guerres déclenchées ....... 52   (5.2/sim)
+   provinces prises de force . 167  (16.7/sim)
+   PAYS ABSORBÉS (morts) ..... 4    (0.4/sim)        ← invariant cassé
+   PAYS ÉMERGÉS (sécession) .. 19   (1.9/sim)        ← la carte respire
+   tech débloquée ............ 4528 (452.8/sim ; 700 faustiens)
+   pic de révolte moyen ...... 7.8 pays
+   soulèvements .............. 789 allumés → 22 sécession(s) · 757 coup(s) · 10 écrasé(s)
+   morts au combat (révoltes)  429  (43/sim)
+   Soulèvements atteints : 4/10 ; Ordre de Fer : 0/10
+
+
+4. POINT D'ATTENTION — LES COUPS (757)
+──────────────────────────────────────
+ Honnêteté : les COUPS sont élevés (≈76/sim, contre ≈27/sim avant la refonte du
+ relief). Vérifié : ce N'EST PAS la surextension (un run témoin avec/sans le biais
+ d'intégration donne un résultat BIT-IDENTIQUE sur les coups — la surextension ne
+ nourrit que les SÉCESSIONS). La cause est ÉCONOMIQUE : le rééquilibrage du relief
+ a fortement réduit l'or & les minéraux (offre d'or 266→38), et l'orfèvrerie a été
+ tempérée — l'élite martiale a donc plus de mal à s'offrir son statut → satisfaction
+ d'élite plus basse → coups. Le monde « moins riche en montagnes » a un coût social
+ sur l'élite que la boucle marchande n'a pas encore absorbé.
+
+ → Levier proposé (sur ton feu vert) : re-doter l'élite du monde lean (p. ex. relever
+   un peu l'orfèvrerie/perle, ou la part de rente d'élite) pour ramener les coups vers
+   ~30/sim, SANS toucher au dynamisme de la carte (absorptions/émergences).
+
+
+5. CE QUI A CHANGÉ DANS LE CODE
+───────────────────────────────
+   scps_revolt.c  — grief de SUREXTENSION (seuil 6 rég · +0.035/rég · plafond 0.45),
+                    biaisé vers les marches mal intégrées → sécession.
+   chronicle.c    — comptabilité MORTS/NAISSANCES honnête (par sim + synthèse) ;
+                    télémétrie PAR ÂGE (marché · or/empire · tech), triée chronologiquement.
+
+════════════════════════════════════════════════════════════════════════════════
+ BILAN : l'invariant statique est remplacé par une carte qui se fait et se défait —
+ les empires démesurés perdent leurs marches, de nouveaux pays naissent et montent,
+ et l'on suit la richesse/science/marché âge par âge. Reste à re-doter l'élite du
+ monde lean pour calmer les coups (éco, pas politique). Sur ta décision.
+════════════════════════════════════════════════════════════════════════════════
