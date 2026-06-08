@@ -653,7 +653,7 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
 
     /* land_bias : décale la mer (0.5 neutre). mountains : amplitude. */
     float land_bias = (P->land_amount-0.5f)*0.5f;
-    float mtn_amp   = 0.6f + P->mountains*0.9f;
+    float mtn_amp   = 0.42f + P->mountains*0.55f;   /* amplitude RÉDUITE : moins de relief, plus de vallées */
 
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
@@ -1214,43 +1214,48 @@ static Biome assign_biome(float h, float m, float t) {
     if (h<SEA_LEVEL+0.042f) return BIO_COAST;  /* bande littorale plus visible */
     if (h>=PEAK_H)          return (t<0.16f)?BIO_GLACIER:BIO_PEAK;
     if (h>=MOUNTAIN_H)      return BIO_MOUNTAINS;
-    if (h>=MOUNTAIN_H-0.09f)return (t<0.30f)?BIO_HIGHLANDS:BIO_HILLS;
+    if (h>=MOUNTAIN_H-0.05f)return (t<0.30f)?BIO_HIGHLANDS:BIO_HILLS;  /* bande de collines resserrée → plus de bas-pays */
 
-    /* --- Froid (boréal) : taïga dès qu'un peu d'humidité --- */
+    /* Bandes RÉ-ÉQUILIBRÉES (cible : plaines ~40 · forêts ~30 · déserts 10-15) :
+     * la forêt exige plus d'humidité → la frange moyenne devient prairie/plaine ;
+     * la marge sèche devient désert. Le monde respire au lieu d'être une forêt. */
+    /* --- Froid (boréal) : taïga humide, steppe sinon (glacier réservé au très sec) --- */
     if (t<0.17f) {
-        if (m>0.28f) return BIO_FOREST;          /* forêt boréale */
-        if (m>0.16f) return BIO_WOODS;
+        if (m>0.40f) return BIO_FOREST;          /* forêt boréale */
+        if (m>0.24f) return BIO_WOODS;
+        if (m>0.05f) return BIO_STEPPE;
         return BIO_GLACIER;
     }
-    /* --- Frais (tempéré froid) : forêt très étendue --- */
+    /* --- Frais (tempéré froid) : forêt si humide, sinon steppe/prairie --- */
     if (t<0.33f) {
-        if (m>0.40f) return BIO_FOREST;
-        if (m>0.22f) return BIO_WOODS;
-        if (m>0.12f) return BIO_STEPPE;
-        return BIO_STEPPE;
-    }
-    /* --- Tempéré : forêt domine, prairie en marge sèche --- */
-    if (t<0.55f) {
-        if (m>0.44f) return BIO_FOREST;
-        if (m>0.30f) return BIO_WOODS;
-        if (m>0.18f) return BIO_GRASSLAND;
-        if (m>0.10f) return BIO_PLAINS;
+        if (m>0.42f) return BIO_FOREST;
+        if (m>0.28f) return BIO_WOODS;
+        if (m>0.14f) return BIO_GRASSLAND;
+        if (m>0.05f) return BIO_STEPPE;
         return BIO_DRYLANDS;
     }
-    /* --- Chaud : jungle/forêt si humide, frange savane étroite --- */
+    /* --- Tempéré : la PLAINE domine, forêt sur les marges humides --- */
+    if (t<0.55f) {
+        if (m>0.46f) return BIO_FOREST;
+        if (m>0.34f) return BIO_WOODS;
+        if (m>0.20f) return BIO_GRASSLAND;
+        if (m>0.06f) return BIO_PLAINS;
+        return BIO_DRYLANDS;
+    }
+    /* --- Chaud : jungle si très humide, savane/plaine au centre, désert au sec --- */
     if (t<0.72f) {
-        if (m>0.58f) return (h<SEA_LEVEL+0.07f)?BIO_MARSH:BIO_JUNGLE;
-        if (m>0.40f) return BIO_FOREST;          /* forêt tropicale humide */
-        if (m>0.26f) return BIO_WOODS;
-        if (m>0.16f) return BIO_SAVANNA;         /* frange étroite */
-        if (m>0.08f) return BIO_DRYLANDS;
+        if (m>0.60f) return (h<SEA_LEVEL+0.07f)?BIO_MARSH:BIO_JUNGLE;
+        if (m>0.42f) return BIO_FOREST;          /* forêt tropicale humide */
+        if (m>0.28f) return BIO_WOODS;
+        if (m>0.08f) return BIO_SAVANNA;         /* savane large (frange aride réduite) */
+        if (m>0.03f) return BIO_DRYLANDS;
         return (h<SEA_LEVEL+0.06f)?BIO_COASTAL_DESERT:BIO_DESERT;
     }
     /* --- Torride --- */
     if (m>0.60f) return BIO_JUNGLE;
     if (m>0.42f) return BIO_FOREST;
-    if (m>0.24f) return BIO_SAVANNA;
-    if (m>0.12f) return BIO_DRYLANDS;
+    if (m>0.09f) return BIO_SAVANNA;
+    if (m>0.03f) return BIO_DRYLANDS;
     return (h<SEA_LEVEL+0.06f)?BIO_COASTAL_DESERT:BIO_DESERT;
 }
 
@@ -2363,8 +2368,8 @@ static void step_weathering(World *w, const float *height, float seed_f) {
         if (b!=BIO_STEPPE&&b!=BIO_DRYLANDS&&b!=BIO_GRASSLAND) continue;
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float rock=stb_perlin_ridge_noise3(nx*14.f,ny*14.f,seed_f+4200.f,2.f,0.5f,1.f,4);
-        if      (rock>0.72f)              c[i].biome=BIO_HIGHLANDS;
-        else if (rock>0.62f&&b==BIO_STEPPE) c[i].biome=BIO_HILLS;
+        if      (rock>0.82f)              c[i].biome=BIO_HIGHLANDS;
+        else if (rock>0.74f&&b==BIO_STEPPE) c[i].biome=BIO_HILLS;
     }
 
     /* B2d. Zones mortes / toundra : forêt boréale très continentale → steppe/glacier.
@@ -2762,6 +2767,19 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] climat (vent)... "); fflush(stdout);
     gen_climate(w,height,moisture,temp,odist,seed_f,P); printf("ok\n");
+
+    printf("[scps] vallées...      "); fflush(stdout);
+    /* COURBE DE RELIEF (γ>1) : APRÈS le climat (les montagnes ont déjà fait la pluie
+     * orographique → pas de désertification artificielle) → on comprime les hautes
+     * terres vers le bas : la majorité du continent devient plaine/vallée, le relief
+     * se concentre sur les vraies crêtes. Monotone → rivières & côtes préservées. */
+    for (int i=0;i<SCPS_N;i++){
+        if (height[i]<=SEA_LEVEL) continue;
+        float lf=(height[i]-SEA_LEVEL)/(1.f-SEA_LEVEL);
+        lf=powf(lf,1.6f);
+        height[i]=SEA_LEVEL+lf*(1.f-SEA_LEVEL);
+    }
+    printf("ok\n");
 
     /* Atténuation des rivières en zones arides : le débit D8 est purement
      * topographique ; on corrige après le climat pour effacer les « fleuves »

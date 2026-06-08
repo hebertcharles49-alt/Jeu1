@@ -91,6 +91,13 @@ SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
+# ---- Captures de carte headless : N graines → PPM (vue terrain/politique) -
+MAPSHOT_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
+                $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_mapshot.o
+mapshot: $(MAPSHOT_OBJS)
+	$(CC) $(MAPSHOT_OBJS) -o $@ -lm
+
 # ---- Planche-contact de 5 mondes (montage.bmp) ---------------------------
 SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_batch.o

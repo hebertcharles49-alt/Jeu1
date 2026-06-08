@@ -34,8 +34,8 @@
 
 /* ---- Seuils de hauteur (0..1) ----------------------------------------- */
 #define SEA_LEVEL     0.43f
-#define MOUNTAIN_H    0.67f
-#define PEAK_H        0.82f
+#define MOUNTAIN_H    0.78f   /* relief relevé : moins de montagnes, plus de vallées */
+#define PEAK_H        0.88f
 
 /* ---- Paramètres de génération (futurs « sliders » façon Civ) -----------
  * Toutes les valeurs continues sont normalisées : 0.5 = neutre/défaut,

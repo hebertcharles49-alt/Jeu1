@@ -62,3 +62,8 @@ z[A-Z].png
 pop_demo
 econ_scan
 econ_scan.c
+mapshot
+seed_*.ppm
+seed_*.png
+*.ppm
+montage.bmp
