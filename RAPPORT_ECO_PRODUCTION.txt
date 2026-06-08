@@ -1,0 +1,267 @@
+================================================================================
+  SCPS — RAPPORT : PRODUCTION / CONSOMMATION REVISITÉE
+  (+ dispatch des ressources par province · coûts & outputs des bâtiments)
+================================================================================
+  Objet : intégrer les BIENS NOBLES dans la boucle marchande. Aujourd'hui le luxe
+  d'élite (orfèvrerie / étoffe précieuse) et le palier moral (bière / vin) ne sont
+  PAS correctement intégrés : ils sont produits mais MAL routés par le marché, donc
+  l'élite reste sur sa faim de statut → déficit d'élite → COUPS D'ÉTAT en série.
+  Mesuré par scan agrégé (6 graines × 60 ans, 479 régions colonisées, toutes à élite).
+--------------------------------------------------------------------------------
+
+
+================================================================================
+  1. CE QUE LE MARCHÉ FAIT AUJOURD'HUI  (mesuré — couv% = (offre+stock)/demande)
+================================================================================
+
+  BIEN                 demande    offre    stock     prix  couv%  #bât producteurs
+  ------------------------------------------------------------------------------
+  Céréales (GRAIN)      5371      8154    16022     0.30   450%    0  (brut)
+  Poisson  (FISH)        584      2338    10315     1.78  2166%    0  (brut)
+  Bois     (WOOD)       3361      2565      291     1.47    85%    0  (brut)  ← SOUS
+  Sel      (SALT)        128      1327     6715     4.18  6299%    0  (brut)  ← gâché
+  Fourrure (FUR)          62       304     1537    13.67  2965%    0  (brut)  ← gâché
+  ------------------------------------------------------------------------------
+  Étoffe   (CLOTH)      1149       253        0    23.84    22%   64  textile  ← PÉNURIE
+  Papier   (PAPER)       232        89      317    26.34   175%  479  papeterie
+  Remède   (REMEDE)       96         0        0    41.96     0%    0  apothicaire ← ZÉRO
+  ------------------------------------------------------------------------------
+  Bière    (BEER)          0      1338     5636     0.60    n/a  479  brasserie ← DEM. 0 !
+  Vin      (WINE)        336        21       62    28.31    25%    7  domaine    ← PÉNURIE
+  Orfèvr.  (PWARE)       186        32      127   123.76   ~86%   11  joaillerie ← prix PLAFOND
+  Ét.préc. (PCLOTH)        0       123      495     3.62    n/a   64  atelier-lux ← DEM. 0 !
+  ------------------------------------------------------------------------------
+  (Métal/Outils/Armes/Poudre : intermédiaires & militaires, demande civile nulle = normal.)
+
+  LECTURE.
+   • BIÈRE et ÉTOFFE PRÉCIEUSE ont une DEMANDE NULLE alors qu'elles sont CONSOMMÉES
+     (via la substitution culturelle de l'étape satisfaction). Le marché ne les voit
+     pas → prix au plancher, offre non routée.
+   • Pendant ce temps VIN et ORFÈVRERIE portent TOUTE la demande (y compris des
+     cultures qui préfèrent bière/étoffe) → demande surévaluée, offre rare (7 domaines,
+     11 joailleries) → prix au PLAFOND (orfèvrerie 123 = base 22 ×5.6) → l'élite ne
+     peut pas s'offrir son statut.
+   • REMÈDE : 0 producteur, 0 offre — l'apothicaire n'est presque jamais bâti.
+   • Surplus morts : SEL 6299 %, POISSON 2166 %, FOURRURE 2965 % — bruts surproduits
+     qui s'évaporent (décroissance de stock 15 %/tick).
+
+
+================================================================================
+  2. LA CAUSE RACINE — le BUG D'INTÉGRATION des biens-VARIANTES
+================================================================================
+
+  Le moteur modélise deux paliers en VARIANTES culturelles :
+     palier MORAL  : bière (subsistance basse) ↔ vin (haute)
+     palier STATUT : orfèvrerie (martiale) ↔ étoffe précieuse (raffinée)
+
+  La SATISFACTION (econ_tick étape 5) sert bien la variante PRÉFÉRÉE (preferred_drink /
+  preferred_luxe). MAIS l'étape DEMANDE (econ_tick étape 4) n'accumule la demande que
+  sur RES_WINE et RES_PRECIOUS_WARE (la table NEED ne liste QUE ces deux‑là) :
+
+        demand[r] += NEED[c][r] * units;     // NEED a WINE & PRECIOUS_WARE, jamais
+                                             // BEER ni PRECIOUS_CLOTH
+
+  → Le PRIX et le ROUTAGE de marché se calculent sur le mauvais bien :
+     - bière & étoffe précieuse : demande 0 → prix planché, jamais « tirées » ;
+     - vin & orfèvrerie : demande gonflée (toutes cultures) → prix plafond, offre
+       rare structurellement incapable de suivre.
+  → L'élite martiale veut de l'orfèvrerie (gatée à 11 régions) ; l'élite raffinée veut
+     de l'étoffe précieuse (produite mais demande‑0, donc non valorisée/non importée).
+     Dans les deux cas le bien de statut N'ARRIVE PAS → satisfaction d'élite basse →
+     ethos_coup_boost monte → COUP. C'est le moteur des 460/490 coups du balayage.
+
+  CORRECTIF DE PRINCIPE (le seul vrai « fix ») : faire suivre la demande à la
+  PRÉFÉRENCE, comme la satisfaction. Dans l'étape demande, router NEED[WINE] vers
+  preferred_drink(culture) et NEED[PRECIOUS_WARE] vers preferred_luxe(culture).
+  Ainsi bière & étoffe précieuse portent leur vraie demande, et leurs producteurs
+  (479 brasseries, 64 ateliers‑lux DÉJÀ présents) couvrent enfin le besoin.
+
+
+================================================================================
+  3. CONSOMMATION REVISITÉE  (table NEED — unités / 100 hab / tick)
+================================================================================
+  Légende : [=] inchangé · [↑]/[↓] ajusté · [NEW] ajouté · {var} = palier variante
+
+  LABORERS (80 % pop)
+     Céréales      1.00  [=]   (vivres, universel)
+     Poisson       0.20  [=]
+     Bois          0.30  [=]   (chauffe)
+     Étoffe(CLOTH) 0.20 → 0.14 [↓]  CLOTH est en pénurie (couv 22 %) : on dégonfle
+                                    la demande de masse pour que l'offre suive.
+     Bière {var}   [NEW 0.15]       palier moral du COMMUN, servi bière/vin selon
+                                    culture (aujourd'hui les laborers n'ont pas de
+                                    palier moral : on l'ajoute, routé par préférence).
+
+  BOURGEOIS (15 % pop)
+     Céréales      1.00  [=]
+     Étoffe(CLOTH) 0.50 → 0.35 [↓]  (idem : soulager la pénurie de tissu)
+     Papier        0.25  [=]
+     {moral} Vin   0.30  [=]   → ROUTÉ par préférence (bière OU vin), cf. §2
+     Sel           0.20 → 0.12 [↓]  (SEL surproduit 6299 % : la demande ne sert à rien)
+     Remède        0.15  [=]   → mais EXIGE que l'apothicaire existe (cf. §4/§5)
+
+  ÉLITES (5 % pop)
+     Céréales      1.00  [=]
+     {moral} Vin   0.70 → 0.55 [↓]  routé par préférence ; léger dégonflage (l'élite
+                                    surconsommait un bien rare → pénurie chronique)
+     Papier        0.35  [=]
+     Fourrure      0.30  [=]   (FUR surproduit : demande OK, sert d'exutoire)
+     {statut} Orfèvrerie 0.90 → 0.70 [↓]  routé par préférence (orfèvrerie OU étoffe
+                                    précieuse) ; dégonflage : 0.90 était le besoin le
+                                    plus LOURD de tout le jeu sur le bien le plus RARE.
+
+  RÈGLE GÉNÉRALE : tout palier {var}/{moral}/{statut} accumule sa demande sur la
+  variante PRÉFÉRÉE de la culture locale (preferred_drink / preferred_luxe), pas sur
+  un bien fixe. C'est le correctif §2, appliqué à la table.
+
+
+================================================================================
+  4. PRODUCTION REVISITÉE  (recettes RECIPE : intrants → extrant, + main‑d'œuvre)
+================================================================================
+  Format : Bâtiment : in1×q1 (+ in2×q2) → out×qout | labor | PLACEMENT (gate)
+
+  CHAÎNE VIVRIÈRE / COMMUN (peu touchée — elle marche)
+     Brasserie  : Céréales×1.2 → Bière×1.0 | 0.8 | si Céréales   [=]
+     Scierie nav: Bois×2.0     → Naval×1.0  | 0.8 | si Bois       [=]
+     Papeterie  : Bois×1.5     → Papier×1.0 | 0.7 | si Bois       [=]
+
+  PALIER MORAL — VIN (la pénurie 25 % vient de l'intrant SUGAR, trop rare)
+     Domaine    : Sucre×2.0    → Vin×1.0    | 0.9 | si Sucre
+       REVISITÉ : autoriser un 2e intrant — Domaine : (Sucre OU Raisin/Fruits)×2.0.
+       À défaut d'ajouter une ressource « raisin », abaisser le coût en sucre à ×1.4
+       ET élargir le dispatch de SUGAR (cf. §6) : viser ≥ 25 domaines (vs 7).
+
+  CHAÎNE TISSU (CLOTH en pénurie 22 % — l'épine la plus visible)
+     Manuf.textile : Laine×2.0 → Étoffe×1.0 | 1.0 | si Laine
+       REVISITÉ : sortie ×1.0 → ×1.4 (un métier file plus) ; placement aussi si COTON
+       (aujourd'hui le coton ne nourrit aucune chaîne) :
+       Manuf.textile : (Laine OU Coton)×1.6 → Étoffe×1.4.
+
+  PALIER STATUT — le cœur du sujet
+     Joaillerie    : Or×1.0 + MétalPréc×1.0 → Orfèvrerie×1.0 | 1.2 | si Or ET MétalPréc
+       REVISITÉ : desserrer le gate à Or OU MétalPréc (un seul intrant requis),
+       l'autre en BONUS de qualité. Cible : ≥ 35 joailleries (vs 11).
+       Recette : Or×1.5 → Orfèvrerie×1.0  (variante MétalPréc×1.5 → Orfèvrerie×1.2).
+     Atelier‑lux   : Étoffe×2.0 → Étoffe‑préc×1.0 | 1.1 | si Laine   [=]
+       (déjà 64 ateliers : une fois la DEMANDE routée §2, l'offre suit sans changement.)
+
+  SANTÉ — REMÈDE (0 producteur : à intégrer)
+     Apothicaire   : Herbes×1.0 → Remède×1.0 | 0.8 | si Herbes‑méd
+       REVISITÉ : élargir le dispatch d'HERBES (cf. §6, +bog/forêt humide) OU
+       autoriser un intrant de repli : Apothicaire : (Herbes OU Sucre)×1.0 → Remède.
+       Cible : remède présent dans ≥ 1 région sur 6 (vs 0).
+
+  PRINCIPE : on ne crée pas de bien « gratuit ». On (a) desserre les GATES à double
+  intrant rare en simple intrant, (b) ajoute des intrants de REPLI géographiquement
+  plus communs, (c) relève l'OUTPUT des chaînes en pénurie. Tout reste causal.
+
+
+================================================================================
+  5. CONSOMMATION vs OFFRE — CIBLES après revisite (couv% visée ≈ 90–130 %)
+================================================================================
+  BIEN            couv actuelle → cible    levier principal
+  ------------------------------------------------------------------------------
+  Étoffe (CLOTH)      22 %  →  ~100 %       output ×1.4 + coton + demande ↓ (§3/§4)
+  Vin (WINE)          25 %  →  ~100 %       dispatch SUGAR ↑ + recette (§4/§6)
+  Orfèvrerie (PWARE)  ~86 % →  ~110 %       gate Or‑OU‑MétalPréc (§4) + demande routée
+  Étoffe‑préc(PCLOTH) dem 0 →  ~110 %       DEMANDE routée par préférence (§2) ★ clé
+  Bière (BEER)        dem 0 →  ~110 %       DEMANDE routée par préférence (§2) ★ clé
+  Remède (REMEDE)      0 %  →   ~90 %       dispatch HERBES ↑ + repli (§4/§6)
+  Sel (SALT)        6299 %  →  ~200 %       raw_cap SEL ↓ (cf. §6) — moins de gâchis
+  Poisson (FISH)    2166 %  →  ~300 %       raw_cap FISH ↓ (côte)
+  Bois (WOOD)         85 %  →  ~110 %       raw_cap WOOD ↑ léger (intrant + chauffe)
+
+
+================================================================================
+  6. DISPATCH DES RESSOURCES PAR PROVINCE  (gen_resources — poids de tirage)
+================================================================================
+  Aujourd'hui : CHAQUE province tire UNE ressource brute dominante, au hasard pondéré
+  par le biome. Les intrants du LUXE/SANTÉ (sucre, métal précieux, herbes) ont des
+  poids faibles ET des biomes étroits → ils perdent le tirage face aux bruts communs
+  (grain 5.5, bois 3.6, fourrure 3.0) → 7 domaines, 11 joailleries, 0 apothicaires.
+
+  6a. POIDS REVISITÉS (les rares montent, les surproduits descendent)
+     Sucre (SUGAR)        coastal+aride+chaud 2.6   → ÉLARGIR : + tropical/savane humide
+                                                     1.6 ; + estuaire chaud 1.2.
+     Métal préc (PMETAL)  mtn 1.2 / autre 0.2        → mtn 1.6 / collines 0.6 (filons)
+     Herbes (MED_HERBS)   bog 2.6 / hauteur‑humide 1.4 → + forêt 1.0 ; + prairie humide 0.8
+     ------------------------------------------------------------------------------
+     Sel (SALT)           aride 1.8 / côte 0.8       → aride 1.0 / côte 0.4   (surproduit)
+     Poisson (via raw_cap côtier, econ_init)          côte ×0.55 → ×0.35 du socle
+     Fourrure (FUR)       3.0                         → 2.0                   (surproduit)
+     Bois (WOOD)          3.6                         → 3.6 [=] (mais raw_cap +10 %, §pénurie)
+
+  6b. SECONDE RESSOURCE (recommandé) — casser le « une seule brute par province »
+     Donner à chaque province une ressource SECONDAIRE mineure (raw_cap réduit ×0.4)
+     tirée dans le même panier pondéré. Effet : une province « grain » peut porter un
+     filon de métal précieux ou un coin d'herbes → les intrants rares cessent d'être
+     éliminés par le tirage unique, sans inonder la carte. C'est le levier le plus
+     propre pour intégrer durablement le luxe & la santé.
+
+  6c. PLACEMENT DES MANUFACTURES (econ_init) — suivre le dispatch
+     Domaine viticole  : si Sucre>0            → ÉLARGIR à raw_cap Sucre du repli §4
+     Joaillerie        : si Or>0 ET MétalPréc>0 → si Or>0 OU MétalPréc>0   (gate §4)
+     Apothicaire       : si Herbes>0           → + repli Sucre (§4)
+     Manuf. textile    : si Laine>0            → si Laine>0 OU Coton>0      (§4)
+
+
+================================================================================
+  7. COÛTS & OUTPUTS DES BÂTIMENTS
+================================================================================
+  Deux familles distinctes :
+
+  7a. MANUFACTURES (econ.c RECIPE) — AUTO‑placées, sans coût d'or ; « output » = la
+      recette ci‑dessus (§4). Leur NIVEAU monte par réinvestissement bourgeois (2 %).
+      → Revisite : voir §4 (gates + outputs). Pas de coût d'or à introduire ici.
+
+  7b. ÉDIFICES (agency.c EDIFICES) — bâtis par joueur/IA : DÉLAI (jours) + MATÉRIAUX
+      achetés au marché en or ; « output » = le delta institutionnel (K/H/foi/food/PE).
+      Table actuelle (coût matériaux | output) :
+
+        Édifice         délai  coût matériaux            output
+        Tribunal        180    40 bois                   K +1.0
+        Chancellerie    365    50 bois + 25 métal        K +1.5
+        Académie        1800   60 métal + 15 métal‑préc  K +1.5, P +0.5
+        Garnison        180    40 bois + 20 métal        H +1.0
+        Forteresse      1100   60 bois + 50 métal        H +2.0
+        Citadelle       2200   100 métal + 30 outils     H +3.0
+        Port            540    80 bois + 20 métal        P +1.0
+        Marché          180    35 bois                   PE_infra +1.0
+        Grenier         90     25 bois                   food_cap +1.0
+        Irrigation      270    30 bois + 15 métal        food_cap +1.5
+        Sanctuaire      150    30 bois                    foi +1.0
+        Temple          600    50 bois + 30 métal         foi +2.0
+        Cathédrale      2000   70 métal + 25 métal‑préc   foi +3.5
+        Bibliothèque    500    40 bois + 20 métal         savoir +1.5
+        Banque          700    40 métal + 20 métal‑préc   PE_infra +1.4
+
+      CONSTAT (cf. rapport « gold sans rareté ») : ces coûts en matériaux sont
+      DÉRISOIRES face au trésor (72× le PIB) → le coût ne mord pas.
+      Revisite recommandée (à coupler avec « taxer le flux, pas le stock ») :
+        • indexer le coût matériaux sur le TIER de capitale et l'ÉTENDUE du pays
+          (×1 + 0.15·n_régions) → un grand empire paie ses institutions plus cher
+          (frein tall/wide qui manque aujourd'hui) ;
+        • porter les coûts de tier 3 (Académie/Citadelle/Cathédrale/Banque) à des
+          intrants RARES en quantité réelle (métal‑préc 15→40) — désormais possible
+          puisque le métal précieux est mieux dispatché (§6).
+
+
+================================================================================
+  8. EFFET ATTENDU SUR LES COUPS  (le pourquoi de tout ceci)
+================================================================================
+  Chaîne causale visée :
+     §2 demande routée + §4 gates desserrés + §6 dispatch
+        → l'élite REÇOIT son bien de statut (orfèvrerie OU étoffe précieuse)
+        → society_sat de l'élite remonte
+        → satisfaction générale > 40 % (le plancher de grogne actuel)
+        → déficit de révolte (W_BASKET) baisse ET ethos_coup_boost retombe
+        → les coups redeviennent RARES (intention du design §5 factions),
+          au lieu de 460/490 soulèvements.
+
+  MÉTRIQUE DE CONTRÔLE : relancer `chronicle 20240607 10 200` après application —
+  cible : part des coups < 40 % des soulèvements (vs 94 % aujourd'hui), satisfaction
+  moyenne > 55 %, couvertures §5 dans [90 %,130 %], invariant « 0 pays absorbé » tenu.
+
+================================================================================
+  FIN — ces valeurs sont des PROPOSITIONS chiffrées, non appliquées au code.
+================================================================================
