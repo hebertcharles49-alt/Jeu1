@@ -19,6 +19,7 @@
 #include "scps_agency.h"
 #include "scps_routes.h"
 #include "scps_intertrade.h"
+#include "scps_warhost.h"
 #include "scps_diplo.h"
 #include "scps_events.h"
 #include "scps_modifier.h"
@@ -37,6 +38,7 @@ typedef struct {
     TechState *ts; Statecraft *sc; AgencyState *ag; EventsState *ev; ModifierStack *drift;
     LaborEcon *labor; DiploState *dp; RouteNetwork *rn; AiActor *ai; bool *ai_on;
     RevoltState *rs;
+    WarHost     *host;   /* armées levées par pays (mobilisation) */
     int16_t prev_owner_mo[SCPS_MAX_REG];   /* propriétaires au mois précédent (détection de conquête) */
     int day, year, player;
 } Sim;
@@ -101,6 +103,7 @@ static void sim_day(Sim *s, World *w) {
         /* DIPLOMATIE annuelle : usure de guerre, FONTE des trêves & du momentum
          * (la guerre peut reprendre après le répit), et le SCORE DE GUERRE (bras-de-fer
          * + attrition qui saigne les armes). */
+        warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }
@@ -122,7 +125,7 @@ static void sim_init(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);
-    revolt_init(s->rs);
+    revolt_init(s->rs); warhost_init(s->host);
     for (int r=0;r<SCPS_MAX_REG;r++)
         s->prev_owner_mo[r] = (r<s->econ->n_regions)? s->econ->region[r].owner : -1;
     events_init(s->ev, w, w->seed);
@@ -241,7 +244,7 @@ int main(int argc, char **argv){
     s.drift=malloc(sizeof(ModifierStack)); s.labor=malloc(sizeof(LaborEcon));
     s.dp=malloc(sizeof(DiploState)); s.rn=malloc(sizeof(RouteNetwork));
     s.ai=calloc(SCPS_MAX_COUNTRY,sizeof(AiActor)); s.ai_on=calloc(SCPS_MAX_COUNTRY,sizeof(bool));
-    s.rs=malloc(sizeof(RevoltState));
+    s.rs=malloc(sizeof(RevoltState)); s.host=malloc(sizeof(WarHost));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
         ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs){ fprintf(stderr,"OOM\n"); return 1; }
 
@@ -409,6 +412,6 @@ int main(int argc, char **argv){
 
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);
     free(s.ag); free(s.ev); free(s.drift); free(s.labor); free(s.dp); free(s.rn);
-    free(s.ai); free(s.ai_on); free(s.rs);
+    warhost_free(s.host); free(s.ai); free(s.ai_on); free(s.rs); free(s.host);
     return 0;
 }

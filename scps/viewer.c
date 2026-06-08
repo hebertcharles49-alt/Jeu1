@@ -37,6 +37,7 @@
 #include "scps_ai.h"        /* les voisins VIVENT : lecteurs de coordonnées, mêmes leviers */
 #include "scps_revolt.h"    /* la révolte INCARNÉE : sécessions/coups dans le jeu vivant */
 #include "scps_intertrade.h"/* commerce inter-pays : grandes routes marchandes + embargo */
+#include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -327,6 +328,7 @@ typedef struct {
     DiploState      *dp;       /* relations / guerres */
     RouteNetwork    *rn;       /* routes commerciales */
     RevoltState     *rs;       /* soulèvements incarnés (sécessions, coups) */
+    WarHost         *host;     /* armées levées par pays (mobilisation) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
     int16_t          prev_owner_mo[SCPS_MAX_REG];  /* propriétaires du mois (détection de conquête) */
@@ -396,6 +398,7 @@ static void sim_day(Sim *s, World *w) {
         intertrade_tick(s->econ, s->rn, s->dp);   /* grandes routes marchandes (goods inter-pays + embargo) */
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
         /* Diplomatie annuelle : usure de guerre, fonte des trêves/momentum, score de guerre. */
+        warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }
@@ -407,7 +410,7 @@ static void sim_day(Sim *s, World *w) {
  * la partie avance par sim_day (plus de snapshot figé). */
 static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
-        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs) return;
+        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);
@@ -433,6 +436,7 @@ static void sim_rebuild(Sim *s, World *w) {
     labor_init(s->labor, w);
     labor_seed_from_world(s->labor, w, s->econ, s->player);
     revolt_init(s->rs);                                  /* les soulèvements incarnés */
+    warhost_init(s->host);                               /* les armées levées par pays */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
         s->prev_owner_mo[r]=s->econ->region[r].owner;
     s->day=0; s->year=0;
@@ -763,6 +767,7 @@ int main(int argc, char **argv) {
     sim.dp   = (DiploState*)      malloc(sizeof(DiploState));
     sim.rn   = (RouteNetwork*)    malloc(sizeof(RouteNetwork));
     sim.rs   = (RevoltState*)     malloc(sizeof(RevoltState));
+    sim.host = (WarHost*)         malloc(sizeof(WarHost));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 
@@ -1035,7 +1040,8 @@ int main(int argc, char **argv) {
     free(world);
     free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
     free(sim.ag); free(sim.ev); free(sim.drift); free(sim.labor);
-    free(sim.dp); free(sim.rn); free(sim.rs); free(sim.ai); free(sim.ai_on);
+    warhost_free(sim.host);
+    free(sim.dp); free(sim.rn); free(sim.rs); free(sim.host); free(sim.ai); free(sim.ai_on);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);
