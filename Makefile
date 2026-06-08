@@ -321,6 +321,12 @@ labor_demo: $(LABOR_DEMO_OBJS)
 
 # ---- Les armées : recrutement, armes, contres, combat au dé ---------------
 # Bâti sur l'économie (pop par classe + armes fabriquées). Autonome (pas de SDL).
+# ---- La population PRÉCISE : race × culture × foi × classe émergente -------
+POP_DEMO_OBJS := $(OBJDIR)/scps_scps_popsim.o $(OBJDIR)/scps_scps_culture.o \
+                 $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_pop_demo.o
+pop_demo: $(POP_DEMO_OBJS)
+	$(CC) $(POP_DEMO_OBJS) -o $@ -lm
+
 ARMY_DEMO_OBJS := $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_army.o \
                   $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_army_demo.o
 army_demo: $(ARMY_DEMO_OBJS)
