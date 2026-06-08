@@ -279,7 +279,7 @@ int main(int argc, char **argv){
         printf("\n── Sim %d (graine %u) — %d empires · %d cités-états · %d continents · %d régions ──\n",
                k+1, seed, n_emp, n_city, cont, s.econ->n_regions);
 
-        int snap[4]={50,100,150,200}, si=0;
+        int snap[4]={years/5, years*2/5, years*3/5, years*4/5}, si=0;  /* instantanés mis à l'échelle */
         for (int yr=0; yr<years; yr++){
             for (int d=0; d<365; d++) sim_day(&s, w);
             /* conquêtes de l'année : régions passées d'un PAYS à un autre (de force) */
@@ -328,6 +328,29 @@ int main(int argc, char **argv){
             printf("              1er empire « %s » : %d régions (%d%% des terres) | Stabilité %d  Prospérité %d  Légitimité %d  Cohésion %d — Assise %s\n",
                    w->country[tp].name, treg, share, r.m_stabilite.value, r.m_prosperite.value,
                    r.m_legitimite.value, r.m_cohesion.value, label_assise(r.assise));
+
+        /* MÉTRIQUES PAR EMPIRE (chaque empire vivant, trié par taille) — métriques 0-100. */
+        {
+            int idx[SCPS_MAX_COUNTRY], ne=0;
+            for (int c=0;c<w->n_countries;c++){ PolityRole rl=w->country[c].role;
+                if ((rl==POLITY_PLAYER||rl==POLITY_ANTAGONIST) && regions_of(s.econ,c)>0) idx[ne++]=c; }
+            for (int a=0;a<ne;a++) for (int b=a+1;b<ne;b++)
+                if (regions_of(s.econ,idx[b])>regions_of(s.econ,idx[a])){ int t=idx[a];idx[a]=idx[b];idx[b]=t; }
+            printf("              empires vivants (%d) — métriques 0-100 :\n", ne);
+            for (int a=0;a<ne;a++){ int c=idx[a];
+                CountryReadout cr=country_readout(s.wp,s.ts,w,c);
+                int ctech = s.ai_on[c]? s.ai[c].stats.techs : 0;
+                printf("                · %-16s %3d rég · pop %5.0fk · Stab %3d Prosp %3d Légit %3d Cohés %3d Infl %3d · %2d tech%s\n",
+                       w->country[c].name, regions_of(s.econ,c), ai_country_population(w,s.econ,c)/1000.0,
+                       cr.m_stabilite.value, cr.m_prosperite.value, cr.m_legitimite.value, cr.m_cohesion.value,
+                       cr.influence, ctech, (c==tp)?" ★":"");
+            }
+        }
+        /* VIVIER DE CITÉS-ÉTATS : combien du pool initial reste DISPONIBLE (vivant). */
+        { int cs=0; for (int c=0;c<w->n_countries;c++)
+              if (w->country[c].role==POLITY_CITY_STATE && regions_of(s.econ,c)>0) cs++;
+          printf("              vivier cités-états : %d disponibles / %d au départ (%d absorbées)\n",
+                 cs, n_city, n_city-cs); }
 
         /* POPULATION : totale + par continent (les 4 plus peuplés). */
         {
