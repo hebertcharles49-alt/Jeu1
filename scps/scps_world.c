@@ -2487,83 +2487,74 @@ static void gen_resources(World *w) {
         bool  warm  = tmp>0.55f, cold = tmp<0.34f;
         bool  bigriver = rivmax[p]>150;
 
-        bool flat       = (B==BIO_PLAINS||B==BIO_FARMLAND||B==BIO_GRASSLAND||
-                           B==BIO_STEPPE||B==BIO_SAVANNA||B==BIO_DRYLANDS);
-        bool humid_flat = (B==BIO_PLAINS||B==BIO_FARMLAND||B==BIO_GRASSLAND)&&moist>0.45f;
-        bool pastoral   = (B==BIO_GRASSLAND||B==BIO_STEPPE||B==BIO_SAVANNA);
         bool arid       = (B==BIO_DRYLANDS||B==BIO_DESERT||B==BIO_COASTAL_DESERT||
                            B==BIO_SAVANNA)||moist<0.30f;
-        bool forested   = (B==BIO_FOREST||B==BIO_WOODS||B==BIO_JUNGLE||B==BIO_MANGROVE);
         bool hills      = (B==BIO_HILLS||B==BIO_HIGHLANDS);
-        bool mtn        = (B==BIO_MOUNTAINS||B==BIO_PEAK||H>0.70f);
-        bool relief     = biome_is_relief(B)||H>0.58f;
-        bool mesa       = arid && (hills||H>0.55f);
+        bool mesa       = arid && (hills||H>0.55f);   /* filons à découvert (cuivre/fer) */
 
         float wt[RES_COUNT]; for (int r=0;r<RES_COUNT;r++) wt[r]=0.f;
         #define ADD(R,V) wt[R]+=(V)
 
-        /* --- Agricole & élevage --- */
-        /* La NOURRITURE domine : on remappe les probas vers les vivres pour
-         * qu'un monde ne meure pas de faim. Le grain l'emporte largement sur les
-         * terres arables ; l'élevage et la pêche complètent. */
-        if (B==BIO_FARMLAND)       ADD(RES_GRAIN,     5.5f);   /* terres cultivées */
-        if (B==BIO_PLAINS)         ADD(RES_GRAIN,     4.4f);
-        if (B==BIO_GRASSLAND)      ADD(RES_GRAIN,     3.4f);   /* arable aussi */
-        if (B==BIO_WOODS)          ADD(RES_GRAIN,     1.6f);   /* clairières cultivables */
-        if (B==BIO_SAVANNA)        ADD(RES_LIVESTOCK, 2.0f);   /* savane → pâture */
-        if (humid_flat)            ADD(RES_GRAIN,     1.4f);
-        if (flat && !arid)       { ADD(RES_LIVESTOCK, 2.2f); ADD(RES_WOOL, 1.2f); }   /* prés non-arides → laine */
-        if (pastoral)            { ADD(RES_LIVESTOCK, 2.6f); ADD(RES_WOOL, 2.6f); ADD(RES_MED_HERBS, 0.7f); }
-        if (hills)               { ADD(RES_LIVESTOCK, 1.6f); ADD(RES_WOOL, 2.2f); }
-        if (flat && arid && warm)  ADD(RES_COTTON,    1.8f);   /* flatlands arides */
-
-        /* --- Poisson : côte ou fleuve à fort débit (sans voler la terre
-         *     productive : poids modéré, gagne surtout les côtes pauvres) --- */
-        if (coastal[p])            ADD(RES_FISH, 2.6f);   /* la mer nourrit fort */
-        if (bigriver)              ADD(RES_FISH, 2.4f);
-
-        /* --- Fourrure : régions froides et sauvages --- */
-        if (cold && (forested||B==BIO_BOG||B==BIO_GLACIER||B==BIO_STEPPE))
-                                   ADD(RES_FUR, 2.0f);   /* surproduit : 3.0 → 2.0 */
-
-        /* --- Sel : déserts et côtes --- */
-        if (arid)                  ADD(RES_SALT, 1.8f);
-        if (coastal[p])            ADD(RES_SALT, 0.8f);
-
-        /* --- Sucre : côtes arides chaudes + canne tropicale (chaud & humide) + savane --- */
-        if (coastal[p] && arid && warm) ADD(RES_SUGAR, 2.6f);
-        if (warm && moist>0.55f)        ADD(RES_SUGAR, 1.8f);
-        if (B==BIO_SAVANNA)             ADD(RES_SUGAR, 0.8f);
-
-        /* --- Bois : régions boisées --- */
-        if (forested)              ADD(RES_WOOD, 3.6f);
-
-        /* --- Herbes médicinales : zones humides d'altitude + sous-bois + pâtures --- */
-        if (B==BIO_BOG)            ADD(RES_MED_HERBS, 2.6f);
-        if ((hills||H>0.55f) && moist>0.55f) ADD(RES_MED_HERBS, 1.4f);
-        if (forested)              ADD(RES_MED_HERBS, 1.0f);   /* simples de sous-bois */
-
-        /* --- Minéraux de relief --- */
-        if (relief) {
-            ADD(RES_COPPER, mtn?2.0f:1.4f);
-            ADD(RES_IRON,   mtn?2.0f:1.4f);
-            ADD(RES_COAL,   1.6f);
-            ADD(RES_GOLD,   mtn?2.6f:0.6f);            /* l'or, surtout en montagne */
-            ADD(RES_PRECIOUS_METAL, mtn?1.2f:0.2f);    /* mithril, adamantium */
-            ADD(RES_SULFUR, mtn?1.4f:0.4f);            /* volcanique */
+        /* ══ RÉPARTITION IDÉALE PAR BIOME (doc « répartition des ressources », §2) ══
+         * Une province tire UNE brute dominante ∝ ces poids ; le GRAIN a en plus un
+         * SOCLE garanti hors tirage (econ_init) ∝ fertilité → jamais de famine (P1).
+         * Cible : couverture mondiale 110-150 % par bien consommé, zéro pénurie, zéro
+         * glut absurde. La « bonne chose au bon endroit, en bonne proportion » (P2-P3). */
+        switch (B) {
+            /* ── Plaines fertiles : le grenier ── */
+            case BIO_FARMLAND:  ADD(RES_GRAIN,5.5f); ADD(RES_WOOL,1.0f); ADD(RES_COTTON,0.4f); break;
+            case BIO_PLAINS:    ADD(RES_GRAIN,4.4f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_WOOL,1.2f); break;
+            case BIO_GRASSLAND: ADD(RES_GRAIN,3.0f); ADD(RES_LIVESTOCK,2.2f); ADD(RES_WOOL,2.0f); ADD(RES_MED_HERBS,0.5f); break;
+            /* ── Pastoral & sec ── */
+            case BIO_STEPPE:
+                ADD(RES_LIVESTOCK,2.6f); ADD(RES_WOOL,2.2f); ADD(RES_SALTPETER,0.4f);
+                if (cold) ADD(RES_FUR,0.6f);
+                break;
+            case BIO_SAVANNA:   ADD(RES_LIVESTOCK,2.4f); ADD(RES_WOOL,1.2f); ADD(RES_SUGAR,0.8f); ADD(RES_MED_HERBS,0.5f); break;
+            case BIO_DRYLANDS:  ADD(RES_COTTON,1.8f); ADD(RES_SALT,1.5f); ADD(RES_SALTPETER,1.4f); break;
+            case BIO_DESERT:    ADD(RES_SALT,2.0f); ADD(RES_SALTPETER,1.8f); break;
+            /* ── Forêts : le bois + les simples ── */
+            case BIO_FOREST:
+                ADD(RES_WOOD,3.6f); ADD(RES_MED_HERBS,1.0f);
+                if (cold) ADD(RES_FUR,2.0f);
+                break;
+            case BIO_WOODS:     ADD(RES_WOOD,3.0f); ADD(RES_GRAIN,1.4f); ADD(RES_MED_HERBS,0.8f); break;
+            case BIO_JUNGLE:    ADD(RES_WOOD,3.2f); ADD(RES_SUGAR,1.6f); ADD(RES_MED_HERBS,1.2f); break;
+            /* ── Zones humides ── */
+            case BIO_MARSH:     ADD(RES_FISH,1.6f); ADD(RES_MED_HERBS,1.4f); ADD(RES_SALT,0.4f); break;
+            case BIO_BOG:
+                ADD(RES_MED_HERBS,2.6f); ADD(RES_COAL,0.4f);
+                if (cold) ADD(RES_FUR,1.5f);
+                break;
+            /* ── Côtes & littoraux ── */
+            case BIO_COAST:     ADD(RES_FISH,2.6f); ADD(RES_SALT,0.8f); break;
+            case BIO_MANGROVE:  ADD(RES_FISH,1.6f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); break;
+            case BIO_COASTAL_DESERT:
+                ADD(RES_SALT,1.6f); ADD(RES_SALTPETER,0.6f);
+                if (warm) ADD(RES_SUGAR,2.0f);
+                break;
+            /* ── Reliefs : la laine + les minéraux ── */
+            case BIO_HILLS:     ADD(RES_WOOL,2.2f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_COPPER,1.4f); ADD(RES_IRON,1.4f); ADD(RES_MED_HERBS,0.6f); break;
+            case BIO_HIGHLANDS: ADD(RES_WOOL,2.0f); ADD(RES_COPPER,1.2f); ADD(RES_IRON,1.2f); ADD(RES_MED_HERBS,1.0f); ADD(RES_GOLD,0.6f); break;
+            case BIO_MOUNTAINS: ADD(RES_IRON,2.0f); ADD(RES_COPPER,2.0f); ADD(RES_COAL,1.6f); ADD(RES_GOLD,2.6f);
+                                ADD(RES_PRECIOUS_METAL,1.2f); ADD(RES_SULFUR,1.4f); ADD(RES_SALTPETER,0.6f); break;
+            case BIO_VOLCANO:   ADD(RES_SULFUR,1.4f); ADD(RES_PRECIOUS_METAL,0.4f); break;   /* veines magmatiques */
+            default: break;     /* océans · pic · glacier : terres mortes → rien (P4) */
         }
-        if (mesa) { ADD(RES_COPPER,1.5f); ADD(RES_IRON,1.5f); }  /* mesas */
-
-        /* --- Salpêtre : arides et grottes de montagne (→ poudre, doc §9) --- */
-        if (B==BIO_DESERT||B==BIO_DRYLANDS) ADD(RES_SALTPETER, 1.6f);
-        if (mtn)                            ADD(RES_SALTPETER, 0.6f);
+        /* MESA (aride + relief) : filons de cuivre/fer à découvert (bonus). */
+        if (mesa) { ADD(RES_COPPER,1.5f); ADD(RES_IRON,1.5f); }
+        /* Grande rivière : pêche fluviale d'appoint (hors biomes déjà halieutiques). */
+        if (bigriver && B!=BIO_COAST && B!=BIO_MANGROVE && B!=BIO_MARSH) ADD(RES_FISH,1.6f);
         #undef ADD
 
         /* Tirage pondéré — UNIQUEMENT parmi les ressources BRUTES.
          * Les biens de production (≥ RES_PROD_FIRST) seront posés plus tard
          * par les chaînes de transformation. */
         float tot=0.f; for (int r=1;r<RES_PROD_FIRST;r++) tot+=wt[r];
-        if (tot<1e-4f){ pr->resource = forested?RES_WOOD:RES_GRAIN; pr->resource2=RES_NONE; continue; }
+        if (tot<1e-4f){
+            bool wooded = (B==BIO_FOREST||B==BIO_WOODS||B==BIO_JUNGLE||B==BIO_MANGROVE);
+            pr->resource = wooded?RES_WOOD:RES_GRAIN; pr->resource2=RES_NONE; continue;
+        }
         float roll=rng_f()*tot, acc=0.f; Resource chosen=RES_GRAIN;
         for (int r=1;r<RES_PROD_FIRST;r++){ acc+=wt[r]; if(acc>=roll){chosen=(Resource)r;break;} }
         pr->resource=chosen;

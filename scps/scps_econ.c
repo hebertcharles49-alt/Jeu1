@@ -385,7 +385,7 @@ void econ_init(WorldEconomy *e, const World *w) {
          * pondéré par la FERTILITÉ moyenne de la région (les bonnes terres
          * nourrissent plus). */
         re->raw_cap[RES_GRAIN] += subsist * (1.15f + 0.70f*reg_hab[rid]);
-        re->raw_cap[RES_WOOD]  += subsist * 0.40f;
+        re->raw_cap[RES_WOOD]  += subsist * 0.44f;   /* §6a : socle bois +10 % (intrant + chauffe) */
         if (coastal) re->raw_cap[RES_FISH] += subsist * 0.25f;   /* poisson surproduit ×20 : on calme */
 
         /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux

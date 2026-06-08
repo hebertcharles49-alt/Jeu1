@@ -14,7 +14,7 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     /* Institutionnel → K (ce qui métabolise la distance, tient la diversité). */
     [EDI_TRIBUNAL]     = { "Tribunal",      180,  { .K_inst=1.0f }, {{RES_WOOD},{40}} },
     [EDI_CHANCELLERIE] = { "Chancellerie",  365,  { .K_inst=1.5f }, {{RES_WOOD,RES_METAL},{50,25}} },
-    [EDI_ACADEMIE]     = { "Académie",      1800, { .K_inst=1.5f, .P_open=0.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{60,15}} },
+    [EDI_ACADEMIE]     = { "Académie",      1800, { .K_inst=1.5f, .P_open=0.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{60,40}} },  /* §7 : tier 3 → métal-préc 15→40 */
     /* Coercitif → H (tient l'ordre par la force — ronge L, voie fragile). */
     [EDI_GARNISON]     = { "Garnison",      180,  { .H_coerc=1.0f }, {{RES_WOOD,RES_METAL},{40,20}} },
     [EDI_FORTERESSE]   = { "Forteresse",    1100, { .H_coerc=2.0f }, {{RES_WOOD,RES_METAL},{60,50}} },
@@ -32,13 +32,13 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     /* Foi → SOUTIENT L (sacraliser le trône apaise sans réprimer — §4 du catalogue). */
     [EDI_SANCTUAIRE]   = { "Sanctuaire",    150,  { .faith=1.0f }, {{RES_WOOD},{30}} },
     [EDI_TEMPLE]       = { "Temple",        600,  { .faith=2.0f }, {{RES_WOOD,RES_METAL},{50,30}} },
-    [EDI_CATHEDRALE]   = { "Cathédrale",    2000, { .faith=3.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{70,25}} },
+    [EDI_CATHEDRALE]   = { "Cathédrale",    2000, { .faith=3.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{70,40}} },  /* §7 : tier 3 → métal-préc 25→40 */
     /* Savoir → recherche (le monastère sacralise ET étudie — §5 du catalogue). */
     [EDI_BIBLIOTHEQUE] = { "Bibliothèque",  500,  { .savoir=1.5f }, {{RES_WOOD,RES_METAL},{40,20}} },
     [EDI_MONASTERE]    = { "Monastère",     900,  { .savoir=1.0f, .faith=1.0f }, {{RES_WOOD,RES_METAL},{50,15}} },
     /* Commerce → PE local (capte le flux ; la banque finance l'État). */
     [EDI_COMPTOIR]     = { "Comptoir",      200,  { .PE_infra=0.8f }, {{RES_WOOD},{30}} },
-    [EDI_BANQUE]       = { "Banque",        700,  { .PE_infra=1.4f }, {{RES_METAL,RES_PRECIOUS_METAL},{40,20}} },
+    [EDI_BANQUE]       = { "Banque",        700,  { .PE_infra=1.4f }, {{RES_METAL,RES_PRECIOUS_METAL},{40,40}} },  /* §7 : tier 3 → métal-préc 20→40 */
 };
 
 const EdificeDef *edifice_def(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?&EDIFICES[e]:NULL; }
@@ -46,6 +46,17 @@ const char       *edifice_name(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?EDIFIC
 
 /* ---- Coût des bâtiments (§1) : matériaux ACHETÉS au marché en or ------- */
 #define BUILD_MIN_PRICE 0.20f   /* plancher de prix : même un bien abondant n'est jamais gratuit */
+
+/* §7 — l'ÉTENDUE du pays RENCHÉRIT ses institutions (le frein tall/wide qui manquait) :
+ * facteur ×(1 + 0.15·n_régions du pays) sur le coût matériaux. Un grand empire paie
+ * ses édifices bien plus cher — sa croissance institutionnelle se paie. */
+static float agency_extent_mult(const WorldEconomy *econ, int region){
+    int owner = econ->region[region].owner;
+    if (owner < 0) return 1.f;
+    int n=0;
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==owner) n++;
+    return 1.f + 0.15f*(float)n;
+}
 
 float agency_build_gold(const WorldEconomy *econ, int region, Edifice e){
     if (e<0||e>=EDIFICE_COUNT || !econ || region<0 || region>=econ->n_regions) return 0.f;
@@ -58,7 +69,7 @@ float agency_build_gold(const WorldEconomy *econ, int region, Edifice e){
         float price = re->price[r]; if (price < BUILD_MIN_PRICE) price = BUILD_MIN_PRICE;
         gold += c->qty[k] * price;       /* le manque renchérit : la rareté monte le prix */
     }
-    return gold;
+    return gold * agency_extent_mult(econ, region);   /* §7 : indexé sur l'étendue du pays */
 }
 
 bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e){
@@ -68,10 +79,11 @@ bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e){
     if (gold > re->treasury) return false;        /* pas l'or → pas de chantier (garde, comme colonize) */
     re->treasury -= gold;                          /* on PAIE le marché en or */
     const BuildCost *c=&EDIFICES[e].cost;          /* … et l'on CONSOMME les matériaux du marché */
+    float mult = agency_extent_mult(econ, region); /* §7 : un grand pays consomme plus */
     for (int k=0;k<BUILD_RES_MAX;k++){
         Resource r=c->res[k];
         if (r<=RES_NONE || r>=RES_COUNT || c->qty[k]<=0.f) continue;
-        re->stock[r] -= c->qty[k]; if (re->stock[r] < 0.f) re->stock[r]=0.f;
+        re->stock[r] -= c->qty[k]*mult; if (re->stock[r] < 0.f) re->stock[r]=0.f;
     }
     return agency_order_build(a, region, e);       /* enfile le chantier (durée existante) */
 }
