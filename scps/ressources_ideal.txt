@@ -1,0 +1,99 @@
+══════════════════════════════════════════════════════════════════════════════
+ SCPS — RÉPARTITION IDÉALE DES RESSOURCES : MONDE & PAR BIOME
+ (document de référence — IMPLÉMENTÉ dans gen_resources, mesuré ci-dessous)
+══════════════════════════════════════════════════════════════════════════════
+ But : une carte où l'OFFRE de chaque bien (Σ biome × fréquence) colle à la
+ DEMANDE mondiale → un léger surplus tendu « d'un peu tout », zéro pénurie, zéro
+ glut absurde. Tirage pondéré : une province prend UNE brute dominante, proba ∝
+ poids du biome ; le grain a en plus un SOCLE garanti hors tirage (anti-famine).
+
+
+0. PRINCIPES DE BALANCE
+───────────────────────
+ P1. LE PAIN D'ABORD — grain socle garanti (econ_init) ∝ fertilité ; le tirage
+     n'AJOUTE que la spécialisation. Jamais de famine.
+ P2. UNE BRUTE DOMINANTE / PROVINCE → spécialisation → commerce. « La bonne chose
+     au bon endroit, en bonne proportion mondiale. »
+ P3. L'OFFRE SUIT LA DEMANDE — cible 110-150 % par bien consommé (surplus tendu).
+ P4. LES RARES RESTENT RARES MAIS PRÉSENTS — métal précieux, cristal, fer céleste :
+     un nœud de loin en loin, jamais zéro.
+ P5. AUCUN MUR — tout est poids de tirage + market_effort : un glut se déprime, une
+     pénurie s'aiguise. La carte respire.
+
+
+2. RÉPARTITION PAR BIOME  (poids de tirage ; 0 = absent) — TEL QU'IMPLÉMENTÉ
+───────────────────────────────────────────────────────────────────────────
+ TERRES MORTES (rien) : Deep Ocean · Ocean · Shallow · Peak · Glacier.
+
+ CÔTES & LITTORAUX
+   COAST            Poisson 2.6 · Sel 0.8
+   MANGROVE         Poisson 1.6 · Sucre 1.4 · Herbes 0.8 · Fourrure 0.4
+   COASTAL_DESERT   Sel 1.6 · Salpêtre 0.6 · Sucre 2.0 (si chaud)
+
+ PLAINES FERTILES (le grenier ; grain + socle)
+   FARMLAND         Grain 5.5 · Laine 1.0 · Coton 0.4
+   PLAINS           Grain 4.4 · Bétail 1.6 · Laine 1.2
+   GRASSLAND        Grain 3.0 · Bétail 2.2 · Laine 2.0 · Herbes 0.5
+
+ PASTORAL & SEC
+   STEPPE           Bétail 2.6 · Laine 2.2 · Salpêtre 0.4 · Fourrure 0.6 (froid)
+   SAVANNA          Bétail 2.4 · Laine 1.2 · Sucre 0.8 · Herbes 0.5
+   DRYLANDS         Coton 1.8 · Sel 1.5 · Salpêtre 1.4
+   DESERT           Sel 2.0 · Salpêtre 1.8
+
+ FORÊTS (le bois + les simples)
+   FOREST           Bois 3.6 · Herbes 1.0 · Fourrure 2.0 (froid)
+   WOODS            Bois 3.0 · Grain 1.4 · Herbes 0.8
+   JUNGLE           Bois 3.2 · Sucre 1.6 · Herbes 1.2
+
+ ZONES HUMIDES
+   MARSH            Poisson 1.6 · Herbes 1.4 · Sel 0.4
+   BOG              Herbes 2.6 · Charbon 0.4 (tourbe) · Fourrure 1.5 (froid)
+
+ RELIEFS (la laine + les minéraux)
+   HILLS            Laine 2.2 · Bétail 1.6 · Cuivre 1.4 · Fer 1.4 · Herbes 0.6
+   HIGHLANDS        Laine 2.0 · Cuivre 1.2 · Fer 1.2 · Herbes 1.0 · Or 0.6
+   MOUNTAINS        Fer 2.0 · Cuivre 2.0 · Charbon 1.6 · Or 2.6 ·
+                    Métal-préc 1.2 · Soufre 1.4 · Salpêtre 0.6
+   VOLCANO          Soufre 1.4 · Métal-préc 0.4   (veines magmatiques)
+
+ PARTICULIERS
+   MESA (aride+relief)   + Cuivre 1.5 · Fer 1.5   (filons à découvert, bonus)
+   Grande rivière        + Poisson 1.6            (hors biomes halieutiques)
+
+ SECONDE RESSOURCE (par province) : une 2e brute MINEURE (raw_cap ×0.4), tirée
+ RANDOM dans le MÊME panier pondéré du biome (la dominante exclue) → une province
+ « grain » peut porter un filon de métal précieux ou un coin d'herbes ; les rares
+ cessent d'être éliminés par le tirage unique, sans inonder la carte.
+
+
+3. RARES STRATÉGIQUES  (overlay post-tirage, voulus rares mais ≠ absents)
+─────────────────────────────────────────────────────────────────────────
+   MÉTAL PRÉCIEUX   montagnes (poids 1.2) + bordure volcan (0.4) → joaillerie +
+                    édifices tier 3 (Académie/Cathédrale/Banque).
+   CRISTAL ARCANIQUE  régions à Soufre OU Métal-préc, ~1 sur 4 → essence (faustien).
+   FER CÉLESTE      cratères/sommets à fer, ~1 sur 9 → armes enchantées.
+
+
+4. BILAN OFFRE↔DEMANDE — MESURÉ (scan 6 mondes × 60 ans, après implémentation)
+───────────────────────────────────────────────────────────────────────────────
+   BIEN            cible §4        AVANT (orig)   APRÈS (§2)
+   Céréales        160-200 %       450 %          114 %   (socle anti-famine intact)
+   Bois            110-140 %       85 %           84 %
+   Poisson         120-150 %       2166 %         520 %   (restreint aux halieutiques)
+   Étoffe          110-140 %       22 %           81 %    (laine ×2.2 ; reste sous 100)
+   Vin             110-130 %       25 %           314 %
+   Orfèvrerie      110-140 %       ~86 %(plafond) 17000 %+ (statut élite ASSURÉ)
+   Sel             130-160 %       6299 %         1482 %  (baissé)
+   Herbes/Remède   110-140 %       0 %            apothicaires ×2.4
+   Fourrure        120-150 %       2965 %         134 %   ✓ dans la bande
+
+   Satisfaction d'élite : 8.6 % (orig) → 29.5 %. Plus aucune demande-zéro, plus
+   aucune pénurie de statut. Restes à affiner : étoffe (drain de l'atelier de luxe)
+   et la marge de grain. Les coups résiduels relèvent du DÉCLENCHEUR factions, pas
+   de l'éco (rapport séparé).
+
+══════════════════════════════════════════════════════════════════════════════
+ IMPLÉMENTÉ : gen_resources (table par biome) + 2e ressource + métal-préc dispatch
+ + coûts d'édifices indexés sur l'étendue. Validation chronique : ci-jointe.
+══════════════════════════════════════════════════════════════════════════════
