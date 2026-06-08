@@ -443,3 +443,36 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     }
     return pr;
 }
+
+/* ===================================================================== */
+/* ARBRE DE TECH — la membrane de l'arbre concentrique                     */
+/* ===================================================================== */
+const char *label_tree_state(TreeState s){
+    switch(s){ case TREE_DONE: return "acquis"; case TREE_OPEN: return "disponible"; default: return "verrouillé"; }
+}
+void tech_tree_readout(const TechState *ts, unsigned race_access, float population,
+                       TechTreeReadout *out){
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    out->n = TECH_COUNT;
+    out->points = ts ? (int)(ts->research_points + 0.5f) : 0;
+    out->n_themes = THM_COUNT; out->n_functions = FN_COUNT;
+    for (int t=0;t<THM_COUNT && t<3;t++) out->theme[t]    = tech_theme_name((TechTheme)t);
+    for (int f=0;f<FN_COUNT  && f<3;f++) out->function[f] = tech_function_name((TechFunction)f);
+    for (int i=0;i<TECH_COUNT;i++){
+        const TechNode *n = tech_node((TechId)i);
+        TreeNodeReadout *nr = &out->node[i];
+        nr->quarter  = tech_quarter(n->theme, n->func);   /* l'ANGLE */
+        nr->tier     = n->tier;                            /* le RAYON */
+        nr->faustian = n->faustian;
+        nr->is_base  = tech_is_base((TechId)i);
+        nr->name     = n->name;
+        nr->unlocks  = n->unlocks;
+        nr->cost     = (int)(tech_cost((TechId)i, population) + 0.5f);
+        bool done = ts && ts->unlocked[i];
+        bool open = ts && tech_can_research(ts, (TechId)i, race_access);
+        nr->state    = done ? TREE_DONE : (open ? TREE_OPEN : TREE_LOCKED);
+        /* orphelin = signature d'une AUTRE race dont l'empire n'a pas l'accès. */
+        nr->orphan   = (n->native!=RACE_COUNT) && !(race_access & tech_race_bit(n->native));
+    }
+}

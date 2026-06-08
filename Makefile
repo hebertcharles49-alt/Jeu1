@@ -51,7 +51,8 @@ core_demo: $(CORE_DEMO_OBJS)
 # Prouve le test décisif « Tenue · Contrainte » et la couverture du lexique.
 READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
                      $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
-                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_readout_demo.o
+                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
+                     $(OBJDIR)/scps_readout_demo.o
 readout_demo: $(READOUT_DEMO_OBJS)
 	$(CC) $(READOUT_DEMO_OBJS) -o $@ -lm
 

@@ -187,6 +187,40 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
                                  int province_id);
 
 /* ===================================================================== */
+/* ARBRE DE TECH — la membrane de l'arbre CONCENTRIQUE (mots + nombres)    */
+/* ===================================================================== */
+/* Le renderer dessine un arbre concentrique : ANGLE = quartier (0..8 = thème×
+ * fonction), RAYON = tier. Il ne lit AUCUN flottant de tech : il reçoit, par
+ * nœud, sa position (quartier/tier), son ÉTAT (mot), s'il est faustien/orphelin,
+ * son nom, ce qu'il déverrouille, et son COÛT (un nombre tangible : des points). */
+typedef enum { TREE_LOCKED = 0, TREE_OPEN, TREE_DONE } TreeState; /* verrouillé/disponible/acquis */
+typedef struct {
+    int         quarter;    /* 0..8 (= thème*3 + fonction) — l'ANGLE */
+    int         tier;       /* le RAYON (profondeur) */
+    TreeState   state;
+    bool        faustian;   /* ⚠ bout interdit */
+    bool        orphan;     /* signature d'une AUTRE race, accès manquant (greffe possible) */
+    bool        is_base;    /* bâtiment de base (le centre) */
+    const char *name;
+    const char *unlocks;    /* le bâtiment/capacité déverrouillé */
+    int         cost;       /* points de recherche (0 pour les bases) — nombre tangible */
+} TreeNodeReadout;
+typedef struct {
+    TreeNodeReadout node[TECH_COUNT];
+    int         n;          /* = TECH_COUNT */
+    int         points;     /* points de recherche DISPONIBLES (tangible) */
+    int         n_themes;   /* 3 */
+    int         n_functions;/* 3 */
+    const char *theme[3];    /* "Savoir" / "Forge" / "Société" — l'ordre des secteurs */
+    const char *function[3]; /* "Production" / "Armée" / "Renforcement" */
+} TechTreeReadout;
+/* Remplit le readout depuis l'état de tech d'un empire : son masque d'accès de
+ * race (pour les orphelines) et sa population (pour le coût). */
+void tech_tree_readout(const TechState *ts, unsigned race_access, float population,
+                       TechTreeReadout *out);
+const char *label_tree_state(TreeState s);   /* "verrouillé"/"disponible"/"acquis" */
+
+/* ===================================================================== */
 /* LEXIQUE — un mot (label) + une définition (hover) par bande            */
 /* ===================================================================== */
 /* label_X(band) → le MOT affiché. hover_X() → la définition d'une phrase
