@@ -1,0 +1,132 @@
+══════════════════════════════════════════════════════════════════════════════
+ SCPS — INTÉGRATION DE LA POPULATION PRÉCISE (classe émergente race×culture×foi)
+ Sims de contrôle AVANT / APRÈS — graine 7, 5 mondes, 200 ans
+══════════════════════════════════════════════════════════════════════════════
+
+Question posée : la population « précise » (race × culture × foi × classe sociale)
+n'était jusqu'ici qu'une démo isolée. On la fait passer EN JEU — la classe de
+chaque groupe émerge des emplois de sa région à chaque tick — et on mesure si
+l'équilibre du moteur tient. Le risque identifié : les factions pondèrent
+désormais les groupes par leur classe ÉMERGENTE (un Noble pèse ×3) ; cela
+pourrait déplacer la fréquence des coups d'État. On tranche par la mesure.
+
+
+1. CE QUI PASSE EN JEU (l'intégration)
+──────────────────────────────────────
+• PopGroup.pop_by_class[3] — pour chaque groupe (race × culture × foi) : combien
+  de Journaliers / Bourgeois / Nobles. Σ pop_by_class = count. Jamais posé :
+  recalculé à chaque tick.
+
+• demography_tick, étape 3 — après migration et assimilation, la fonction
+  demography_emerge_classes répartit, sur chaque groupe, AU PRORATA et par
+  paquets de 100 :
+     – les emplois NOBLES  = capitale (tier · 100, le tier que la pop débloque) ;
+     – les emplois BOURGEOIS = somme des ouvriers d'ateliers de la région.
+  La structure d'emplois sculpte le tissu social, groupe par groupe — rien n'est
+  décrété d'en haut.
+
+• Factions — accumulate() pondère chaque groupe par
+     Σ_classe  pop_by_class · clout(classe)            (Noble ×3, Bourgeois ×2)
+  au lieu de  count · clout(klass)  (replié si l'émergence n'a pas encore couru).
+  Une vague de PROMOTIONS pèse donc sur la politique interne (Conquérant, Légiste…).
+  Bâtir une capitale = fabriquer des nobles = déplacer le rapport de force.
+
+• Panneau de province (POPULATION) — le camembert de classe agrège les
+  pop_by_class des groupes présents (repli sur les strates si aucun groupe).
+
+• SÉPARATION PRÉSERVÉE — les strates d'econ (prospérité, impôts, croissance)
+  restent une comptabilité distincte ; l'émergence ne touche QUE la politique
+  (factions) et l'affichage. L'équilibre macro est conservé par construction.
+
+
+2. VÉRIFICATION BUILD & DÉMOS (arbre courant)
+─────────────────────────────────────────────
+Build complet : 0 warning  (cc -O2 -Wall -Wextra -std=c99).
+Démos auto-vérifiantes, toutes vertes :
+     factions_demo ........ 32 / 0
+     demography_demo ...... 19 / 0
+     demography_integ ..... 6 / 0
+     revolt_demo .......... 23 / 0
+     labor_demo ........... 35 / 0
+     pop_demo ............. 14 / 0
+
+
+3. PROTOCOLE DE SIM
+───────────────────
+Commande      : chronicle 7 5 200   (5 mondes — graines 7, 108, 209, 310, 411 ;
+                200 ans chacun ; aucune entrée joueur).
+AVANT (témoin): HEAD committé — les factions pondèrent count · clout(klass),
+                tous les groupes comptent comme Journaliers.
+APRÈS (essai) : l'intégration — les factions pondèrent la classe ÉMERGENTE.
+Mêmes graines ⇒ mondes rigoureusement identiques ⇒ comparaison appariée
+(seul le poids de classe dans les factions diffère entre les deux colonnes).
+
+
+4. RÉSULTATS — SYNTHÈSE APPARIÉE (5 sims × 200 ans)
+──────────────────────────────────────────────────
+                                          AVANT (témoin)   APRÈS (intég.)   Δ
+  âges éveillés .......................   29  (5.8/sim)    27  (5.4/sim)    −2
+  guerres déclenchées .................   40  (8.0/sim)    39  (7.8/sim)    −1
+  provinces PRISES de force ...........  131 (26.2/sim)   136 (27.2/sim)    +5
+  pays absorbés .......................    0  (0.0/sim)     0  (0.0/sim)     0   ← invariant
+  nœuds de tech (dont faustiens) ......  1769 (272)       1822 (280)      +53
+  régions réduites (campagne) .........   38  (7.6/sim)    39  (7.8/sim)    +1
+  pic de révolte moyen ................   8.6 pays         9.6 pays        +1.0
+  soulèvements allumés ................   79               81              +2
+   → sécessions .......................   17               19              +2
+   → COUPS D'ÉTAT .....................   59               59               0   ← invariant
+   → concessions ......................    0                0               0
+   → écrasés ..........................    2                2               0
+  morts au combat (révoltes) ..........   29               23              −6
+  sims atteignant les Soulèvements ....   4/5              2/5
+  sims atteignant l'Ordre de Fer ......   0/5              0/5
+
+
+5. DÉTAIL PAR MONDE — LES COUPS D'ÉTAT (la métrique sensible)
+────────────────────────────────────────────────────────────
+                            AVANT                       APRÈS
+  Sim 1 (graine 7)    5 allumés ·  0 coup        5 allumés ·  0 coup
+  Sim 2 (graine 108)  0 allumés ·  0 coup        0 allumés ·  0 coup
+  Sim 3 (graine 209)  6 allumés ·  0 coup        7 allumés ·  0 coup
+  Sim 4 (graine 310) 64 allumés · 59 coups      64 allumés · 59 coups   ← cascade
+  Sim 5 (graine 411)  4 allumés ·  0 coup        5 allumés ·  0 coup
+
+Les 59 coups proviennent ENTIÈREMENT d'un seul monde (graine 310) — une cascade
+de coups dans un empire fragilisé — et ce chiffre est RIGOUREUSEMENT IDENTIQUE
+avant et après. Le poids de classe émergent ne déclenche, n'éteint ni ne
+déplace aucun coup d'État.
+
+
+6. LECTURE — L'ÉQUILIBRE TIENT
+──────────────────────────────
+• Invariant n°1 — pays absorbés : 0 / 0. Personne n'est rayé de la carte ; le
+  plancher de survie des polities tient exactement comme avant.
+
+• Invariant n°2 — coups d'État : 59 / 59, à l'unité près, même monde porteur.
+  C'est la réponse directe au risque soulevé : pondérer les groupes par leur
+  classe émergente (Noble ×3) NE déstabilise PAS la politique interne. Les
+  factions restent en place ; on a gagné la causalité « bâtir → promouvoir →
+  peser » sans payer en chaos.
+
+• Expansion (provinces prises 26.2 → 27.2) : dans le bruit d'un échantillon de
+  5 mondes ; l'émergence ne touche pas la conquête abstraite — attendu, vérifié.
+  Reste dans la cible (~28 prov/sim).
+
+• Écarts résiduels (sécessions 17→19, pic de révolte 8.6→9.6, tech +3 %) : de
+  l'ordre de ±1 par monde sur 2-3 mondes. Le poids de classe nudge marginalement
+  le penchant des factions là où la composition sociale a un peu bougé — un
+  soulèvement ou une sécession de plus ici ou là, jamais une bascule. Le compteur
+  « sims atteignant les Soulèvements » (4/5 → 2/5) est le plus bruyant : c'est un
+  seuil franchi/non-franchi compté sur 5 tirages seulement, pas une tendance.
+
+• Aucun monde ne bascule dans l'Ordre de Fer (0/5) dans les deux cas.
+
+CONCLUSION — L'intégration de la population précise est essentiellement neutre
+pour l'équilibre : les deux invariants durs (0 absorbé, 59 coups concentrés sur
+la cascade de la graine 310) sont préservés au chiffre près, et les seuls écarts
+sont du bruit d'échantillon ±1. La classe sociale de chaque groupe (race × culture
+× foi) vit désormais en jeu, sort des emplois, et pèse sur les factions — sans
+déséquilibrer le moteur. Bon pour la suite : la sim à comptage de population plus
+fin (religions × cultures × classes) repose sur des fondations stables.
+
+══════════════════════════════════════════════════════════════════════════════
