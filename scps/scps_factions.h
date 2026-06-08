@@ -60,4 +60,27 @@ EthosFaction country_faction_weights(const World *w, const WorldEconomy *econ, i
 /* Variante directe sur un jeu de provinces (bancs d'essai / sous-ensembles). */
 EthosFaction faction_weights_of(const ProvincePop *provs, int n, float out[FAC_COUNT]);
 
+/* ===================================================================== */
+/* L'ÉTHOS EFFECTIF — la résultante que le moteur LIT (§3)                 */
+/* ===================================================================== */
+/* La/les faction(s) dominante(s) fixent les poids w_* EFFECTIFS du pays — la
+ * même grille que la personnalité IA. L'éthos est un équilibre interne qui GLISSE
+ * quand la distribution bouge (conquête, migration). Sort cinq axes [0..~1] :
+ * expand/trade/build/faith/faustian, le Communautaire RETENANT expand & faustian
+ * (le bien-commun bride les aventures). */
+typedef struct { float w_expand, w_trade, w_build, w_faith, w_faustian; } EthosWeights;
+EthosWeights faction_effective_weights(const float weights[FAC_COUNT]);
+
+/* ===================================================================== */
+/* COHÉSION vs FRACTURE DE VALEURS (§6) — la distance interne              */
+/* ===================================================================== */
+/* Un éthos dominant net → COHÉSION (direction claire, friction basse). Deux
+ * factions fortes qui se disputent la tête (45/40) → FRACTURE interne (paralysie,
+ * terreau de coup/guerre civile). Mesure le « contesté » de la direction : 0 si
+ * une faction écrase, →1 si la seconde talonne la première. Parente de D̄, mais
+ * sur les VALEURS — le frein INTERNE à la conquête (avaler des éthos divergents
+ * importe des factions qui s'opposent ; l'incohérence te ligue dedans). */
+float faction_fracture(const float weights[FAC_COUNT]);
+float faction_cohesion(const float weights[FAC_COUNT]);   /* = 1 − fracture */
+
 #endif /* SCPS_FACTIONS_H */

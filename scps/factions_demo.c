@@ -115,6 +115,46 @@ int main(void){
            we[FAC_CONQUERANT] > wl[FAC_CONQUERANT] + 0.05f);
     }
 
+    /* ═══ 5. L'ÉTHOS EFFECTIF (§3) — la résultante que le moteur lit ══════ */
+    printf("\n── 5. L'éthos effectif : la dominante fixe les poids w_* ──\n");
+    {
+        /* Un pays conquérant (orques) vs un pays marchand (halfelins). */
+        float wc[FAC_COUNT], wm[FAC_COUNT];
+        ProvincePop pc; memset(&pc,0,sizeof pc);
+        pc.groups[0]=grp(cult(ETHOS_DOMINATEUR,RACE_ORQUE,CREDO_PLURALISTE),CLASS_ELITE,300);
+        pc.groups[1]=grp(cult(ETHOS_DOMINATEUR,RACE_ORQUE,CREDO_PLURALISTE),CLASS_LABORER,800); pc.n_groups=2;
+        ProvincePop pm; memset(&pm,0,sizeof pm);
+        pm.groups[0]=grp(cult(ETHOS_MERCANTILE,RACE_HALFELIN,CREDO_PLURALISTE),CLASS_LABORER,1000); pm.n_groups=1;
+        faction_weights_of(&pc,1,wc); faction_weights_of(&pm,1,wm);
+        EthosWeights ec=faction_effective_weights(wc), em=faction_effective_weights(wm);
+        printf("   conquérant : w_expand=%.2f w_trade=%.2f | marchand : w_expand=%.2f w_trade=%.2f\n",
+               ec.w_expand, ec.w_trade, em.w_expand, em.w_trade);
+        ok("le pays conquérant a un w_expand effectif PLUS fort que le marchand", ec.w_expand > em.w_expand);
+        ok("le pays marchand a un w_trade effectif PLUS fort que le conquérant", em.w_trade > ec.w_trade);
+    }
+
+    /* ═══ 6. COHÉSION vs FRACTURE DE VALEURS (§6) — le frein interne ══════ */
+    printf("\n── 6. Fracture de valeurs : un empire 45/45 est paralysé, un mono-éthos cohésif ──\n");
+    {
+        /* Mono-éthos : un seul peuple → cohésion (fracture basse). */
+        ProvincePop mono; memset(&mono,0,sizeof mono);
+        mono.groups[0]=grp(cult(ETHOS_BUREAUCRATE,RACE_HUMAIN,CREDO_PLURALISTE),CLASS_LABORER,1000); mono.n_groups=1;
+        float wmono[FAC_COUNT]; faction_weights_of(&mono,1,wmono);
+        /* Deux blocs forts et opposés (Conquérants ~ Marchands) → fracture. */
+        ProvincePop split; memset(&split,0,sizeof split);
+        split.groups[0]=grp(cult(ETHOS_DOMINATEUR,RACE_ORQUE,CREDO_PLURALISTE),CLASS_LABORER,1000);
+        split.groups[1]=grp(cult(ETHOS_MERCANTILE,RACE_HALFELIN,CREDO_PLURALISTE),CLASS_LABORER,1000);
+        split.n_groups=2;
+        float wsplit[FAC_COUNT]; faction_weights_of(&split,1,wsplit);
+        printf("   mono-éthos : fracture %.2f (cohésion %.2f) | bloc 50/50 opposé : fracture %.2f\n",
+               faction_fracture(wmono), faction_cohesion(wmono), faction_fracture(wsplit));
+        ok("un mono-éthos est COHÉSIF (fracture basse)", faction_fracture(wmono) < 0.40f);
+        ok("deux factions fortes et opposées DÉCHIRENT (fracture nettement plus haute)",
+           faction_fracture(wsplit) > 0.45f && faction_fracture(wsplit) > faction_fracture(wmono) + 0.15f);
+        ok("fracture = 1 − cohésion", faction_fracture(wsplit) + faction_cohesion(wsplit) > 0.99f
+                                   && faction_fracture(wsplit) + faction_cohesion(wsplit) < 1.01f);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

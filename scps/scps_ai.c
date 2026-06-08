@@ -12,8 +12,12 @@
 #include "scps_ai.h"
 #include "scps_tech.h"
 #include "scps_species.h"
+#include "scps_factions.h"   /* l'éthos effectif + la fracture de valeurs (frein interne §6) */
 #include <string.h>
 #include <math.h>
+
+#define AI_ETHOS_FRACTURE_W     0.7f  /* poids du frein INTERNE : une politique déchirée se consolide (§6) */
+#define AI_ETHOS_FRACTURE_FLOOR 0.38f /* socle : un mono-éthos a une fracture résiduelle — on ne freine qu'AU-DELÀ */
 
 /* ---- Cadences & calibrage --------------------------------------------- */
 #define AI_ECON_CADENCE   550    /* ~1.5 an entre décisions éco/bâti        */
@@ -124,6 +128,12 @@ AiView ai_observe(const WorldProsperity *wp, const World *w,
     }
     v.armee = diplo_mil_power(w, econ, cid);
 
+    /* Fracture de VALEURS (§6) : si deux factions-éthos opposées se disputent la
+     * direction du pays, la politique se déchire (paralysie interne). Lu de la
+     * distribution de factions enracinée dans les peuples du pays. */
+    { float fw[FAC_COUNT]; country_faction_weights(w, econ, cid, fw);
+      v.ethos_fracture = faction_fracture(fw); }
+
     /* ── PERCEPTION DES BESOINS — ce qui MANQUE (l'IA était aveugle à tout ça) ──
      * Lu des MÊMES données que la membrane montre au joueur : capacités d'extraction,
      * stocks, demande/offre agrégées du pays. Aucune omniscience sur l'ennemi. */
@@ -178,7 +188,14 @@ float ai_consolidation_pressure(const AiView *v){
     float surext  = clampf(v->Dinf_interne / fmaxf(v->K, 1.f) - 1.f, 0.f, 1.f);
     /* tendu : l'ordre tient surtout par la contrainte (fragilité haute). */
     float tendu   = clampf((v->fragilite - 5.f)/5.f, 0.f, 1.f);
-    float p = fragile; if (surext>p) p=surext; if (tendu>p) p=tendu;
+    /* déchiré : deux factions-éthos opposées paralysent la direction (§6) — un frein
+     * INTERNE, sœur de la surextension culturelle : la surexpansion ligue le monde
+     * dehors, l'incohérence d'éthos te ligue dedans. PLANCHER : un mono-éthos garde
+     * une fracture résiduelle (les penchants s'étalent) — seule la fracture AU-DELÀ
+     * de ce socle (avaler des éthos divergents) freine, pas la cohésion ordinaire. */
+    float dechire = clampf((v->ethos_fracture - AI_ETHOS_FRACTURE_FLOOR)
+                           / (1.f - AI_ETHOS_FRACTURE_FLOOR), 0.f, 1.f) * AI_ETHOS_FRACTURE_W;
+    float p = fragile; if (surext>p) p=surext; if (tendu>p) p=tendu; if (dechire>p) p=dechire;
     return clampf(p, 0.f, 1.f);
 }
 

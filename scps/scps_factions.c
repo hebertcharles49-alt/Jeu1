@@ -97,3 +97,35 @@ EthosFaction country_faction_weights(const World *w, const WorldEconomy *econ, i
     (void)w;
     return finalize(acc, out);
 }
+
+/* ---- L'éthos effectif (§3) : la distribution → les cinq axes w_* ------- */
+EthosWeights faction_effective_weights(const float w[FAC_COUNT]){
+    EthosWeights e;
+    /* Chaque axe = la part de sa faction. Le Communautaire RETIENT les aventures
+     * (il bride expand & faustian — le bien-commun contre l'extraction/la guerre). */
+    float restraint = w[FAC_COMMUNAUTAIRE];
+    e.w_expand   = w[FAC_CONQUERANT]    * (1.f - 0.6f*restraint);
+    e.w_trade    = w[FAC_MARCHAND];
+    e.w_build    = w[FAC_LEGISTE];
+    e.w_faith    = w[FAC_GARDIEN];
+    e.w_faustian = w[FAC_TRANSGRESSEUR] * (1.f - 0.6f*restraint);
+    return e;
+}
+
+/* ---- Cohésion vs fracture de valeurs (§6) ----------------------------- */
+float faction_fracture(const float w[FAC_COUNT]){
+    /* « Contesté » de la direction : la seconde faction talonne-t-elle la première ?
+     * Une tête écrasante → 0 ; deux fortes au coude-à-coude (45/40) → ~1. Pondéré
+     * par le poids cumulé des deux têtes (une paralysie de nains ne paralyse rien). */
+    float s1=0.f, s2=0.f;
+    for (int f=0; f<FAC_COUNT; f++){
+        if (w[f] > s1){ s2=s1; s1=w[f]; }
+        else if (w[f] > s2){ s2=w[f]; }
+    }
+    if (s1 <= 0.f) return 0.f;
+    float contested = s2 / s1;            /* 0 (tête seule) .. 1 (au coude-à-coude) */
+    float mass      = s1 + s2;            /* la dispute doit peser dans le pays */
+    float fr = contested * mass;
+    return fr<0.f ? 0.f : (fr>1.f ? 1.f : fr);
+}
+float faction_cohesion(const float w[FAC_COUNT]){ return 1.f - faction_fracture(w); }

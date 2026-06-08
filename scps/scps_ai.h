@@ -53,6 +53,7 @@ typedef struct {
     Resource strat_gap;  /* matière stratégique absente du pays (salpêtre/fer céleste/cristal) */
     float    gap_acuity; /* gravité agrégée du manque [0..1] */
     float    take_pressure; /* acuité d'un bien NON-productible localement → ne reste que PRENDRE/COMMERCER [0..1] */
+    float    ethos_fracture; /* fracture de VALEURS interne (factions opposées) [0..1] — frein interne (§6) */
 } AiView;
 
 /* ---- Compteurs (preuve d'émergence : on tally par acteur) ------------------ */
