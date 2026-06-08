@@ -236,3 +236,30 @@ const char *campaign_phase_name(FieldPhase ph){
         default:       return "?";
     }
 }
+
+ArmyComposition campaign_composition(const Campaign *c, int o){
+    ArmyComposition z; memset(&z,0,sizeof z);
+    if (o<0 || o>=SCPS_MAX_COUNTRY) return z;
+    const ArmyState *a=&c->army[o].force;
+    for (int i=0;i<a->n_units;i++){
+        long n=a->units[i].count; if (n<=0) continue;
+        switch (a->units[i].type){
+            case U_PIQUIER: case U_LANCIER: case U_EPEISTE:   z.infanterie+=n; break;
+            case U_ARCHER:  case U_ARBALETE:                  z.archers   +=n; break;
+            case U_CAV_LEGERE: case U_CAV_LOURDE:             z.cavalerie +=n; break;
+            case U_MAGE:                                      z.mages     +=n; break;
+            default: break;
+        }
+        z.total+=n;
+    }
+    return z;
+}
+
+const char *army_host_word(long paquets){
+    if (paquets<=0)   return "—";
+    if (paquets<8)    return "éclaireurs";   /* une poignée */
+    if (paquets<25)   return "détachement";
+    if (paquets<70)   return "troupe";
+    if (paquets<160)  return "armée";
+    return "horde";                          /* une marée */
+}

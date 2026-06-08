@@ -22,6 +22,7 @@
 #include "scps_campaign.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int g_pass=0,g_fail=0;
 static void ok(const char*w,bool c){ printf("   %s %s\n",c?"✓":"✗",w); if(c)g_pass++; else g_fail++; }
@@ -129,6 +130,18 @@ int main(int argc,char**argv){
     ok("les phases ont des noms diégétiques distincts (repos / marche / siège)",
        campaign_phase_name(FA_MARCH)[0] && campaign_phase_name(FA_SIEGE)[0] &&
        campaign_phase_name(FA_IDLE)[0]);
+    /* composition par grand type d'arme (survol UI §4) + mot de taille (asymétrie). */
+    campaign_init(camp, w, econ);
+    ArmyState mix = make_force(20,15,8);              /* 20 inf, 8 cav ; +archers à la main */
+    mix.units[mix.n_units].type=U_ARCHER; mix.units[mix.n_units].count=5; mix.n_units++;
+    campaign_order(camp, econ, A, frontier, target, &mix);
+    ArmyComposition cp = campaign_composition(camp, A);
+    printf("   composition : %ld inf · %ld arch · %ld cav · %ld mages (total %ld) — taille « %s »\n",
+           cp.infanterie, cp.archers, cp.cavalerie, cp.mages, cp.total, army_host_word(cp.total));
+    ok("la composition se range par grand type d'arme (inf 35, arch 5, cav 8)",
+       cp.infanterie==35 && cp.archers==5 && cp.cavalerie==8 && cp.total==48);
+    ok("le mot de taille grandit avec les effectifs (asymétrie d'info ennemie)",
+       army_host_word(3)[0] && strcmp(army_host_word(5), army_host_word(200))!=0);
 
 done:
     printf("\n══════════════════════════════════════════════════════════════\n");

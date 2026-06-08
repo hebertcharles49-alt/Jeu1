@@ -85,4 +85,13 @@ long        campaign_units        (const Campaign *c, int owner);  /* paquets de
 int         campaign_taken        (const Campaign *c, int owner);  /* régions réduites */
 const char *campaign_phase_name   (FieldPhase ph);
 
+/* Composition d'une armée par GRAND TYPE d'arme (paquets de 100) — pour le survol
+ * de l'UI §4 (« cav / inf / arch »). Tangible, jamais de coordonnée SCPS. */
+typedef struct { long infanterie, archers, cavalerie, mages, total; } ArmyComposition;
+ArmyComposition campaign_composition(const Campaign *c, int owner);
+
+/* Mot de TAILLE d'une troupe (asymétrie d'information : on montre ce MOT pour une
+ * armée ennemie, pas son décompte exact). « éclaireurs » → « horde ». */
+const char *army_host_word(long paquets);
+
 #endif /* SCPS_CAMPAIGN_H */
