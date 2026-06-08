@@ -223,7 +223,7 @@ static int colonized_provinces(const World *w, const WorldEconomy *e){
 
 int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
-    int nsims     = (argc>2)?atoi(argv[2]):11;   /* sim i : 2+i empires, 5+i cités (2→12 / 5→15) */
+    int nsims     = (argc>2)?atoi(argv[2]):10;   /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
     int years     = (argc>3)?atoi(argv[3]):200;
     if (nsims<1) nsims=1;
     if (years<1) years=1;

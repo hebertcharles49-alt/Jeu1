@@ -37,6 +37,9 @@ static inline float absf(float v){return v<0?-v:v;}
 #define CLAIM_ILLEGIT_MOM 2.0f  /* surcroît de fulgurance par prise ILLÉGITIME (→ coalition) */
 #define REP_MIN_SCORE     20.f  /* en-deçà de ce score : match nul → aucune indemnité */
 #define REP_RATE          0.5f  /* part max du trésor du perdant exigée (à 100 de score) */
+/* ---- Esclavage (§4c) -------------------------------------------------- */
+#define SLAVE_FRACTION    0.25f         /* part de la population prise déportée en captivité */
+#define SLAVE_DRIFT_BASE  800000        /* plage de drift_id réservée aux groupes d'esclaves */
 /* ---- Rancune nationale (§6) ------------------------------------------ */
 #define RANCOR_PER_LOSS   1.0f          /* grief par province PERDUE (irrédentisme) */
 #define RANCOR_ILLEGIT    1.0f          /* surcroît si la prise fut ILLÉGITIME (agression nue) */
@@ -269,7 +272,45 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     int dst=-1, cp=w->country[conqueror].capital_prov;
     if (cp>=0 && cp<w->n_provinces) dst=w->province[cp].region;
     diplo_pillage_region(econ, region, dst);
+    diplo_enslave_capture(w, econ, conqueror, region);   /* §4c esclavage (gate provisoire) */
     return true;
+}
+
+/* ---- guerre : ESCLAVAGE (§4c) — déporter la population prise ----------- *
+ * Gate PROVISOIRE : une société de RAZZIA (traditions prédatrices). La tech
+ * d'asservissement arrive au prochain jet → on la branchera ICI (un || de plus). */
+static bool society_enslaves(const PopCulture *pc){
+    return pc && (pc->martial==MART_HORDE_MONTEE ||
+                  pc->martial==MART_RAZZIA_MARITIME ||
+                  pc->martial==MART_THALASSO_PREDATRICE);
+}
+long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region){
+    if (conqueror<0||conqueror>=w->n_countries||region<0||region>=econ->n_regions) return 0;
+    if (!society_enslaves(cap_culture(w,econ,conqueror))) return 0;   /* société non-asservissante */
+    int cp=w->country[conqueror].capital_prov;
+    int crr=(cp>=0&&cp<w->n_provinces)? w->province[cp].region : -1;
+    if (crr<0||crr>=econ->n_regions||crr==region) return 0;
+    ProvincePop *src=&econ->region[region].pop, *dst=&econ->region[crr].pop;
+    /* les captifs sortent du plus GROS groupe de la province prise. */
+    int gi=-1; long best=0;
+    for (int i=0;i<src->n_groups;i++) if (src->groups[i].count>best){ best=src->groups[i].count; gi=i; }
+    if (gi<0) return 0;                              /* province non groupée → rien à déporter ici */
+    long captives=(long)((float)src->groups[gi].count*SLAVE_FRACTION);
+    if (captives<=0) return 0;
+    /* le cœur doit DÉJÀ être représenté en groupes : injecter dans une région
+     * mono-groupe (n_groups=0) masquerait sa population native (repli ignoré dès
+     * n_groups>0). Pas de place libre non plus → on renonce. */
+    if (dst->n_groups<1 || dst->n_groups>=SCPS_MAX_GROUPS) return 0;
+    /* déportation au CŒUR : on crée un cohorte DIASPORA non-intégrée (restive) de
+     * culture étrangère → le D̄ du maître monte (la fracture s'installe au centre).
+     * Toujours DISTINCTE (jamais fondue dans un groupe libre co-culturel). */
+    PopGroup ng=src->groups[gi];                      /* garde race/culture/origine */
+    ng.count=captives; ng.diaspora=true; ng.integration=0.f;
+    ng.drift_id=SLAVE_DRIFT_BASE + region*SCPS_MAX_GROUPS + dst->n_groups;
+    dst->groups[dst->n_groups++]=ng;
+    src->groups[gi].count-=captives;
+    if (src->groups[gi].count<=0){ src->groups[gi]=src->groups[src->n_groups-1]; src->n_groups--; }
+    return captives;
 }
 
 /* ---- guerre : SACCAGE (§4) — dépouiller la province prise -------------- */

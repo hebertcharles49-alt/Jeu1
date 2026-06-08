@@ -20,6 +20,7 @@
 #include "scps_diplo.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int g_pass=0,g_fail=0;
 static void ok(const char*w,bool c){ printf("   %s %s\n",c?"✓":"✗",w); if(c)g_pass++; else g_fail++; }
@@ -386,6 +387,43 @@ int main(int argc,char**argv){
                    rancor_illegit >= rancor_loss + 0.9f);
             } else ok("(pas assez de provinces pour la rancune de conquête)", true);
         }
+    }
+
+    /* ---- 9. Esclavage (§4c) : déportation → groupe restif au cœur (D̄↑) ---- */
+    printf("\n── 9. Esclavage (déportation → groupe restif au cœur · D̄↑) ──\n");
+    {
+        int A=player;
+        int capR=(w->country[A].capital_prov>=0)? w->province[w->country[A].capital_prov].region : -1;
+        int srcR=-1; for(int r=0;r<econ->n_regions;r++) if(r!=capR){ srcR=r; break; }
+        if(capR>=0 && srcR>=0){
+            /* Le banc tourne en mono-groupe : on PEUPLE explicitement le cœur (natifs)
+             * et une province source (un groupe ÉTRANGER — des orques). */
+            PopGroup nat; memset(&nat,0,sizeof nat);
+            nat.race=RACE_HUMAIN; nat.klass=CLASS_BOURGEOIS; nat.count=8000;
+            nat.integration=1.f; nat.L=6.f; nat.drift_id=111; nat.origin_sphere=species_sphere(RACE_HUMAIN);
+            econ->region[capR].pop.n_groups=1; econ->region[capR].pop.groups[0]=nat;
+            PopGroup foe; memset(&foe,0,sizeof foe);
+            foe.race=RACE_ORQUE; foe.klass=CLASS_LABORER; foe.count=4000;
+            foe.integration=1.f; foe.L=5.f; foe.drift_id=222; foe.origin_sphere=species_sphere(RACE_ORQUE);
+            econ->region[srcR].pop.n_groups=1; econ->region[srcR].pop.groups[0]=foe;
+
+            econ->region[capR].culture.martial=MART_THALASSO_PREDATRICE;   /* société de RAZZIA */
+            long captives=diplo_enslave_capture(w,econ,A,srcR);
+            printf("   captifs déportés au cœur : %ld (sur 4000)\n",captives);
+            ok("une société de razzia DÉPORTE une part (≈¼) de la population prise",
+               captives>0 && captives<=1100);
+            ok("la capitale gagne un GROUPE de plus — les captifs au cœur",
+               econ->region[capR].pop.n_groups==2);
+            PopGroup *g=&econ->region[capR].pop.groups[econ->region[capR].pop.n_groups-1];
+            ok("le groupe d'esclaves est RESTIF (non-intégré + diaspora → D̄↑ au centre)",
+               g->integration<0.01f && g->diaspora && g->race==RACE_ORQUE);
+            ok("la province prise PERD la population déportée",
+               econ->region[srcR].pop.groups[0].count < 4000);
+            /* GATE : une société NON-prédatrice n'asservit personne. */
+            econ->region[capR].culture.martial=MART_MUR_BOUCLIERS;
+            ok("une société NON-asservissante ne capture personne (gate PROVISOIRE — tech à venir)",
+               diplo_enslave_capture(w,econ,A,srcR)==0);
+        } else ok("(monde trop petit pour le test d'esclavage)", true);
     }
 
     printf("\n══════════════════════════════════════════════════════════════\n");

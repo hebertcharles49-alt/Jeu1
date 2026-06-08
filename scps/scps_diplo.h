@@ -110,6 +110,14 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
  * Appelé automatiquement par diplo_conquer_region ; exposé pour le banc d'essai. */
 float diplo_pillage_region(WorldEconomy *econ, int region, int dst_region);
 
+/* ESCLAVAGE (§4c) — une société ASSERVISSANTE déporte une part de la population
+ * prise vers son CŒUR (capitale) : un groupe DIASPORA non-intégré (restif) de
+ * culture étrangère → le D̄ du maître monte, la fracture s'installe au centre.
+ * Renvoie le nombre de captifs ; 0 si la société n'asservit pas. Gate PROVISOIRE
+ * (tradition de razzia) — la tech d'asservissement se branchera ici. Appelé par
+ * diplo_conquer_region ; exposé pour le banc d'essai. */
+long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region);
+
 void diplo_tick(DiploState *d, float dt);   /* usure de guerre (war_years++) + trêve/momentum */
 
 /* ---- SCORE DE GUERRE (§2) — le bras-de-fer, à ticker chaque an ---------- *
