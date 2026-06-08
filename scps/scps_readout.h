@@ -44,6 +44,11 @@ typedef enum { HU_REVOLTEE, HU_FRONDEUSE, HU_TIEDE, HU_LOYALE, HU_DEVOUEE }     
 typedef enum { LI_MEME_SANG, LI_COUSINE, LI_SOEUR_LOINTAINE, LI_ETRANGERE,
                LI_HERETIQUE_PROCHE, LI_INASSIMILABLE }                            BandLignee;
 typedef enum { AG_CALME, AG_FREMISSANTE, AG_AGITEE, AG_INSURGEE }                 BandAgitation;
+/* Humeur de FOI de la province face au culte du trône (passe religion §7).
+ * Dévote : même branche sacrée, doctrine proche, ferveur — le troupeau fidèle.
+ * Tiède : même branche mais dérive doctrinale, ou indifférence pluraliste.
+ * Hérétique : foi étrangère, ou schisme du même tronc devenu inconciliable. */
+typedef enum { FOI_DEVOTE, FOI_TIEDE, FOI_HERETIQUE }                             BandFoi;
 
 /* ===================================================================== */
 /* MÉTRIQUE 0-100 — le NOMBRE de jeu (projection d'une coordonnée cachée) */
@@ -97,6 +102,7 @@ typedef struct {
     BandCarrefour carrefour;   /* CF_NONE si pas un pôle */
     BandHumeur    humeur;
     BandLignee    lignee;
+    BandFoi       foi;         /* humeur religieuse face au culte du trône */
     bool          diaspora;
     MetricReadout agitation;   /* 0-100 : L bas + coercition + tension de diversité */
     bool          seuil_revolte;/* l'agitation a franchi le seuil de révolte */
@@ -128,6 +134,8 @@ BandHumeur   band_humeur(float L_local);
 /* Lignée : horloge (cousinage) ET contenu (friction), + schisme religieux. */
 BandLignee   band_lignee(float clock_dist, float content_dist, bool religious_schism);
 BandAgitation band_agitation(int agitation_0_100);
+/* Foi : disposition religieuse de la province face au culte du trône. */
+BandFoi      band_foi(bool same_branch, float religion_dist, bool schism, bool region_fervent);
 
 /* ===================================================================== */
 /* PROJECTIONS — coordonnée NUE [0..10] → métrique de jeu [0..100]        */
@@ -241,5 +249,6 @@ const char *label_carrefour(BandCarrefour b); const char *hover_carrefour(void);
 const char *label_humeur(BandHumeur b);    const char *hover_humeur(void);
 const char *label_lignee(BandLignee b);    const char *hover_lignee(void);
 const char *label_agitation(BandAgitation b); const char *hover_agitation(void);
+const char *label_foi(BandFoi b);          const char *hover_foi(void);
 
 #endif /* SCPS_READOUT_H */

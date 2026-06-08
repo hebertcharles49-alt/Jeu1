@@ -100,6 +100,16 @@ BandLignee band_lignee(float clock_dist, float content_dist, bool schism) {
     if (!clock_near &&  content_near) return LI_SOEUR_LOINTAINE;/* horloge loin, contenu jumeau */
     return LI_ETRANGERE;
 }
+BandFoi band_foi(bool same_branch, float religion_dist, bool schism, bool region_fervent) {
+    /* La FOI de la province face au culte du trône. Le schisme — cousin du même
+     * tronc devenu inconciliable — fait pire qu'une foi étrangère (narcissisme
+     * des petites différences). La ferveur fait le DÉVOT : un pluraliste aligné
+     * reste tiède (il ne s'embrase pour aucun dogme). */
+    if (!same_branch)            return FOI_HERETIQUE;  /* branche sacrée étrangère */
+    if (schism)                  return FOI_HERETIQUE;  /* rupture doctrinale ouverte */
+    if (religion_dist < 2.0f && region_fervent) return FOI_DEVOTE;
+    return FOI_TIEDE;
+}
 
 /* ===================================================================== */
 /* PROJECTIONS — coordonnée [0..10] → métrique [0..100]                   */
@@ -220,6 +230,7 @@ LBL(label_humeur,   BandHumeur,   "Révoltée","Frondeuse","Tiède","Loyale","D�
 LBL(label_lignee,   BandLignee,   "Du même sang","Cousine","Sœur lointaine","Étrangère",
                                   "Hérétique proche","Inassimilable")
 LBL(label_agitation,BandAgitation,"Calme","Frémissante","Agitée","Insurgée")
+LBL(label_foi,      BandFoi,      "Dévote","Tiède","Hérétique")
 #undef LBL
 
 /* ===================================================================== */
@@ -253,6 +264,8 @@ const char *hover_lignee(void){ return
     "Ce qui la lie à la culture du trône ; le même sang se gouverne aisément, l'inassimilable jamais sans la force."; }
 const char *hover_agitation(void){ return
     "La colère qui monte dans la province ; soutenue, elle vire à la révolte — qu'apaisent la stabilité du royaume, la garnison et la légitimité."; }
+const char *hover_foi(void){ return
+    "La ferveur de la province envers le culte du trône ; dévote, elle nourrit la légitimité sacrée — hérétique, elle couve le schisme."; }
 
 /* ===================================================================== */
 /* ENVELOPPES SIM — lisent les sorties STOCKÉES, jamais scps_core         */
@@ -391,8 +404,10 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
         float dr = rc->religion - ruling->religion; if (dr < 0) dr = -dr;
         bool schism = same_branch && both_zealous && dr < 4.f;
         pr.lignee = band_lignee(clock, content, schism);
+        pr.foi    = band_foi(same_branch, dr, schism, rc->credo != CREDO_PLURALISTE);
     } else {
         pr.lignee = LI_MEME_SANG;
+        pr.foi    = FOI_TIEDE;
     }
 
     /* Agitation (0-100) : L bas + coercition + tension de diversité (lignée

@@ -98,6 +98,7 @@ int main(void) {
     COVER(label_humeur,   hover_humeur,   5);
     COVER(label_lignee,   hover_lignee,   6);
     COVER(label_agitation,hover_agitation,4);
+    COVER(label_foi,      hover_foi,      3);
     #undef COVER
     ok("chaque bande a un mot ET une définition non vides", all_labeled);
 
@@ -111,6 +112,16 @@ int main(void) {
     AllegeanceReadout schism = allegeance_from_floats(6.f, 1.f, 1.f, /*schism*/true);
     ok("schisme religieux proche → « Hérétique proche »",
        schism.lignee == LI_HERETIQUE_PROCHE);
+    /* Humeur de FOI : même branche + doctrine proche + ferveur → Dévote ;
+     * branche étrangère ou schisme → Hérétique ; pluraliste aligné → Tiède. */
+    ok("même branche, doctrine proche, ferveur → Foi « Dévote »",
+       band_foi(/*same*/true, /*dist*/1.f, /*schism*/false, /*fervent*/true) == FOI_DEVOTE);
+    ok("branche sacrée étrangère → Foi « Hérétique »",
+       band_foi(/*same*/false, 1.f, false, true) == FOI_HERETIQUE);
+    ok("schisme du même tronc → Foi « Hérétique » (pire que l'infidèle lointain)",
+       band_foi(true, 1.f, /*schism*/true, true) == FOI_HERETIQUE);
+    ok("pluraliste aligné → Foi « Tiède » (il ne s'embrase pour aucun dogme)",
+       band_foi(true, 1.f, false, /*fervent*/false) == FOI_TIEDE);
     printf("     ex. province frondeuse, lignée étrangère : Humeur=%s Lignée=%s\n",
            label_humeur(allegeance_from_floats(3.f,4.f,4.f,false).humeur),
            label_lignee(LI_ETRANGERE));

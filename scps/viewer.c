@@ -639,6 +639,7 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     ui_section(ren, x, &y, "ALLÉGEANCE");
     ui_row(ren,x,&y,rw,"Humeur", label_humeur(p.humeur), band_good(p.humeur,5,true), hover_humeur());
     ui_row(ren,x,&y,rw,"Lignée", label_lignee(p.lignee), band_good(p.lignee,6,false), hover_lignee());
+    ui_row(ren,x,&y,rw,"Foi", label_foi(p.foi), band_good(p.foi,3,false), hover_foi());
     snprintf(line,sizeof line, "%d", p.agitation.value);
     ui_row(ren,x,&y,rw,"Agitation", line, band_good(band_agitation(p.agitation.value),4,false), hover_agitation());
     if (p.seuil_revolte) {
