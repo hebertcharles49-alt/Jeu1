@@ -450,30 +450,61 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
 const char *label_tree_state(TreeState s){
     switch(s){ case TREE_DONE: return "acquis"; case TREE_OPEN: return "disponible"; default: return "verrouillé"; }
 }
-/* L'EFFET d'un nœud, en mots DIÉGÉTIQUES (lu de son rôle : thème × fonction ×
- * faustien) — JAMAIS un nom de coordonnée SCPS. Le faustien prévient, en mots de
- * jeu, qu'il rapproche la Brèche / appelle la catastrophe. */
-static const char *tree_effect(const TechNode *n){
-    if (n->faustian){
-        if (n->func==FN_ARMEE)        return "⚠ pouvoir interdit : une puissance fulgurante, mais la Brèche se rapproche";
-        if (n->func==FN_RENFORCEMENT) return "⚠ savoir interdit : un grand pouvoir, mais la Brèche se rapproche";
-        return "⚠ faustien : une grande puissance, au prix de la catastrophe qui vient";
-    }
-    switch(n->theme){
-        case THM_SAVOIR:
-            if (n->func==FN_PRODUCTION)   return "accélère la recherche";
-            if (n->func==FN_ARMEE)        return "magie de guerre : renforce l'armée";
-            return "arcane protectrice : aide à tenir un royaume de peuples divers";
-        case THM_FORGE:
-            if (n->func==FN_PRODUCTION)   return "augmente la production (le multiplicateur de rendement)";
-            if (n->func==FN_ARMEE)        return "forge des armes : renforce l'armée";
-            return "fortifie : durabilité et défense";
-        default: /* THM_SOCIETE */
-            if (n->func==FN_PRODUCTION)   return "croissance, commerce et impôt (la prospérité)";
-            if (n->func==FN_ARMEE)        return "lève et organise les armées";
-            return "consolide l'ordre (justice, foi, intégration) — la seule voie qui encaisse le faustien";
-    }
-}
+/* L'UTILITÉ CONCRÈTE de chaque bâtiment, en mots de jeu — ce qu'il PERMET ou
+ * FOURNIT (production d'une ressource, logements, services, recrutement, défense,
+ * recherche…), pas une coordonnée SCPS. Le faustien annonce son revers ÉVIDENT :
+ * il rapproche la Brèche. Indexé par TechId (robuste au réordonnancement). */
+static const char *const TECH_UTILITY[TECH_COUNT] = {
+    /* Savoir · Production — la recherche */
+    [TECH_BIBLIOTHEQUE]      = "+recherche (le socle du savoir)",
+    [TECH_SCRIPTORIUM]       = "+recherche",
+    [TECH_ACADEMIE]          = "+recherche (vitesse accrue)",
+    [TECH_UNIVERSITE]        = "+recherche (vitesse maximale)",
+    /* Savoir · Armée — la magie de guerre */
+    [TECH_SAVOIR_GUERRE]     = "+armée (doctrine de guerre)",
+    [TECH_MAGIE_BATAILLE]    = "+armée (mages de combat)",
+    [TECH_INVOCATION]        = "armée invoquée, sans population ⚠ rapproche la Brèche",
+    [TECH_EVEIL]             = "⚠ armée invoquée massive — déclenche la crise de fin",
+    /* Savoir · Renforcement — l'arcane protectrice */
+    [TECH_WARDS]             = "+défense (protections runiques)",
+    [TECH_SCRYING]           = "+stabilité (vision lointaine)",
+    [TECH_COMMUNION]         = "+cohésion (l'harmonie des peuples)",
+    [TECH_SAVOIR_INTERDIT]   = "⚠ grand pouvoir interdit — rapproche la Brèche",
+    /* Forge · Production — extraction & rendement */
+    [TECH_COLLECTE_BOIS]     = "permet la production de bois",
+    [TECH_COLLECTE_ARGILE]   = "permet la production d'argile",
+    [TECH_FONDERIE]          = "permet la production de métal (fer, acier)",
+    [TECH_OUTILLAGE]         = "+production (multiplicateur de rendement)",
+    [TECH_MANUFACTURE]       = "+production (biens manufacturés)",
+    [TECH_INDUSTRIE]         = "+production de masse",
+    /* Forge · Armée — l'armement */
+    [TECH_ARMURERIE]         = "permet la production d'armes",
+    [TECH_POUDRIERE]         = "permet la production de poudre à canon",
+    [TECH_FORGE_RUNES]       = "permet les armes enchantées ⚠ rapproche la Brèche",
+    [TECH_OEUVRE_NOIRE]      = "⚠ armes terribles — rapproche la Brèche",
+    /* Forge · Renforcement — construction & défense */
+    [TECH_ATELIER]           = "permet de bâtir (chantiers de construction)",
+    [TECH_QUALITE_MATERIAUX] = "+durabilité des bâtiments (béton → marbre)",
+    [TECH_FORTIFICATIONS]    = "+défense (forteresse → citadelle)",
+    [TECH_AUTOMATES]         = "+défense & production (golems) ⚠ rapproche la Brèche",
+    /* Société · Production — vivres, commerce, impôt */
+    [TECH_COLLECTE_NOURRITURE]= "permet la production de nourriture",
+    [TECH_IRRIGATION]        = "+nourriture & +logements (greniers)",
+    [TECH_COMMERCE]          = "+or (commerce, marché, banque)",
+    [TECH_CADASTRE]          = "+or (l'impôt)",
+    [TECH_ABONDANCE]         = "+croissance & +or (l'abondance halfeline)",
+    /* Société · Armée — la levée */
+    [TECH_CASERNE]           = "permet de recruter de l'infanterie",
+    [TECH_CONSCRIPTION]      = "+armée (la levée en masse)",
+    [TECH_ORGANISATION]      = "+armée (organisation militaire)",
+    [TECH_ESCLAVAGE]         = "main-d'œuvre & armées serviles ⚠ fracture interne",
+    [TECH_CASTE_MARTIALE]    = "⚠ +armée (caste guerrière) — rapproche la Brèche",
+    /* Société · Renforcement — services, foi, intégration */
+    [TECH_CHANCELLERIE]      = "+services (administration) & +stabilité",
+    [TECH_FOI]               = "+légitimité & services religieux (temple → cathédrale)",
+    [TECH_INTEGRATION]       = "+cohésion (l'assimilation des peuples)",
+    [TECH_CULTE_IMPERIAL]    = "⚠ +cohésion forcée — rapproche la Brèche",
+};
 void tech_tree_readout(const TechState *ts, unsigned race_access, float population,
                        TechTreeReadout *out){
     if (!out) return;
@@ -492,7 +523,7 @@ void tech_tree_readout(const TechState *ts, unsigned race_access, float populati
         nr->is_base  = tech_is_base((TechId)i);
         nr->name     = n->name;
         nr->unlocks  = n->unlocks;
-        nr->effet    = tree_effect(n);
+        nr->effet    = TECH_UTILITY[i] ? TECH_UTILITY[i] : n->unlocks;   /* l'utilité concrète */
         nr->cost     = (int)(tech_cost((TechId)i, population) + 0.5f);
         bool done = ts && ts->unlocked[i];
         bool open = ts && tech_can_research(ts, (TechId)i, race_access);

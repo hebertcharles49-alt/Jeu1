@@ -272,9 +272,12 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
             int lw=text_w(g_font_small,nd->name);
             draw_text(ren,g_font_small, x-lw/2, y+sz+1, lc, nd->name);
         }
-        /* l'EFFET, le coût et l'état précis viennent du SURVOL (zone de hover) */
-        snprintf(g_tree_hov[i],sizeof g_tree_hov[i], "%s — déverrouille %s · %s · coût %d pts (%s%s)",
-                 nd->name, nd->unlocks, nd->effet, nd->cost, label_tree_state(nd->state),
+        /* SURVOL : le bâtiment + son UTILITÉ concrète, le coût et l'état */
+        snprintf(g_tree_hov[i],sizeof g_tree_hov[i], "%s%s%s — %s · coût %d pts (%s%s)",
+                 nd->name,
+                 strcmp(nd->name,nd->unlocks)? " · bâtit " : "",
+                 strcmp(nd->name,nd->unlocks)? nd->unlocks : "",
+                 nd->effet, nd->cost, label_tree_state(nd->state),
                  nd->orphan? ", orpheline : greffe par la population" : "");
         zone_add((SDL_Rect){x-sz-3,y-sz-3,sz*2+6,sz*2+6}, g_tree_hov[i]);
         if (nd->faustian && (g_tree_demo<0 || nd->state==TREE_DONE)) g_tree_demo=i;  /* un faustien pour la démo */
