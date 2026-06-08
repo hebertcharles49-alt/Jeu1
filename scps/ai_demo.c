@@ -277,11 +277,11 @@ int main(int argc, char **argv){
            rg>=0 && expand_after > expand_before + 0.01f);
     }
 
-    /* ---- COUP DE GRÂCE : la capitale coûte le DOUBLE (score de guerre) ----- *
-     * Un croupion R de 2 régions, désarmé, au contact du Dominateur. Sous un
-     * score de guerre ordinaire, la paix proportionnelle ÉPARGNE sa capitale ;
-     * à score ÉCRASANT (occupation décisive), le Dominateur l'ARRACHE → R absorbé. */
-    printf("\n── Vérification : annexer la DERNIÈRE région (capitale) exige une domination écrasante ──\n");
+    /* ---- §5 COMBAT : le SCORE DE GUERRE est un BUDGET, la province a un PRIX ---- *
+     * Un croupion R de 2 régions, désarmé, au contact du Dominateur. Un budget
+     * marginal n'achète rien (provinces trop chères → R survit) ; un budget écrasant
+     * (≥ valeur totale du pays) annexe R. Un cœur développé coûte plus qu'un bled. */
+    printf("\n── Vérification : le score de guerre est un BUDGET, la province a un PRIX (§5) ──\n");
     {
         /* On soigne le Dominateur (K haut, bien armé) : le frein ne le fige pas. */
         s.ts[cidD].K=12.f;
@@ -322,36 +322,49 @@ int main(int argc, char **argv){
         prosperity_tick(s.wp,s.w,s.econ,s.net,s.ts,s.wl);
         ok("croupion R planté : 2 régions désarmées au contact du Dominateur", rcount==2);
 
-        /* (gate) La capitale coûte le DOUBLE : la revendication (∝ domination) doit
-         * couvrir le déjà-pris + 2. Désarmé → revendication large ; bien défendu → minime. */
-        diplo_init(s.dp); diplo_declare_war_cb(s.dp, cidD, R, CB_TERRITORIAL);
-        int claim_weak = diplo_war_claim(s.dp, s.w, s.econ, cidD, R);
-        ok("contre un croupion désarmé, la revendication couvre le surcoût de la capitale (≥2)",
-           claim_weak >= 2);
-        for (int i=0;i<2;i++){ RegionEconomy *re=&s.econ->region[rr[i]];
-            re->stock[RES_ARMS]=600.f; re->build.H_coerc=24.f; re->strata[CLASS_LABORER].pop=4000.f; }
-        int claim_armed = diplo_war_claim(s.dp, s.w, s.econ, cidD, R);
-        ok("contre une capitale BIEN DÉFENDUE, la revendication ne couvre PAS le surcoût (<2) → épargnée",
-           claim_armed < 2);
-        for (int i=0;i<2;i++){ RegionEconomy *re=&s.econ->region[rr[i]];   /* on re-désarme pour l'annexion */
-            re->stock[RES_ARMS]=0.f; re->build.H_coerc=0.f; re->strata[CLASS_LABORER].pop=40.f; }
+        /* (prix) une province DÉVELOPPÉE coûte plus cher qu'un arrière-pays nu. */
+        RegionEconomy *rich=&s.econ->region[rr[1]];
+        rich->build.K_inst=8.f; rich->build.PE_infra=6.f; rich->prosperity=9.f;
+        rich->strata[CLASS_LABORER].pop=6000.f; rich->revolt_scar=0.f;
+        float p_cheap=diplo_province_price(s.econ, rr[0]), p_rich=diplo_province_price(s.econ, rr[1]);
+        printf("   prix : arrière-pays %.0f  vs  cœur développé %.0f\n", p_cheap, p_rich);
+        ok("une province DÉVELOPPÉE coûte plus cher qu'un arrière-pays (§5)", p_rich > p_cheap + 8.f);
+        /* le SACCAGE effondre la valeur → la province pillée est moins chère à prendre. */
+        rich->revolt_scar=1.0f; float p_sacked=diplo_province_price(s.econ, rr[1]); rich->revolt_scar=0.f;
+        ok("une province SACCAGÉE coûte MOINS (saccager-puis-prendre est bon marché)", p_sacked < p_rich - 4.f);
+        /* on re-aplatit rr[1] : deux provinces bon marché pour le test d'absorption. */
+        rich->build.K_inst=0.f; rich->build.PE_infra=0.f; rich->prosperity=1.f;
+        rich->strata[CLASS_LABORER].pop=40.f;
 
-        /* On SOIGNE l'ordre du Dominateur (légitimité haute, sans coercition) pour
-         * que le frein de survie ne le fige pas — on teste l'annexion, pas le frein. */
+        /* On soigne l'ordre du Dominateur (le frein ne le fige pas). */
         for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].owner==cidD){
             s.wl->L[r]=9.f; s.wl->years_held[r]=120.f; s.econ->region[r].coercion=0.f;
             s.econ->region[r].build.food_cap=6.f;
         }
         for (int t=0;t<6;t++){ legitimacy_tick(s.wl,s.w,s.econ,s.ts);
             prosperity_tick(s.wp,s.w,s.econ,s.net,s.ts,s.wl); }
-
-        /* (intégré) domination écrasante → la capitale TOMBE, R absorbé. */
         act[0].next_econ_day=INT_MAX;                 /* gèle l'éco, isole la stratégie */
         int dW=2*horizon;
+
+        /* (A) R BIEN DÉFENDU (parité militaire) → budget marginal → R survit. */
+        for (int i=0;i<2;i++){ RegionEconomy *re=&s.econ->region[rr[i]];
+            re->stock[RES_ARMS]=800.f; re->build.H_coerc=24.f; re->strata[CLASS_LABORER].pop=4000.f; }
+        prosperity_tick(s.wp,s.w,s.econ,s.net,s.ts,s.wl);
+        diplo_init(s.dp); diplo_declare_war_cb(s.dp, cidD, R, CB_TERRITORIAL);
+        for (int k=0;k<8;k++){ act[0].peace_lock_until=0; act[0].credit_war=20.f;
+            act[0].next_strat_day=dW; ai_step(&act[0],s.w,s.econ,s.wp,s.wl,s.ag,s.rn,s.dp,dW); }
+        int rB=0; for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].owner==R) rB++;
+        ok("R bien défendu (parité) : budget marginal → R survit", rB>=1);
+
+        /* (B) R DÉSARMÉ (domination écrasante) → budget large ≥ sa valeur → R ANNEXÉ. */
+        for (int i=0;i<2;i++){ RegionEconomy *re=&s.econ->region[rr[i]];
+            re->stock[RES_ARMS]=0.f; re->build.H_coerc=0.f; re->strata[CLASS_LABORER].pop=40.f; }
+        prosperity_tick(s.wp,s.w,s.econ,s.net,s.ts,s.wl);
+        diplo_init(s.dp); diplo_declare_war_cb(s.dp, cidD, R, CB_TERRITORIAL);
         for (int k=0;k<10;k++){ act[0].peace_lock_until=0; act[0].credit_war=20.f;
             act[0].next_strat_day=dW; ai_step(&act[0],s.w,s.econ,s.wp,s.wl,s.ag,s.rn,s.dp,dW); }
         int rA=0; for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].owner==R) rA++;
-        ok("domination écrasante : le Dominateur ARRACHE la capitale → R ABSORBÉ (0 région)",
+        ok("R désarmé (domination écrasante) : le Dominateur ANNEXE R (0 région)",
            rcount==2 && rA==0);
     }
 

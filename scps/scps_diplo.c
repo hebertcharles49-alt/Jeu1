@@ -84,6 +84,7 @@ void diplo_make_peace   (DiploState *d,int a,int b){
         d->cb[a][b]=d->cb[b][a]=CB_NONE;   /* le but de guerre s'éteint avec la guerre */
         d->battle_score[a][b]=d->battle_score[b][a]=0.f;   /* le bras-de-fer se solde */
         d->conquered[a][b]=d->conquered[b][a]=0;
+        d->conq_value[a][b]=d->conq_value[b][a]=0.f;       /* §5 : le budget dépensé se solde */
     }
 }
 bool diplo_can_declare(const DiploState *d,int a,int b){
@@ -251,6 +252,7 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     int defender=re->owner;
     if (defender==conqueror) return false;           /* déjà à nous */
     if (defender>=0 && diplo_status(d,conqueror,defender)!=DIPLO_WAR) return false;
+    float price = diplo_province_price(econ, region);  /* §5 : son prix INTACT (avant le saccage) */
     re->owner = conqueror;            /* transfert : la diversité suit (compute_profile) */
     re->colonized = true;
     re->revolt_scar = 1.0f;           /* la conquête CONVULSE : −50 % dévelop. quelques années */
@@ -258,6 +260,7 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
         d->momentum[conqueror] += MOMENTUM_PER_CONQ;   /* la fulgurance EFFRAIE (→ coalition) */
         if (defender>=0 && defender<SCPS_MAX_COUNTRY){
             d->conquered[conqueror][defender]++;        /* OCCUPATION : pousse le score de guerre */
+            d->conq_value[conqueror][defender] += price;/* §5 : budget de score DÉPENSÉ sur cette prise */
             d->rancor[defender][conqueror] += RANCOR_PER_LOSS;  /* §6 le DÉPOSSÉDÉ garde rancune */
             /* §5 LÉGITIMITÉ : au-delà de ce que la domination militaire justifie (la
              * revendication), la prise est de la SUREXPANSION — surcroît de fulgurance
@@ -407,6 +410,47 @@ int diplo_war_claim(const DiploState *d, const World *w, const WorldEconomy *eco
     if (cb!=CB_TERRITORIAL) return 1;                    /* humiliation/source/vassalité : une prise */
     return 1 + (int)(CLAIM_DOM*fmaxf(0.f, ratio-0.5f));  /* territorial : ∝ domination */
 }
+
+/* ---- §5 COMBAT : le PRIX d'une province (∝ valeur développée) ---------- */
+#define PRICE_BASE   10.f   /* un arrière-pays nu coûte déjà ça */
+#define PRICE_BUILT   1.6f  /* par point de densité bâtie (K/H/P/food/foi/savoir) */
+#define PRICE_PROS    2.2f  /* par point de prospérité locale */
+#define PRICE_POP     0.004f/* par âme (un cœur peuplé coûte cher) */
+float diplo_province_price(const WorldEconomy *econ, int region){
+    if (!econ || region<0 || region>=econ->n_regions) return PRICE_BASE;
+    const RegionEconomy *re=&econ->region[region];
+    const ProvBuild *b=&re->build;
+    float built = b->K_inst + b->H_coerc + b->PE_infra + b->food_cap + b->faith + b->savoir;
+    float pop   = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                + re->strata[CLASS_ELITE].pop;
+    float dev   = PRICE_BUILT*built + PRICE_PROS*re->prosperity + PRICE_POP*pop;
+    /* le SACCAGE effondre la valeur (revolt_scar) → la province pillée coûte moins. */
+    float scar = (re->revolt_scar>0.f) ? (1.f - 0.45f*clampf(re->revolt_scar,0.f,1.f)) : 1.f;
+    return PRICE_BASE + dev*scar;
+}
+#define BUDGET_DOM    300.f  /* valeur achetable par cran de domination militaire (au-delà de 0.5) */
+#define BUDGET_SCORE  0.40f  /* … + une prime du score accumulé (une victoire décisive prend plus) */
+float diplo_war_budget(const DiploState *d, const World *w, const WorldEconomy *econ, int a, int b){
+    /* Le budget de conquête = la DOMINATION militaire (disponible d'emblée — sinon, le
+     * score partant de 0, l'attaquant ne pourrait jamais s'offrir la 1re province) PLUS
+     * une prime du score de guerre accumulé (l'occupation/les batailles → prend davantage). */
+    float pA=diplo_mil_power(w,econ,a), pB=diplo_mil_power(w,econ,b);
+    float ratio=pA/(pA+pB+0.01f);
+    float dom = BUDGET_DOM * fmaxf(0.f, ratio-0.5f);
+    float sc  = diplo_war_score(d,a,b); if (sc<0.f) sc=0.f;
+    return dom + BUDGET_SCORE*sc;
+}
+/* La valeur TOTALE du territoire d'un pays (Σ prix des provinces) — un budget qui la
+ * couvre toute = victoire DÉCISIVE (annexion possible) ; sinon le pays est protégé. */
+float diplo_country_value(const WorldEconomy *econ, int cid){
+    if (!econ || cid<0) return 0.f;
+    float v=0.f;
+    for (int r=0;r<econ->n_regions;r++)
+        if (econ->region[r].owner==cid && econ->region[r].culture.settled)
+            v += diplo_province_price(econ, r);
+    return v;
+}
+
 float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int b){
     if (a<0||a>=w->n_countries||b<0||b>=w->n_countries||a==b) return 0.f;
     float s=diplo_war_score(d,a,b);                      /* point de vue de a */

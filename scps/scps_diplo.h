@@ -50,6 +50,7 @@ typedef struct {
      * l'autre +50→+100) ; le défenseur pousse vers −100 par l'attrition. */
     float       battle_score[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* [-100 .. +50] */
     int16_t     conquered  [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];   /* régions prises ce conflit (occupation) */
+    float       conq_value [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];   /* §5 combat : PRIX cumulé des provinces prises (budget de score dépensé) */
     /* RANCUNE NATIONALE (§6) — rancor[a][b] = grief de a contre b qui lui a PRIS des
      * terres. ASYMÉTRIQUE, SURVIT à la paix (le grief reste), décroît sur une
      * génération. Donne à a un casus belli territorial (irrédentisme, sans adjacence)
@@ -142,6 +143,16 @@ float diplo_war_score(const DiploState *d, int a, int b);
  * la punit en fulgurance (→ coalition) — biaisé, jamais interdit. */
 int   diplo_war_claim (const DiploState *d, const World *w,
                        const WorldEconomy *econ, int a, int b);
+
+/* §5 COMBAT — LE PRIX D'UNE PROVINCE en score de guerre, ∝ sa VALEUR DÉVELOPPÉE
+ * (bâti + prospérité + population). Le score de guerre [0..100] est un BUDGET dépensé
+ * à la paix : on ne prend que les provinces dont le prix cumulé ≤ score. Un cœur
+ * développé coûte cher (victoire DÉCISIVE requise) ; un arrière-pays est bon marché ;
+ * une province SACCAGÉE (valeur effondrée) devient moins chère à annexer. */
+float diplo_province_price(const WorldEconomy *econ, int region);
+float diplo_war_budget(const DiploState *d, const World *w, const WorldEconomy *econ,
+                       int attacker, int defender);  /* domination militaire + prime de score */
+float diplo_country_value(const WorldEconomy *econ, int cid);             /* Σ prix des provinces */
 /* RÉPARATIONS : à la paix, le VAINCU (score adverse net) indemnise le vainqueur
  * ∝ |score de guerre| — ponction des trésors provinciaux du perdant → capitale du
  * vainqueur. Renvoie l'or transféré ; 0 si match nul (pas de vainqueur net). */
