@@ -401,3 +401,40 @@ long army_march_attrition(ArmyState *a, Biome b, float days){
     }
     return lost_total;
 }
+
+/* ===================================================================== */
+/* LE SIÈGE — contrôler une province coûte du temps                       */
+/* ===================================================================== */
+#define SIEGE_WALK_DAYS       14.f   /* aucune défense : on plante le drapeau */
+#define SIEGE_MAX_DAYS        730.f  /* 2 ANS — rien ne traîne au-delà */
+#define SIEGE_BASE            45.f   /* investir une place défendue (socle) */
+#define SIEGE_PER_DEF         60.f   /* jours ajoutés par niveau de fortification */
+#define SIEGE_PER_FOOD_MONTH  30.f   /* la garnison tient ~un mois par mois de vivres */
+#define RELIEF_DEFENSE        0.5f   /* part de défense ajoutée par le relief le plus haut */
+
+float terrain_defense_mult(Biome b, float height){
+    float base;
+    switch (b){
+        case BIO_MOUNTAINS:                              base = 1.8f; break;  /* la forteresse de roche */
+        case BIO_HILLS:  case BIO_HIGHLANDS:             base = 1.4f; break;  /* la hauteur commande */
+        case BIO_FOREST: case BIO_WOODS: case BIO_JUNGLE:base = 1.3f; break;  /* le couvert protège l'assiégé */
+        case BIO_MARSH:  case BIO_BOG: case BIO_MANGROVE:base = 1.3f; break;  /* l'approche s'enlise */
+        case BIO_DESERT: case BIO_COASTAL_DESERT:        base = 1.1f; break;  /* l'assiégeant souffre aussi */
+        default:                                         base = 1.0f; break;  /* la plaine n'abrite pas */
+    }
+    float h = height < 0.f ? 0.f : (height > 1.f ? 1.f : height);
+    return base * (1.f + RELIEF_DEFENSE * h);   /* le relief abrite (cf. §1 : il freinait la marche) */
+}
+
+float siege_days(float defense_level, float food_months, float def_mult){
+    if (defense_level <= 0.f) return SIEGE_WALK_DAYS;     /* nue : 14 jours, pas de siège */
+    if (food_months < 0.f) food_months = 0.f;
+    if (def_mult   <= 0.f) def_mult   = 1.f;
+    float d = SIEGE_BASE
+            + SIEGE_PER_DEF        * defense_level        /* la fortification fait durer */
+            + SIEGE_PER_FOOD_MONTH * food_months;         /* les vivres font tenir */
+    d *= def_mult;                                        /* terrain & multiplicateurs divers */
+    if (d > SIEGE_MAX_DAYS) d = SIEGE_MAX_DAYS;           /* plafond : 2 ans */
+    if (d < SIEGE_WALK_DAYS) d = SIEGE_WALK_DAYS;         /* jamais moins que marcher dedans */
+    return d;
+}

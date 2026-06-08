@@ -180,4 +180,27 @@ float army_step_days(const ArmyState *a, Biome to, float height,
  * le total de paquets fondus en route. */
 long  army_march_attrition(ArmyState *a, Biome b, float days);
 
+/* ===================================================================== */
+/* LE SIÈGE — combien de temps pour CONTRÔLER une province               */
+/* ----------------------------------------------------------------------
+ * Marcher dans une province SANS défense, c'est l'affaire de 14 jours : on
+ * plante le drapeau. Défendue, c'est un SIÈGE qui s'étire — au plus 2 ANS —
+ * d'autant plus long que la place est FORTIFIÉE, qu'elle a des VIVRES pour tenir,
+ * et que le TERRAIN l'abrite. Même horloge en JOURS que la marche (§1) et la
+ * bataille (§2) : prendre une terre coûte du temps, pas un clic.              */
+/* ===================================================================== */
+
+/* Multiplicateur défensif du terrain (≥1) : le relief qui FREINE la marche (§1)
+ * ABRITE le défenseur. La plaine n'aide pas (1) ; la montagne tient (≈1.8 +
+ * relief) ; forêt, marais et hauteurs abritent un peu. */
+float terrain_defense_mult(Biome b, float height);
+
+/* Jours pour CONTRÔLER une province :
+ *   defense_level ≤ 0  → 14 jours (aucune défense : on entre, on plante le drapeau).
+ *   sinon → (base + fortification·defense_level + vivres·food_months)·def_mult,
+ *           borné à 2 ANS (730 jours).
+ * food_months = mois de vivres stockés (la garnison tient tant qu'elle mange) ;
+ * def_mult = terrain & multiplicateurs divers (cf. terrain_defense_mult). */
+float siege_days(float defense_level, float food_months, float def_mult);
+
 #endif /* SCPS_ARMY_H */

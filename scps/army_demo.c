@@ -287,6 +287,29 @@ int main(int argc, char **argv){
     printf("   miroir de mages, l'un doté de SAVOIR·Armée : il gagne %d/%d\n", arc, N9);
     ok("l'ARCANE décide le duel de mages (SAVOIR·Armée pèse sur les dégâts du mage)", arc>=15);
 
+    /* ═══ 10. LE SIÈGE : contrôler une province coûte du temps ════════ */
+    printf("\n── 10. Le SIÈGE : 14 j si nue, sinon un siège (≤ 2 ans) selon fortif/vivres/terrain ──\n");
+    float walk = siege_days(0.f, 12.f, 2.f);   /* sans défense : vivres et terrain n'y font rien */
+    ok("une province SANS défense est prise en 14 jours (on plante le drapeau)", walk==14.f);
+    ok("une province DÉFENDUE résiste bien au-delà de 14 jours", siege_days(1.f,0.f,1.f) > 14.f);
+
+    float s_lowdef = siege_days(1.f, 2.f, 1.f), s_hidef = siege_days(4.f, 2.f, 1.f);
+    float s_lowfood= siege_days(2.f, 1.f, 1.f), s_hifood= siege_days(2.f, 10.f,1.f);
+    printf("   siège : défense 1→4 = %.0f→%.0f j | vivres 1→10 mois = %.0f→%.0f j\n",
+           s_lowdef, s_hidef, s_lowfood, s_hifood);
+    ok("plus la place est FORTIFIÉE, plus le siège s'étire", s_hidef > s_lowdef);
+    ok("plus la garnison a de VIVRES stockés, plus elle tient", s_hifood > s_lowfood);
+
+    float s_plain = siege_days(3.f, 4.f, terrain_defense_mult(BIO_PLAINS,   0.10f));
+    float s_mount = siege_days(3.f, 4.f, terrain_defense_mult(BIO_MOUNTAINS,0.80f));
+    printf("   même garnison : plaine %.0f j vs montagne %.0f j (le relief abrite, cf. §1)\n", s_plain, s_mount);
+    ok("le TERRAIN abrite : une forteresse de montagne tient plus qu'une de plaine", s_mount > s_plain);
+    ok("la montagne défend mieux que la plaine (multiplicateur de terrain ≥ 1)",
+       terrain_defense_mult(BIO_MOUNTAINS,0.8f) > terrain_defense_mult(BIO_PLAINS,0.1f) &&
+       terrain_defense_mult(BIO_PLAINS,0.1f) >= 1.f);
+    ok("le siège est PLAFONNÉ à 2 ans (730 j) — même une citadelle pleine finit par tomber",
+       siege_days(20.f, 60.f, 3.f) == 730.f);
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");
