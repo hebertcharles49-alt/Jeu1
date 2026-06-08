@@ -10,6 +10,7 @@
 #include "scps_revolt.h"
 #include "scps_species.h"   /* species_name */
 #include "scps_culture.h"   /* ethos_name (via culture nom) */
+#include "scps_factions.h"  /* §5 : la tension de coup d'une faction forte aliénée */
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -52,6 +53,20 @@
                                 * n'est pas partout : une province lointaine se défend seule) */
 #define REINFORCE_CAP 600.f    /* la couronne ne peut projeter qu'une part de son armée ici */
 #define REVOLT_COOLDOWN 1095.f /* après TOUT soulèvement (maté ou apaisé), la province se tait ~3 ans */
+
+/* §5 — COUP D'ÉTHOS : grief POLITIQUE d'un groupe ÉTABLI (intégré à la polité, pas
+ * une conquête fraîche qui, elle, SÉCÈDE) dont l'éthos appartient à une faction forte
+ * et ALIÉNÉE — opposée à la direction effective. Ses membres veulent SAISIR l'État
+ * pour imposer leur éthos. L'éthos d'un groupe survit à l'assimilation (signature de
+ * race + trait d'éthos), donc une minorité enracinée reste porteuse de SA faction. */
+#define COUP_ETHOS_W       1.0f   /* une faction fortement aliénée peut soulever seule (motif politique) */
+#define COUP_ETHOS_TRIGGER 0.12f  /* au-delà, le grief est POLITIQUE → coup (saisir l'État), pas jacquerie */
+static float ethos_coup_boost(const PopGroup *g, EthosFaction alien_fac, float coup_tension){
+    if (coup_tension<=0.f || g->diaspora || g->integration < SECEDE_INTEG) return 0.f;  /* établi, pas sécessionniste */
+    float lean[FAC_COUNT]; group_ethos_lean(&g->culture, lean);
+    int gf=0; for (int f=1; f<FAC_COUNT; f++) if (lean[f]>lean[gf]) gf=f;  /* la faction de ce groupe */
+    return (gf==(int)alien_fac) ? COUP_ETHOS_W*coup_tension : 0.f;
+}
 #define CRUSH_KILL    0.55f    /* part des mobilisés tués si écrasés */
 
 static inline float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
@@ -144,11 +159,18 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
     for (int i=0;i<rs->count;i++) if (rs->list[i].active && rs->list[i].region==region) return -1;
     const PopCulture *crown = crown_of(w,econ,owner);
 
-    /* le groupe au plus fort déficit porte le soulèvement */
+    /* §5 : la tension de coup du pays — une faction forte aliénée porte son élite. */
+    float ct=0.f; EthosFaction cf=FAC_COMMUNAUTAIRE;
+    { float fw[FAC_COUNT]; country_faction_weights(w,econ,owner,fw);
+      ct=faction_coup_tension(fw,&cf); }
+
+    /* le groupe au plus fort déficit porte le soulèvement (grief politique compris) */
     int worst=-1; float wd=0.f;
     for (int i=0;i<pp->n_groups;i++){
         float d=revolt_group_deficit(&pp->groups[i], drift, crown,
-                                     re->food_sat, re->society_sat, tax_pressure, re->coercion);
+                                     re->food_sat, re->society_sat, tax_pressure, re->coercion)
+              + ethos_coup_boost(&pp->groups[i], cf, ct);
+        if (d>1.f) d=1.f;
         if (d>wd){ wd=d; worst=i; }
     }
     if (worst<0 || wd<IGNITE_DEFICIT) return -1;
@@ -166,7 +188,11 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
     Rebellion *rb=&rs->list[slot];
     memset(rb,0,sizeof *rb);
     rb->active=true; rb->region=region; rb->owner=owner;
-    rb->kind=revolt_classify(g, drift, crown);
+    /* §5 : si le grief POLITIQUE (faction forte aliénée) domine, c'est un COUP — la
+     * faction saisit l'État pour imposer son éthos. Sinon, la nature usuelle (sécession
+     * d'une nation conquise, jacquerie de classe). */
+    rb->kind = (ethos_coup_boost(g, cf, ct) >= COUP_ETHOS_TRIGGER)
+             ? REBEL_COUP : revolt_classify(g, drift, crown);
     rb->race=g->race; rb->klass=g->klass;
     rb->culture=group_culture_effective(g, drift);
     rb->drift_id=g->drift_id; rb->mobilized=mob; rb->deficit=wd;
@@ -189,6 +215,10 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
 /* ===================================================================== */
 void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
                  const ModifierStack *drift, int days){
+    /* §5 : tension de coup PAR PAYS (faction forte aliénée) — calculée à la demande,
+     * mise en cache (un pays a la même tension dans toutes ses régions ce tick). */
+    float ctens[SCPS_MAX_COUNTRY]; EthosFaction cfac[SCPS_MAX_COUNTRY];
+    char  cdone[SCPS_MAX_COUNTRY]; memset(cdone,0,sizeof cdone);
     for (int r=0;r<econ->n_regions && r<SCPS_MAX_REG;r++){
         RegionEconomy *re=&econ->region[r];
         if (rs->revanchism_days[r]>0.f) rs->revanchism_days[r]=fmaxf(0.f, rs->revanchism_days[r]-(float)days);
@@ -196,10 +226,18 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
             rs->desperation_days[r]=0.f; continue;
         }
         const PopCulture *crown=crown_of(w,econ,re->owner);
+        int o=re->owner; float ct=0.f; EthosFaction cf=FAC_COMMUNAUTAIRE;
+        if (o>=0 && o<SCPS_MAX_COUNTRY){
+            if (!cdone[o]){ float fw[FAC_COUNT]; country_faction_weights(w,econ,o,fw);
+                            ctens[o]=faction_coup_tension(fw,&cfac[o]); cdone[o]=1; }
+            ct=ctens[o]; cf=cfac[o];
+        }
         float worst=0.f;
         for (int i=0;i<re->pop.n_groups;i++){
             float d=revolt_group_deficit(&re->pop.groups[i], drift, crown,
-                                         re->food_sat, re->society_sat, re->over_tax, re->coercion);
+                                         re->food_sat, re->society_sat, re->over_tax, re->coercion)
+                  + ethos_coup_boost(&re->pop.groups[i], cf, ct);   /* §5 : grief politique */
+            if (d>1.f) d=1.f;
             if (d>worst) worst=d;
         }
         /* le séparatisme post-conquête désespère la province « quoi qu'il arrive » */

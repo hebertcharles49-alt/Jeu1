@@ -155,6 +155,31 @@ int main(void){
                                    && faction_fracture(wsplit) + faction_cohesion(wsplit) < 1.01f);
     }
 
+    /* ═══ 7. TENSION DE COUP (§5) — une faction forte aliénée vise le trône ══ */
+    printf("\n── 7. Tension de coup : une faction forte OPPOSÉE à la direction couve un coup ──\n");
+    {
+        ok("l'opposition Gardiens↔Transgresseurs est maximale (l'épine dorsale faustienne)",
+           faction_opposition(FAC_GARDIEN,FAC_TRANSGRESSEUR) > 0.95f);
+        ok("une faction ne s'oppose pas à elle-même", faction_opposition(FAC_MARCHAND,FAC_MARCHAND)==0.f);
+        /* Régime marchand (dominante) avec un bloc CONQUÉRANT fort et opposé. */
+        ProvincePop pp; memset(&pp,0,sizeof pp);
+        pp.groups[0]=grp(cult(ETHOS_MERCANTILE,RACE_HALFELIN,CREDO_PLURALISTE),CLASS_LABORER,1100);
+        pp.groups[1]=grp(cult(ETHOS_DOMINATEUR,RACE_ORQUE,CREDO_PLURALISTE),CLASS_ELITE,300);
+        pp.n_groups=2;
+        float w[FAC_COUNT]; faction_weights_of(&pp,1,w);
+        EthosFaction alien; float tension=faction_coup_tension(w,&alien);
+        printf("   régime marchand + élite orque conquérante : tension de coup %.2f (faction aliénée : %s)\n",
+               tension, faction_name(alien));
+        ok("un bloc fort et opposé à la direction crée une TENSION de coup", tension > 0.15f);
+        /* Mono-éthos : nulle opposition forte → quasi nulle tension. */
+        ProvincePop mono; memset(&mono,0,sizeof mono);
+        mono.groups[0]=grp(cult(ETHOS_BUREAUCRATE,RACE_HUMAIN,CREDO_PLURALISTE),CLASS_LABORER,1000);
+        mono.n_groups=1;
+        float wm[FAC_COUNT]; faction_weights_of(&mono,1,wm);
+        ok("un mono-éthos ne couve aucun coup (nulle faction forte opposée)",
+           faction_coup_tension(wm,&alien) < tension - 0.10f);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

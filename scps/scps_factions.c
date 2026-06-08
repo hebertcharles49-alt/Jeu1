@@ -129,3 +129,32 @@ float faction_fracture(const float w[FAC_COUNT]){
     return fr<0.f ? 0.f : (fr>1.f ? 1.f : fr);
 }
 float faction_cohesion(const float w[FAC_COUNT]){ return 1.f - faction_fracture(w); }
+
+/* ---- Opposition de valeurs & tension de coup (§5) --------------------- */
+float faction_opposition(EthosFaction a, EthosFaction b){
+    if (a==b) return 0.f;
+    /* Table SYMÉTRIQUE des oppositions de valeurs (§1 « Oppose »).
+     * Ordre : Conquérant, Marchand, Légiste, Gardien, Transgresseur, Communautaire. */
+    static const float O[FAC_COUNT][FAC_COUNT] = {
+        /* C */ { 0.f, 0.6f, 0.4f, 0.2f, 0.2f, 1.0f },
+        /* M */ { 0.6f, 0.f, 0.2f, 0.9f, 0.5f, 0.3f },
+        /* L */ { 0.4f, 0.2f, 0.f, 0.3f, 0.9f, 0.3f },
+        /* G */ { 0.2f, 0.9f, 0.3f, 0.f, 1.0f, 0.5f },
+        /* T */ { 0.2f, 0.5f, 0.9f, 1.0f, 0.f, 0.9f },
+        /* U */ { 1.0f, 0.3f, 0.3f, 0.5f, 0.9f, 0.f },
+    };
+    if (a<0||a>=FAC_COUNT||b<0||b>=FAC_COUNT) return 0.f;
+    return O[a][b];
+}
+
+float faction_coup_tension(const float w[FAC_COUNT], EthosFaction *out){
+    int dom=0; for (int f=1; f<FAC_COUNT; f++) if (w[f]>w[dom]) dom=f;   /* la direction effective */
+    float best=0.f; int bf=dom;
+    for (int f=0; f<FAC_COUNT; f++){
+        if (f==dom) continue;
+        float t = w[f] * faction_opposition((EthosFaction)f, (EthosFaction)dom);  /* fort ET opposé */
+        if (t>best){ best=t; bf=f; }
+    }
+    if (out) *out=(EthosFaction)bf;
+    return best;
+}

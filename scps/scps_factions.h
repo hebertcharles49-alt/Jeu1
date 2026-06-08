@@ -83,4 +83,18 @@ EthosWeights faction_effective_weights(const float weights[FAC_COUNT]);
 float faction_fracture(const float weights[FAC_COUNT]);
 float faction_cohesion(const float weights[FAC_COUNT]);   /* = 1 − fracture */
 
+/* ===================================================================== */
+/* OPPOSITION DE VALEURS & TENSION DE COUP (§5)                            */
+/* ===================================================================== */
+/* L'opposition de VALEURS entre deux factions [0..1] (colonne « Oppose » du §1) :
+ * Conquérants↔Communautaires (guerre/paix), Marchands↔Gardiens (ouverture/foi
+ * imposée), Légistes↔Transgresseurs (ordre/raccourci), Gardiens↔Transgresseurs
+ * (l'orthodoxie interdit / le culte sacralise le faustien — l'épine dorsale). */
+float faction_opposition(EthosFaction a, EthosFaction b);
+
+/* La TENSION DE COUP d'un pays : la faction la plus FORTE dont l'éthos S'OPPOSE à
+ * la direction effective (la dominante), pondérée par sa part. Élevée = une faction
+ * forte aliénée couve un coup pour imposer SON éthos. Écrit la faction aliénée. */
+float faction_coup_tension(const float weights[FAC_COUNT], EthosFaction *out_alienated);
+
 #endif /* SCPS_FACTIONS_H */
