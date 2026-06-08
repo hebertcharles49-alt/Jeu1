@@ -246,6 +246,37 @@ int main(int argc, char **argv){
         ok("le Dominateur est le plus agressif (guerres+conquêtes)", aD>=aM && aD>=aB && aD>0);
     }
 
+    /* ---- §3 : l'ÉTHOS EFFECTIF GLISSE avec la composition ------------------ *
+     * Le Mercantile, homogène, a un appétit de conquête effectif = son socle.
+     * On lui INJECTE une grosse province orque (Conquérants) non assimilée : sa
+     * résultante de factions glisse → son w_expand EFFECTIF monte. « Un empire
+     * change d'éthos quand qui le compose change. » */
+    printf("\n── Vérification : l'éthos effectif glisse avec la composition (§3) ──\n");
+    {
+        int day=horizon;
+        act[1].next_strat_day=day; ai_step(&act[1],s.w,s.econ,s.wp,s.wl,s.ag,s.rn,s.dp,day);
+        float expand_before=act[1].w_expand;
+        int rg=-1;
+        for (int r=0;r<s.econ->n_regions;r++)
+            if (s.econ->region[r].active && s.econ->region[r].owner!=cidM
+                && s.econ->region[r].owner!=cidD && s.econ->region[r].owner!=cidB){ rg=r; break; }
+        if (rg>=0){
+            RegionEconomy *re=&s.econ->region[rg];
+            PopCulture oc=make_fiche(9.f,ETHOS_DOMINATEUR,ECON_TRIBUT,CREDO_PLURALISTE); oc.race=RACE_ORQUE;
+            re->owner=(int16_t)cidM; re->colonized=true; re->culture=oc;
+            memset(&re->pop,0,sizeof re->pop);
+            re->pop.groups[0].race=RACE_ORQUE; re->pop.groups[0].origin=oc; re->pop.groups[0].culture=oc;
+            re->pop.groups[0].klass=CLASS_LABORER; re->pop.groups[0].count=3000;
+            re->pop.n_groups=1;
+        }
+        act[1].next_strat_day=day; ai_step(&act[1],s.w,s.econ,s.wp,s.wl,s.ag,s.rn,s.dp,day);
+        float expand_after=act[1].w_expand;
+        printf("   Mercantile : w_expand effectif %.3f → après avoir avalé une province orque → %.3f\n",
+               expand_before, expand_after);
+        ok("avaler une province ORQUE monte l'appétit de conquête EFFECTIF (l'éthos glisse, §3)",
+           rg>=0 && expand_after > expand_before + 0.01f);
+    }
+
     /* ---- COUP DE GRÂCE : la capitale coûte le DOUBLE (score de guerre) ----- *
      * Un croupion R de 2 régions, désarmé, au contact du Dominateur. Sous un
      * score de guerre ordinaire, la paix proportionnelle ÉPARGNE sa capitale ;

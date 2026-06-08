@@ -74,12 +74,16 @@ typedef struct {
     int      cid;            /* pays piloté */
     int      home_region;    /* région-capitale (où l'on bâtit) */
 
-    /* Personnalité — dérivée de la fiche, figée à l'init (jitterée par graine). */
-    float    w_expand;       /* conquête   (∝ valeurs / Dominateur) */
-    float    w_trade;        /* commerce   (∝ inverse valeurs × trait éco) */
-    float    w_build;        /* bâtir du K (∝ Bureaucrate / Ordre) */
-    float    w_faith;        /* prosélytisme (∝ credo) */
-    float    w_faustian;     /* pente arcanique */
+    /* Personnalité EFFECTIVE — la résultante des factions-éthos (§3), qui GLISSE
+     * quand la composition change : socle de la culture régnante, MODULÉ par l'écart
+     * entre le penchant du peuple et celui du trône (conquérir des orques monte la
+     * conquête). Lue partout dans le moteur (agression, recherche, casus belli). */
+    float    w_expand;       /* conquête    (faction Conquérants) */
+    float    w_trade;        /* commerce    (faction Marchands) */
+    float    w_build;        /* bâtir du K  (faction Légistes) */
+    float    w_faith;        /* prosélytisme(faction Gardiens) */
+    float    w_faustian;     /* pente arcanique (faction Transgresseurs) */
+    float    w_base[5];      /* socle figé à l'init (culture du trône + jitter) — la résultante module ça */
 
     /* Pression accumulée : un seau qui se vide en ACTION — déterministe, ∝ poids
      * (un modèle de tension qui monte jusqu'à se décharger en levier). */

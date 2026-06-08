@@ -90,6 +90,38 @@ void ai_derive_weights(AiActor *a, const PopCulture *self){
     a->w_build    *= 0.88f + 0.24f*frand(&a->rng);
     a->w_faith    *= 0.88f + 0.24f*frand(&a->rng);
     a->w_faustian *= 0.88f + 0.24f*frand(&a->rng);
+    /* Socle figé : la résultante des factions le MODULERA (ai_refresh_ethos, §3). */
+    a->w_base[0]=a->w_expand; a->w_base[1]=a->w_trade; a->w_base[2]=a->w_build;
+    a->w_base[3]=a->w_faith;  a->w_base[4]=a->w_faustian;
+}
+
+/* §3 — L'ÉTHOS EFFECTIF GLISSE : la personnalité du pays n'est plus figée à sa
+ * culture de trône, elle suit la RÉSULTANTE de ses factions. On module le socle
+ * par l'ÉCART entre le penchant du PEUPLE (distribution enracinée) et celui du
+ * TRÔNE (culture régnante) : un empire homogène ne bouge pas (écart nul, équilibre
+ * préservé) ; un empire qui a avalé des orques voit sa conquête (et son faustien)
+ * MONTER, son commerce baisser — « un empire change d'éthos quand qui le compose
+ * change ». Borné : la résultante infléchit, elle ne renverse pas le socle. */
+#define AI_ETHOS_GLIDE 1.0f
+static float glide_axis(float base, float pop_share, float crown_share){
+    float f = 1.f + AI_ETHOS_GLIDE*(pop_share - crown_share);
+    return base * clampf(f, 0.3f, 2.0f);
+}
+static void ai_refresh_ethos(AiActor *a, const World *w, const WorldEconomy *econ){
+    int cp = (a->cid>=0 && a->cid<w->n_countries) ? w->country[a->cid].capital_prov : -1;
+    int cr = (cp>=0 && cp<w->n_provinces) ? w->province[cp].region : -1;
+    if (cr<0 || cr>=econ->n_regions) return;
+    /* Le penchant du TRÔNE = celui de sa capitale (le siège du pouvoir) ; celui du
+     * PEUPLE = la distribution de tout l'empire. Même source (les groupes) → un
+     * empire homogène ne glisse PAS (capitale == empire), seule la diversité conquise
+     * écarte les deux. */
+    float crownlean[FAC_COUNT]; faction_weights_of(&econ->region[cr].pop, 1, crownlean);
+    float pop[FAC_COUNT];       country_faction_weights(w, econ, a->cid, pop);
+    a->w_expand   = glide_axis(a->w_base[0], pop[FAC_CONQUERANT],    crownlean[FAC_CONQUERANT]);
+    a->w_trade    = glide_axis(a->w_base[1], pop[FAC_MARCHAND],      crownlean[FAC_MARCHAND]);
+    a->w_build    = glide_axis(a->w_base[2], pop[FAC_LEGISTE],       crownlean[FAC_LEGISTE]);
+    a->w_faith    = glide_axis(a->w_base[3], pop[FAC_GARDIEN],       crownlean[FAC_GARDIEN]);
+    a->w_faustian = glide_axis(a->w_base[4], pop[FAC_TRANSGRESSEUR], crownlean[FAC_TRANSGRESSEUR]);
 }
 
 void ai_actor_init(AiActor *a, const World *w, const WorldEconomy *econ,
@@ -685,6 +717,7 @@ void ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
         a->next_econ_day = day + AI_ECON_CADENCE/2 + (int)(frand(&a->rng)*AI_ECON_CADENCE);
     }
     if (strat_due){
+        ai_refresh_ethos(a, w, econ);   /* §3 : l'éthos effectif GLISSE avec la composition avant d'agir */
         ai_strat_turn(a, w, econ, wp, wl, diplo, &v, brake, day);
         a->next_strat_day = day + AI_STRAT_CADENCE/2 + (int)(frand(&a->rng)*AI_STRAT_CADENCE);
     }
