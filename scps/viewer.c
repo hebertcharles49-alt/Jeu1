@@ -840,14 +840,42 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         }
     }
 
-    ui_section(ren, x, &y, "ÉCONOMIE");
-    ui_row(ren,x,&y,rw,"Vocation", p.vocation, COL_PARCH,
-           "Ce que la province fait de mieux ; sa place dans l'économie du royaume.");
-    ui_row(ren,x,&y,rw,"Ressource", p.ressource, COL_PARCH,
-           "Le bien que la province extrait ou produit.");
-    ui_row(ren,x,&y,rw,"Aisance", label_aisance(p.aisance), band_good(p.aisance,4,true), hover_aisance());
-    if (p.carrefour != CF_NONE)
-        ui_row(ren,x,&y,rw,"Carrefour", label_carrefour(p.carrefour), band_good(p.carrefour,4,true), hover_carrefour());
+    /* RESSOURCES + REVENUS — la province produit, en flux JOURNALIER (+N/j). */
+    IncomeReadout inc = province_income(econ, (pid>=0&&pid<w->n_provinces)?w->province[pid].region:-1);
+    {
+        ui_section(ren, x, &y, "RESSOURCES");
+        char res[96]; int rn=0, shown=0; res[0]=0;
+        for (int i=0;i<inc.n && shown<2;i++){
+            if (inc.line[i].manufactured) continue;                    /* les brutes locales en tête */
+            rn += snprintf(res+rn, sizeof res-rn, "%s%s", shown?" · ":"", inc.line[i].source);
+            shown++;
+        }
+        if (shown==0) snprintf(res,sizeof res, "%s", p.ressource);      /* repli : la ressource géo */
+        draw_text(ren, g_font, x, y, COL_PARCH, res);
+        char rhov[160]; snprintf(rhov,sizeof rhov,
+                 "Les biens extraits sur place (vocation : %s). Le détail des entrées est dans Revenus.", p.vocation);
+        zone_add((SDL_Rect){x-2,y-2,rw,19}, rhov); y += 22;
+    }
+    {
+        ui_section(ren, x, &y, "REVENUS");
+        for (int i=0;i<inc.n;i++){
+            char l[24]; snprintf(l,sizeof l, "+%.1f/j", inc.line[i].per_day);
+            draw_text(ren, g_font, x, y, sense_color(0.62f), l);
+            draw_text(ren, g_font, x+74, y, COL_DIM, inc.line[i].source);
+            char hv[160]; snprintf(hv,sizeof hv, "%s · %s : +%.1f or/jour (offre × prix).",
+                     inc.line[i].manufactured?"Sortie d'atelier (bourgeois)":"Collecte (laboureurs)",
+                     inc.line[i].source, inc.line[i].per_day);
+            zone_add((SDL_Rect){x-2,y-2,rw,18}, hv); y += 18;
+        }
+        if (inc.n==0){ draw_text(ren, g_font, x, y, COL_DIM, "rien de notable"); y += 18; }
+        char nl[24]; snprintf(nl,sizeof nl, "+%.1f/j", inc.net_per_day);
+        draw_text(ren, g_font, x, y, COL_PARCH, "Net");
+        draw_text(ren, g_font, x+74, y, sense_color(0.80f), nl);
+        zone_add((SDL_Rect){x-2,y-2,rw,18},
+                 "Net : la VALEUR AJOUTÉE de la province par jour (le PIB local) — collecte + ateliers, "
+                 "nette des intrants consommés. (L'impôt d'État et l'entretien remontent au royaume.)");
+        y += 22;
+    }
 
     ui_section(ren, x, &y, "ALLÉGEANCE");
     ui_row(ren,x,&y,rw,"Lignée", label_lignee(p.lignee), band_good(p.lignee,6,false), hover_lignee());

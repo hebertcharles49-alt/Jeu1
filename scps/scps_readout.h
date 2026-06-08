@@ -141,6 +141,22 @@ typedef struct {
     const char *specialisation_hover;
 } ProvinceReadout;
 
+/* REVENUS — le détail des entrées d'une province, en flux JOURNALIER (+N/j). Une
+ * ligne par source : la COLLECTE des brutes et la SORTIE des ateliers (valeur
+ * produite/jour = offre × prix), puis le NET (valeur ajoutée/jour = le PIB local).
+ * Tout en nombres tangibles (or-équivalent), jamais un flottant SCPS. */
+typedef struct {
+    const char *source;        /* le bien (ressource ou produit), mot diégétique */
+    float       per_day;       /* +N/j : valeur produite par jour (or-équivalent, 1 décimale) */
+    bool        manufactured;  /* false = collecte (brute) ; true = sortie d'atelier */
+} IncomeLine;
+typedef struct {
+    IncomeLine line[6];        /* les sources principales, triées par valeur */
+    int        n;
+    float      net_per_day;    /* +N/j : valeur ajoutée totale (PIB local / jour) */
+} IncomeReadout;
+IncomeReadout province_income(const WorldEconomy *econ, int region);
+
 /* ===================================================================== */
 /* SEUILLAGE — flottants NUS → bandes (la membrane testable)              */
 /* ===================================================================== */
