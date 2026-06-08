@@ -34,6 +34,14 @@
 /* ---- Scan : la misère SOUTENUE finit par lever une région ------------- */
 #define SCAN_DEFICIT   0.48f   /* au-delà : CRISE aiguë (pas la pauvreté chronique douce) */
 #define SCAN_SUSTAIN   120     /* jours de désespérance avant le soulèvement */
+
+/* SUREXTENSION : au-delà d'un seuil de régions, un empire tient mal ses marches —
+ * chaque région excédentaire pousse le déficit séparatiste. Les conquêtes mal
+ * digérées finissent par se détacher → de NOUVEAUX pays émergent de la démesure.
+ * (Remplace l'« invariant 0 absorbé » statique par une carte politique vivante.) */
+#define OVEREXT_FREE    6       /* régions « gratuites » : un empire compact tient bien */
+#define OVEREXT_PER_REG 0.035f  /* déficit ajouté PAR région au-delà du seuil */
+#define OVEREXT_CAP     0.45f   /* plafond du grief de surextension */
 /* ---- Revanchisme : subir la conquête arme le séparatisme --------------- */
 #define REVANCHISM_DAYS  (10*365)  /* la blessure de la conquête (≈10 ans) */
 #define REVANCHISM_MOBIL  1.45f    /* la rage gonfle les rangs rebelles */
@@ -218,6 +226,10 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
      * mise en cache (un pays a la même tension dans toutes ses régions ce tick). */
     float ctens[SCPS_MAX_COUNTRY]; EthosFaction cfac[SCPS_MAX_COUNTRY];
     char  cdone[SCPS_MAX_COUNTRY]; memset(cdone,0,sizeof cdone);
+    /* SUREXTENSION : on compte les régions par pays UNE fois (cache O(n)). */
+    int owned[SCPS_MAX_COUNTRY]; memset(owned,0,sizeof owned);
+    for (int r=0;r<econ->n_regions;r++){ int o=econ->region[r].owner;
+        if (o>=0 && o<SCPS_MAX_COUNTRY) owned[o]++; }
     for (int r=0;r<econ->n_regions && r<SCPS_MAX_REG;r++){
         RegionEconomy *re=&econ->region[r];
         if (rs->revanchism_days[r]>0.f) rs->revanchism_days[r]=fmaxf(0.f, rs->revanchism_days[r]-(float)days);
@@ -237,6 +249,12 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
                   + ethos_coup_boost(&re->pop.groups[i], cf, ct);   /* §5 : grief politique */
             if (d>1.f) d=1.f;
             if (d>worst) worst=d;
+        }
+        /* SUREXTENSION : un empire trop vaste tient mal ses marches → le grief
+         * séparatiste monte avec la taille (les conquêtes excédentaires se détachent). */
+        if (o>=0 && o<SCPS_MAX_COUNTRY && owned[o]>OVEREXT_FREE){
+            float overext = clampf((float)(owned[o]-OVEREXT_FREE)*OVEREXT_PER_REG, 0.f, OVEREXT_CAP);
+            worst = clampf(worst + overext, 0.f, 1.f);
         }
         /* le séparatisme post-conquête désespère la province « quoi qu'il arrive » */
         if (worst>=SCAN_DEFICIT || revanchism_factor(rs,r)>0.f) rs->desperation_days[r] += (float)days;

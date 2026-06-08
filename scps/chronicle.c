@@ -276,6 +276,46 @@ static int colonized_provinces(const World *w, const WorldEconomy *e){
     return n;
 }
 
+/* ── TÉLÉMÉTRIE PAR ÂGE : marché · or par empire · tech, figés à l'avènement ── */
+static double country_gold(const WorldEconomy *e, int c){
+    double g=0.0; for (int r=0;r<e->n_regions;r++) if (e->region[r].owner==c) g+=e->region[r].treasury;
+    return g;
+}
+static float avg_price(const WorldEconomy *e, Resource res){
+    double s=0.0; int n=0;
+    for (int r=0;r<e->n_regions;r++) if (e->region[r].colonized){ s+=e->region[r].price[res]; n++; }
+    return n? (float)(s/n):0.f;
+}
+typedef struct {
+    int    year;                                 /* -1 = âge pas (encore) avéné */
+    double gold_total, gdp_total, pop_total;
+    int    tech_total, living;
+    float  p_grain, p_cloth, p_ware, p_tools;    /* le « marché » figé par âge */
+    int    n_top; char top_name[3][32]; double top_gold[3]; int top_reg[3];
+} AgeSnap;
+
+static void capture_age_snap(AgeSnap *snap, int year, const World *w, const Sim *s){
+    const WorldEconomy *e=s->econ;
+    snap->year=year;
+    double gold=0.0, gdp=0.0;
+    for (int r=0;r<e->n_regions;r++){ gold+=e->region[r].treasury; gdp+=e->region[r].gdp; }
+    snap->gold_total=gold; snap->gdp_total=gdp; snap->pop_total=total_pop(e);
+    int tech=0; for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++) if (s->ai_on[c]) tech+=s->ai[c].stats.techs;
+    snap->tech_total=tech; snap->living=living_countries(w,e);
+    snap->p_grain=avg_price(e,RES_GRAIN);         snap->p_cloth=avg_price(e,RES_CLOTH);
+    snap->p_ware =avg_price(e,RES_PRECIOUS_WARE); snap->p_tools=avg_price(e,RES_TOOLS);
+    /* or des 3 plus gros empires (par régions) */
+    int idx[SCPS_MAX_COUNTRY], ne=0;
+    for (int c=0;c<w->n_countries;c++){ PolityRole rl=w->country[c].role;
+        if ((rl==POLITY_PLAYER||rl==POLITY_ANTAGONIST) && regions_of(e,c)>0 && ne<SCPS_MAX_COUNTRY) idx[ne++]=c; }
+    for (int a=0;a<ne;a++) for (int b=a+1;b<ne;b++)
+        if (regions_of(e,idx[b])>regions_of(e,idx[a])){ int t=idx[a];idx[a]=idx[b];idx[b]=t; }
+    snap->n_top = ne<3?ne:3;
+    for (int a=0;a<snap->n_top;a++){ int c=idx[a];
+        snprintf(snap->top_name[a],sizeof snap->top_name[a],"%s",w->country[c].name);
+        snap->top_gold[a]=country_gold(e,c); snap->top_reg[a]=regions_of(e,c); }
+}
+
 int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
     int nsims     = (argc>2)?atoi(argv[2]):10;   /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
@@ -304,7 +344,7 @@ int main(int argc, char **argv){
     printf("══════════════════════════════════════════════════════════════════════\n");
 
     /* Agrégats sur toutes les sims */
-    long tot_wars=0, tot_absorbed=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
+    long tot_wars=0, tot_absorbed=0, tot_emerged=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
     long tot_techs=0, tot_faustian=0, tot_campaign=0;
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -321,8 +361,14 @@ int main(int argc, char **argv){
         int cont = w->n_continents;
         int n_emp, n_city; role_counts(w, &n_emp, &n_city);
         int c0 = living_countries(w, s.econ);
+        /* qui est VIVANT au départ : on tracera les morts (absorbés) ET les
+         * naissances (sécessions) — la carte politique BOUGE, plus d'invariant figé. */
+        bool was_alive[SCPS_MAX_COUNTRY];
+        for (int c=0;c<SCPS_MAX_COUNTRY;c++)
+            was_alive[c] = (c<w->n_countries && w->country[c].role!=POLITY_UNCLAIMED && regions_of(s.econ,c)>0);
 
-        int age_year[AGE_COUNT]; for (int a=0;a<AGE_COUNT;a++) age_year[a]=-1;
+        int age_year[AGE_COUNT]; AgeSnap age_snap[AGE_COUNT];
+        for (int a=0;a<AGE_COUNT;a++){ age_year[a]=-1; age_snap[a].year=-1; }
         int war_onsets=0, prev_wars=0, peak_wars=0;
         int peak_rev=0, peak_rev_year=0;
         int min_living=c0;
@@ -347,6 +393,7 @@ int main(int argc, char **argv){
             for (int a=0;a<AGE_COUNT;a++)
                 if (age_year[a]<0 && ages_dawned(s.ev,(AgeId)a)){
                     age_year[a]=s.year;
+                    capture_age_snap(&age_snap[a], s.year, w, &s);   /* marché·or·tech figés à l'avènement */
                     printf("   an %3d  ÂGE : %s\n", s.year, age_name((AgeId)a));
                 }
             int wa = wars_active(w, s.dp);
@@ -373,12 +420,18 @@ int main(int argc, char **argv){
         int treg=0, tp = top_power(w, s.econ, &treg);
         CountryReadout r = (tp>=0)? country_readout(s.wp,s.ts,w,tp)
                                   : country_readout(s.wp,s.ts,w,0);
-        int absorbed = c0 - c1; if (absorbed<0) absorbed=0;
+        /* MORTS (absorbés) vs NAISSANCES (sécessions) : la carte politique respire. */
+        int absorbed=0, emerged=0;
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+            bool alive_now = (w->country[c].role!=POLITY_UNCLAIMED && regions_of(s.econ,c)>0);
+            if (was_alive[c] && !alive_now) absorbed++;
+            if (!was_alive[c] && alive_now) emerged++;
+        }
         int share = (s.econ->n_regions>0)? treg*100/s.econ->n_regions : 0;
         int nages=0; for (int a=0;a<AGE_COUNT;a++) if (age_year[a]>=0) nages++;
 
-        printf("   BILAN an %d : %d pays subsistent (%d absorbés ; plancher %d) | %d âge(s) ; %d guerre(s) au total, pic %d ; pic de révolte %d (an %d)\n",
-               years, c1, absorbed, min_living, nages, war_onsets, peak_wars, peak_rev, peak_rev_year);
+        printf("   BILAN an %d : %d pays subsistent (%d absorbés · %d émergés ; plancher %d) | %d âge(s) ; %d guerre(s) au total, pic %d ; pic de révolte %d (an %d)\n",
+               years, c1, absorbed, emerged, min_living, nages, war_onsets, peak_wars, peak_rev, peak_rev_year);
         if (tp>=0)
             printf("              1er empire « %s » : %d régions (%d%% des terres) | Stabilité %d  Prospérité %d  Légitimité %d  Cohésion %d — Assise %s\n",
                    w->country[tp].name, treg, share, r.m_stabilite.value, r.m_prosperite.value,
@@ -419,6 +472,29 @@ int main(int argc, char **argv){
         /* EXPANSION : provinces colonisées (vierges peuplées) vs PRISES de force. */
         printf("              expansion : %d prov colonisées · %d prov PRISES de force · armée finale %.0f\n",
                colonized_provinces(w,s.econ), conq_prov, total_army(w,s.econ));
+        /* TÉLÉMÉTRIE PAR ÂGE : le marché, l'or par empire et la tech à chaque avènement. */
+        { bool any=false; for (int a=0;a<AGE_COUNT;a++) if (age_snap[a].year>=0) any=true;
+          if (any){
+            printf("              ── par âge (instantané à l'avènement) ──\n");
+            int ord[AGE_COUNT]; for (int a=0;a<AGE_COUNT;a++) ord[a]=a;   /* tri chronologique */
+            for (int a=0;a<AGE_COUNT;a++) for (int b=a+1;b<AGE_COUNT;b++){
+                int ya=age_snap[ord[a]].year, yb=age_snap[ord[b]].year;
+                if (ya<0) ya=99999;
+                if (yb<0) yb=99999;
+                if (yb<ya){ int t=ord[a];ord[a]=ord[b];ord[b]=t; }
+            }
+            for (int oi=0;oi<AGE_COUNT;oi++){ int a=ord[oi];
+                const AgeSnap *sn=&age_snap[a]; if (sn->year<0) continue;
+                printf("                an %3d %-24s | pays %2d · pop %5.0fk · or Σ %7.0f · PIB %6.0f · tech %3d\n",
+                       sn->year, age_name((AgeId)a), sn->living, sn->pop_total/1000.0,
+                       sn->gold_total, sn->gdp_total, sn->tech_total);
+                printf("                       marché : grain %.2f · étoffe %.2f · orfèvr. %.2f · outils %.2f | or/empire :",
+                       sn->p_grain, sn->p_cloth, sn->p_ware, sn->p_tools);
+                for (int t=0;t<sn->n_top;t++) printf(" %s %.0f(%dr)", sn->top_name[t], sn->top_gold[t], sn->top_reg[t]);
+                printf("\n");
+            }
+          }
+        }
         /* POURQUOI les révoltes : la cause LUE (légitimité ? capacité ?). */
         {
             int nr,ns; float Lr,Kr,SIr,Ls,Ks,SIs;
@@ -448,7 +524,7 @@ int main(int argc, char **argv){
                  reduced, moving);
           tot_campaign += reduced; }
 
-        tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
+        tot_wars += war_onsets; tot_absorbed += absorbed; tot_emerged += emerged; tot_peakrev += peak_rev; tot_ages += nages;
         tot_conq += conq_prov;
         tot_ignited += s.rs->n_ignited; tot_seceded += s.rs->n_seceded; tot_coup += s.rs->n_coup;
         tot_concession += s.rs->n_concession; tot_crushed += s.rs->n_crushed; tot_revdead += s.rs->pop_lost;
@@ -461,7 +537,8 @@ int main(int argc, char **argv){
     printf("   âges éveillés (total) ....... %ld   (moy. %.1f/sim)\n", tot_ages, (double)tot_ages/nsims);
     printf("   guerres déclenchées (total) . %ld   (moy. %.1f/sim)\n", tot_wars, (double)tot_wars/nsims);
     printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
-    printf("   pays absorbés (total) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
+    printf("   pays absorbés (morts) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
+    printf("   pays émergés (sécession) .... %ld   (moy. %.1f/sim ; la carte politique respire)\n", tot_emerged, (double)tot_emerged/nsims);
     printf("   nœuds de tech débloqués ..... %ld   (moy. %.1f/sim ; %ld faustiens)\n", tot_techs, (double)tot_techs/nsims, tot_faustian);
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
