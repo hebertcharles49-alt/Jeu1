@@ -323,6 +323,7 @@ int province_composition(const ProvincePop *pp, const ModifierStack *drift,
         GroupReadout *r=&out[n];
         r->race    = species_name(g->race);
         r->culture = ethos_name(eff.ethos);
+        r->religion= religion_branch_name(eff.rel_branch);
         r->klass   = labor_class_word(g->klass);
         r->percent = (int)(100*g->count/total);
         r->loyaute = band_humeur(g->L);

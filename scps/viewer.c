@@ -226,6 +226,27 @@ static void draw_gauge(SDL_Renderer *ren, int x,int y,int gw,int gh,int value){
     int mx = x + (int)(value/100.f*(gw-1));
     fill_rect(ren, mx-1, y-2, 3, gh+4, COL_PARCH);   /* le curseur à la valeur */
 }
+/* Camembert : des PARTS (percent[]) en couleurs (cols[]), peint disque par
+ * pixel (SDL n'a pas de remplissage d'arc) — 0 en haut, sens horaire. */
+static void draw_pie(SDL_Renderer *ren, int cx,int cy,int r,
+                     const int *percent, const SDL_Color *cols, int n){
+    for (int dy=-r; dy<=r; dy++) for (int dx=-r; dx<=r; dx++){
+        if (dx*dx+dy*dy > r*r) continue;
+        float a = atan2f((float)dx, (float)-dy);      /* 0 en haut */
+        if (a<0) a += 6.2831853f;
+        float frac100 = a/6.2831853f*100.f;           /* 0..100 horaire */
+        SDL_Color c = COL_PANEL2; int acc=0;
+        for (int i=0;i<n;i++){ acc+=percent[i]; if (frac100 < acc){ c=cols[i]; break; } }
+        SDL_SetRenderDrawColor(ren, c.r,c.g,c.b,c.a);
+        SDL_RenderDrawPoint(ren, cx+dx, cy+dy);
+    }
+    draw_ring(ren, cx, cy, (float)r, COL_DIM);
+}
+/* Palette de parts (camemberts, barres empilées) — cuivre, teals, parchemin… */
+static const SDL_Color SLICE_PAL[8] = {
+    {0xb8,0x73,0x33,0xff}, {0x4e,0x8d,0x8a,0xff}, {0xc9,0xa2,0x4b,0xff}, {0x7a,0x5c,0x99,0xff},
+    {0x9a,0x8f,0x78,0xff}, {0x5f,0x8a,0xb0,0xff}, {0xa8,0x5a,0x5a,0xff}, {0x6f,0x9a,0x5a,0xff},
+};
 static void zone_add(SDL_Rect r, const char *def);   /* (défini plus bas — survol) */
 /* survol : nom + EFFET de chaque nœud (mots de jeu) ; positions pour la capture. */
 static char g_tree_hov[TECH_COUNT][240];
@@ -698,12 +719,11 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     draw_text(ren, g_font, x, y, COL_PARCH, line);
     zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 22;
 
-    /* COMPOSITION — la ventilation des GROUPES de la province (le payoff du
-     * refactor démographique). race/classe diégétiques ; loyauté en MOT ; état. */
+    /* CAMEMBERTS — Culture + Religion côte à côte (la race SUIT la culture :
+     * pas de 3ᵉ disque). Surface sobre ; le détail vit dans le survol. */
     {
         int reg = (pid>=0 && pid<w->n_provinces) ? w->province[pid].region : -1;
         if (reg>=0 && reg<econ->n_regions && econ->region[reg].pop.n_groups>0) {
-            ui_section(ren, x, &y, "COMPOSITION");
             int owner = econ->region[reg].owner;
             const PopCulture *crown = &econ->region[reg].culture;     /* repli */
             if (owner>=0 && owner<w->n_countries) {
@@ -711,27 +731,38 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                 if (cp>=0 && cp<w->n_provinces) { int cr=w->province[cp].region;
                     if (cr>=0 && cr<econ->n_regions) crown=&econ->region[cr].culture; }
             }
-            static char comp_hov[SCPS_MAX_GROUPS][160];
             GroupReadout gr[SCPS_MAX_GROUPS];
             int ng = province_composition(&econ->region[reg].pop, drift, crown, 5.f, 5.f,
                                           gr, SCPS_MAX_GROUPS);
-            for (int i=0;i<ng;i++) {
-                int barw = 6 + (int)(gr[i].percent*0.38f);     /* barre de proportion (≤44) */
-                SDL_Color lc = band_good(gr[i].loyaute,5,true);
-                fill_rect(ren, x, y+3, barw, 10, lc);
-                char buf[80];
-                snprintf(buf,sizeof buf, "%d%% %s — %s", gr[i].percent, gr[i].race, label_humeur(gr[i].loyaute));
-                draw_text(ren, g_font, x+50, y, COL_PARCH, buf);
-                int bw=text_w(g_font,buf);
-                char et[44]; snprintf(et,sizeof et, " · %s", gr[i].etat);
-                draw_text(ren, g_font, x+50+bw, y, COL_DIM, et);
-                snprintf(comp_hov[i],sizeof comp_hov[i],
-                         "%s · %s — %s (%s). Race/classe diégétiques ; loyauté en mot ; jamais un nom SCPS.",
-                         gr[i].race, gr[i].klass, label_humeur(gr[i].loyaute), gr[i].etat);
-                zone_add((SDL_Rect){x-2,y-2,rw,19}, comp_hov[i]);
-                if (i>0 && gr[i].loyaute <= HU_FRONDEUSE) restive=true;   /* minorité restive */
-                y += 20;
+            /* parts de CULTURE : un secteur par groupe (la race le suit, en survol). */
+            int cper[SCPS_MAX_GROUPS]={0}; SDL_Color ccol[SCPS_MAX_GROUPS]={{0}};
+            for (int i=0;i<ng;i++){ cper[i]=gr[i].percent; ccol[i]=SLICE_PAL[i&7];
+                if (i>0 && gr[i].loyaute<=HU_FRONDEUSE) restive=true; }
+            /* parts de RELIGION : agrégées par confession. */
+            const char *rnm[SCPS_MAX_GROUPS]={0}; int rper[SCPS_MAX_GROUPS]={0}; SDL_Color rcol[SCPS_MAX_GROUPS]={{0}}; int nr=0;
+            for (int i=0;i<ng;i++){
+                int f=-1; for (int j=0;j<nr;j++) if (!strcmp(rnm[j],gr[i].religion)){ f=j; break; }
+                if (f<0){ rnm[nr]=gr[i].religion; rper[nr]=gr[i].percent; rcol[nr]=SLICE_PAL[nr&7]; nr++; }
+                else rper[f]+=gr[i].percent;
             }
+            int pr_=22, cyc=y+pr_+4, cx1=x+pr_+6, cx2=x+rw/2+pr_+2;
+            draw_pie(ren, cx1, cyc, pr_, cper, ccol, ng);
+            draw_pie(ren, cx2, cyc, pr_, rper, rcol, nr);
+            draw_text(ren, g_font_small, cx1-pr_, cyc+pr_+3, COL_DIM, "Culture");
+            draw_text(ren, g_font_small, cx2-pr_, cyc+pr_+3, COL_DIM, "Religion");
+            /* survols : les compositions détaillées (mots, pas un flottant SCPS). */
+            static char chov[320], rhov[320]; int cn=0, rn2=0;
+            cn += snprintf(chov+cn, sizeof chov-cn, "Culture : ");
+            for (int i=0;i<ng && cn<(int)sizeof chov-48;i++)
+                cn += snprintf(chov+cn, sizeof chov-cn, "%s%d%% %s (%s — %s)",
+                               i?" · ":"", gr[i].percent, gr[i].culture, gr[i].race, label_humeur(gr[i].loyaute));
+            rn2 += snprintf(rhov+rn2, sizeof rhov-rn2, "Religion · culte du trône : %s — ",
+                            religion_branch_name(crown->rel_branch));
+            for (int i=0;i<nr && rn2<(int)sizeof rhov-40;i++)
+                rn2 += snprintf(rhov+rn2, sizeof rhov-rn2, "%s%d%% %s", i?" · ":"", rper[i], rnm[i]);
+            zone_add((SDL_Rect){cx1-pr_,cyc-pr_,2*pr_+4,2*pr_+14}, chov);
+            zone_add((SDL_Rect){cx2-pr_,cyc-pr_,2*pr_+4,2*pr_+14}, rhov);
+            y = cyc + pr_ + 16;
         } else {
             ui_section(ren, x, &y, "PEUPLE");
             ui_row(ren,x,&y,rw,"Race", p.race, COL_PARCH,
