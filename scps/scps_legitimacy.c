@@ -26,11 +26,15 @@ static inline float absf(float v) { return v < 0.f ? -v : v; }
 
 /* Distance de CONTENU (L∞ sur valeurs/subsistance/parenté/religion) entre deux
  * profils de population — la friction, langue exclue (horloge). */
+/* La FOI est ACTIVE (§3 légitimité sacrée) : régner sur une AUTRE BRANCHE de foi
+ * éloigne (alignement ↓ → L ↓), au-delà de l'axe religion. */
+#define FAITH_BRANCH_PEN 5.5f
 static float content_dist(const PopCulture *a, const PopCulture *b) {
     float dv = absf(a->valeurs     - b->valeurs);
     float ds = absf(a->subsistance - b->subsistance);
     float dp = absf(a->parente     - b->parente);
     float dr = absf(a->religion    - b->religion);
+    if (a->rel_branch!=b->rel_branch && dr<FAITH_BRANCH_PEN) dr=FAITH_BRANCH_PEN;
     float m = dv; if (ds>m) m=ds; if (dp>m) m=dp; if (dr>m) m=dr;
     return m;
 }

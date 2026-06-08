@@ -35,9 +35,14 @@ static inline float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v
 static inline float absf(float v){ return v<0?-v:v; }
 
 /* Distance de CONTENU (L∞, langue exclue) — la friction. */
+/* La FOI est un axe ACTIF (§1/§3) : une autre BRANCHE de foi est une vraie
+ * fracture, au-delà de l'axe religion (même foi → cohésion & assimilation vite ;
+ * autre foi → résistance, fracture). */
+#define FAITH_BRANCH_PEN 5.5f
 static float content_dist(const PopCulture *a, const PopCulture *b){
     float dv=absf(a->valeurs-b->valeurs), ds=absf(a->subsistance-b->subsistance);
     float dp=absf(a->parente-b->parente), dr=absf(a->religion-b->religion);
+    if (a->rel_branch!=b->rel_branch && dr<FAITH_BRANCH_PEN) dr=FAITH_BRANCH_PEN;
     float m=dv; if(ds>m)m=ds; if(dp>m)m=dp; if(dr>m)m=dr; return m;
 }
 static float agit_from_L(float L){ return clampf((6.f - L)*15.f, 0.f, 100.f); }
