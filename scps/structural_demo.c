@@ -158,7 +158,7 @@ int main(int argc, char **argv){
     float SIo1=s.wp->country[cOpen].SI, FRc1=s.wp->country[cCoer].fragilite;
     printf("   société OUVERTE : SI %.1f→%.1f (pression de réforme) ; régime COERCITIF : fragilité %.1f→%.1f (amorcé)\n",
            SIo0,SIo1, FRc0,FRc1);
-    ok("le boon : le palier du savoir s'ouvre (Société/4)", ages_tier_open(s.ev,TBR_SOCIETY,4));
+    ok("le boon : le palier du savoir s'ouvre (Société/4)", ages_tier_open(s.ev,THM_SOCIETE,4));
     ok("la société OUVERTE subit la pression de réforme (SI baisse)", SIo1 < SIo0 - 0.1f);
     ok("le régime COERCITIF voit sa légitimité se dissoudre → fragilité monte", FRc1 > FRc0 + 0.1f);
 

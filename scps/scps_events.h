@@ -45,7 +45,7 @@ typedef struct {
     /* Échelle monde (Âges) : */
     float d_C_global;   /* connectivité mondiale             */
     float d_breach;     /* pression de brèche mondiale       */
-    int   unlock_branch;/* TechBranch ouverte (-1 = aucune)  */
+    int   unlock_branch;/* TechTheme ouvert (-1 = aucune)  */
     int   unlock_tier;  /* palier ouvert                     */
 } EvEffect;
 
@@ -92,7 +92,7 @@ typedef enum {
 
 typedef struct {
     bool  dawned[AGE_COUNT];
-    bool  tier_open[TBR_COUNT][8];   /* paliers de tech ouverts par les âges */
+    bool  tier_open[THM_COUNT][8];   /* paliers de tech ouverts par les âges */
     float breach_pressure;           /* l'endgame faustien mondial */
     float research_mult;             /* palier de la Raison : recherche plus vive */
     float integration_mult;          /* palier des Empires : intégration accélérée */
@@ -168,7 +168,7 @@ const EventDef *event_def(int evid);
 bool  events_check_ages(EventsState *ev, World *w, WorldEconomy *econ,
                         WorldProsperity *wp, WorldLegitimacy *wl, const TechState ts[]);
 bool  ages_dawned(const EventsState *ev, AgeId a);
-bool  ages_tier_open(const EventsState *ev, TechBranch br, int tier);
+bool  ages_tier_open(const EventsState *ev, TechTheme br, int tier);
 float ages_breach_pressure(const EventsState *ev);
 const char *age_name(AgeId a);
 /* Verdict du MOTEUR agrégé : combien de pays sont en mode révolutionnaire

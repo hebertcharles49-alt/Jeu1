@@ -232,8 +232,10 @@ static void sim_day(Sim *s, World *w) {
     /* — quotidien — */
     agency_advance(s->ag, w, s->econ, s->wl, 1);            /* les actions progressent */
     routes_advance(s->rn, w, s->econ, 1);
-    for (int c=0;c<w->n_countries;c++) if (s->ai_on[c])     /* les voisins VIVENT (cadence étalée) */
+    for (int c=0;c<w->n_countries;c++) if (s->ai_on[c]){    /* les voisins VIVENT (cadence étalée) */
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
+        ai_research_step(&s->ai[c], &s->ts[c], w, s->econ, s->wp, s->day);  /* l'arbre vivant */
+    }
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
     /* — mensuel : ÉCONOMIE + réputation diplomatique (O(n²)) + démographie, tous

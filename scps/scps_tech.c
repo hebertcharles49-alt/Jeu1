@@ -147,7 +147,24 @@ void tech_state_init(TechState *s, bool has_ruins_access) {
     s->H=0.f; s->fracture=0.f; s->charge=0.f;
     s->has_ruins_access=has_ruins_access;
     s->crisis_triggered=false;
+    s->research_points=0.f;
     for (int i=0;i<TECH_COUNT;i++) if (NODES[i].tier==0){ s->unlocked[i]=true; s->n_unlocked++; }
+}
+
+/* Rendement de recherche : la spine SAVOIR·Production accélère la recherche. */
+float tech_research_yield(const TechState *s){
+    float y=1.0f;
+    for (int i=0;i<TECH_COUNT;i++)
+        if (s->unlocked[i] && NODES[i].theme==THM_SAVOIR && NODES[i].func==FN_PRODUCTION && NODES[i].tier>0)
+            y += 0.5f;                 /* Scriptorium / Académie / Université */
+    return y;
+}
+
+/* Le penchant d'une race = le thème de sa signature (lecture, pas de « si race »). */
+TechTheme tech_race_affinity(SpeciesArchetype r){
+    for (int i=0;i<TECH_COUNT;i++)
+        if (NODES[i].native==r) return NODES[i].theme;   /* le thème où sa signature niche */
+    return THM_SOCIETE;                                  /* défaut : le socle */
 }
 
 const TechNode *tech_node(TechId id){ return (id>=0&&id<TECH_COUNT)?&NODES[id]:NULL; }

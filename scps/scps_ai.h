@@ -32,6 +32,7 @@
 #include "scps_agency.h"
 #include "scps_routes.h"
 #include "scps_diplo.h"
+#include "scps_tech.h"
 #include <stdint.h>
 
 /* ---- LA VUE : ce que l'IA LIT (coordonnées déjà calculées, zéro privilège) -- */
@@ -63,6 +64,8 @@ typedef struct {
     int builds_h;        /* citadelles (→ H) bâties sous la crise — SERRER (Ordre de Fer) */
     int builds_other;    /* greniers/marchés (food/PE) bâtis */
     int consolidations;  /* paix faites sous le frein (digestion) */
+    int techs;           /* technologies recherchées (l'arbre vivant) */
+    int techs_faustian;  /* dont des bouts FAUSTIENS (la pente arcanique) */
 } AiStats;
 
 /* ---- L'ACTEUR : une personnalité (poids de la fiche) + un rythme ----------- */
@@ -84,7 +87,9 @@ typedef struct {
     /* Cadences DÉCALÉES (jour du prochain réveil) + hystérésis de paix. */
     int      next_econ_day;
     int      next_strat_day;
+    int      next_research_day;  /* cadence de RECHERCHE (l'arbre de tech) */
     int      peace_lock_until;   /* après une consolidation : pas de guerre avant */
+    bool     can_enslave;        /* §4c : l'Économie servile (TECH_ESCLAVAGE) débloquée ? */
 
     uint32_t rng;            /* graine perso (jitter, départage) */
     AiStats  stats;
@@ -116,5 +121,18 @@ float  ai_aggression(const AiActor *a, const AiView *v);
 void   ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
                WorldLegitimacy *wl, AgencyState *ag, RouteNetwork *rn,
                DiploState *diplo, int day);
+
+/* RECHERCHE (1 JOUR) : à sa cadence, l'empire accumule des points (rendement
+ * Savoir × population) et déverrouille UN nœud choisi par ses BUTS + le PENCHANT
+ * de sa race + le FREIN (faustien évité quand on est fragile). Aucun « si race ».
+ * L'ACCÈS de race (sa population) débloque les orphelines → diffusion par conquête. */
+void   ai_research_step(AiActor *a, TechState *ts, const World *w,
+                        const WorldEconomy *econ, const WorldProsperity *wp, int day);
+
+/* Masque des races présentes dans la population de l'empire (sa propre race +
+ * conquises/migrées) → l'accès aux techs orphelines. Exposé pour le banc d'essai. */
+unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid);
+/* Population totale de l'empire (assiette de recherche & d'échelle de coût). */
+float    ai_country_population(const World *w, const WorldEconomy *econ, int cid);
 
 #endif /* SCPS_AI_H */

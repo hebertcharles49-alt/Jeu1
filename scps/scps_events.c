@@ -287,7 +287,7 @@ static void apply_effect(EventCtx *cx, EvScope scope, int subject, const EvEffec
             cx->wp->age_breach_flux = clampf(cx->wp->age_breach_flux + e->d_breach, 0.f, 10.f);
         }
         cx->ev->ages.breach_pressure = clampf(cx->ev->ages.breach_pressure + e->d_breach, 0.f, 10.f);
-        if (e->unlock_branch>=0 && e->unlock_branch<TBR_COUNT && e->unlock_tier>=0 && e->unlock_tier<8)
+        if (e->unlock_branch>=0 && e->unlock_branch<THM_COUNT && e->unlock_tier>=0 && e->unlock_tier<8)
             cx->ev->ages.tier_open[e->unlock_branch][e->unlock_tier]=true;
         return;
     }
@@ -504,15 +504,15 @@ static void age_dawn(EventsState *ev, AgeId a, World *w, WorldEconomy *econ, Wor
     EventCtx cx={ev,w,econ,NULL,wp,NULL,NULL,NULL};
     EvEffect e; memset(&e,0,sizeof e); e.pop_mult=1.f; e.unlock_branch=-1;
     switch(a){
-        case AGE_COMMERCE: e.d_C_global=1.0f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=3; break;
-        case AGE_REASON:   ev->ages.research_mult += 0.5f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=4; break;
-        case AGE_EMPIRES:  ev->ages.integration_mult += 0.5f; e.unlock_branch=TBR_SOCIETY; e.unlock_tier=5; break;
-        case AGE_BREACH:   e.d_breach=2.0f; e.unlock_branch=TBR_MAGIC; e.unlock_tier=5; break;
+        case AGE_COMMERCE: e.d_C_global=1.0f; e.unlock_branch=THM_SOCIETE; e.unlock_tier=3; break;
+        case AGE_REASON:   ev->ages.research_mult += 0.5f; e.unlock_branch=THM_SOCIETE; e.unlock_tier=4; break;
+        case AGE_EMPIRES:  ev->ages.integration_mult += 0.5f; e.unlock_branch=THM_SOCIETE; e.unlock_tier=5; break;
+        case AGE_BREACH:   e.d_breach=2.0f; e.unlock_branch=THM_SAVOIR; e.unlock_tier=5; break;
         /* Structurels : on déplace une ENTRÉE GLOBALE du moteur (le verdict suit). */
         case AGE_LUMIERES:
             if (wp){ wp->age_I_bonus += AGE_DELTA_I;            /* les idées surgissent */
                      wp->age_lumiere_solvent += AGE_DELTA_SOLV; }/* la légitimité coercitive se dissout */
-            e.unlock_branch=TBR_SOCIETY; e.unlock_tier=4;       /* le boon : le savoir */
+            e.unlock_branch=THM_SOCIETE; e.unlock_tier=4;       /* le boon : le savoir */
             break;
         case AGE_SOULEVEMENTS: if(wp) wp->age_L_penalty += AGE_DELTA_L; break;   /* L ↓ partout (contagion) */
         case AGE_ORDRE_FER:
@@ -547,8 +547,8 @@ bool events_check_ages(EventsState *ev, World *w, WorldEconomy *econ,
     return any;
 }
 bool  ages_dawned(const EventsState *ev, AgeId a){ return (a>=0&&a<AGE_COUNT)?ev->ages.dawned[a]:false; }
-bool  ages_tier_open(const EventsState *ev, TechBranch br, int tier){
-    return (br>=0&&br<TBR_COUNT&&tier>=0&&tier<8)?ev->ages.tier_open[br][tier]:false;
+bool  ages_tier_open(const EventsState *ev, TechTheme br, int tier){
+    return (br>=0&&br<THM_COUNT&&tier>=0&&tier<8)?ev->ages.tier_open[br][tier]:false;
 }
 float ages_breach_pressure(const EventsState *ev){ return ev->ages.breach_pressure; }
 

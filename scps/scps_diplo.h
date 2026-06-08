@@ -100,7 +100,7 @@ int   diplo_perceived_hegemon(const World *w, const WorldEconomy *econ,
  * monte ; L de la région s'effondre (puis réintègre sur des générations).
  * Renvoie true si la conquête a lieu. */
 bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
-                          WorldLegitimacy *wl, int conqueror, int region);
+                          WorldLegitimacy *wl, int conqueror, int region, bool conqueror_enslaves);
 
 /* SACCAGE (§4) — une province PRISE est DÉPOUILLÉE une fois : l'or de ses coffres
  * et ~6 mois de production (entrepôt valorisé) sont fondus dans le trésor de
@@ -113,10 +113,10 @@ float diplo_pillage_region(WorldEconomy *econ, int region, int dst_region);
 /* ESCLAVAGE (§4c) — une société ASSERVISSANTE déporte une part de la population
  * prise vers son CŒUR (capitale) : un groupe DIASPORA non-intégré (restif) de
  * culture étrangère → le D̄ du maître monte, la fracture s'installe au centre.
- * Renvoie le nombre de captifs ; 0 si la société n'asservit pas. Gate PROVISOIRE
- * (tradition de razzia) — la tech d'asservissement se branchera ici. Appelé par
- * diplo_conquer_region ; exposé pour le banc d'essai. */
-long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region);
+ * Renvoie le nombre de captifs ; 0 si `enslaves` est faux. GATE = la TECH
+ * d'asservissement (TECH_ESCLAVAGE, signature Orque) ; l'appelant passe le booléen.
+ * Appelé par diplo_conquer_region ; exposé pour le banc d'essai. */
+long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region, bool enslaves);
 
 void diplo_tick(DiploState *d, float dt);   /* usure de guerre (war_years++) + trêve/momentum */
 

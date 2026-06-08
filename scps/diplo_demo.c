@@ -98,7 +98,7 @@ int main(int argc,char**argv){
         printf("   → guerre au pays #%d, conquête de la région %d (« %s », D∞=%.1f de nous)\n",
                tgt_owner, target, w->region[target].name, best);
         diplo_declare_war(dp,player,tgt_owner);
-        bool took=diplo_conquer_region(dp,w,econ,wl,player,target);
+        bool took=diplo_conquer_region(dp,w,econ,wl,player,target,false);
 
         /* recalcul : la région conquise est désormais à nous → diversité. */
         for(int t=0;t<3;t++){ legitimacy_tick(wl,w,econ,ts); prosperity_tick(wp,w,econ,net,ts,wl); }
@@ -288,7 +288,7 @@ int main(int argc,char**argv){
             int Br=-1; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B && econ->region[r].culture.settled){Br=r;break;}
             if(Br>=0 && claim==1){
                 float mom0=dp->momentum[A];
-                diplo_conquer_region(dp,w,econ,wl,A,Br);  /* la prise (claim+1) = ILLÉGITIME */
+                diplo_conquer_region(dp,w,econ,wl,A,Br,false);  /* la prise (claim+1) = ILLÉGITIME */
                 ok("prendre AU-DELÀ de la revendication = SUREXPANSION (fulgurance ↑↑ → coalition)",
                    dp->momentum[A] > mom0 + 2.0f);        /* base 1 + surcharge 2 → > 2 prouve la surcharge */
             } else ok("(pas de cible nette pour le test de surexpansion)", true);
@@ -375,12 +375,12 @@ int main(int argc,char**argv){
                 for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B && econ->region[r].culture.settled){ if(Br1<0)Br1=r; else {Br2=r;break;} }
                 /* perte LÉGITIME (dans la revendication) : la rancune = la seule perte. */
                 diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
-                diplo_conquer_region(dp,w,econ,wl,A,Br1);
+                diplo_conquer_region(dp,w,econ,wl,A,Br1,false);
                 float rancor_loss=diplo_rancor(dp,B,A);
                 /* perte ILLÉGITIME (occupation forcée BIEN au-delà du légitime) : rancune CREUSÉE. */
                 diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
                 dp->conquered[A][B]=20;                          /* surexpansion manifeste */
-                diplo_conquer_region(dp,w,econ,wl,A,Br2);
+                diplo_conquer_region(dp,w,econ,wl,A,Br2,false);
                 float rancor_illegit=diplo_rancor(dp,B,A);
                 ok("perdre une province POSE la rancune sur le dépossédé", rancor_loss >= 0.9f);
                 ok("une prise ILLÉGITIME CREUSE la rancune (perte + agression nue)",
@@ -407,10 +407,10 @@ int main(int argc,char**argv){
             foe.integration=1.f; foe.L=5.f; foe.drift_id=222; foe.origin_sphere=species_sphere(RACE_ORQUE);
             econ->region[srcR].pop.n_groups=1; econ->region[srcR].pop.groups[0]=foe;
 
-            econ->region[capR].culture.martial=MART_THALASSO_PREDATRICE;   /* société de RAZZIA */
-            long captives=diplo_enslave_capture(w,econ,A,srcR);
+            /* GATE = la TECH d'asservissement (TECH_ESCLAVAGE, signature Orque) : booléen. */
+            long captives=diplo_enslave_capture(w,econ,A,srcR,/*enslaves*/true);
             printf("   captifs déportés au cœur : %ld (sur 4000)\n",captives);
-            ok("une société de razzia DÉPORTE une part (≈¼) de la population prise",
+            ok("un empire doté de l'Économie servile DÉPORTE ≈¼ de la population prise",
                captives>0 && captives<=1100);
             ok("la capitale gagne un GROUPE de plus — les captifs au cœur",
                econ->region[capR].pop.n_groups==2);
@@ -419,10 +419,9 @@ int main(int argc,char**argv){
                g->integration<0.01f && g->diaspora && g->race==RACE_ORQUE);
             ok("la province prise PERD la population déportée",
                econ->region[srcR].pop.groups[0].count < 4000);
-            /* GATE : une société NON-prédatrice n'asservit personne. */
-            econ->region[capR].culture.martial=MART_MUR_BOUCLIERS;
-            ok("une société NON-asservissante ne capture personne (gate PROVISOIRE — tech à venir)",
-               diplo_enslave_capture(w,econ,A,srcR)==0);
+            /* GATE : sans la TECH d'asservissement (enslaves=false), personne n'est asservi. */
+            ok("sans la TECH d'asservissement (TECH_ESCLAVAGE), personne n'est capturé",
+               diplo_enslave_capture(w,econ,A,srcR,/*enslaves*/false)==0);
         } else ok("(monde trop petit pour le test d'esclavage)", true);
     }
 

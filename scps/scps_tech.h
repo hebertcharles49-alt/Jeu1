@@ -107,6 +107,7 @@ typedef struct {
     int   n_unlocked;
     bool  has_ruins_access;   /* porte de l'arcane (Savoir faustien profond) */
     bool  crisis_triggered;   /* la crise de fin est-elle convoquée ? */
+    float research_points;    /* points de recherche accumulés (économie de tech) */
 } TechState;
 
 /* ---- Catégories d'intrants pour la fusion ----------------------------- */
@@ -156,6 +157,15 @@ bool  tech_research(TechState *s, TechId id, unsigned race_access);
  * Plus l'empire est ÉTENDU (∝ population), plus CHAQUE tech coûte → frein au
  * snowball, « tall » viable. Les bâtiments de base (tier 0) coûtent 0. */
 float tech_cost(TechId id, float population);
+
+/* Rendement de recherche : multiplicateur issu du SAVOIR·Production (Bibliothèque
+ * → Scriptorium → Académie → Université). La POPULATION fournit l'assiette (côté
+ * appelant : income = yield × f(pop)). La pop produit la recherche ET en renchérit
+ * le coût → équilibre en un seul levier. */
+float tech_research_yield(const TechState *s);
+/* Le PENCHANT d'une race : le thème vers lequel sa signature la porte (biais IA,
+ * jamais un « si race==X » : c'est une lecture de la table). */
+TechTheme tech_race_affinity(SpeciesArchetype r);
 
 /* ---- API : la Brèche (verrou SCPS, inchangé) -------------------------- */
 float tech_dereal(const TechState *s);          /* max(0,(P/10)·C + flux − K) */

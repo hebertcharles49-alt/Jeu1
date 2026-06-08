@@ -10,6 +10,8 @@
  * coordonnée de consolidation. Aucune branche « si pays==X ».
  */
 #include "scps_ai.h"
+#include "scps_tech.h"
+#include "scps_species.h"
 #include <string.h>
 #include <math.h>
 
@@ -24,6 +26,13 @@
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
+/* ---- Recherche (l'arbre de tech vivant) ------------------------------- */
+#define AI_RESEARCH_CADENCE 365  /* ~1 an entre déverrouillages potentiels */
+#define AI_RESEARCH_RATE    14.f /* points/an de base, × rendement Savoir × f(pop) */
+#define AI_RESEARCH_POPREF  8000.f /* population qui DOUBLE l'assiette de recherche */
+#define AI_TECH_PENCHANT    2.0f  /* biais vers le thème de SA race (penchant, pas « si ») */
+#define AI_TECH_SIGNATURE   1.5f  /* prime à une signature accessible (la sienne / greffée) */
+#define AI_TECH_FAUSTIAN    2.5f  /* tolérance faustienne = w_faustian − frein (sinon on évite) */
 
 /* ---- Utilitaires ------------------------------------------------------ */
 static inline float clampf(float v, float lo, float hi){ return v<lo?lo:(v>hi?hi:v); }
@@ -89,8 +98,9 @@ void ai_actor_init(AiActor *a, const World *w, const WorldEconomy *econ,
     ai_derive_weights(a, self);
 
     /* Cadences DÉCALÉES : chacun se réveille à un moment propre (pas de lockstep). */
-    a->next_econ_day  = (int)(frand(&a->rng) * AI_ECON_CADENCE);
-    a->next_strat_day = (int)(frand(&a->rng) * AI_STRAT_CADENCE);
+    a->next_econ_day     = (int)(frand(&a->rng) * AI_ECON_CADENCE);
+    a->next_strat_day    = (int)(frand(&a->rng) * AI_STRAT_CADENCE);
+    a->next_research_day = (int)(frand(&a->rng) * AI_RESEARCH_CADENCE);
 }
 
 /* ===================================================================== */
@@ -434,7 +444,7 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         CasusBelli goal = (enemy>=0)? diplo_war_goal(diplo, a->cid, enemy) : CB_TERRITORIAL;
         int er = ai_pick_enemy_region(econ, diplo, a->cid);
         if (er>=0){
-            if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er)){
+            if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
                 a->credit_war -= 1.f; a->stats.conquests++;
                 /* §5 PAIX PROPORTIONNELLE : un casus belli non-territorial est SATISFAIT
                  * par une prise (la source / l'humiliation) ; le territorial ENCAISSE sa
@@ -495,6 +505,92 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         diplo_declare_war_cb(diplo, a->cid, rival, cb);   /* la guerre a une RAISON (gate la paix) */
         a->credit_war -= 1.f; a->stats.wars++;
     }
+}
+
+/* ===================================================================== */
+/* RECHERCHE — l'arbre de tech vivant (buts + penchant de race + frein)     */
+/* ===================================================================== */
+static SpeciesArchetype ai_capital_race(const World *w, const WorldEconomy *econ, int cid){
+    if (cid<0||cid>=w->n_countries) return RACE_HUMAIN;
+    int cp=w->country[cid].capital_prov;
+    if (cp<0||cp>=w->n_provinces) return RACE_HUMAIN;
+    int cr=w->province[cp].region;
+    if (cr<0||cr>=econ->n_regions) return RACE_HUMAIN;
+    return econ->region[cr].culture.race;
+}
+float ai_country_population(const World *w, const WorldEconomy *econ, int cid){
+    float pop=0.f; (void)w;
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
+        const RegionEconomy *re=&econ->region[r];
+        for (int k=0;k<CLASS_COUNT;k++) pop += re->strata[k].pop;
+    }
+    return pop;
+}
+unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
+    unsigned m = tech_race_bit(ai_capital_race(w,econ,cid));        /* sa propre race, toujours */
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
+        const RegionEconomy *re=&econ->region[r];
+        m |= tech_race_bit(re->culture.race);                      /* la culture dominante */
+        for (int g=0;g<re->pop.n_groups;g++)
+            m |= tech_race_bit(re->pop.groups[g].race);            /* groupes conquis/migrés → diffusion */
+    }
+    return m;
+}
+
+/* Le nœud à déverrouiller : score = BUTS (la fonction répond au besoin lu) +
+ * PENCHANT de race (biais vers son thème + ses signatures) − FREIN (le faustien
+ * n'est pris que si la pente dépasse le frein). Aucun « si race==X ». */
+static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w,
+                           const WorldEconomy *econ, const WorldProsperity *wp,
+                           unsigned access, float pop){
+    AiView v = ai_observe(wp, w, econ, a->cid);
+    float brake = ai_consolidation_pressure(&v);
+    TechTheme affinity = tech_race_affinity(ai_capital_race(w,econ,a->cid));
+    TechId best=TECH_COUNT; float bestscore=-1e30f;
+    for (int i=0;i<TECH_COUNT;i++){
+        TechId id=(TechId)i;
+        if (!tech_can_research(ts,id,access)) continue;
+        float cost=tech_cost(id,pop);
+        if (cost > ts->research_points + 0.01f) continue;          /* pas encore les moyens */
+        const TechNode *n=tech_node(id);
+        float score=0.f;
+        /* BUTS — la fonction du nœud répond à un besoin lu de la VUE (pas de script). */
+        if (n->func==FN_ARMEE)        score += 1.2f*a->w_expand + 2.0f*v.take_pressure + 0.25f*n->dMil;
+        if (n->func==FN_PRODUCTION)   score += 1.0f*a->w_trade  + 1.5f*v.gap_acuity   + 0.25f*n->dEco;
+        if (n->func==FN_RENFORCEMENT){ score += 1.0f*a->w_build + 0.4f*n->dK + 0.3f*n->dL;
+            if (n->dFracture<0.f) score += 0.05f*v.fracture; }                 /* anti-fracture si fracturé */
+        if (n->theme==THM_SOCIETE && n->func==FN_RENFORCEMENT) score += 0.6f*a->w_faith;
+        /* PENCHANT de race — biais, jamais un gate. */
+        if (n->theme==affinity)    score += AI_TECH_PENCHANT;
+        if (n->native!=RACE_COUNT) score += AI_TECH_SIGNATURE;     /* une signature accessible se prend */
+        /* FREIN — le faustien rapproche la Brèche : pris seulement si la pente l'emporte. */
+        if (n->faustian)           score += AI_TECH_FAUSTIAN*(a->w_faustian - brake) - 0.3f*n->charge;
+        score -= 0.002f*cost;      /* à score égal : le plus proche (le moins cher) d'abord */
+        if (score>bestscore){ bestscore=score; best=id; }
+    }
+    return best;
+}
+
+void ai_research_step(AiActor *a, TechState *ts, const World *w,
+                      const WorldEconomy *econ, const WorldProsperity *wp, int day){
+    if (!ts || day < a->next_research_day) return;
+    a->next_research_day = day + AI_RESEARCH_CADENCE;
+    float pop = ai_country_population(w, econ, a->cid);
+    /* ASSIETTE : la pop PRODUIT la recherche — et la renchérit (tech_cost) → équilibre. */
+    float income = (AI_RESEARCH_RATE/365.f)*AI_RESEARCH_CADENCE
+                 * tech_research_yield(ts) * (1.f + pop/AI_RESEARCH_POPREF);
+    ts->research_points += income;
+    unsigned access = ai_race_access(w, econ, a->cid);
+    TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
+    if (pick!=TECH_COUNT){
+        float cost = tech_cost(pick, pop);
+        if (ts->research_points >= cost && tech_research(ts, pick, access)){
+            ts->research_points -= cost;
+            a->stats.techs++;
+            if (tech_node(pick)->faustian) a->stats.techs_faustian++;
+        }
+    }
+    a->can_enslave = ts->unlocked[TECH_ESCLAVAGE];   /* §4c : le gate de l'esclavage suit la tech */
 }
 
 /* ===================================================================== */

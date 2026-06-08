@@ -240,7 +240,7 @@ CasusBelli diplo_casus_belli(const World *w, const WorldEconomy *econ, const Wor
 
 /* ---- guerre : conquête ------------------------------------------------ */
 bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
-                          WorldLegitimacy *wl, int conqueror, int region){
+                          WorldLegitimacy *wl, int conqueror, int region, bool conqueror_enslaves){
     if (conqueror<0||conqueror>=w->n_countries) return false;
     if (region<0||region>=econ->n_regions) return false;
     RegionEconomy *re=&econ->region[region];
@@ -272,21 +272,17 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     int dst=-1, cp=w->country[conqueror].capital_prov;
     if (cp>=0 && cp<w->n_provinces) dst=w->province[cp].region;
     diplo_pillage_region(econ, region, dst);
-    diplo_enslave_capture(w, econ, conqueror, region);   /* §4c esclavage (gate provisoire) */
+    diplo_enslave_capture(w, econ, conqueror, region, conqueror_enslaves);   /* §4c : gate = TECH_ESCLAVAGE */
     return true;
 }
 
 /* ---- guerre : ESCLAVAGE (§4c) — déporter la population prise ----------- *
- * Gate PROVISOIRE : une société de RAZZIA (traditions prédatrices). La tech
- * d'asservissement arrive au prochain jet → on la branchera ICI (un || de plus). */
-static bool society_enslaves(const PopCulture *pc){
-    return pc && (pc->martial==MART_HORDE_MONTEE ||
-                  pc->martial==MART_RAZZIA_MARITIME ||
-                  pc->martial==MART_THALASSO_PREDATRICE);
-}
-long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region){
+ * GATE = la TECH d'asservissement (TECH_ESCLAVAGE, signature Orque) : l'appelant
+ * passe `enslaves` = l'empire a-t-il l'Économie servile débloquée. La tech circule
+ * avec les peuples (orpheline) → ce sont les Orques et ceux qui les ont absorbés. */
+long diplo_enslave_capture(World *w, WorldEconomy *econ, int conqueror, int region, bool enslaves){
+    if (!enslaves) return 0;                                          /* société sans l'Économie servile */
     if (conqueror<0||conqueror>=w->n_countries||region<0||region>=econ->n_regions) return 0;
-    if (!society_enslaves(cap_culture(w,econ,conqueror))) return 0;   /* société non-asservissante */
     int cp=w->country[conqueror].capital_prov;
     int crr=(cp>=0&&cp<w->n_provinces)? w->province[cp].region : -1;
     if (crr<0||crr>=econ->n_regions||crr==region) return 0;

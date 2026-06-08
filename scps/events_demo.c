@@ -214,10 +214,10 @@ int main(int argc, char **argv){
       for (int k=0;k<ns;k++) s.econ->region[settled[k]].route_pe=2.0f; }   /* 6 carrefours riches */
     s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     printf("   Commerce : éveillé=%d  C mondial=+%.1f  palier Société/3 ouvert=%d\n",
-           ages_dawned(s.ev,AGE_COMMERCE), s.wp->age_C_bonus, ages_tier_open(s.ev,TBR_SOCIETY,3));
+           ages_dawned(s.ev,AGE_COMMERCE), s.wp->age_C_bonus, ages_tier_open(s.ev,THM_SOCIETE,3));
     ok("l'Âge du Commerce s'éveille quand X nœuds dépassent la valeur Y", ages_dawned(s.ev,AGE_COMMERCE));
     ok("à son avènement, la connectivité MONDIALE monte (C global) + palier de tech",
-       s.wp->age_C_bonus>0.f && ages_tier_open(s.ev,TBR_SOCIETY,3));
+       s.wp->age_C_bonus>0.f && ages_tier_open(s.ev,THM_SOCIETE,3));
 
     /* Âge de la Raison : Lumière mondiale cumulée. */
     for (int c=0;c<s.wp->n_countries && c<4;c++) s.wp->country[c].Lumiere=9.f;
@@ -239,7 +239,7 @@ int main(int argc, char **argv){
     s.ev->ages.days_elapsed += 31*365; events_check_ages(s.ev,s.w,s.econ,s.wp,s.wl,s.ts);
     printf("   Brèche : éveillée=%d  pression mondiale=%.1f  flux faustien mondial=%.1f  palier Magie/5=%d\n",
            ages_dawned(s.ev,AGE_BREACH), ages_breach_pressure(s.ev), s.wp->age_breach_flux,
-           ages_tier_open(s.ev,TBR_MAGIC,5));
+           ages_tier_open(s.ev,THM_SAVOIR,5));
     ok("la charge faustienne fait advenir l'Âge de la Brèche", ages_dawned(s.ev,AGE_BREACH));
     ok("la Brèche monte la pression de fin MONDIALE (flux faustien global → déréalisation)",
        ages_breach_pressure(s.ev)>0.f && s.wp->age_breach_flux>0.f);
