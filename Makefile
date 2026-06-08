@@ -218,6 +218,20 @@ WARHOST_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 warhost_demo: $(WARHOST_DEMO_OBJS)
 	$(CC) $(WARHOST_DEMO_OBJS) -o $@ -lm
 
+# ---- La campagne : les armées sur la carte (marche, siège, bataille) -------
+# Pose les primitives combat-dans-le-temps (déplacement/siège/bataille/doctrine)
+# sur une vraie carte ; non-invasif (lecture seule sur econ).
+CAMPAIGN_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                   $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                   $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_labor.o \
+                   $(OBJDIR)/scps_scps_campaign.o $(OBJDIR)/scps_campaign_demo.o
+campaign_demo: $(CAMPAIGN_DEMO_OBJS)
+	$(CC) $(CAMPAIGN_DEMO_OBJS) -o $@ -lm
+
 # ---- Routes commerciales : la cloche f(D̄) faite action (§7) --------------
 ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
