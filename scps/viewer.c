@@ -48,8 +48,8 @@
 #include <math.h>
 
 /* ---- Configuration fenêtre ------------------------------------------- */
-#define WIN_W 1280
-#define WIN_H  640
+#define WIN_W 1200
+#define WIN_H 1080
 
 /* ---- Temps de jeu : du snapshot au JEU VIVANT ------------------------ */
 typedef enum { SPEED_PAUSE=0, SPEED_1, SPEED_2, SPEED_5, SPEED_COUNT } GameSpeed;
@@ -154,12 +154,15 @@ static void status_line(const World *w, ViewMode mode, uint32_t seed,
  * + label_X / hover_X.
  * ====================================================================== */
 
-/* ---- Palette (bleu nuit & cuivre, §5.4) ------------------------------- */
-static const SDL_Color COL_PANEL  = { 0x0f,0x16,0x22,0xf2 };
-static const SDL_Color COL_PANEL2 = { 0x16,0x20,0x30,0xf2 };
-static const SDL_Color COL_COPPER = { 0xb8,0x73,0x33,0xff };
-static const SDL_Color COL_PARCH  = { 0xe7,0xdc,0xc4,0xff };
-static const SDL_Color COL_DIM    = { 0x9a,0x8f,0x78,0xff };
+/* ---- Palette (bleu nuit & cuivre, §5.4) — affinée pour la profondeur --- */
+static const SDL_Color COL_PANEL    = { 0x0d,0x14,0x20,0xf6 };  /* navy profond (corps de panneau) */
+static const SDL_Color COL_PANEL2   = { 0x17,0x23,0x35,0xf6 };  /* navy clair (champs, pastilles) */
+static const SDL_Color COL_PANEL_HI = { 0x26,0x36,0x4c,0x4d };  /* voile clair translucide (sheen) */
+static const SDL_Color COL_COPPER   = { 0xc8,0x82,0x3e,0xff };  /* cuivre, plus chaud & vif */
+static const SDL_Color COL_PARCH    = { 0xed,0xe3,0xcd,0xff };  /* parchemin, un brin plus clair */
+static const SDL_Color COL_DIM      = { 0x96,0x8d,0x79,0xff };  /* texte secondaire */
+static const SDL_Color COL_EDGE     = { 0x34,0x42,0x57,0xff };  /* bord DOUX (au lieu d'un trait dur) */
+static const SDL_Color COL_SHADOW   = { 0x00,0x02,0x05,0x6e };  /* ombre portée (relief) */
 
 /* Bande → couleur de sens (vert favorable → ambre → rouge défavorable). */
 static SDL_Color sense_color(float good) {
@@ -194,6 +197,53 @@ static void fill_rect(SDL_Renderer *ren, int x,int y,int w,int h, SDL_Color c) {
     SDL_SetRenderDrawColor(ren, c.r,c.g,c.b,c.a);
     SDL_Rect r={x,y,w,h}; SDL_RenderFillRect(ren,&r);
 }
+/* Rectangle à COINS ARRONDIS (douceur) — corps en 3 bandes + 4 quarts de disque. */
+static void fill_round(SDL_Renderer *ren, int x,int y,int w,int h, SDL_Color c, int r){
+    if (r<1){ fill_rect(ren,x,y,w,h,c); return; }
+    if (r*2>w) r=w/2;
+    if (r*2>h) r=h/2;
+    fill_rect(ren, x+r, y, w-2*r, h, c);
+    fill_rect(ren, x, y+r, r, h-2*r, c);
+    fill_rect(ren, x+w-r, y+r, r, h-2*r, c);
+    SDL_SetRenderDrawColor(ren, c.r,c.g,c.b,c.a);
+    for (int dy=0; dy<r; dy++) for (int dx=0; dx<r; dx++){
+        if (dx*dx+dy*dy <= r*r){
+            SDL_RenderDrawPoint(ren, x+r-1-dx,   y+r-1-dy);
+            SDL_RenderDrawPoint(ren, x+w-r+dx,   y+r-1-dy);
+            SDL_RenderDrawPoint(ren, x+r-1-dx,   y+h-r+dy);
+            SDL_RenderDrawPoint(ren, x+w-r+dx,   y+h-r+dy);
+        }
+    }
+}
+/* Contour à coins arrondis (anneau d'un fill_round). */
+static void round_box(SDL_Renderer *ren, int x,int y,int w,int h, SDL_Color c, int r){
+    if (r<1){ SDL_SetRenderDrawColor(ren,c.r,c.g,c.b,c.a);
+              SDL_Rect rc={x,y,w,h}; SDL_RenderDrawRect(ren,&rc); return; }
+    if (r*2>w) r=w/2;
+    if (r*2>h) r=h/2;
+    SDL_SetRenderDrawColor(ren, c.r,c.g,c.b,c.a);
+    SDL_RenderDrawLine(ren, x+r,y, x+w-r,y);
+    SDL_RenderDrawLine(ren, x+r,y+h-1, x+w-r,y+h-1);
+    SDL_RenderDrawLine(ren, x,y+r, x,y+h-r);
+    SDL_RenderDrawLine(ren, x+w-1,y+r, x+w-1,y+h-r);
+    for (int a=0;a<=90;a+=6){
+        float rad=a*0.0174533f; int dx=(int)(r*cosf(rad)), dy=(int)(r*sinf(rad));
+        SDL_RenderDrawPoint(ren, x+r-dx,   y+r-dy);
+        SDL_RenderDrawPoint(ren, x+w-r+dx, y+r-dy);
+        SDL_RenderDrawPoint(ren, x+r-dx,   y+h-r+dy);
+        SDL_RenderDrawPoint(ren, x+w-r+dx, y+h-r+dy);
+    }
+}
+/* Fond de PANNEAU « smooth » : ombre portée + corps navy arrondi + voile clair en
+ * haut (sheen) + une BORDURE ÉPAISSE qui déborde vers l'EXTÉRIEUR (relief, cadre). */
+static void panel_bg(SDL_Renderer *ren, int x,int y,int w,int h){
+    fill_round(ren, x+4, y+6, w, h, COL_SHADOW, 10);    /* ombre portée, décalée */
+    fill_round(ren, x, y, w, h, COL_PANEL, 8);          /* corps arrondi */
+    fill_round(ren, x+2, y+2, w-4, h/5, COL_PANEL_HI, 7);/* voile clair en haut */
+    round_box(ren, x,   y,   w,   h,   COL_EDGE,   8);  /* liseré intérieur doux */
+    round_box(ren, x-1, y-1, w+2, h+2, COL_COPPER, 9);  /* bordure cuivre, débordante… */
+    round_box(ren, x-2, y-2, w+4, h+4, COL_COPPER, 10); /* …épaissie vers l'extérieur */
+}
 
 /* ===================================================================== */
 /* ARBRE DE TECH CONCENTRIQUE — la membrane (TechTreeReadout) → des anneaux */
@@ -222,9 +272,9 @@ static void draw_gauge(SDL_Renderer *ren, int x,int y,int gw,int gh,int value){
         float t = (gw>1)? (float)i/(gw-1) : 0.f;     /* 0=rouge … 1=vert */
         fill_rect(ren, x+i, y, 1, gh, sense_color(t));
     }
-    draw_box(ren, x-1, y-1, gw+2, gh+2, COL_DIM);
+    round_box(ren, x-1, y-1, gw+2, gh+2, COL_EDGE, 3);
     int mx = x + (int)(value/100.f*(gw-1));
-    fill_rect(ren, mx-1, y-2, 3, gh+4, COL_PARCH);   /* le curseur à la valeur */
+    fill_round(ren, mx-1, y-2, 3, gh+4, COL_PARCH, 1);   /* le curseur à la valeur */
 }
 /* Camembert : des PARTS (percent[]) en couleurs (cols[]), peint disque par
  * pixel (SDL n'a pas de remplissage d'arc) — 0 en haut, sens horaire. */
@@ -621,13 +671,13 @@ static int topbar_sep(SDL_Renderer *ren, int x, int y){
 static int draw_alert(SDL_Renderer *ren, int x, int y, SDL_Color accent,
                       const char *text, const char *hov){
     TTF_Font *fs = g_font_small ? g_font_small : g_font;
-    int tw = text_w(fs, text), w = tw + 16;
-    fill_rect(ren, x, y, w, 18, COL_PANEL);
-    fill_rect(ren, x, y, 3, 18, accent);             /* l'accent de nature */
-    draw_box (ren, x, y, w, 18, COL_DIM);
-    draw_text(ren, fs, x+8, y+1, COL_PARCH, text);
+    int tw = text_w(fs, text), w = tw + 18;
+    fill_round(ren, x, y, w, 18, COL_PANEL2, 5);     /* corps arrondi */
+    fill_round(ren, x+2, y+2, 4, 14, accent, 2);     /* la barre d'accent (nature) */
+    round_box (ren, x-1, y-1, w+2, 20, accent, 6);   /* bordure colorée, débordante */
+    draw_text (ren, fs, x+11, y+1, COL_PARCH, text);
     if (hov) zone_add((SDL_Rect){x,y,w,18}, hov);
-    return x + w + 6;
+    return x + w + 7;
 }
 
 static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World *w, int cid,
@@ -636,7 +686,9 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
     r.influence = statecraft_influence(s->sc, cid);
     int bh = 74;
     fill_rect(ren, 0,0, win_w, bh, COL_PANEL);
-    fill_rect(ren, 0,bh, win_w, 2, COL_COPPER);
+    fill_rect(ren, 0,0, win_w, 10, COL_PANEL_HI);          /* voile clair en haut (relief) */
+    fill_rect(ren, 0,bh,   win_w, 3, COL_COPPER);          /* bordure cuivre ÉPAISSE */
+    fill_rect(ren, 0,bh+3, win_w, 5, COL_SHADOW);          /* ombre portée sous le bandeau */
 
     /* — Rang A : DÉPENSABLE | ACCUMULABLE (clusters séparés) · temps/âge/vitesse (droite).
      *   Le bandeau est un SOMMAIRE : chaque ressource ouvre son système (clic). — */
@@ -709,8 +761,8 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
         static char fhov[6][160];
         for (int k=0;k<6;k++){
             int f=ord[k];
-            fill_rect(ren, xc, yC+2, 9, 9, FCOL[f]);              /* pastille d'identité */
-            draw_box (ren, xc, yC+2, 9, 9, COL_DIM);
+            fill_round(ren, xc, yC+2, 10, 10, FCOL[f], 3);        /* pastille d'identité arrondie */
+            round_box (ren, xc, yC+2, 10, 10, COL_EDGE, 3);
             draw_text(ren, fs, xc+13, yC, COL_DIM, AB[f]);
             int aw = text_w(fs, AB[f]);
             char pz[8]; snprintf(pz,sizeof pz, "%d%%", fc.faction[f].satisfaction);
@@ -782,7 +834,7 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     ProvinceReadout p = province_readout(w, econ, wp, wl, pid);
     (void)win_w;
     int pw=312, px=0, py=102, ph=win_h-py-26;   /* à GAUCHE, sous le bandeau + alertes (§7) */
-    fill_rect(ren, px,py, pw,ph, COL_PANEL);
+    panel_bg(ren, px,py, pw,ph);
     fill_rect(ren, px+pw-2,py, 2,ph, COL_COPPER);   /* liseré cuivre sur le bord intérieur (droite) */
     int x=px+16, y=py+14, rw=pw-30;
     char line[192];
@@ -992,9 +1044,10 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
             int col=i%4, row=i/4, sx=x+col*(sw+sg), sy=sy0+row*(sw+8);
             bool built = S[i].lvl > 0.3f;
             SDL_Color fc = S[i].special ? COL_COPPER : SLICE_PAL[i%6];
-            fill_rect(ren, sx, sy, sw, sw, built ? fc : COL_PANEL2);
-            draw_box(ren, sx, sy, sw, sw, COL_DIM);
-            if (S[i].special) draw_box(ren, sx-1, sy-1, sw+2, sw+2, COL_COPPER);  /* liseré distinct */
+            fill_round(ren, sx, sy, sw, sw, built ? fc : COL_PANEL2, 5);
+            round_box (ren, sx, sy, sw, sw, COL_EDGE, 5);
+            if (S[i].special){ round_box(ren, sx-1, sy-1, sw+2, sw+2, COL_COPPER, 6);  /* liseré cuivre… */
+                               round_box(ren, sx-2, sy-2, sw+4, sw+4, COL_COPPER, 7); } /* …épaissi vers l'extérieur */
             int aw=text_w(g_font_small, S[i].abbr);
             draw_text(ren, g_font_small, sx+(sw-aw)/2, sy+sw/2-7, built?COL_PANEL:COL_DIM, S[i].abbr);
             if (built) snprintf(bhov[i],sizeof bhov[i],
@@ -1046,8 +1099,8 @@ static char g_ohov[80][200];
 static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s, const World *w){
     int player=s->player; if (player<0) return;
     int pw=234, px=win_w-pw, py=102, ph=win_h-py-26;
-    fill_rect(ren, px,py, pw,ph, COL_PANEL);
-    fill_rect(ren, px,py, 2,ph, COL_COPPER);
+    panel_bg(ren, px,py, pw,ph);
+    fill_rect(ren, px,py, 2,ph, COL_COPPER);          /* liseré cuivre sur le bord intérieur (gauche) */
     TTF_Font *fs = g_font_small?g_font_small:g_font;
     int x=px+12, y=py+10, rw=pw-22, bottom=py+ph-4, oi=0;
     draw_text(ren, g_font, x, y, COL_COPPER, "Domaine · par urbanisation"); y+=20;
