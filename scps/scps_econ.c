@@ -64,15 +64,25 @@ typedef struct {
     Resource in2;  float q2;   /* in2 = RES_NONE si une seule entrée */
     Resource out;  float qout;
     float    labor;            /* besoin de main-d'œuvre par niveau */
+    Resource alt1;             /* §4 : intrant de REPLI pour in1 (OR-gate). On puise
+                                * in1 PUIS alt1 ; RES_NONE = pas de repli. Desserre les
+                                * goulots du luxe (Or OU MétalPréc, Laine OU Coton). */
 } Recipe;
 
 static const Recipe RECIPE[BLD_TYPE_COUNT] = {
-    [BLD_TEXTILE]   = { RES_WOOL,  2.0f, RES_NONE,          0.f, RES_CLOTH,          1.0f, 1.0f },
+    /* §4 — TEXTILE : sortie relevée (1.0→1.4) et 2e source de fibre (laine OU coton,
+     * le coton ne nourrissait aucune chaîne) → soulage la pénurie d'étoffe (couv 22%). */
+    [BLD_TEXTILE]   = { RES_WOOL,  1.6f, RES_NONE,          0.f, RES_CLOTH,          1.4f, 1.0f, RES_COTTON },
     [BLD_SAWMILL]   = { RES_WOOD,  2.0f, RES_NONE,          0.f, RES_NAVAL_SUPPLIES, 1.0f, 0.8f },
     [BLD_PAPERMILL] = { RES_WOOD,  1.5f, RES_NONE,          0.f, RES_PAPER,          1.0f, 0.7f },
-    [BLD_WINERY]    = { RES_SUGAR, 2.0f, RES_NONE,          0.f, RES_WINE,           1.0f, 0.9f },
+    /* §4 — VIN : coût en sucre abaissé (2.0→1.4) faute de « raisin » ; le dispatch
+     * SUGAR est élargi (§6) → vise ≥25 domaines (vs 7), couv 25%→~100%. */
+    [BLD_WINERY]    = { RES_SUGAR, 1.4f, RES_NONE,          0.f, RES_WINE,           1.0f, 0.9f },
     [BLD_BREWERY]   = { RES_GRAIN, 1.2f, RES_NONE,          0.f, RES_BEER,           1.0f, 0.8f },
-    [BLD_JEWELER]   = { RES_GOLD,  1.0f, RES_PRECIOUS_METAL,1.0f, RES_PRECIOUS_WARE, 1.0f, 1.2f },
+    /* §4 — JOAILLERIE : gate desserré à Or OU MétalPréc (un seul intrant requis,
+     * l'autre en repli) → vise ≥35 joailleries (vs 11), l'orfèvrerie cesse d'être
+     * gatée à 11 régions et son prix retombe du plafond. */
+    [BLD_JEWELER]   = { RES_GOLD,  1.5f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  1.0f, 1.2f, RES_PRECIOUS_METAL },
     [BLD_WEAVER_LUX]= { RES_CLOTH, 2.0f, RES_NONE,          0.f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f },
     /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
      * nourrit la Brèche (couplée plus bas dans econ_tick → arcane_charge). */
@@ -380,7 +390,9 @@ void econ_init(WorldEconomy *e, const World *w) {
 
         /* ---- Manufactures : implantées là où l'intrant est extrait dans
          *      la région (cohérence géographique de la chaîne de prod). */
-        if (re->raw_cap[RES_WOOL] > 0.f)  region_ensure_building(re,BLD_TEXTILE);
+        /* §6c — textile là où l'on file laine OU coton (le coton nourrit enfin une chaîne). */
+        if (re->raw_cap[RES_WOOL] > 0.f || re->raw_cap[RES_COTTON] > 0.f)
+            region_ensure_building(re,BLD_TEXTILE);
         if (re->raw_cap[RES_WOOD] > 0.f) {
             region_ensure_building(re,BLD_SAWMILL);
             region_ensure_building(re,BLD_PAPERMILL);
@@ -388,10 +400,12 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_SUGAR] > 0.f) region_ensure_building(re,BLD_WINERY);
         /* Brasserie : la bière naît du grain — boisson du commun, partout où l'on cultive. */
         if (re->raw_cap[RES_GRAIN] > 0.f) region_ensure_building(re,BLD_BREWERY);
-        if (re->raw_cap[RES_GOLD] > 0.f && re->raw_cap[RES_PRECIOUS_METAL] > 0.f)
+        /* §6c — joaillerie là où l'on extrait or OU métal précieux (gate desserré §4). */
+        if (re->raw_cap[RES_GOLD] > 0.f || re->raw_cap[RES_PRECIOUS_METAL] > 0.f)
             region_ensure_building(re,BLD_JEWELER);
-        /* L'atelier de luxe a besoin de tissu : présent si on file la laine. */
-        if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
+        /* L'atelier de luxe a besoin de tissu : présent là où l'on file (laine ou coton). */
+        if (re->raw_cap[RES_WOOL] > 0.f || re->raw_cap[RES_COTTON] > 0.f)
+            region_ensure_building(re,BLD_WEAVER_LUX);
         /* Épine dorsale : fonderie + atelier d'outillage là où fer ET charbon. */
         if (re->raw_cap[RES_IRON] > 0.f && re->raw_cap[RES_COAL] > 0.f){
             region_ensure_building(re,BLD_FOUNDRY);
@@ -564,7 +578,11 @@ void econ_tick(WorldEconomy *e, float dt) {
              * par la main-d'œuvre restante. */
             float cap = b->level;
             float lim = cap;
-            if (rc->in1!=RES_NONE) lim=fminf(lim, re->stock[rc->in1]/fmaxf(rc->q1,EPS));
+            if (rc->in1!=RES_NONE){
+                float avail_in1=re->stock[rc->in1];
+                if (rc->alt1!=RES_NONE) avail_in1+=re->stock[rc->alt1];   /* §4 : OR-gate (in1 OU repli) */
+                lim=fminf(lim, avail_in1/fmaxf(rc->q1,EPS));
+            }
             if (rc->in2!=RES_NONE) lim=fminf(lim, re->stock[rc->in2]/fmaxf(rc->q2,EPS));
             /* RÉSERVE VIVRIÈRE : le grain NOURRIT avant de se brasser. On ne brasse
              * que le SURPLUS au-delà du besoin alimentaire (sinon la bière affame
@@ -584,9 +602,20 @@ void econ_tick(WorldEconomy *e, float dt) {
             lim=fminf(lim, cap*lratio);
             if (lim<=0.f){ b->workers=0.f; continue; }
 
-            /* Consomme intrants, produit sortie */
-            if (rc->in1!=RES_NONE){ re->stock[rc->in1]-=lim*rc->q1; demand[rc->in1]+=lim*rc->q1; }
-            if (rc->in2!=RES_NONE){ re->stock[rc->in2]-=lim*rc->q2; demand[rc->in2]+=lim*rc->q2; }
+            /* Consomme intrants, produit sortie. §4 : pour in1 on puise d'abord dans
+             * in1, puis dans le repli alt1 (OR-gate) — chaque source valorisée à SON
+             * prix (la valeur ajoutée reflète l'intrant réellement consommé). */
+            float val_in =0.f;
+            if (rc->in1!=RES_NONE){
+                float want=lim*rc->q1;
+                float from1=fminf(want, re->stock[rc->in1]);
+                re->stock[rc->in1]-=from1; demand[rc->in1]+=from1; val_in+=from1*re->price[rc->in1];
+                float rem=want-from1;
+                if (rem>0.f && rc->alt1!=RES_NONE){
+                    re->stock[rc->alt1]-=rem; demand[rc->alt1]+=rem; val_in+=rem*re->price[rc->alt1];
+                }
+            }
+            if (rc->in2!=RES_NONE){ re->stock[rc->in2]-=lim*rc->q2; demand[rc->in2]+=lim*rc->q2; val_in+=lim*rc->q2*re->price[rc->in2]; }
             float out=lim*rc->qout*prod_mult;   /* outils → productivité */
             out *= (1.f - 0.5f*re->revolt_scar); /* la cicatrice de révolte ronge la production */
             re->stock[rc->out]+=out;
@@ -598,9 +627,6 @@ void econ_tick(WorldEconomy *e, float dt) {
 
             /* Valeur ajoutée = valeur sortie − valeur intrants */
             float val_out=out*re->price[rc->out];
-            float val_in =0.f;
-            if (rc->in1!=RES_NONE) val_in+=lim*rc->q1*re->price[rc->in1];
-            if (rc->in2!=RES_NONE) val_in+=lim*rc->q2*re->price[rc->in2];
             float va=fmaxf(0.f, val_out-val_in);
             gdp += va;
             wage_pool   += va*WAGE_SHARE;
