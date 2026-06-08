@@ -68,7 +68,14 @@
  * pour imposer leur éthos. L'éthos d'un groupe survit à l'assimilation (signature de
  * race + trait d'éthos), donc une minorité enracinée reste porteuse de SA faction. */
 #define COUP_ETHOS_W       1.0f   /* une faction fortement aliénée peut soulever seule (motif politique) */
-#define COUP_ETHOS_TRIGGER 0.12f  /* au-delà, le grief est POLITIQUE → coup (saisir l'État), pas jacquerie */
+#define COUP_ETHOS_TRIGGER 0.18f  /* §C2 : seuil RELEVÉ 0.12→0.18 — le coup exige un grief plus net
+                                   * (le 0.12 faisait tomber le couperet trop tôt → 0-ou-92). */
+/* §C2 — COOLDOWN au niveau PAYS (distinct du REVOLT_COOLDOWN de PROVINCE) : après
+ * qu'un coup a changé la couronne, le pays ENTIER observe un répit (le nouveau régime
+ * se consolide) avant qu'un autre coup ne puisse partir — même si l'affamement persiste.
+ * Casse la BOUCLE de fréquence (un empire qui re-coupait via une autre province). */
+#define COUP_GRACE_DAYS 1825.f    /* ~5 ans de répit post-coup, par pays */
+static float g_coup_grace[SCPS_MAX_COUNTRY];   /* jours de répit restants, par PAYS */
 static float ethos_coup_boost(const PopGroup *g, EthosFaction alien_fac, float coup_tension){
     if (coup_tension<=0.f || g->diaspora || g->integration < SECEDE_INTEG) return 0.f;  /* établi, pas sécessionniste */
     float lean[FAC_COUNT]; group_ethos_lean(&g->culture, lean);
@@ -100,7 +107,9 @@ static int find_group(const ProvincePop *pp, int drift_id){
     return -1;
 }
 
-void revolt_init(RevoltState *rs){ memset(rs,0,sizeof *rs); rs->last_spawned=-1; }
+void revolt_init(RevoltState *rs){ memset(rs,0,sizeof *rs); rs->last_spawned=-1;
+    memset(g_coup_grace,0,sizeof g_coup_grace);   /* §C2 : répit pays remis à zéro par sim */
+}
 
 void revolt_on_conquest(RevoltState *rs, int region){
     if (region>=0 && region<SCPS_MAX_REG) rs->revanchism_days[region]=(float)REVANCHISM_DAYS;
@@ -182,6 +191,10 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
     }
     if (worst<0 || wd<IGNITE_DEFICIT) return -1;
     PopGroup *g=&pp->groups[worst];
+    /* §C2 : ce soulèvement serait-il un COUP ? Si oui ET le pays est en RÉPIT post-coup,
+     * on l'étouffe (le régime fraîchement installé n'est pas renversé l'année d'après). */
+    bool would_coup = (ethos_coup_boost(g, cf, ct) >= COUP_ETHOS_TRIGGER);
+    if (would_coup && owner>=0 && owner<SCPS_MAX_COUNTRY && g_coup_grace[owner]>0.f) return -1;
     long mob=revolt_mobilized(g, wd);
     { float rf=revanchism_factor(rs,region);   /* la rage grossit les rangs, ∝ fraîcheur de la conquête */
       if (rf>0.f) mob=(long)((float)mob*(1.f + (REVANCHISM_MOBIL-1.f)*rf)); }
@@ -198,8 +211,7 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
     /* §5 : si le grief POLITIQUE (faction forte aliénée) domine, c'est un COUP — la
      * faction saisit l'État pour imposer son éthos. Sinon, la nature usuelle (sécession
      * d'une nation conquise, jacquerie de classe). */
-    rb->kind = (ethos_coup_boost(g, cf, ct) >= COUP_ETHOS_TRIGGER)
-             ? REBEL_COUP : revolt_classify(g, drift, crown);
+    rb->kind = would_coup ? REBEL_COUP : revolt_classify(g, drift, crown);
     rb->race=g->race; rb->klass=g->klass;
     rb->culture=group_culture_effective(g, drift);
     rb->drift_id=g->drift_id; rb->mobilized=mob; rb->deficit=wd;
@@ -226,6 +238,8 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
      * mise en cache (un pays a la même tension dans toutes ses régions ce tick). */
     float ctens[SCPS_MAX_COUNTRY]; EthosFaction cfac[SCPS_MAX_COUNTRY];
     char  cdone[SCPS_MAX_COUNTRY]; memset(cdone,0,sizeof cdone);
+    /* §C2 : le répit post-coup s'écoule (par pays). */
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++) if (g_coup_grace[c]>0.f) g_coup_grace[c]-=(float)days;
     /* SUREXTENSION : on compte les régions par pays UNE fois (cache O(n)). */
     int owned[SCPS_MAX_COUNTRY]; memset(owned,0,sizeof owned);
     for (int r=0;r<econ->n_regions;r++){ int o=econ->region[r].owner;
@@ -393,6 +407,8 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
                     re->coercion=fmaxf(0.f, re->coercion-0.3f);
                     demobilize(econ, rb, rb->mobilized);
                     faction_levers_on_coup(rb->owner);   /* §4 : le coup purge la rancœur (plus de spirale) */
+                    if (rb->owner>=0 && rb->owner<SCPS_MAX_COUNTRY)
+                        g_coup_grace[rb->owner]=COUP_GRACE_DAYS;   /* §C2 : répit du nouveau régime */
                     rs->n_coup++; rb->outcome=OUT_COUP;
                     break; }
                 default: {  /* REBEL_CLASS : la couronne CÈDE (concession) */
