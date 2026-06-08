@@ -1211,6 +1211,32 @@ static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s,
     }
 }
 
+/* §5 — la MINICARTE (coin bas-droit) : le monde en petit + le cadre de vue. */
+#define MM_W 212
+#define MM_H 100
+static void minimap_fit(float *scale, float *ox, float *oy){
+    float sx=(float)MM_W/SCPS_W, sy=(float)MM_H/SCPS_H;
+    float sc = sx<sy?sx:sy;
+    *scale=sc; *ox=(SCPS_W - MM_W/sc)*0.5f; *oy=(SCPS_H - MM_H/sc)*0.5f;
+}
+static void minimap_rect(int win_w, int win_h, SDL_Rect *r){
+    r->x=win_w-MM_W-12; r->y=win_h-MM_H-36; r->w=MM_W; r->h=MM_H;
+}
+static void draw_minimap(SDL_Renderer *ren, PixBuf *mm, int win_w, int win_h, const Cam *cam){
+    SDL_Rect m; minimap_rect(win_w,win_h,&m);
+    panel_bg(ren, m.x-5, m.y-5, MM_W+10, MM_H+10);
+    if (mm->tex){ SDL_RenderCopy(ren, mm->tex, NULL, &m); }
+    round_box(ren, m.x-1,m.y-1,MM_W+2,MM_H+2, COL_COPPER, 3);
+    /* le cadre de VUE (où regarde la caméra). */
+    float sc,ox,oy; minimap_fit(&sc,&ox,&oy);
+    int vx=m.x+(int)((cam->ox-ox)*sc), vy=m.y+(int)((cam->oy-oy)*sc);
+    int vw=(int)((win_w/cam->scale)*sc), vh=(int)((win_h/cam->scale)*sc);
+    if (vx<m.x){ vw-=(m.x-vx); vx=m.x; } if (vy<m.y){ vh-=(m.y-vy); vy=m.y; }
+    if (vx+vw>m.x+MM_W) vw=m.x+MM_W-vx;
+    if (vy+vh>m.y+MM_H) vh=m.y+MM_H-vy;
+    if (vw>2 && vh>2) draw_box(ren, vx, vy, vw, vh, (SDL_Color){0xff,0xf4,0xe0,0xff});
+}
+
 /* §5 — BOUTONS de mode de carte (Politique · Culture · Foi · Relief), le COURANT
  * en cuivre. Posés en bas (zone carte), testés au clic. */
 static void draw_mode_buttons(SDL_Renderer *ren, int win_h, ViewMode cur){
@@ -1429,6 +1455,7 @@ int main(int argc, char **argv) {
 
     int win_w = WIN_W, win_h = WIN_H;
     PixBuf pb = pixbuf_create(ren, win_w, win_h);
+    PixBuf mm_pb = pixbuf_create(ren, MM_W, MM_H);   /* §5 : la minicarte (taille fixe) */
 
     World *world = (World*)malloc(sizeof(World));
     if (!world) { fprintf(stderr,"OOM\n"); return 1; }
@@ -1497,12 +1524,16 @@ int main(int argc, char **argv) {
             render_map(world, pb.pixels, pb.w, pb.h, &rp, smode);
             pixbuf_upload(&pb);
             if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
+            if (mm_pb.pixels){ RenderParams mmp=rp; mmp.selected_prov=-1;
+                minimap_fit(&mmp.cam_scale,&mmp.cam_ox,&mmp.cam_oy);
+                render_map(world, mm_pb.pixels, mm_pb.w, mm_pb.h, &mmp, smode); pixbuf_upload(&mm_pb); }
             if (sim.ready && g_font) {
                 zone_reset(); bslot_reset(); orow_reset(); modebtn_reset();
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : l'outliner */
                 draw_mode_buttons(ren, win_h, smode);                     /* §5 : modes de carte */
+                draw_minimap(ren, &mm_pb, win_w, win_h, &cam);            /* §5 : la minicarte */
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
         }
@@ -1553,6 +1584,14 @@ int main(int argc, char **argv) {
                         if (ev.button.x>=r->x && ev.button.x<r->x+r->w &&
                             ev.button.y>=r->y && ev.button.y<r->y+r->h){ mb=i; break; } }
                     if (mb>=0){ mode=(ViewMode)g_modebtns[mb].mode; dirty=true; break; }
+                    /* §5 : un clic sur la MINICARTE recentre la caméra. */
+                    { SDL_Rect m; minimap_rect(win_w,win_h,&m);
+                      if (ev.button.x>=m.x && ev.button.x<m.x+m.w && ev.button.y>=m.y && ev.button.y<m.y+m.h){
+                          float sc,ox,oy; minimap_fit(&sc,&ox,&oy);
+                          float wx=(ev.button.x-m.x)/sc+ox, wy=(ev.button.y-m.y)/sc+oy;
+                          cam.ox = wx - win_w/(2.f*cam.scale); cam.oy = wy - win_h/(2.f*cam.scale);
+                          dirty=true; break;
+                      } }
                     /* §4 panneau : un clic sur un SLOT de bâtiment bâtit l'édifice
                      * (payé au marché, en jours) — pas de bouton « Bâtir ». */
                     int hit=-1;
@@ -1724,6 +1763,13 @@ int main(int argc, char **argv) {
             }
             render_map(world, pb.pixels, pb.w, pb.h, &rp, mode);
             pixbuf_upload(&pb);
+            /* §5 : la minicarte — le monde entier en petit (même mode + teinte). */
+            if (mm_pb.pixels){
+                RenderParams mmp = rp; mmp.selected_prov = -1;
+                minimap_fit(&mmp.cam_scale, &mmp.cam_ox, &mmp.cam_oy);
+                render_map(world, mm_pb.pixels, mm_pb.w, mm_pb.h, &mmp, mode);
+                pixbuf_upload(&mm_pb);
+            }
             dirty = false;
         }
 
@@ -1742,6 +1788,7 @@ int main(int argc, char **argv) {
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : « ce que je possède » */
                 draw_mode_buttons(ren, win_h, mode);                      /* §5 : modes de carte */
+                draw_minimap(ren, &mm_pb, win_w, win_h, &cam);            /* §5 : la minicarte */
                 if (selected >= 0)
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
@@ -1759,6 +1806,7 @@ int main(int argc, char **argv) {
 
     printf("\n");
     pixbuf_destroy(&pb);
+    pixbuf_destroy(&mm_pb);
     free(world);
     free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
     free(sim.ag); free(sim.ev); free(sim.drift); free(sim.labor);
