@@ -23,6 +23,8 @@ out_*.png
 montage.bmp
 scps_ui.ppm
 scps_ui.png
+scps_ui_zoom.png
+scps_armies*.png
 
 .claude/
 
@@ -52,3 +54,4 @@ intertrade_demo
 warhost_demo
 factions_demo
 missions_demo
+campaign_demo
