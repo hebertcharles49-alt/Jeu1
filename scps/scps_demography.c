@@ -30,6 +30,17 @@
 #define ASSIM_MIN_YEARS  12.0f
 #define ASSIM_MAX_YEARS  200.0f
 #define FUSE_EPS         0.30f   /* distance de contenu sous laquelle on fusionne */
+/* ---- Conversion religieuse (§2) : la FOI converge vers le TRÔNE ------- *
+ * L'assimilation tire la culture vers la dominante LOCALE ; la CONVERSION
+ * tire la foi — l'axe doctrinal puis la BRANCHE sacrée — vers la COURONNE,
+ * mais seulement sous un trône PROSÉLYTE. La bascule de branche exige que la
+ * foi ait pris RACINE (années de règne) ET que l'axe ait convergé. */
+#define FAITH_CONV_SOFT    0.015f /* évangélisme : fraction/an du gap doctrinal comblée */
+#define FAITH_CONV_HARD    0.045f /* purification : conversion forcée, plus vive */
+#define CONVERT_YEARS      60.0f  /* évangéliste : la branche bascule après deux générations */
+#define CONVERT_YEARS_HARD 20.0f  /* purificateur : une génération suffit */
+#define CONVERT_AXIS       1.5f   /* évangéliste : bascule quand l'axe a quasi convergé */
+#define CONVERT_AXIS_HARD  4.0f   /* purificateur : bascule de force, axe encore distant */
 
 static inline float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
 static inline float absf(float v){ return v<0?-v:v; }
@@ -201,6 +212,35 @@ int assimilation_tick(ProvincePop *pp, ModifierStack *drift, float P, float K, f
     return fused;
 }
 
+/* CONVERSION RELIGIEUSE (§2) — la foi des provinces converge vers le TRÔNE.
+ * Distincte de l'assimilation (qui tire vers la dominante LOCALE) : ici l'axe
+ * doctrinal de CHAQUE groupe dérive vers la couronne, et la branche sacrée
+ * BASCULE une fois la foi enracinée (années de règne) et l'axe convergé. Un
+ * trône pluraliste ne convertit personne — l'empire reste multi-confessionnel
+ * (la tolérance est la non-conversion). Évangélisme : lent, n'achève que les
+ * proches ; Purification : vif, bascule de force les confessions distantes. */
+void faith_convert_tick(ProvincePop *pp, const PopCulture *crown,
+                        float years_held, float ypt){
+    if (!crown || crown->credo==CREDO_PLURALISTE) return;   /* tolérance : nulle conversion */
+    bool  hard       = (crown->credo==CREDO_PURIFICATEUR);
+    float rate       = (hard?FAITH_CONV_HARD   :FAITH_CONV_SOFT )*ypt;
+    float need_years = (hard?CONVERT_YEARS_HARD :CONVERT_YEARS  );
+    float need_axis  = (hard?CONVERT_AXIS_HARD  :CONVERT_AXIS   );
+    for (int i=0;i<pp->n_groups;i++){
+        PopGroup *g=&pp->groups[i];
+        /* L'axe doctrinal de l'ORIGINE dérive vers le trône — mutation DIRECTE
+         * (la foi convertie EST qui ils sont), pas la pile réversible : O(1) par
+         * groupe, et cohérent avec la bascule de branche ci-dessous. */
+        float gap = crown->religion - g->origin.religion;
+        g->origin.religion = clampf(g->origin.religion + gap*rate, 0.f, 10.f);
+        if (g->origin.rel_branch != crown->rel_branch
+            && years_held >= need_years && absf(gap) <= need_axis){
+            g->origin.rel_branch = crown->rel_branch;       /* la BRANCHE bascule (durable) */
+            g->origin.credo      = crown->credo;            /* et embrasse le credo du trône */
+        }
+    }
+}
+
 /* ===================================================================== */
 /* MIGRATION PASSIVE — emporte race + culture (§4)                        */
 /* ===================================================================== */
@@ -333,7 +373,6 @@ void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift){
 
 void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
                      ModifierStack *drift, float P, float K, float dt){
-    (void)wl;
     if (dt<=0.f) dt=1.f;
     /* 1. Par région : L par groupe, assimilation, rafraîchir le cache, sync dominante. */
     for (int r=0; r<econ->n_regions; r++){
@@ -347,6 +386,8 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
             pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
         }
         assimilation_tick(pp, drift, P, K, dt);                  /* dérive durable (∝ D∞), au pas dt */
+        float yh = (wl && r < SCPS_MAX_REG) ? wl->years_held[r] : 100.f;
+        faith_convert_tick(pp, crown, yh, dt);                  /* la FOI converge vers le trône (§2) */
         for (int i=0;i<pp->n_groups;i++)
             pp->groups[i].culture = group_culture_effective(&pp->groups[i], drift);
         const PopGroup *dom=province_dominant(pp);

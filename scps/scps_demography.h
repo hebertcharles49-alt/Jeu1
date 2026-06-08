@@ -56,6 +56,15 @@ float assimilation_years(float Dinf, float P, float K);   /* Halfelin ~20 ans, O
  * quand la distance < EPS. Renvoie le nb de groupes fusionnés ce tick. */
 int   assimilation_tick(ProvincePop *pp, ModifierStack *drift, float P, float K, float years_per_tick);
 
+/* ---- Conversion religieuse (§2) — la FOI converge vers le TRÔNE ------- *
+ * Distincte de l'assimilation (qui tire vers la dominante LOCALE) : l'axe
+ * doctrinal de chaque groupe dérive vers la couronne, et la BRANCHE sacrée
+ * bascule une fois la foi enracinée (`years_held`) et l'axe convergé — mais
+ * seulement sous un trône PROSÉLYTE (credo ≠ pluraliste). Pluraliste : nulle
+ * conversion, l'empire reste multi-confessionnel. Appelé par demography_tick. */
+void  faith_convert_tick(ProvincePop *pp, const PopCulture *crown,
+                         float years_held, float years_per_tick);
+
 /* ---- Migration passive — emporte race + culture (§4) ----------------- */
 /* Déplace `amount` du groupe `gi` de `from` vers `to` (adjacence/prospérité
  * jugées par l'appelant). Crée une minorité/diaspora à l'arrivée → du D interne.

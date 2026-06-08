@@ -134,6 +134,63 @@ int main(int argc, char **argv){
     ok("l'assimilation est DURABLE (la dérive métabolisée ne saute pas à la levée de H)",
        cdist(&orc_eff_before,&orc_eff_after) < 0.01f);
 
+    /* ═══ 4b. CONVERSION RELIGIEUSE — la FOI converge vers le TRÔNE ════ */
+    printf("\n── 4b. Conversion : la branche sacrée bascule vers la couronne (si prosélyte) ──\n");
+    /* Une minorité HÉRÉTIQUE : culture quasi identique au trône, mais d'une
+     * AUTRE branche sacrée (Dharmique vs Abrahamique) → un mur de fracture. */
+    PopCulture heretic = cult(2,6,3,5, ETHOS_ORDRE);    /* v/s/p = couronne ; foi=5 vs 2 */
+    heretic.rel_branch = REL_DHARMIQUE;                 /* l'autre branche : le vrai clivage */
+    /* (a) TOLÉRANCE : un trône pluraliste ne convertit personne. */
+    PopCulture crown_plu = crown; crown_plu.credo = CREDO_PLURALISTE; crown_plu.religion = 2.f;
+    ProvincePop plu; memset(&plu,0,sizeof plu);
+    plu.groups[0]=grp(RACE_HUMAIN,SPHERE_HOMMES,crown_plu,CLASS_LABORER,800,8.f,1.f,false);
+    plu.groups[1]=grp(RACE_HUMAIN,SPHERE_HOMMES,heretic,  CLASS_LABORER,200,6.f,0.9f,false);
+    plu.n_groups=2;
+    for (int yr=0; yr<200; yr++) faith_convert_tick(&plu, &crown_plu, 300.f, 1.f);
+    ok("un trône PLURALISTE ne convertit personne (tolérance : empire multi-confessionnel)",
+       plu.groups[1].origin.rel_branch == REL_DHARMIQUE);
+    /* (b) PURIFICATION : la branche hérétique BASCULE vers la couronne, puis fusionne. */
+    PopCulture crown_pur = crown; crown_pur.credo = CREDO_PURIFICATEUR; crown_pur.religion = 2.f;
+    ProvincePop pur; memset(&pur,0,sizeof pur);
+    pur.groups[0]=grp(RACE_HUMAIN,SPHERE_HOMMES,crown_pur,CLASS_LABORER,800,8.f,1.f,false);
+    pur.groups[1]=grp(RACE_HUMAIN,SPHERE_HOMMES,heretic,  CLASS_LABORER,200,6.f,0.9f,false);
+    pur.n_groups=2;
+    int her_id = pur.groups[1].drift_id;
+    bool flipped=false;
+    for (int yr=0; yr<120 && !flipped; yr++){
+        faith_convert_tick(&pur, &crown_pur, 300.f, 1.f);
+        for (int i=0;i<pur.n_groups;i++)
+            if (pur.groups[i].drift_id==her_id && pur.groups[i].origin.rel_branch==REL_ABRAHAMIQUE) flipped=true;
+    }
+    ok("un trône PURIFICATEUR fait BASCULER la branche hérétique vers la sienne", flipped);
+    /* … et l'axe ayant convergé, la conversion ACHÈVE l'assimilation : fusion. */
+    bool fused_after_conv=false;
+    for (int yr=0; yr<120; yr++){
+        faith_convert_tick(&pur, &crown_pur, 300.f, 1.f);
+        assimilation_tick(&pur, drift, 5.f, 5.f, 1.f);
+    }
+    fused_after_conv = (pur.n_groups==1);  /* l'hérétique converti a fondu dans la dominante */
+    ok("la conversion fait tomber le mur de branche → l'assimilation peut ACHEVER (fusion)",
+       fused_after_conv);
+    /* (c) GRADIENT de prosélytisme : à 30 ans de règne, le purificateur a déjà
+     *     converti ; l'évangéliste, plus lent (deux générations), pas encore. */
+    PopCulture crown_eva = crown; crown_eva.credo = CREDO_EVANGELISTE; crown_eva.religion = 2.f;
+    ProvincePop eva; memset(&eva,0,sizeof eva);
+    eva.groups[0]=grp(RACE_HUMAIN,SPHERE_HOMMES,crown_eva,CLASS_LABORER,800,8.f,1.f,false);
+    eva.groups[1]=grp(RACE_HUMAIN,SPHERE_HOMMES,heretic,  CLASS_LABORER,200,6.f,0.9f,false);
+    eva.n_groups=2;
+    ProvincePop pur30; memset(&pur30,0,sizeof pur30);
+    pur30.groups[0]=grp(RACE_HUMAIN,SPHERE_HOMMES,crown_pur,CLASS_LABORER,800,8.f,1.f,false);
+    pur30.groups[1]=grp(RACE_HUMAIN,SPHERE_HOMMES,heretic, CLASS_LABORER,200,6.f,0.9f,false);
+    pur30.n_groups=2;
+    for (int yr=0; yr<30; yr++){
+        faith_convert_tick(&eva,   &crown_eva, 30.f, 1.f);
+        faith_convert_tick(&pur30, &crown_pur, 30.f, 1.f);
+    }
+    ok("le PURIFICATEUR convertit en une génération ; l'ÉVANGÉLISTE traîne (deux)",
+       pur30.groups[1].origin.rel_branch==REL_ABRAHAMIQUE &&
+       eva.groups[1].origin.rel_branch==REL_DHARMIQUE);
+
     /* ═══ 5. MIGRATION — emporte race + culture, crée du D ════════════ */
     printf("\n── 5. Migration : un groupe afflue vers la prospérité, devient diaspora ──\n");
     ProvincePop poor; memset(&poor,0,sizeof poor); poor.prosperity=3.f;
