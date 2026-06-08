@@ -182,6 +182,10 @@ FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 faith_demo: $(FAITH_DEMO_OBJS)
 	$(CC) $(FAITH_DEMO_OBJS) -o $@ -lm
 
+FACTIONS_DEMO_OBJS := $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_factions_demo.o
+factions_demo: $(FACTIONS_DEMO_OBJS)
+	$(CC) $(FACTIONS_DEMO_OBJS) -o $@ -lm
+
 INTERTRADE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
