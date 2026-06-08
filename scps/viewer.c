@@ -583,17 +583,24 @@ static int draw_reading(SDL_Renderer *ren, int x, int y, const char *cat,
 }
 
 /* Une ressource « Nom stock +flux » (flux rouge si négatif). Survolable. */
-static int draw_res(SDL_Renderer *ren, int x, int y, const char *name, long stock, long flow,
+static int draw_res(SDL_Renderer *ren, int x, int y, const char *name, long stock, float flow,
                     const char *def){
     char buf[48]; snprintf(buf,sizeof buf, "%s %ld", name, stock);
     draw_text(ren, g_font, x, y, COL_PARCH, buf);
     int w1 = text_w(g_font, buf);
-    char fb[24]; snprintf(fb,sizeof fb, " %+ld", flow);
+    char fb[24];                                  /* le flux, TOUJOURS en +N/j */
+    if (flow>=10.f || flow<=-10.f) snprintf(fb,sizeof fb, " %+d/j", (int)flow);
+    else                            snprintf(fb,sizeof fb, " %+.1f/j", flow);
     SDL_Color fc = (flow<0) ? sense_color(0.12f) : sense_color(0.82f);
     draw_text(ren, g_font, x+w1, y, fc, fb);
     int total = w1 + text_w(g_font, fb);
     zone_add((SDL_Rect){x-3,y-2,total+6,19}, def);
     return x + total + 20;
+}
+/* Séparateur vertical fin entre clusters du bandeau. */
+static int topbar_sep(SDL_Renderer *ren, int x, int y){
+    fill_rect(ren, x+2, y-1, 1, 16, COL_DIM);
+    return x + 9;
 }
 
 /* LA TOPBAR (§2) : ressources · métriques 0-100 · temps/âge/vitesse. Deux rangs,
@@ -606,14 +613,23 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
     fill_rect(ren, 0,0, win_w, bh, COL_PANEL);
     fill_rect(ren, 0,bh, win_w, 2, COL_COPPER);
 
-    /* — Rang A : ressources (gauche) · temps/âge/vitesse (droite) — */
+    /* — Rang A : DÉPENSABLE | ACCUMULABLE (clusters séparés) · temps/âge/vitesse (droite).
+     *   Le bandeau est un SOMMAIRE : chaque ressource ouvre son système (clic). — */
     int x=12, yA=6;
-    x = draw_res(ren,x,yA, lres_name(LR_GOLD),      s->labor->stock[LR_GOLD],      s->labor->flow[LR_GOLD],
-                 "L'or en caisse : taxes et surplus commercial vendu au marché.");
-    x = draw_res(ren,x,yA, lres_name(LR_FOOD),      s->labor->stock[LR_FOOD],      s->labor->flow[LR_FOOD],
-                 "Les vivres ; la famine stoppe la croissance de la population.");
-    x = draw_res(ren,x,yA, lres_name(LR_MATERIALS), s->labor->stock[LR_MATERIALS], s->labor->flow[LR_MATERIALS],
-                 "Les matériaux de construction ; bâtir, coloniser et armer en consomment.");
+    /* Dépensable : Or · Nourriture · Matériaux (stock + flux +N/j). */
+    x = draw_res(ren,x,yA, lres_name(LR_GOLD),      s->labor->stock[LR_GOLD],      (float)s->labor->flow[LR_GOLD],
+                 "Or en caisse (clic → Finances : revenus, commerce, taxation réglable). Taxes + surplus vendu au marché.");
+    x = draw_res(ren,x,yA, lres_name(LR_FOOD),      s->labor->stock[LR_FOOD],      (float)s->labor->flow[LR_FOOD],
+                 "Vivres (clic → Subsistance & démographie). La famine stoppe la croissance de la population.");
+    x = draw_res(ren,x,yA, lres_name(LR_MATERIALS), s->labor->stock[LR_MATERIALS], (float)s->labor->flow[LR_MATERIALS],
+                 "Matériaux (clic → Chaînes de production & stock du marché). Bâtir, coloniser et armer en consomment.");
+    x = topbar_sep(ren, x, yA);
+    /* Accumulable : Savoir (points de recherche) · Influence — stock + flux. */
+    float ppop = ai_country_population(w, s->econ, cid);
+    x = draw_res(ren,x,yA, "Savoir",    (long)r.m_savoir.value, ai_research_income(&s->ts[cid], ppop),
+                 "Savoir — le niveau de lumière du royaume 0-100 (clic → Arbre de tech) ; le flux est la recherche que la population produit par jour.");
+    x = draw_res(ren,x,yA, "Influence", (long)statecraft_influence(s->sc,cid), statecraft_influence_flux(s->sc,s->econ,s->wp,cid),
+                 "Influence diplomatique (clic → Diplomatie). Prospérité + taille + accords tenus la nourrissent ; elle plafonne les diplomates.");
     /* droite : date · barre 250 ans · âge · VITESSE (Espace = pause, +/-) */
     char date[48]; snprintf(date,sizeof date, "An %d / %d", s->year, GAME_YEARS);
     const char *age = (s->ev->ages.last_dawned>=0) ? age_name((AgeId)s->ev->ages.last_dawned) : "Aube du monde";
@@ -635,21 +651,18 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
     draw_text(ren, g_font, speedx, yA, (sp==SPEED_PAUSE)?sense_color(0.5f):COL_COPPER, spl);
     zone_add((SDL_Rect){speedx-3,yA-2,wspeed+6,19}, "Vitesse du temps. Espace = pause ; + / − = accélérer / ralentir.");
 
-    /* — Rang B : pays + métriques 0-100 — */
+    /* — Rang B : pays + INDICES 0-100 (colorés par valeur, rouge bas → vert haut).
+     *   Pas d'« Assise » (on ne nomme pas le type de légitimité). Savoir/Influence
+     *   sont passés en ACCUMULABLE (rang A) ; le présage part en alertes. — */
     int yB=28;
     const char *name = (cid>=0 && cid<w->n_countries) ? w->country[cid].name : "—";
     int xb=12;
     draw_text(ren, g_font, xb, yB, COL_COPPER, name); xb += text_w(g_font,name) + 18;
     xb = draw_reading(ren,xb,yB,"Stabilité", r.m_stabilite.value, label_stab(r.stabilite),   band_good(r.stabilite,5,true),  hover_stab());
-    xb = draw_reading(ren,xb,yB,"Assise",    -1,                  label_assise(r.assise),    band_good(r.assise,4,false),    hover_assise());
     xb = draw_reading(ren,xb,yB,"Légitimité",r.m_legitimite.value,label_legit(r.legitimite), band_good(r.legitimite,5,true), hover_legit());
     xb = draw_reading(ren,xb,yB,"Cohésion",  r.m_cohesion.value,  label_concorde(r.concorde),band_good(r.concorde,4,false),  hover_concorde());
     xb = draw_reading(ren,xb,yB,"Prospérité",r.m_prosperite.value,label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
-    xb = draw_reading(ren,xb,yB,"Savoir",    r.m_savoir.value,    label_savoir(r.savoir),    band_good(r.savoir,4,true),     hover_savoir());
-    xb = draw_reading(ren,xb,yB,"Influence", r.influence,         "",                        COL_PARCH,
-                      "La réputation diplomatique : prospérité, taille et accords tenus la nourrissent ; elle plafonne les diplomates en mission.");
-    if (r.presage != PG_CALME)
-        draw_reading(ren,xb,yB,"Présage",   -1,                  label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
+    (void)xb;
 
     /* — Rang C : la balance des FACTIONS-ÉTHOS (politique interne, §9) — jauges
      *   cuivre par éthos ; une faction aliénée (opposée à la direction) vire au rouge. */

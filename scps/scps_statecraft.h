@@ -77,6 +77,10 @@ void statecraft_init(Statecraft *sc, const World *w);
 
 /* ---- Lecteurs (nombres de JEU, jamais un flottant SCPS) ---------------- */
 int  statecraft_influence      (const Statecraft *sc, int cid);          /* 0..100 */
+/* Variation d'INFLUENCE par JOUR (convergence vers le standing prospérité+taille+
+ * prestige) — pour le bandeau (Influence accumulable + flux +N/j). */
+float statecraft_influence_flux(const Statecraft *sc, const WorldEconomy *econ,
+                                const WorldProsperity *wp, int cid);
 int  statecraft_opinion        (const Statecraft *sc, int a, int b);     /* −100..100 */
 int  statecraft_missions_cap   (const Statecraft *sc, int cid);          /* plafond simultané */
 int  statecraft_missions_active(const Statecraft *sc, int cid);

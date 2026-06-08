@@ -699,6 +699,11 @@ static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w
     return best;
 }
 
+float ai_research_income(const TechState *ts, float pop){
+    if (!ts) return 0.f;
+    return (AI_RESEARCH_RATE/365.f) * tech_research_yield(ts) * (1.f + pop/AI_RESEARCH_POPREF);
+}
+
 void ai_research_step(AiActor *a, TechState *ts, const World *w,
                       const WorldEconomy *econ, const WorldProsperity *wp, int day){
     if (!ts || day < a->next_research_day) return;

@@ -140,4 +140,8 @@ unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid);
 /* Population totale de l'empire (assiette de recherche & d'échelle de coût). */
 float    ai_country_population(const World *w, const WorldEconomy *econ, int cid);
 
+/* Revenu de SAVOIR (points de recherche) par JOUR : l'assiette de pop × le
+ * rendement du Savoir·Production. Sert au bandeau (Savoir accumulable + flux). */
+float    ai_research_income(const TechState *ts, float pop);
+
 #endif /* SCPS_AI_H */

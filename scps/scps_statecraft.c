@@ -70,6 +70,15 @@ void statecraft_init(Statecraft *sc, const World *w){
 }
 
 /* ---- Lecteurs ---------------------------------------------------------- */
+float statecraft_influence_flux(const Statecraft *sc, const WorldEconomy *econ,
+                                const WorldProsperity *wp, int cid){
+    if (!sc||!econ||!wp||cid<0||cid>=SCPS_MAX_COUNTRY) return 0.f;
+    float prosp = (cid<wp->n_countries)? clampf(wp->country[cid].P_realise,0.f,10.f):0.f;
+    float size  = (float)country_size(econ, cid);
+    float standing = clampf(prosp*4.f + size*3.f + sc->prestige[cid], 0.f, 100.f);
+    return (standing - sc->influence[cid]) * SC_INFLUENCE_RATE;   /* /jour */
+}
+
 int statecraft_influence(const Statecraft *sc, int cid){
     if (cid<0||cid>=sc->n_countries) return 0;
     return iclamp((int)(sc->influence[cid]+0.5f), 0, 100);
