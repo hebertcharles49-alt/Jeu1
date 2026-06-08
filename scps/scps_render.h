@@ -22,6 +22,8 @@ typedef enum {
     VIEW_TEMPERATURE,   /* Température (rouge=chaud) */
     VIEW_RESOURCES,     /* Bien commercial par province */
     VIEW_HABITABILITY,  /* Habitabilité : rouge=mort, jaune=marginal, vert=fertile */
+    VIEW_CULTURE,       /* Culture dominante par région (teinte fournie par l'appelant) */
+    VIEW_FAITH,         /* Foi dominante par région (teinte fournie par l'appelant) */
     VIEW_COUNT
 } ViewMode;
 
@@ -35,6 +37,10 @@ typedef struct {
     bool     show_rivers;
     bool     show_borders;
     bool     show_grid;        /* debug : grille des cellules */
+    /* Teinte PAR RÉGION (ARGB), fournie par l'appelant pour VIEW_CULTURE/VIEW_FAITH
+     * (la membrane : le viewer calcule les couleurs diégétiques depuis l'éco et les
+     * passe ; le renderer ne lit aucun flottant SCPS). NULL = pas de teinte. */
+    const uint32_t *region_tint;
 } RenderParams;
 
 /* ---- Rendu principal --------------------------------------------------

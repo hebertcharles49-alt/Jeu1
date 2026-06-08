@@ -17,7 +17,8 @@
 
 const char *VIEW_NAMES[VIEW_COUNT] = {
     "Terrain","Territoires","Régions","Pays","Continents","Altimétrie",
-    "Fertilité","Humidité","Température","Ressources","Habitabilité"
+    "Fertilité","Humidité","Température","Ressources","Habitabilité",
+    "Culture","Foi"
 };
 
 /* ---- Primitives couleur ---------------------------------------------- */
@@ -106,7 +107,7 @@ static uint32_t biome_blend(const World *w, int cx, int cy, float fx, float fy) 
 
 /* ---- Rendu d'une cellule individuelle -------------------------------- */
 static uint32_t cell_color(const World *w, int cx, int cy, float fx, float fy,
-                            ViewMode mode, int selected_prov) {
+                            ViewMode mode, int selected_prov, const uint32_t *region_tint) {
     const Cell *c = scps_cellc(w, cx, cy);
     float h = c->height;
 
@@ -213,6 +214,11 @@ static uint32_t cell_color(const World *w, int cx, int cy, float fx, float fy,
     if (mode == VIEW_CONTINENTS && c->continent >= 0) {
         terrain = alpha_over(terrain, w->continent[c->continent].color, 0.50f);
     }
+    /* ---- Overlay CULTURE / FOI : teinte par région, fournie par l'appelant
+     *      (le viewer la calcule depuis l'éco ; le renderer ne lit rien de SCPS). */
+    if ((mode == VIEW_CULTURE || mode == VIEW_FAITH) && region_tint && c->region >= 0) {
+        terrain = alpha_over(terrain, region_tint[c->region], 0.55f);
+    }
 
     /* ---- Rivières (overlay bleu) ------------------------------------- */
     if (c->river > 70 && !c->lake) {
@@ -272,7 +278,7 @@ void render_map(const World *w, uint32_t *pixels, int pw, int ph,
                 col = 0xFF080C10u;
             } else {
                 /* position fractionnaire dans la cellule → fondu bilinéaire */
-                col = cell_color(w, cx, cy, wx-(float)cx, wy-(float)cy, mode, p->selected_prov);
+                col = cell_color(w, cx, cy, wx-(float)cx, wy-(float)cy, mode, p->selected_prov, p->region_tint);
             }
             pixels[sy * pw + sx] = col;
         }

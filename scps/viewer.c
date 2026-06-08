@@ -435,6 +435,23 @@ static void orow_add(SDL_Rect row, SDL_Rect ham, int prov, int hammer_reg){
     if (g_norows<80){ g_orows[g_norows].row=row; g_orows[g_norows].ham=ham;
                       g_orows[g_norows].prov=prov; g_orows[g_norows].hammer_reg=hammer_reg; g_norows++; }
 }
+/* BOUTONS de mode de carte (§5) : posés chaque frame, testés au clic. */
+typedef struct { SDL_Rect r; int mode; } ModeBtn;
+static ModeBtn g_modebtns[6]; static int g_nmodebtns;
+static void modebtn_reset(void){ g_nmodebtns=0; }
+static void modebtn_add(SDL_Rect r, int mode){
+    if (g_nmodebtns<6){ g_modebtns[g_nmodebtns].r=r; g_modebtns[g_nmodebtns].mode=mode; g_nmodebtns++; }
+}
+/* Teintes diégétiques par culture (éthos) et par foi (branche) — le viewer les
+ * calcule, le renderer les blende (membrane : pas de flottant SCPS au rendu). */
+static uint32_t ethos_tint(int e){
+    static const uint32_t P[6]={0xFFb0413a,0xFFc06a2e,0xFFc9a24b,0xFF4e8d8a,0xFF5f8ab0,0xFF6f9a5a};
+    return P[(e>=0&&e<6)?e:0];
+}
+static uint32_t faith_tint(int b){
+    static const uint32_t P[4]={0xFF6f9a5a,0xFFc9a24b,0xFF7a5c99,0xFF5f8ab0};
+    return P[(b>=0&&b<4)?b:0];
+}
 
 /* ---- Sim branchée (snapshot de N ticks, déterministe par graine) ------ */
 typedef struct {
@@ -1165,6 +1182,26 @@ static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s,
     }
 }
 
+/* §5 — BOUTONS de mode de carte (Politique · Culture · Foi · Relief), le COURANT
+ * en cuivre. Posés en bas (zone carte), testés au clic. */
+static void draw_mode_buttons(SDL_Renderer *ren, int win_h, ViewMode cur){
+    struct { const char *name; ViewMode m; } B[4] = {
+        {"Politique", VIEW_COUNTRIES}, {"Culture", VIEW_CULTURE},
+        {"Foi", VIEW_FAITH}, {"Relief", VIEW_TERRAIN} };
+    TTF_Font *fs=g_font_small?g_font_small:g_font;
+    int x=322, y=win_h-26-32, h=24;
+    for (int i=0;i<4;i++){
+        int tw=text_w(fs,B[i].name), w=tw+18;
+        bool on=(cur==B[i].m);
+        fill_round(ren, x, y, w, h, on?COL_PANEL2:COL_PANEL, 6);
+        round_box (ren, x, y, w, h, on?COL_COPPER:COL_EDGE, 6);
+        if (on) round_box(ren, x-1,y-1,w+2,h+2, COL_COPPER, 7);   /* le courant : rim cuivre */
+        draw_text(ren, fs, x+9, y+5, on?COL_COPPER:COL_DIM, B[i].name);
+        modebtn_add((SDL_Rect){x,y,w,h}, (int)B[i].m);
+        x += w+7;
+    }
+}
+
 /* Survol = définition : le hover de la zone sous le curseur, en pied d'écran. */
 static void draw_hover_footer(SDL_Renderer *ren, int win_w, int win_h, int mx, int my){
     const char *def = zone_hit(mx,my);
@@ -1300,12 +1337,13 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
 /* ======================================================================= */
 
 int main(int argc, char **argv) {
-    bool shot = false, shot_tree = false, shot_war = false;
+    bool shot = false, shot_tree = false, shot_war = false, shot_culture = false;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
         else if (!strcmp(argv[i], "--tree")) { shot = true; shot_tree = true; }
         else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
+        else if (!strcmp(argv[i], "--culture")) { shot = true; shot_culture = true; }  /* §5 : vue culture */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
     }
 
@@ -1419,14 +1457,23 @@ int main(int argc, char **argv) {
             if (shot_war)                    /* §4 : laisse une guerre mûrir → des armées sur la carte */
                 for (int y=0; y<120 && !any_field_army(&sim, world); y++)
                     for (int d=0; d<365; d++) sim_day(&sim, world);
-            render_map(world, pb.pixels, pb.w, pb.h, &rp, VIEW_COUNTRIES);
+            ViewMode smode = shot_culture ? VIEW_CULTURE : VIEW_COUNTRIES;
+            rp.region_tint = NULL;
+            if (smode==VIEW_CULTURE){
+                static uint32_t tnt[SCPS_MAX_REG];
+                for (int r=0;r<sim.econ->n_regions && r<SCPS_MAX_REG;r++)
+                    tnt[r]=ethos_tint((int)sim.econ->region[r].culture.ethos);
+                rp.region_tint = tnt;
+            }
+            render_map(world, pb.pixels, pb.w, pb.h, &rp, smode);
             pixbuf_upload(&pb);
             if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
             if (sim.ready && g_font) {
-                zone_reset(); bslot_reset(); orow_reset();
+                zone_reset(); bslot_reset(); orow_reset(); modebtn_reset();
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : l'outliner */
+                draw_mode_buttons(ren, win_h, smode);                     /* §5 : modes de carte */
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
         }
@@ -1471,6 +1518,12 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
+                    /* §5 : un clic sur un BOUTON DE MODE change la vue de carte. */
+                    int mb=-1;
+                    for (int i=0;i<g_nmodebtns;i++){ SDL_Rect *r=&g_modebtns[i].r;
+                        if (ev.button.x>=r->x && ev.button.x<r->x+r->w &&
+                            ev.button.y>=r->y && ev.button.y<r->y+r->h){ mb=i; break; } }
+                    if (mb>=0){ mode=(ViewMode)g_modebtns[mb].mode; dirty=true; break; }
                     /* §4 panneau : un clic sur un SLOT de bâtiment bâtit l'édifice
                      * (payé au marché, en jours) — pas de bouton « Bâtir ». */
                     int hit=-1;
@@ -1630,6 +1683,16 @@ int main(int argc, char **argv) {
         if (dirty && pb.pixels) {
             rp.cam_ox = cam.ox; rp.cam_oy = cam.oy; rp.cam_scale = cam.scale;
             rp.selected_prov = selected;
+            rp.region_tint = NULL;
+            if ((mode==VIEW_CULTURE || mode==VIEW_FAITH) && sim.ready) {
+                static uint32_t g_region_tint[SCPS_MAX_REG];
+                for (int r=0;r<sim.econ->n_regions && r<SCPS_MAX_REG;r++){
+                    const PopCulture *cu=&sim.econ->region[r].culture;
+                    g_region_tint[r] = (mode==VIEW_CULTURE) ? ethos_tint((int)cu->ethos)
+                                                            : faith_tint((int)cu->rel_branch);
+                }
+                rp.region_tint = g_region_tint;
+            }
             render_map(world, pb.pixels, pb.w, pb.h, &rp, mode);
             pixbuf_upload(&pb);
             dirty = false;
@@ -1641,7 +1704,7 @@ int main(int argc, char **argv) {
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
-            zone_reset(); bslot_reset(); orow_reset();
+            zone_reset(); bslot_reset(); orow_reset(); modebtn_reset();
             int cid = country_for_panel(world, selected);
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
@@ -1649,6 +1712,7 @@ int main(int argc, char **argv) {
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : « ce que je possède » */
+                draw_mode_buttons(ren, win_h, mode);                      /* §5 : modes de carte */
                 if (selected >= 0)
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
