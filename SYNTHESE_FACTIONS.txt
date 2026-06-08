@@ -1,0 +1,144 @@
+══════════════════════════════════════════════════════════════════════════════
+  SCPS — SYNTHÈSE : LES FACTIONS PAR ÉTHOS (+ l'arc économique & diplomatique)
+══════════════════════════════════════════════════════════════════════════════
+
+Ce document récapitule la session : le système de FACTIONS PAR ÉTHOS (le gros
+morceau), et les passes qui l'entourent — religion (conversion, humeur de foi),
+diplomatie (coup de grâce), économie (coût des bâtiments). Tout est vérifié par
+bancs d'essai auto-vérifiants et chroniques 5×200 ans (0 warning, membrane tenue).
+
+
+────────────────────────────────────────────────────────────────────────────────
+  I.  CE QU'EST UNE FACTION-ÉTHOS
+────────────────────────────────────────────────────────────────────────────────
+
+Les factions internes ne sont PAS une nouvelle couche plaquée : ce sont les MÊMES
+axes que les poids de personnalité de l'IA (w_expand / w_trade / w_build / w_faith
+/ w_faustian), faits ACTEURS INTERNES, et ENRACINÉS dans les groupes culturels.
+Six factions, orthogonales aux CLASSES (la classe dit COMBIEN tu as ; la faction
+dit ce que l'État DEVRAIT être) :
+
+   Conquérants    (w_expand)    force, hiérarchie, gloire — guerre, conscription, H
+   Marchands      (w_trade)     échange, ouverture — libre-échange, frontières
+   Légistes       (w_build)     ordre, institutions, mérite — bureaucratie, K
+   Gardiens       (w_faith)     foi, tradition, le credo — foi imposée, théocratie
+   Transgresseurs (w_faustian)  la puissance au-delà des limites — runes, arcane
+   Communautaires (—)           le peuple, l'harmonie, la subsistance — bien commun
+
+
+────────────────────────────────────────────────────────────────────────────────
+  II.  LES SIX PASSES DU SYSTÈME
+────────────────────────────────────────────────────────────────────────────────
+
+§1-2  LE SPECTRE & L'ENRACINEMENT  (scps_factions)
+   Chaque GROUPE culturel a un penchant d'éthos, dérivé de sa culture : son ÉTHOS
+   (la direction première), sa SIGNATURE de race (orque → Conquérant+Transgresseur ;
+   nain → Légiste+Transgresseur/forge à runes ; halfelin/gnome → Marchand+Communau-
+   taire ; elfe → arcane+tradition ; humain → l'intégrateur), son CREDO (la ferveur
+   nourrit les Gardiens). La distribution du PAYS = Σ groupes (population × poids de
+   CLASSE × penchant) — l'élite gouverne (×3 la masse). Conséquence clé : CONQUÉRIR
+   un peuple orque MONTE les Conquérants dans ta politique interne. Tes guerres
+   reconfigurent ton spectre politique.
+
+§3   L'ÉTHOS EFFECTIF  (la résultante qui GLISSE)
+   La personnalité de l'IA n'est plus figée à sa culture de trône : elle suit la
+   RÉSULTANTE de ses factions. On module le socle (figé à l'init) par l'ÉCART entre
+   le penchant du PEUPLE (tout l'empire) et celui du TRÔNE (sa capitale). Un empire
+   homogène ne glisse pas (équilibre préservé) ; un empire qui a avalé des orques
+   voit sa conquête et son faustien MONTER. « Un empire change d'éthos quand qui le
+   compose change. » Les cinq axes, lus partout (agression, recherche, casus belli).
+
+§6   LA FRACTURE DE VALEURS  (le frein INTERNE)
+   Un éthos dominant net → cohésion. Deux factions fortes qui se disputent la tête →
+   FRACTURE (paralysie). Une distance de VALEURS, sœur de la distance culturelle D̄.
+   Elle FREINE : un empire d'éthos incohérent se consolide au lieu de mordre. Sœur
+   du frein externe — la surexpansion ligue le monde DEHORS, l'incohérence te ligue
+   DEDANS. (Plancher : un mono-éthos garde une fracture résiduelle ; seule la
+   diversité CONQUISE freine, pas la cohésion ordinaire.)
+
+§5   LES COUPS  (le mécontentement → conflit de valeurs)
+   Un COUP tombe d'une faction forte ET ALIÉNÉE — pas d'un script. faction_opposition
+   pose l'opposition de valeurs (Conquérants↔Communautaires, Marchands↔Gardiens,
+   Légistes↔Transgresseurs, et Gardiens↔Transgresseurs au maximum : l'orthodoxie
+   interdit / le culte sacralise le faustien — l'épine dorsale religieuse). Quand un
+   groupe ÉTABLI (intégré, pas une conquête fraîche qui SÉCÈDE) porte une faction
+   forte opposée à la direction effective, son grief devient POLITIQUE : il vise à
+   SAISIR l'État pour imposer son éthos. Via le module revolt. Émergent et RARE : les
+   empires cohésifs ne couvent rien ; un empire divisé voit ses factions se déchirer.
+
+§8   LES MISSIONS DÉCENNALES  (rythme, direction, ressources)
+   Tous les 10 ans, une mission contextuelle par pays : ériger l'institution que veut
+   l'éthos dominant, renforcer la chaîne d'outils, ou percer des technologies. Tirée
+   de l'état du pays ; l'accomplir verse OR + MATIÈRES (∝ ampleur). Maintenant que
+   bâtir COÛTE, la récompense pèse. Passif : s'émet et se récompense seule.
+
+§9   LA BALANCE SURFACÉE  (UI / membrane)
+   Le bandeau gagne un rang « Factions » : six jauges cuivre par éthos (part 0-100,
+   tangible comme une part de population) ; une faction ALIÉNÉE vire au rouge ;
+   « X mène » nomme la direction effective ; « Sédition <mot> (N) » jauge le coup qui
+   couve. Le joueur LIT enfin sa politique interne : qui le compose, qui mène, qui
+   complote. Membrane tenue — aucun nom de coordonnée SCPS ne franchit la cloison.
+
+RESTE EN FILE : §4 (les leviers comme des VOTES — renforcer/aliéner une faction) et
+§7 (l'engagement d'âge — à chaque lever d'âge, une faction propose une pledge).
+
+
+────────────────────────────────────────────────────────────────────────────────
+  III.  L'ARC QUI ENTOURE  (religion · diplomatie · économie)
+────────────────────────────────────────────────────────────────────────────────
+
+RELIGION
+   • CONVERSION (§2) : la foi des provinces converge vers le TRÔNE — l'axe doctrinal
+     dérive, la branche sacrée BASCULE une fois enracinée. Le credo fait le rythme :
+     pluraliste tolère (empire multi-confessionnel), évangéliste convertit lent,
+     purificateur convertit de force.
+   • HUMEUR DE FOI (§7 UI) : le panneau de province affiche « Foi » — Dévote / Tiède
+     / Hérétique — face au culte du trône.
+
+DIPLOMATIE — LE COUP DE GRÂCE
+   « Pourquoi aucun pays ne se fait absorber ? » Parce que la paix proportionnelle
+   banque un gain borné puis signe. On entrouvre la porte sans rompre l'anti-snowball :
+   la DERNIÈRE région d'un pays (sa capitale) coûte le DOUBLE à prendre (revendication
+   ≥ déjà-pris + 2). Élimination possible mais difficile : il faut broyer l'ennemi en
+   croupion ET le dominer nettement, sans coalition de secours.
+
+ÉCONOMIE — LE COÛT DES BÂTIMENTS
+   Les bâtiments étaient GRATUITS (l'agency n'enfilait qu'une durée). Désormais chaque
+   bâtiment a une RECETTE de matériaux, achetée AU MARCHÉ en OR (les ressources vont
+   dans le marché, pas dans un stock joueur). Le coût monte avec le TIER (bois → bois+
+   métal → métal+précieux), pas avec l'étendue. La boucle se referme : Forge·Prod →
+   matériaux ; Société·Prod → or qui les achète ; Savoir·Prod → recherche qui paie les
+   techs. (Le coût des techs ∝ étendue était déjà là — le frein tall/wide.)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  IV.  VÉRIFICATION
+────────────────────────────────────────────────────────────────────────────────
+
+BANCS D'ESSAI (auto-vérifiants, 0 échec) :
+   factions_demo 22/0 · missions_demo 8/0 · agency_demo 18/0 · ai_demo 21/0
+   readout_demo 27/0 · revolt_demo 23/0 · demography_demo 19/0 · diplo_demo 49/0 …
+
+CHRONIQUE  (balayage headless, 5 sims × 200 ans, sans joueur) — derniers chiffres :
+   pays absorbés ......... 0          (l'anti-snowball tient ; le coup de grâce reste rare)
+   âges éveillés ......... 5.4 / sim
+   guerres ............... 5.0 / sim
+   provinces prises ...... ~20-30 / sim   (la conquête VIT, tempérée par les freins)
+   nœuds de tech ......... ~360 / sim     (les missions rythment sans sur-doper)
+   soulèvements .......... sécessions + COUPS (concentrés dans les empires divisés)
+
+CLOISON (membrane) : le renderer ne lit JAMAIS un flottant SCPS — mots diégétiques +
+nombres tangibles (0-100, population, or) seulement. Vérifié par grep, par
+construction (faction_readout/country_readout traduisent ; le viewer reçoit des MOTS).
+
+
+────────────────────────────────────────────────────────────────────────────────
+  V.  CE QUI RESTE
+────────────────────────────────────────────────────────────────────────────────
+
+   Factions : §4 (leviers = votes) · §7 (engagement d'âge).
+   Combat dans le temps (prompt entier, intact) : déplacement lisant le terrain ·
+     combat en jours + phases choc/retrait · techs en cascade · UI armée (intel) ·
+     prix de province en score de guerre (refonte de diplo_war_claim en budget).
+
+══════════════════════════════════════════════════════════════════════════════
