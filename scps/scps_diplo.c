@@ -412,10 +412,10 @@ int diplo_war_claim(const DiploState *d, const World *w, const WorldEconomy *eco
 }
 
 /* ---- §5 COMBAT : le PRIX d'une province (∝ valeur développée) ---------- */
-#define PRICE_BASE   10.f   /* un arrière-pays nu coûte déjà ça */
-#define PRICE_BUILT   1.6f  /* par point de densité bâtie (K/H/P/food/foi/savoir) */
-#define PRICE_PROS    2.2f  /* par point de prospérité locale */
-#define PRICE_POP     0.004f/* par âme (un cœur peuplé coûte cher) */
+#define PRICE_BASE   4.f    /* un arrière-pays nu : ~5-8 */
+#define PRICE_BUILT  0.9f   /* par point de densité bâtie (K/H/P/food/foi/savoir) */
+#define PRICE_PROS   1.2f   /* par point de prospérité locale */
+#define PRICE_POP    0.002f /* par âme (un cœur peuplé coûte plus) — une GROSSE province ~40 */
 float diplo_province_price(const WorldEconomy *econ, int region){
     if (!econ || region<0 || region>=econ->n_regions) return PRICE_BASE;
     const RegionEconomy *re=&econ->region[region];
@@ -463,6 +463,26 @@ float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int 
     for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==loser){
         float pay=frac*econ->region[r].treasury;
         econ->region[r].treasury-=pay; total+=pay;       /* indemnité prélevée sur tout le royaume */
+    }
+    if (dst>=0&&dst<econ->n_regions) econ->region[dst].treasury+=total;
+    return total;
+}
+
+/* §5 — LE BUTIN : le budget de score NON dépensé en terres (« les 95 % restants »)
+ * VIDE les coffres du vaincu vers la capitale du vainqueur. Une victoire écrasante sur
+ * un petit pays prend ses quelques provinces ET son or ; sur un grand, on prend ce que
+ * le budget couvre en terre, le reste en pillage. */
+#define LOOT_GOLD_PER_VALUE 16.f   /* conversion : un point de budget restant convoite ~16 or */
+float diplo_loot(World *w, WorldEconomy *econ, int attacker, int defender, float leftover_value){
+    if (attacker<0||attacker>=w->n_countries||defender<0||defender>=w->n_countries||attacker==defender) return 0.f;
+    if (leftover_value<=0.f) return 0.f;
+    float want = leftover_value * LOOT_GOLD_PER_VALUE;
+    int cap=w->country[attacker].capital_prov;
+    int dst=(cap>=0&&cap<w->n_provinces)?w->province[cap].region:-1;
+    float total=0.f;
+    for (int r=0;r<econ->n_regions && total<want;r++) if (econ->region[r].owner==defender){
+        float take=fminf(econ->region[r].treasury, want-total);
+        if (take>0.f){ econ->region[r].treasury-=take; total+=take; }   /* on vide les coffres */
     }
     if (dst>=0&&dst<econ->n_regions) econ->region[dst].treasury+=total;
     return total;

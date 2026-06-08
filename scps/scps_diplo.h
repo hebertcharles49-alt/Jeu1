@@ -153,6 +153,8 @@ float diplo_province_price(const WorldEconomy *econ, int region);
 float diplo_war_budget(const DiploState *d, const World *w, const WorldEconomy *econ,
                        int attacker, int defender);  /* domination militaire + prime de score */
 float diplo_country_value(const WorldEconomy *econ, int cid);             /* Σ prix des provinces */
+/* §5 BUTIN : le budget de score NON dépensé en terres VIDE les coffres du vaincu. */
+float diplo_loot(World *w, WorldEconomy *econ, int attacker, int defender, float leftover_value);
 /* RÉPARATIONS : à la paix, le VAINCU (score adverse net) indemnise le vainqueur
  * ∝ |score de guerre| — ponction des trésors provinciaux du perdant → capitale du
  * vainqueur. Renvoie l'or transféré ; 0 si match nul (pas de vainqueur net). */

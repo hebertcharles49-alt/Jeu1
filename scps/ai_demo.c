@@ -336,6 +336,14 @@ int main(int argc, char **argv){
         rich->build.K_inst=0.f; rich->build.PE_infra=0.f; rich->prosperity=1.f;
         rich->strata[CLASS_LABORER].pop=40.f;
 
+        /* (butin) le budget de score restant VIDE les coffres du vaincu. */
+        s.econ->region[rr[0]].treasury=500.f;
+        int capD=s.w->province[s.w->country[cidD].capital_prov].region;
+        float tD0=s.econ->region[capD].treasury;
+        float looted=diplo_loot(s.w, s.econ, cidD, R, 20.f);   /* 20 de budget restant → pillage */
+        ok("le BUTIN vide les coffres du vaincu vers la capitale du vainqueur (§5)",
+           looted > 1.f && s.econ->region[rr[0]].treasury < 500.f && s.econ->region[capD].treasury > tD0);
+
         /* On soigne l'ordre du Dominateur (le frein ne le fige pas). */
         for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].owner==cidD){
             s.wl->L[r]=9.f; s.wl->years_held[r]=120.f; s.econ->region[r].coercion=0.f;

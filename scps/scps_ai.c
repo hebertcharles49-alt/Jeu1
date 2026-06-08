@@ -549,7 +549,9 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
             float spent  = (victim>=0 && victim<SCPS_MAX_COUNTRY)? diplo->conq_value[a->cid][victim] : 0.f;
             bool territorial = (goal==CB_TERRITORIAL || goal==CB_NONE);
             if (territorial && victim>=0 && spent + price > budget){
-                /* trop cher pour cette victoire → on banque le gain et l'on signe. */
+                /* trop cher pour cette victoire → on banque le gain ET, du budget restant
+                 * (« les 95 % »), on VIDE les coffres du vaincu, puis on signe. */
+                diplo_loot(w, econ, a->cid, victim, budget - spent);
                 diplo_reparations(diplo, w, econ, a->cid, victim);
                 diplo_make_peace(diplo, a->cid, victim);
             } else if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
@@ -564,10 +566,13 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
                 }
             }
         } else {
-            /* plus de territoire ennemi adjacent : la guerre est GAGNÉE → on signe la
-             * paix (indemnité au passage) et l'on pourra viser une autre cible plus tard. */
+            /* plus de territoire ennemi adjacent : la guerre est GAGNÉE → le budget restant
+             * VIDE les coffres, indemnité au passage, et l'on signe (autre cible plus tard). */
             for (int b=0; b<w->n_countries; b++)
                 if (b!=a->cid && diplo_status(diplo, a->cid, b)==DIPLO_WAR){
+                    float lo = diplo_war_budget(diplo,w,econ,a->cid,b)
+                             - ((b<SCPS_MAX_COUNTRY)? diplo->conq_value[a->cid][b] : 0.f);
+                    diplo_loot(w, econ, a->cid, b, lo);
                     diplo_reparations(diplo, w, econ, a->cid, b);
                     diplo_make_peace(diplo, a->cid, b);
                 }
