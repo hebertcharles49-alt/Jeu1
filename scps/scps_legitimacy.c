@@ -28,7 +28,7 @@ static inline float absf(float v) { return v < 0.f ? -v : v; }
  * profils de population — la friction, langue exclue (horloge). */
 /* La FOI est ACTIVE (§3 légitimité sacrée) : régner sur une AUTRE BRANCHE de foi
  * éloigne (alignement ↓ → L ↓), au-delà de l'axe religion. */
-#define FAITH_BRANCH_PEN 5.5f
+#define FAITH_BRANCH_PEN 3.5f
 static float content_dist(const PopCulture *a, const PopCulture *b) {
     float dv = absf(a->valeurs     - b->valeurs);
     float ds = absf(a->subsistance - b->subsistance);

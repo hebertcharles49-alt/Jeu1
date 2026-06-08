@@ -33,6 +33,7 @@
 #define AI_TECH_PENCHANT    2.0f  /* biais vers le thème de SA race (penchant, pas « si ») */
 #define AI_TECH_SIGNATURE   1.5f  /* prime à une signature accessible (la sienne / greffée) */
 #define AI_TECH_FAUSTIAN    2.5f  /* tolérance faustienne = w_faustian − frein (sinon on évite) */
+#define AI_FAITH_FAUSTIAN   3.0f  /* §4 : l'orthodoxie INTERDIT le faustien, le culte le SACRALISE */
 
 /* ---- Utilitaires ------------------------------------------------------ */
 static inline float clampf(float v, float lo, float hi){ return v<lo?lo:(v>hi?hi:v); }
@@ -518,6 +519,20 @@ static SpeciesArchetype ai_capital_race(const World *w, const WorldEconomy *econ
     if (cr<0||cr>=econ->n_regions) return RACE_HUMAIN;
     return econ->region[cr].culture.race;
 }
+/* §4 RELIGION — la posture de la foi régnante sur l'interdit [0..1] (orthodoxe bas
+ * ↔ culte haut), lue de l'éthos de la culture-capitale (même barème que scps_faith).
+ * L'orthodoxe INTERDIT le faustien (sacrilège) ; le culte le SACRALISE. */
+static float ai_faith_stance(const World *w, const WorldEconomy *econ, int cid){
+    if (cid<0||cid>=w->n_countries) return 0.25f;
+    int cp=w->country[cid].capital_prov; if (cp<0||cp>=w->n_provinces) return 0.25f;
+    int cr=w->province[cp].region;       if (cr<0||cr>=econ->n_regions) return 0.25f;
+    switch (econ->region[cr].culture.ethos){
+        case ETHOS_DOMINATEUR: return 0.36f; case ETHOS_HONNEUR:  return 0.30f;
+        case ETHOS_MERCANTILE: return 0.26f; case ETHOS_PACIFISTE:return 0.20f;
+        case ETHOS_BUREAUCRATE:return 0.14f; case ETHOS_ORDRE:    return 0.10f;
+        default:               return 0.20f;
+    }
+}
 float ai_country_population(const World *w, const WorldEconomy *econ, int cid){
     float pop=0.f; (void)w;
     for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
@@ -546,6 +561,7 @@ static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w
     AiView v = ai_observe(wp, w, econ, a->cid);
     float brake = ai_consolidation_pressure(&v);
     TechTheme affinity = tech_race_affinity(ai_capital_race(w,econ,a->cid));
+    float faith_stance = ai_faith_stance(w,econ,a->cid);   /* §4 : orthodoxe interdit, culte sacralise */
     TechId best=TECH_COUNT; float bestscore=-1e30f;
     for (int i=0;i<TECH_COUNT;i++){
         TechId id=(TechId)i;
@@ -564,7 +580,10 @@ static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w
         if (n->theme==affinity)    score += AI_TECH_PENCHANT;
         if (n->native!=RACE_COUNT) score += AI_TECH_SIGNATURE;     /* une signature accessible se prend */
         /* FREIN — le faustien rapproche la Brèche : pris seulement si la pente l'emporte. */
-        if (n->faustian)           score += AI_TECH_FAUSTIAN*(a->w_faustian - brake) - 0.3f*n->charge;
+        if (n->faustian){          /* la pente faustienne, FREINÉE ou BÉNIE par la foi (§4) */
+            float religious = (faith_stance - 0.5f)*2.f;   /* −1 orthodoxe (sacrilège) … +1 culte */
+            score += AI_TECH_FAUSTIAN*(a->w_faustian - brake) - 0.3f*n->charge + AI_FAITH_FAUSTIAN*religious;
+        }
         score -= 0.002f*cost;      /* à score égal : le plus proche (le moins cher) d'abord */
         if (score>bestscore){ bestscore=score; best=id; }
     }

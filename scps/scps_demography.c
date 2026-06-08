@@ -38,7 +38,7 @@ static inline float absf(float v){ return v<0?-v:v; }
 /* La FOI est un axe ACTIF (§1/§3) : une autre BRANCHE de foi est une vraie
  * fracture, au-delà de l'axe religion (même foi → cohésion & assimilation vite ;
  * autre foi → résistance, fracture). */
-#define FAITH_BRANCH_PEN 5.5f
+#define FAITH_BRANCH_PEN 3.5f
 static float content_dist(const PopCulture *a, const PopCulture *b){
     float dv=absf(a->valeurs-b->valeurs), ds=absf(a->subsistance-b->subsistance);
     float dp=absf(a->parente-b->parente), dr=absf(a->religion-b->religion);
