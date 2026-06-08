@@ -2512,9 +2512,9 @@ static void gen_resources(World *w) {
         if (B==BIO_WOODS)          ADD(RES_GRAIN,     1.6f);   /* clairières cultivables */
         if (B==BIO_SAVANNA)        ADD(RES_LIVESTOCK, 2.0f);   /* savane → pâture */
         if (humid_flat)            ADD(RES_GRAIN,     1.4f);
-        if (flat && !arid)         ADD(RES_LIVESTOCK, 2.2f);
-        if (pastoral)            { ADD(RES_LIVESTOCK, 2.6f); ADD(RES_WOOL, 1.5f); }
-        if (hills)               { ADD(RES_LIVESTOCK, 1.6f); ADD(RES_WOOL, 1.5f); }
+        if (flat && !arid)       { ADD(RES_LIVESTOCK, 2.2f); ADD(RES_WOOL, 1.2f); }   /* prés non-arides → laine */
+        if (pastoral)            { ADD(RES_LIVESTOCK, 2.6f); ADD(RES_WOOL, 2.6f); ADD(RES_MED_HERBS, 0.7f); }
+        if (hills)               { ADD(RES_LIVESTOCK, 1.6f); ADD(RES_WOOL, 2.2f); }
         if (flat && arid && warm)  ADD(RES_COTTON,    1.8f);   /* flatlands arides */
 
         /* --- Poisson : côte ou fleuve à fort débit (sans voler la terre
@@ -2524,21 +2524,24 @@ static void gen_resources(World *w) {
 
         /* --- Fourrure : régions froides et sauvages --- */
         if (cold && (forested||B==BIO_BOG||B==BIO_GLACIER||B==BIO_STEPPE))
-                                   ADD(RES_FUR, 3.0f);
+                                   ADD(RES_FUR, 2.0f);   /* surproduit : 3.0 → 2.0 */
 
         /* --- Sel : déserts et côtes --- */
         if (arid)                  ADD(RES_SALT, 1.8f);
         if (coastal[p])            ADD(RES_SALT, 0.8f);
 
-        /* --- Sucre : côtes arides chaudes --- */
+        /* --- Sucre : côtes arides chaudes + canne tropicale (chaud & humide) + savane --- */
         if (coastal[p] && arid && warm) ADD(RES_SUGAR, 2.6f);
+        if (warm && moist>0.55f)        ADD(RES_SUGAR, 1.8f);
+        if (B==BIO_SAVANNA)             ADD(RES_SUGAR, 0.8f);
 
         /* --- Bois : régions boisées --- */
         if (forested)              ADD(RES_WOOD, 3.6f);
 
-        /* --- Herbes médicinales : zones humides d'altitude --- */
+        /* --- Herbes médicinales : zones humides d'altitude + sous-bois + pâtures --- */
         if (B==BIO_BOG)            ADD(RES_MED_HERBS, 2.6f);
         if ((hills||H>0.55f) && moist>0.55f) ADD(RES_MED_HERBS, 1.4f);
+        if (forested)              ADD(RES_MED_HERBS, 1.0f);   /* simples de sous-bois */
 
         /* --- Minéraux de relief --- */
         if (relief) {
