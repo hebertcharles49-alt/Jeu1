@@ -180,6 +180,27 @@ int main(void){
            faction_coup_tension(wm,&alien) < tension - 0.10f);
     }
 
+    /* ═══ 8. LES LEVIERS COMME DES VOTES (§4) ═══════════════════════════ */
+    printf("\n── 8. Un levier AVANCE un éthos et AIGRIT les opposés (un vote) ──\n");
+    {
+        faction_levers_reset();
+        ok("au départ, nulle rancœur", faction_grievance(0, FAC_MARCHAND)==0.f);
+        faction_lever_apply(0, FAC_GARDIEN, 0.4f);   /* foi imposée → Gardiens */
+        ok("imposer la foi (Gardiens) AIGRIT les Marchands (opposés)",
+           faction_grievance(0,FAC_MARCHAND) > 0.2f);
+        ok("… et n'aigrit PAS la faction avancée elle-même", faction_grievance(0,FAC_GARDIEN)==0.f);
+        faction_lever_apply(1, FAC_TRANSGRESSEUR, 0.4f);  /* forge à runes → Transgresseurs */
+        ok("la forge à runes (Transgresseurs) aigrit les Communautaires",
+           faction_grievance(1,FAC_COMMUNAUTAIRE) > 0.2f);
+        float g0=faction_grievance(0,FAC_MARCHAND);
+        faction_levers_decay(0.5f);
+        ok("une stance non entretenue S'EFFACE (la rancœur retombe)",
+           faction_grievance(0,FAC_MARCHAND) < g0 - 0.05f);
+        faction_levers_reset();
+        ok("reset remet tout à zéro (début de sim)",
+           faction_grievance(0,FAC_MARCHAND)==0.f && faction_grievance(1,FAC_COMMUNAUTAIRE)==0.f);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

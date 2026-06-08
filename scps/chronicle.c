@@ -26,6 +26,7 @@
 #include "scps_demography.h"
 #include "scps_revolt.h"
 #include "scps_missions.h"
+#include "scps_factions.h"
 #include "scps_labor.h"
 #include "scps_ai.h"
 #include "scps_species.h"
@@ -111,6 +112,7 @@ static void sim_day(Sim *s, World *w) {
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales : rythme + récompense */
+        faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface (~15 ans) */
     }
     if (++s->day % 365 == 0) s->year++;
 }
@@ -131,6 +133,7 @@ static void sim_init(Sim *s, World *w) {
     }
     demography_attach(w, s->econ, s->drift);
     revolt_init(s->rs); warhost_init(s->host); missions_init(s->missions);
+    faction_levers_reset();   /* §4 : stances de factions remises à zéro pour cette sim */
     for (int r=0;r<SCPS_MAX_REG;r++)
         s->prev_owner_mo[r] = (r<s->econ->n_regions)? s->econ->region[r].owner : -1;
     events_init(s->ev, w, w->seed);

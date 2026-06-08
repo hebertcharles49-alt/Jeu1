@@ -161,8 +161,7 @@ int revolt_ignite(RevoltState *rs, World *w, WorldEconomy *econ,
 
     /* §5 : la tension de coup du pays — une faction forte aliénée porte son élite. */
     float ct=0.f; EthosFaction cf=FAC_COMMUNAUTAIRE;
-    { float fw[FAC_COUNT]; country_faction_weights(w,econ,owner,fw);
-      ct=faction_coup_tension(fw,&cf); }
+    ct = faction_coup_tension_c(w,econ,owner,&cf);   /* tension de coup AVEC le grief des leviers (§4) */
 
     /* le groupe au plus fort déficit porte le soulèvement (grief politique compris) */
     int worst=-1; float wd=0.f;
@@ -228,8 +227,7 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
         const PopCulture *crown=crown_of(w,econ,re->owner);
         int o=re->owner; float ct=0.f; EthosFaction cf=FAC_COMMUNAUTAIRE;
         if (o>=0 && o<SCPS_MAX_COUNTRY){
-            if (!cdone[o]){ float fw[FAC_COUNT]; country_faction_weights(w,econ,o,fw);
-                            ctens[o]=faction_coup_tension(fw,&cfac[o]); cdone[o]=1; }
+            if (!cdone[o]){ ctens[o]=faction_coup_tension_c(w,econ,o,&cfac[o]); cdone[o]=1; }
             ct=ctens[o]; cf=cfac[o];
         }
         float worst=0.f;
@@ -372,6 +370,7 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
                         wl->L[r]=clampf(wl->L[r]+1.5f,0.f,10.f);
                     re->coercion=fmaxf(0.f, re->coercion-0.3f);
                     demobilize(econ, rb, rb->mobilized);
+                    faction_levers_on_coup(rb->owner);   /* §4 : le coup purge la rancœur (plus de spirale) */
                     rs->n_coup++; rb->outcome=OUT_COUP;
                     break; }
                 default: {  /* REBEL_CLASS : la couronne CÈDE (concession) */

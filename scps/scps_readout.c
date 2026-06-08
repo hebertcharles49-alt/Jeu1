@@ -353,16 +353,17 @@ CountryReadout country_readout(const WorldProsperity *wp, const TechState *ts,
 FactionsReadout faction_readout(const World *w, const WorldEconomy *econ, int cid) {
     FactionsReadout fr; memset(&fr, 0, sizeof fr);
     float wt[FAC_COUNT];
-    EthosFaction dom = country_faction_weights(w, econ, cid, wt);
+    EthosFaction dom = faction_effective_distribution(w, econ, cid, wt);  /* base + leviers (§4) */
     fr.dominant = faction_name(dom);
     for (int f = 0; f < FAC_COUNT; f++) {
         fr.faction[f].name = faction_name((EthosFaction)f);
         fr.faction[f].part = iclamp((int)roundf(wt[f] * 100.f), 0, 100);
-        /* alignée = peu opposée à la direction dominante (sinon elle s'aigrit). */
-        fr.faction[f].aligned = (faction_opposition((EthosFaction)f, dom) < 0.5f);
+        /* alignée = peu opposée à la direction ET peu aigrie par la politique. */
+        fr.faction[f].aligned = (faction_opposition((EthosFaction)f, dom) < 0.5f)
+                             && (faction_grievance(cid, (EthosFaction)f) < 0.30f);
     }
     EthosFaction alienated;
-    float tension = faction_coup_tension(wt, &alienated);
+    float tension = faction_coup_tension_c(w, econ, cid, &alienated);
     fr.sedition = mk_metric(iclamp((int)roundf(tension * 200.f), 0, 100),  /* tension ~0..0.5 → 0..100 */
                             label_sedition(band_sedition(tension)), hover_sedition());
     return fr;

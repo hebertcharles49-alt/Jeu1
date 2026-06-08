@@ -97,4 +97,26 @@ float faction_opposition(EthosFaction a, EthosFaction b);
  * forte aliénée couve un coup pour imposer SON éthos. Écrit la faction aliénée. */
 float faction_coup_tension(const float weights[FAC_COUNT], EthosFaction *out_alienated);
 
+/* ===================================================================== */
+/* LES LEVIERS COMME DES VOTES (§4) — la politique déplace l'équilibre     */
+/* ===================================================================== */
+/* Un levier (libre-échange, foi imposée, forge à runes…) AVANCE un éthos et en
+ * ALIÈNE d'autres : il RENFORCE la faction alignée (elle gagne du poids effectif)
+ * et FÂCHE les opposées (elles accumulent du grief → couvent le coup). Favoriser
+ * longtemps fait DÉRIVER le pays vers cet éthos. État de stance PAR PAYS, remis à
+ * zéro par sim (faction_levers_reset), qui s'efface s'il n'est pas entretenu. */
+void faction_levers_reset(void);                                  /* début de partie/sim */
+void faction_lever_apply(int cid, EthosFaction advanced, float strength);  /* un vote */
+void faction_levers_decay(float rate);                            /* la stance non tenue s'efface */
+void faction_levers_on_coup(int cid);                             /* un coup DÉCHARGE la rancœur du pays */
+float faction_grievance(int cid, EthosFaction f);                 /* 0-1 : la rancœur d'une faction (UI) */
+
+/* La distribution EFFECTIVE = base (groupes) + stance des leviers, normalisée. C'est
+ * elle que le moteur lit (éthos effectif §3, tension de coup §5, UI §9). Dominante. */
+EthosFaction faction_effective_distribution(const World *w, const WorldEconomy *econ,
+                                            int cid, float out[FAC_COUNT]);
+/* Tension de coup TENANT COMPTE du grief des opposés aliénés par la politique. */
+float faction_coup_tension_c(const World *w, const WorldEconomy *econ,
+                             int cid, EthosFaction *out_alienated);
+
 #endif /* SCPS_FACTIONS_H */

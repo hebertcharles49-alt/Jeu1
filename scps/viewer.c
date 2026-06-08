@@ -39,6 +39,7 @@
 #include "scps_intertrade.h"/* commerce inter-pays : grandes routes marchandes + embargo */
 #include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
+#include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -406,6 +407,7 @@ static void sim_day(Sim *s, World *w) {
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales */
+        faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface */
     }
     if (++s->day % 365 == 0) s->year++;
 }
@@ -443,6 +445,7 @@ static void sim_rebuild(Sim *s, World *w) {
     revolt_init(s->rs);                                  /* les soulèvements incarnés */
     warhost_init(s->host);                               /* les armées levées par pays */
     missions_init(s->missions);                          /* missions décennales */
+    faction_levers_reset();                              /* §4 : stances de factions à zéro */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
         s->prev_owner_mo[r]=s->econ->region[r].owner;
     s->day=0; s->year=0;

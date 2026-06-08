@@ -31,6 +31,10 @@
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
 #define AI_CRUSADE_W      4.0f   /* croisade : l'orthodoxe vise qui développe le faustien (chance ∝ ferveur) */
+/* §4 — leviers : chaque ACTE est un vote. Une politique tenue accumule vers le cap. */
+#define AI_LEVER_TECH     0.05f  /* franchir l'interdit (tech faustienne) → Transgresseurs */
+#define AI_LEVER_WAR      0.05f  /* conquérir → Conquérants */
+#define AI_LEVER_BUILD    0.035f /* bâtir une famille d'édifices → la faction afférente */
 #define AI_ANNEX_SURCHARGE 2     /* la DERNIÈRE région (capitale) coûte le DOUBLE : 2 « points » de domination */
                                  /*   militaire au lieu d'1 (revendication ≥ déjà-pris + 2). Sous ce seuil, la */
                                  /*   paix proportionnelle ÉPARGNE la capitale — l'annexion exige une domination nette. */
@@ -116,7 +120,7 @@ static void ai_refresh_ethos(AiActor *a, const World *w, const WorldEconomy *eco
      * empire homogène ne glisse PAS (capitale == empire), seule la diversité conquise
      * écarte les deux. */
     float crownlean[FAC_COUNT]; faction_weights_of(&econ->region[cr].pop, 1, crownlean);
-    float pop[FAC_COUNT];       country_faction_weights(w, econ, a->cid, pop);
+    float pop[FAC_COUNT];       faction_effective_distribution(w, econ, a->cid, pop);  /* base + leviers (§4) */
     a->w_expand   = glide_axis(a->w_base[0], pop[FAC_CONQUERANT],    crownlean[FAC_CONQUERANT]);
     a->w_trade    = glide_axis(a->w_base[1], pop[FAC_MARCHAND],      crownlean[FAC_MARCHAND]);
     a->w_build    = glide_axis(a->w_base[2], pop[FAC_LEGISTE],       crownlean[FAC_LEGISTE]);
@@ -390,6 +394,18 @@ static Edifice ai_next_savoir_edifice(const WorldEconomy *econ, int region){
 /* ===================================================================== */
 /* TOURS DE DÉCISION                                                       */
 /* ===================================================================== */
+/* §4 — la famille d'un édifice désigne la faction qu'il AVANCE (bâtir = voter). */
+static EthosFaction ai_lever_for_edifice(Edifice e){
+    switch (e){
+        case EDI_GARNISON: case EDI_FORTERESSE: case EDI_CITADELLE:        return FAC_CONQUERANT;
+        case EDI_SANCTUAIRE: case EDI_TEMPLE: case EDI_CATHEDRALE: case EDI_MONASTERE: return FAC_GARDIEN;
+        case EDI_GRENIER: case EDI_IRRIGATION: case EDI_AQUEDUC:           return FAC_COMMUNAUTAIRE;
+        case EDI_MARCHE: case EDI_ENTREPOT: case EDI_PORT: case EDI_CARAVANSERAIL:
+        case EDI_COMPTOIR: case EDI_BANQUE:                               return FAC_MARCHAND;
+        default:                                                          return FAC_LEGISTE;  /* Tribunal/Académie/Bibliothèque… */
+    }
+}
+
 /* Économie : commercer OU bâtir (le frein réoriente l'énergie vers le K). */
 static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
                          AgencyState *ag, RouteNetwork *rn, float brake){
@@ -413,7 +429,10 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
          * par la fiche ; le moteur d'ordre fait le verdict. */
         if (brake > AI_BRAKE_HARD && a->w_expand >= 0.60f){
             Edifice e = ai_next_h_edifice(econ, a->home_region);
-            if (a->home_region>=0 && agency_build(ag, econ, a->home_region, e)) a->stats.builds_h++;
+            if (a->home_region>=0 && agency_build(ag, econ, a->home_region, e)){
+                a->stats.builds_h++;
+                faction_lever_apply(a->cid, ai_lever_for_edifice(e), AI_LEVER_BUILD);  /* §4 : bâtir = voter */
+            }
         } else {
             /* RÉFORME : on métabolise (K). Mais un trône au consentement bas se
              * SACRALISE d'abord (la foi soutient L) ; institutions mûres, on
@@ -432,6 +451,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
                  * vs DIGESTION imposée par le frein — on ne les confond pas. */
                 if (brake > AI_BRAKE_HARD) a->stats.builds_other++;
                 else                       a->stats.builds_k++;
+                faction_lever_apply(a->cid, ai_lever_for_edifice(e), AI_LEVER_BUILD);  /* §4 : la famille d'édifice vote */
             }
         }
     } else if (a->credit_trade>=1.f){
@@ -439,8 +459,10 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
         int p = ai_pick_trade_partner(econ, a->home_region, a->cid);
         if (p>=0 && routes_order(rn, econ, a->home_region, p, false)){
             a->stats.routes++;
+            faction_lever_apply(a->cid, FAC_MARCHAND, AI_LEVER_BUILD);   /* §4 : le négoce AVANCE les Marchands */
         } else if (a->home_region>=0 && agency_build(ag, econ, a->home_region, EDI_MARCHE)){
             a->stats.builds_other++;                       /* pas de partenaire : on bâtit le carrefour */
+            faction_lever_apply(a->cid, FAC_MARCHAND, AI_LEVER_BUILD);
         }
     }
 }
@@ -533,6 +555,7 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
                 diplo_make_peace(diplo, a->cid, victim);
             } else if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
                 a->credit_war -= 1.f; a->stats.conquests++;
+                faction_lever_apply(a->cid, FAC_CONQUERANT, AI_LEVER_WAR);  /* §4 : la guerre AVANCE les Conquérants */
                 /* §5 PAIX PROPORTIONNELLE : un casus belli non-territorial est SATISFAIT
                  * par une prise (la source / l'humiliation) ; le territorial ENCAISSE sa
                  * REVENDICATION (∝ domination militaire) puis SIGNE — l'IA banque le gain
@@ -692,7 +715,9 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
         if (ts->research_points >= cost && tech_research(ts, pick, access)){
             ts->research_points -= cost;
             a->stats.techs++;
-            if (tech_node(pick)->faustian) a->stats.techs_faustian++;
+            if (tech_node(pick)->faustian){ a->stats.techs_faustian++;
+                faction_lever_apply(a->cid, FAC_TRANSGRESSEUR, AI_LEVER_TECH);  /* §4 : franchir l'interdit AVANCE les Transgresseurs */
+            }
         }
     }
     a->can_enslave = ts->unlocked[TECH_ESCLAVAGE];   /* §4c : le gate de l'esclavage suit la tech */

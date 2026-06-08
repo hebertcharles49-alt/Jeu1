@@ -7,6 +7,7 @@
  */
 #include "scps_factions.h"
 #include "scps_species.h"   /* SpeciesArchetype */
+#include <string.h>         /* memset (reset des stances) */
 
 const char *faction_name(EthosFaction f){
     static const char *N[FAC_COUNT] = {
@@ -153,6 +154,81 @@ float faction_coup_tension(const float w[FAC_COUNT], EthosFaction *out){
     for (int f=0; f<FAC_COUNT; f++){
         if (f==dom) continue;
         float t = w[f] * faction_opposition((EthosFaction)f, (EthosFaction)dom);  /* fort ET opposé */
+        if (t>best){ best=t; bf=f; }
+    }
+    if (out) *out=(EthosFaction)bf;
+    return best;
+}
+
+/* ===================================================================== */
+/* LES LEVIERS COMME DES VOTES (§4) — stance par pays (état module)        */
+/* ===================================================================== */
+#define LEVER_BIAS_CAP  0.45f   /* une stance ne renverse pas la démographie, elle l'infléchit */
+#define COUP_GRIEF_W    0.25f   /* poids du grief de politique dans la tension de coup (NUDGE, pas flot) */
+static float g_lever_bias [SCPS_MAX_COUNTRY][FAC_COUNT];   /* le poids ajouté à la faction favorisée */
+static float g_lever_grief[SCPS_MAX_COUNTRY][FAC_COUNT];   /* la rancœur des factions aliénées */
+
+void faction_levers_reset(void){
+    memset(g_lever_bias, 0, sizeof g_lever_bias);
+    memset(g_lever_grief,0, sizeof g_lever_grief);
+}
+void faction_lever_apply(int cid, EthosFaction advanced, float strength){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY||advanced<0||advanced>=FAC_COUNT||strength<=0.f) return;
+    float b=g_lever_bias[cid][advanced]+strength; if (b>LEVER_BIAS_CAP) b=LEVER_BIAS_CAP;
+    g_lever_bias[cid][advanced]=b;                              /* la faction alignée gagne du poids */
+    for (int f=0; f<FAC_COUNT; f++){                            /* … les opposées s'aigrissent */
+        if (f==(int)advanced) continue;
+        float g=g_lever_grief[cid][f] + strength*faction_opposition((EthosFaction)f,advanced);
+        g_lever_grief[cid][f] = g>1.f ? 1.f : g;
+    }
+}
+void faction_levers_decay(float rate){
+    float k = 1.f - (rate<0.f?0.f:(rate>1.f?1.f:rate));         /* la stance non entretenue s'efface */
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++) for (int f=0;f<FAC_COUNT;f++){
+        g_lever_bias[c][f]*=k; g_lever_grief[c][f]*=k;
+    }
+}
+float faction_grievance(int cid, EthosFaction f){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY||f<0||f>=FAC_COUNT) return 0.f;
+    return g_lever_grief[cid][f];
+}
+void faction_levers_on_coup(int cid){
+    /* Le coup a basculé le régime : la rancœur accumulée se DÉCHARGE (sinon le pays
+     * recouve aussitôt — un coup tous les deux ans). La pression politique est purgée. */
+    if (cid<0||cid>=SCPS_MAX_COUNTRY) return;
+    for (int f=0; f<FAC_COUNT; f++) g_lever_grief[cid][f]=0.f;
+}
+
+EthosFaction faction_effective_distribution(const World *w, const WorldEconomy *econ,
+                                            int cid, float out[FAC_COUNT]){
+    float base[FAC_COUNT]; country_faction_weights(w, econ, cid, base);
+    double s=0.0;
+    for (int f=0; f<FAC_COUNT; f++){
+        float bias = (cid>=0&&cid<SCPS_MAX_COUNTRY) ? g_lever_bias[cid][f] : 0.f;
+        float v = base[f] + bias; if (v<0.f) v=0.f;
+        out[f]=v; s+=v;
+    }
+    int dom=FAC_COMMUNAUTAIRE; float best=-1.f;
+    for (int f=0; f<FAC_COUNT; f++){
+        out[f] = (s>0.0)?(float)(out[f]/s):(f==FAC_COMMUNAUTAIRE?1.f:0.f);
+        if (out[f]>best){ best=out[f]; dom=f; }
+    }
+    return (EthosFaction)dom;
+}
+
+float faction_coup_tension_c(const World *w, const WorldEconomy *econ,
+                             int cid, EthosFaction *out){
+    /* La tension reste ancrée sur la distribution de BASE (la démographie, niveau §5,
+     * borné) — surtout PAS sur la dominante biaisée par les leviers, sinon favoriser
+     * un éthos rend ses opposés chroniquement aliénés → coups en boucle. Les leviers
+     * n'AJOUTENT qu'un grief BORNÉ (∝ politique), purgé par un coup réussi. */
+    float base[FAC_COUNT];
+    EthosFaction dom = country_faction_weights(w, econ, cid, base);
+    float best=0.f; int bf=dom;
+    for (int f=0; f<FAC_COUNT; f++){
+        if (f==(int)dom) continue;
+        float grief = (cid>=0&&cid<SCPS_MAX_COUNTRY) ? g_lever_grief[cid][f] : 0.f;
+        float t = base[f]*faction_opposition((EthosFaction)f,dom) + COUP_GRIEF_W*grief;
         if (t>best){ best=t; bf=f; }
     }
     if (out) *out=(EthosFaction)bf;
