@@ -36,6 +36,7 @@
 #include "scps_labor.h"     /* topbar : Or / Nourriture / Matériaux */
 #include "scps_ai.h"        /* les voisins VIVENT : lecteurs de coordonnées, mêmes leviers */
 #include "scps_revolt.h"    /* la révolte INCARNÉE : sécessions/coups dans le jeu vivant */
+#include "scps_intertrade.h"/* commerce inter-pays : grandes routes marchandes + embargo */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -392,6 +393,7 @@ static void sim_day(Sim *s, World *w) {
         legitimacy_tick(s->wl, w, s->econ, s->ts);
         trade_network_build(s->net, w, s->econ);
         trade_tick(s->econ, s->net);
+        intertrade_tick(s->econ, s->rn, s->dp);   /* grandes routes marchandes (goods inter-pays + embargo) */
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
         /* Diplomatie annuelle : usure de guerre, fonte des trêves/momentum, score de guerre. */
         diplo_tick(s->dp, 365.f);

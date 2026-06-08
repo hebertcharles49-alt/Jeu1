@@ -18,6 +18,7 @@
 #include "scps_statecraft.h"
 #include "scps_agency.h"
 #include "scps_routes.h"
+#include "scps_intertrade.h"
 #include "scps_diplo.h"
 #include "scps_events.h"
 #include "scps_modifier.h"
@@ -95,6 +96,7 @@ static void sim_day(Sim *s, World *w) {
         world_tick(w, s->econ, 1.0f);
         legitimacy_tick(s->wl, w, s->econ, s->ts);
         trade_network_build(s->net, w, s->econ); trade_tick(s->econ, s->net);
+        intertrade_tick(s->econ, s->rn, s->dp);   /* grandes routes marchandes (goods inter-pays + embargo) */
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
         /* DIPLOMATIE annuelle : usure de guerre, FONTE des trêves & du momentum
          * (la guerre peut reprendre après le répit), et le SCORE DE GUERRE (bras-de-fer

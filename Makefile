@@ -73,7 +73,7 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_statecraft.o \
              $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_scps_events.o \
              $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o \
-             $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_revolt.o \
+             $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_scps_intertrade.o \
              $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
@@ -181,6 +181,17 @@ FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 faith_demo: $(FAITH_DEMO_OBJS)
 	$(CC) $(FAITH_DEMO_OBJS) -o $@ -lm
 
+INTERTRADE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                   $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                   $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
+                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
+                   $(OBJDIR)/scps_intertrade_demo.o
+intertrade_demo: $(INTERTRADE_DEMO_OBJS)
+	$(CC) $(INTERTRADE_DEMO_OBJS) -o $@ -lm
+
 # ---- Routes commerciales : la cloche f(D̄) faite action (§7) --------------
 ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
@@ -209,7 +220,7 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                   $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_species.o \
-                  $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                  $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                   $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
                   $(OBJDIR)/scps_scps_events.o $(OBJDIR)/scps_scps_demography.o \
                   $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_modifier.o \
@@ -226,7 +237,7 @@ STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                         $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                         $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
                         $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
-                        $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                        $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                         $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_statecraft_demo.o
 statecraft_demo: $(STATECRAFT_DEMO_OBJS)
 	$(CC) $(STATECRAFT_DEMO_OBJS) -o $@ -lm
@@ -239,7 +250,7 @@ EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
-                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                     $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_events.o \
                     $(OBJDIR)/scps_events_demo.o
 events_demo: $(EVENTS_DEMO_OBJS)
@@ -252,7 +263,7 @@ STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
-                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                     $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
                     $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_events.o \
                     $(OBJDIR)/scps_structural_demo.o
