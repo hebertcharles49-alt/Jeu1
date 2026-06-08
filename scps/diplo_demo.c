@@ -310,6 +310,84 @@ int main(int argc,char**argv){
         } else ok("(monde trop petit pour le test de paix proportionnelle)", true);
     }
 
+    /* ---- 8. Rancune nationale (§6) : irrédentisme · ralliement · l'oubli ---- */
+    printf("\n── 8. Rancune nationale (irrédentisme · ralliement · l'oubli) ──\n");
+    {
+        int A=player, P=-1, B=-1, Bn=0;
+        for(int c=0;c<w->n_countries;c++){
+            if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+            if(P<0) P=c;
+            int n=0; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==c && econ->region[r].culture.settled) n++;
+            if(n>Bn){ Bn=n; B=c; }
+        }
+        if(P<0){ ok("(monde trop petit pour le test de rancune)", true); }
+        else {
+            /* RALLIEMENT (avant toute conquête : B intact) — à rancune ÉGALE de
+             * domination, le lésé qui reprend ses terres accumule le score plus vite. */
+            if(B>=0){
+                for(int r=0;r<econ->n_regions;r++){
+                    econ->region[r].stock[RES_ARMS]=econ->region[r].stock[RES_GUNPOWDER]=0.f;
+                    econ->region[r].stock[RES_ENCHANTED_ARMS]=(econ->region[r].owner==A)?2000.f:0.f;
+                }
+                diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+                for(int y=0;y<3;y++) diplo_war_tick(dp,w,econ,wp,1.f);
+                float noRally=dp->battle_score[A][B];
+                diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+                dp->rancor[A][B]=3.0f;                       /* A reprend SES terres */
+                for(int y=0;y<3;y++) diplo_war_tick(dp,w,econ,wp,1.f);
+                ok("le RALLIEMENT galvanise la reconquête (bras-de-fer plus rapide à domination égale)",
+                   dp->battle_score[A][B] > noRally + 0.5f);
+            } else ok("(pas de cible pour le ralliement)", true);
+
+            /* IRRÉDENTISME : la rancune seule donne un CB territorial SANS adjacence. */
+            int Bfar=-1;
+            for(int c=0;c<w->n_countries;c++){
+                if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+                bool adj=false;
+                for(int r=0;r<econ->n_regions&&!adj;r++) if(econ->region[r].owner==A)
+                    for(int s=0;s<econ->n_regions;s++) if(econ->region[s].owner==c&&econ->adj[r][s]){adj=true;break;}
+                if(!adj){ Bfar=c; break; }
+            }
+            if(Bfar>=0){
+                diplo_init(dp);
+                CasusBelli cb0=diplo_casus_belli(w,econ,wp,dp,A,Bfar,RES_NONE);
+                dp->rancor[A][Bfar]=2.0f;
+                CasusBelli cb1=diplo_casus_belli(w,econ,wp,dp,A,Bfar,RES_NONE);
+                ok("sans rancune NI adjacence : pas de casus belli territorial", cb0!=CB_TERRITORIAL);
+                ok("la RANCUNE seule donne un CB territorial (irrédentisme, sans adjacence)", cb1==CB_TERRITORIAL);
+            } else ok("(pas de pays non-adjacent pour le test d'irrédentisme)", true);
+
+            /* La rancune SURVIT à la paix, puis S'OUBLIE sur une génération. */
+            diplo_init(dp); dp->rancor[A][P]=2.0f;
+            diplo_make_peace(dp,A,P);
+            ok("la rancune SURVIT à la paix (le grief ne s'éteint pas avec la guerre)", diplo_rancor(dp,A,P) > 1.9f);
+            diplo_tick(dp, 365.f*5.f);
+            float r5=diplo_rancor(dp,A,P);
+            ok("la rancune S'ESTOMPE avec le temps (5 ans → elle fond)", r5 < 1.9f && r5 > 0.f);
+            diplo_tick(dp, 365.f*30.f);
+            ok("sur une génération, la rancune est OUBLIÉE (→ 0)", diplo_rancor(dp,A,P)==0.f);
+
+            /* CONQUÊTE (en dernier : mute B) — la prise POSE la rancune ; une prise
+             * ILLÉGITIME la CREUSE. B surarmé → revendication=1 stable. */
+            if(B>=0 && Bn>=2){
+                int Br1=-1,Br2=-1;
+                for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B && econ->region[r].culture.settled){ if(Br1<0)Br1=r; else {Br2=r;break;} }
+                /* perte LÉGITIME (dans la revendication) : la rancune = la seule perte. */
+                diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+                diplo_conquer_region(dp,w,econ,wl,A,Br1);
+                float rancor_loss=diplo_rancor(dp,B,A);
+                /* perte ILLÉGITIME (occupation forcée BIEN au-delà du légitime) : rancune CREUSÉE. */
+                diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+                dp->conquered[A][B]=20;                          /* surexpansion manifeste */
+                diplo_conquer_region(dp,w,econ,wl,A,Br2);
+                float rancor_illegit=diplo_rancor(dp,B,A);
+                ok("perdre une province POSE la rancune sur le dépossédé", rancor_loss >= 0.9f);
+                ok("une prise ILLÉGITIME CREUSE la rancune (perte + agression nue)",
+                   rancor_illegit >= rancor_loss + 0.9f);
+            } else ok("(pas assez de provinces pour la rancune de conquête)", true);
+        }
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

@@ -23,6 +23,7 @@
 #define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on propose l'alliance */
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
+#define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
 
 /* ---- Utilitaires ------------------------------------------------------ */
 static inline float clampf(float v, float lo, float hi){ return v<lo?lo:(v>hi?hi:v); }
@@ -210,10 +211,12 @@ static int ai_pick_rival(const AiActor *a, const World *w, const WorldEconomy *e
          * Moins de guerres marginales ; le besoin aigu en vaut encore le risque. */
         float widen = diplo_war_widening_cost(w, econ, diplo, a->cid, b);
         /* On frappe ce qui MENACE — et, à proportion de l'appétit de conquête, ce
-         * qui est FAIBLE. La parenté/alliance et le risque d'élargissement retiennent. */
+         * qui est FAIBLE. La RANCUNE pèse (on veut reprendre nos terres) ; la
+         * parenté/alliance et le risque d'élargissement retiennent. */
         float score = rel.threat
                     + a->w_expand * 3.0f * (opportunism>0.f ? opportunism : 0.f)
                     + a->w_faith  * 5.0f * rel.schism
+                    + AI_RANCOR_W * diplo_rancor(diplo, a->cid, b)
                     - rel.alliance
                     - AI_WIDEN_W * widen;
         if (score > bestscore){ bestscore=score; best=b; }

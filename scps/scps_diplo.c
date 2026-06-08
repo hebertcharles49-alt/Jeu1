@@ -37,6 +37,13 @@ static inline float absf(float v){return v<0?-v:v;}
 #define CLAIM_ILLEGIT_MOM 2.0f  /* surcroît de fulgurance par prise ILLÉGITIME (→ coalition) */
 #define REP_MIN_SCORE     20.f  /* en-deçà de ce score : match nul → aucune indemnité */
 #define REP_RATE          0.5f  /* part max du trésor du perdant exigée (à 100 de score) */
+/* ---- Rancune nationale (§6) ------------------------------------------ */
+#define RANCOR_PER_LOSS   1.0f          /* grief par province PERDUE (irrédentisme) */
+#define RANCOR_ILLEGIT    1.0f          /* surcroît si la prise fut ILLÉGITIME (agression nue) */
+#define RANCOR_DECAY      (1.0f/(10.f*365.f))  /* s'oublie sur ~une génération (10 ans/cran) */
+#define RANCOR_CB_SEUIL   0.75f         /* au-delà : casus belli territorial sans adjacence */
+#define RANCOR_RALLY_W    0.6f          /* galvanisation max de la guerre de reconquête */
+#define RANCOR_RALLY_NORM 3.0f          /* échelle de saturation du ralliement */
 
 void diplo_init(DiploState *d){ memset(d,0,sizeof(*d)); }
 
@@ -214,6 +221,10 @@ CasusBelli diplo_casus_belli(const World *w, const WorldEconomy *econ, const Wor
      * le casus belli du Mercantile bloqué (il vise la province-source). */
     if (want>RES_NONE && want<RES_COUNT && country_extracts(econ,b,want) && !country_extracts(econ,a,want))
         return CB_ECONOMIC;
+    /* TERRITORIAL par RANCUNE (§6) — l'IRRÉDENTISME : on a perdu des terres au profit
+     * de b et on garde le grief → on peut revenir les reprendre, même sans adjacence. */
+    if (d && a<SCPS_MAX_COUNTRY && b<SCPS_MAX_COUNTRY && d->rancor[a][b] > RANCOR_CB_SEUIL)
+        return CB_TERRITORIAL;
     /* RELIGIEUX — schisme (branche proche + prosélytisme = ennemi naturel). */
     Relation rel = diplo_relation(w,econ,wp,d,a,b);
     if (rel.schism > 0.45f) return CB_RELIGIOUS;
@@ -241,11 +252,13 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
         d->momentum[conqueror] += MOMENTUM_PER_CONQ;   /* la fulgurance EFFRAIE (→ coalition) */
         if (defender>=0 && defender<SCPS_MAX_COUNTRY){
             d->conquered[conqueror][defender]++;        /* OCCUPATION : pousse le score de guerre */
+            d->rancor[defender][conqueror] += RANCOR_PER_LOSS;  /* §6 le DÉPOSSÉDÉ garde rancune */
             /* §5 LÉGITIMITÉ : au-delà de ce que la domination militaire justifie (la
              * revendication), la prise est de la SUREXPANSION — surcroît de fulgurance
              * (le monde se ligue) et plaie plus profonde (intégration déjà à zéro). */
             if (d->conquered[conqueror][defender] > diplo_war_claim(d,w,econ,conqueror,defender)){
                 d->momentum[conqueror] += CLAIM_ILLEGIT_MOM;
+                d->rancor[defender][conqueror] += RANCOR_ILLEGIT;  /* l'agression nue creuse le grief */
                 re->revolt_scar = 1.0f;
             }
         }
@@ -323,9 +336,12 @@ void diplo_war_tick(DiploState *d, World *w, WorldEconomy *econ,
         if (d->cb[a][b]==CB_NONE) continue;             /* a est l'ATTAQUANT (il porte le CB) */
         float pA=diplo_mil_power(w,econ,a), pB=diplo_mil_power(w,econ,b);
         float ratio = pA/(pA+pB+0.01f);                  /* avantage militaire de l'attaquant */
+        /* RALLIEMENT (§6) : qui reprend SES terres se bat avec fureur — la rancune
+         * galvanise (saturation douce) → le bras-de-fer penche plus vite vers le lésé. */
+        float rally = 1.f + RANCOR_RALLY_W*(d->rancor[a][b]/(d->rancor[a][b]+RANCOR_RALLY_NORM));
         /* BATAILLES : l'avantage pousse le battle_score vers +50 ; un attaquant plus
          * FAIBLE le voit chuter (la voie défensive de l'adversaire vers −100). */
-        d->battle_score[a][b] = clampf(d->battle_score[a][b] + WAR_BATTLE_W*(ratio-0.5f)*2.f*dt,
+        d->battle_score[a][b] = clampf(d->battle_score[a][b] + WAR_BATTLE_W*(ratio-0.5f)*2.f*dt*rally,
                                        -100.f, WAR_BATTLE_CAP);
         d->battle_score[b][a] = d->battle_score[a][b];   /* miroir lisible */
         /* ATTRITION : la guerre SAIGNE les armes des deux ; le perdant de l'échange
@@ -368,10 +384,18 @@ float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int 
     return total;
 }
 
+float diplo_rancor(const DiploState *d, int a, int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0.f;
+    return d->rancor[a][b];
+}
+
 void diplo_tick(DiploState *d, float dt){
     for (int a=0;a<SCPS_MAX_COUNTRY;a++){
         /* la fulgurance s'oublie : un conquérant arrêté cesse d'effrayer. */
         d->momentum[a] = fmaxf(0.f, d->momentum[a] - MOMENTUM_DECAY*dt);
+        /* la RANCUNE (§6) s'estompe sur une génération (asymétrique : plein balayage). */
+        for (int b=0;b<SCPS_MAX_COUNTRY;b++)
+            if (d->rancor[a][b]>0.f) d->rancor[a][b]=fmaxf(0.f, d->rancor[a][b]-RANCOR_DECAY*dt);
         for (int b=a+1;b<SCPS_MAX_COUNTRY;b++){
             if (d->status[a][b]==DIPLO_WAR){
                 d->war_years[a][b]+=dt/365.f; d->war_years[b][a]=d->war_years[a][b];

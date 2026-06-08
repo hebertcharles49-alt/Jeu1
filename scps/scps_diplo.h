@@ -50,6 +50,11 @@ typedef struct {
      * l'autre +50→+100) ; le défenseur pousse vers −100 par l'attrition. */
     float       battle_score[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* [-100 .. +50] */
     int16_t     conquered  [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];   /* régions prises ce conflit (occupation) */
+    /* RANCUNE NATIONALE (§6) — rancor[a][b] = grief de a contre b qui lui a PRIS des
+     * terres. ASYMÉTRIQUE, SURVIT à la paix (le grief reste), décroît sur une
+     * génération. Donne à a un casus belli territorial (irrédentisme, sans adjacence)
+     * et galvanise sa guerre de reconquête (ralliement). */
+    float       rancor     [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
 } DiploState;
 
 void diplo_init(DiploState *d);
@@ -129,5 +134,10 @@ int   diplo_war_claim (const DiploState *d, const World *w,
  * ∝ |score de guerre| — ponction des trésors provinciaux du perdant → capitale du
  * vainqueur. Renvoie l'or transféré ; 0 si match nul (pas de vainqueur net). */
 float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int b);
+
+/* RANCUNE (§6) — le grief de a contre b (terres perdues). Lecture pour l'IA (biais
+ * de reconquête) et l'UI. Posée par diplo_conquer_region sur le DÉPOSSÉDÉ, plus
+ * profonde si la prise fut ILLÉGITIME ; survit à la paix, décroît dans diplo_tick. */
+float diplo_rancor(const DiploState *d, int a, int b);
 
 #endif /* SCPS_DIPLO_H */
