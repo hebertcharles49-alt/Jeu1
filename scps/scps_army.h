@@ -105,4 +105,42 @@ float arm_damage(UnitType a, UnitType b, long count_a, float disc_b, float terra
  * cavalerie — lien couche d'action). rng = graine (xorshift) avancée en place. */
 BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t *rng);
 
+/* ===================================================================== */
+/* §1 — LE DÉPLACEMENT SUR LE TERRAIN                                     */
+/* ----------------------------------------------------------------------
+ * Le terrain décide du TEMPS. Un sommet ne se traverse pas ; une plaine se
+ * dévore ; une forêt et un marais ralentissent ; une rivière se franchit
+ * lentement et à découvert. On avance au pas du convoi (l'unité la plus lente),
+ * et la marche use : le désert assoiffe, le marais épuise. Tout est en JOURS —
+ * le combat (résolu en manches) s'inscrira dans la même horloge (§2).        */
+/* ===================================================================== */
+
+/* Terrain infranchissable (glacier, pic, océan, volcan) : aucune armée n'y
+ * passe ; army_step_days y renvoie l'infini. */
+bool  terrain_impassable(Biome b);
+
+/* Multiplicateur de vitesse du terrain (1 = référence plaine cultivée). Le
+ * relief (height 0..1) ralentit en plus : grimper coûte. ≤0 = infranchissable. */
+float terrain_move_factor(Biome b, float height);
+
+/* Taux d'attrition JOURNALIER de la marche (fraction des effectifs perdue par
+ * jour sur ce terrain) : désert et marais saignent, la plaine épargne. */
+float march_attrition_rate(Biome b);
+
+/* Vitesse de carte de l'armée = celle de son unité LA PLUS LENTE (pas du
+ * convoi). 0 si l'armée est vide ou sans unité vivante. */
+float army_slowest_move(const ArmyState *a);
+
+/* Jours pour qu'une armée franchisse une case de biome `to` (hauteur `height`).
+ * `river_crossing` : on franchit un cours d'eau (lent, à découvert) ;
+ * `on_route` : une route porte la marche (plus vite). INFINITY si le terrain
+ * est infranchissable ou l'armée incapable de bouger. */
+float army_step_days(const ArmyState *a, Biome to, float height,
+                     bool river_crossing, bool on_route);
+
+/* Applique l'attrition d'une marche de `days` jours sur le biome `b` : ampute
+ * chaque unité de la fraction perdue (paquets de 100, jamais sous 0). Renvoie
+ * le total de paquets fondus en route. */
+long  army_march_attrition(ArmyState *a, Biome b, float days);
+
 #endif /* SCPS_ARMY_H */

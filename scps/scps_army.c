@@ -209,3 +209,96 @@ BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t
     else                        r.winner=0;
     return r;
 }
+
+/* ===================================================================== */
+/* §1 — LE DÉPLACEMENT SUR LE TERRAIN                                     */
+/* ===================================================================== */
+#define MARCH_BASE_DAYS   12.f   /* jours-référence pour franchir une case (calibrage) */
+#define RIVER_PENALTY     1.8f   /* franchir un cours d'eau : lent et à découvert */
+#define ROUTE_SPEEDUP     1.6f   /* une route porte la marche */
+#define RELIEF_DRAG       0.55f  /* part de vitesse rognée par le relief le plus haut */
+
+bool terrain_impassable(Biome b){
+    switch (b){
+        case BIO_DEEP_OCEAN: case BIO_OCEAN: case BIO_SHALLOW:   /* l'eau : pas pour une armée de terre */
+        case BIO_PEAK: case BIO_GLACIER: case BIO_VOLCANO:       /* la roche nue, la glace, le feu */
+            return true;
+        default: return false;
+    }
+}
+
+float terrain_move_factor(Biome b, float height){
+    if (terrain_impassable(b)) return 0.f;
+    float base;
+    switch (b){
+        case BIO_PLAINS: case BIO_FARMLAND: case BIO_GRASSLAND:
+        case BIO_STEPPE: case BIO_SAVANNA:               base = 1.20f; break;  /* l'open dévoré */
+        case BIO_COAST:  case BIO_DRYLANDS:              base = 1.00f; break;
+        case BIO_DESERT: case BIO_COASTAL_DESERT:        base = 0.70f; break;  /* le sable freine */
+        case BIO_HILLS:  case BIO_HIGHLANDS:             base = 0.70f; break;
+        case BIO_WOODS:  case BIO_FOREST:                base = 0.50f; break;  /* le couvert ralentit */
+        case BIO_MARSH:  case BIO_BOG: case BIO_MANGROVE:base = 0.40f; break;  /* la boue colle */
+        case BIO_JUNGLE:                                 base = 0.35f; break;
+        case BIO_MOUNTAINS:                              base = 0.33f; break;  /* grimper, à pic */
+        default:                                         base = 1.00f; break;
+    }
+    /* le relief rogne en plus : grimper coûte (height 0..1). */
+    float h = height < 0.f ? 0.f : (height > 1.f ? 1.f : height);
+    return base * (1.f - RELIEF_DRAG * h);
+}
+
+float march_attrition_rate(Biome b){
+    switch (b){
+        case BIO_DESERT: case BIO_COASTAL_DESERT:        return 0.030f;  /* la soif */
+        case BIO_JUNGLE:                                 return 0.025f;  /* la fièvre */
+        case BIO_MARSH:  case BIO_BOG: case BIO_MANGROVE:return 0.020f;  /* l'épuisement */
+        case BIO_MOUNTAINS: case BIO_HIGHLANDS:          return 0.012f;  /* le froid, l'altitude */
+        case BIO_STEPPE: case BIO_SAVANNA: case BIO_DRYLANDS: return 0.010f;
+        case BIO_DEEP_OCEAN: case BIO_OCEAN: case BIO_SHALLOW:
+        case BIO_PEAK: case BIO_GLACIER: case BIO_VOLCANO:    return 0.f;  /* on n'y marche pas */
+        default:                                         return 0.006f;  /* la marche ordinaire */
+    }
+}
+
+float army_slowest_move(const ArmyState *a){
+    if (!a) return 0.f;
+    float slow = 0.f; bool any=false;
+    for (int i=0;i<a->n_units;i++){
+        if (a->units[i].count<=0) continue;
+        float m = UNITS[a->units[i].type].mouvement;
+        if (!any || m < slow){ slow = m; any=true; }   /* on avance au pas du plus lent */
+    }
+    return any ? slow : 0.f;
+}
+
+float army_step_days(const ArmyState *a, Biome to, float height,
+                     bool river_crossing, bool on_route){
+    if (terrain_impassable(to)) return INFINITY;
+    float v = army_slowest_move(a);
+    if (v <= 0.f) return INFINITY;                 /* armée vide : ne bouge pas */
+    float f = terrain_move_factor(to, height);
+    if (f <= 0.f) return INFINITY;
+    float days = MARCH_BASE_DAYS / (v * f);
+    if (river_crossing) days *= RIVER_PENALTY;
+    if (on_route)       days /= ROUTE_SPEEDUP;
+    return days;
+}
+
+long army_march_attrition(ArmyState *a, Biome b, float days){
+    if (!a || days <= 0.f) return 0;
+    float rate = march_attrition_rate(b);
+    if (rate <= 0.f) return 0;
+    /* fraction fondue sur la durée : 1-(1-taux)^jours (compounding journalier). */
+    float keep = powf(1.f - rate, days);
+    float loss_frac = 1.f - keep;
+    long lost_total = 0;
+    for (int i=0;i<a->n_units;i++){
+        Unit *u=&a->units[i];
+        if (u->count<=0) continue;
+        long lost = (long)((float)u->count * loss_frac + 0.5f);
+        if (lost > u->count) lost = u->count;
+        u->count -= lost;
+        lost_total += lost;
+    }
+    return lost_total;
+}

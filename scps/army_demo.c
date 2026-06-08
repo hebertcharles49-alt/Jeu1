@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 static int g_pass=0, g_fail=0;
 static void ok(const char *what, bool cond){
@@ -146,6 +147,49 @@ int main(int argc, char **argv){
        (r6.winner<0 && r6.routB>r6.routA) || (r6.winner>0 && r6.routA>r6.routB));
     ok("l'armée la plus rompue RECULE (le vainqueur en a le moins)",
        (r6.winner<0 && r6.routA<r6.routB) || (r6.winner>0 && r6.routB<r6.routA));
+
+    /* ═══ 7. LE DÉPLACEMENT : le terrain décide du temps (§1) ══════════ */
+    printf("\n── 7. Le terrain décide du temps : la plaine se dévore, le sommet se refuse ──\n");
+    ArmyState pieton = one(U_PIQUIER, 10);                    /* infanterie lente (mouvement 2) */
+    float d_plaine  = army_step_days(&pieton, BIO_PLAINS,    0.10f, false, false);
+    float d_foret   = army_step_days(&pieton, BIO_FOREST,    0.20f, false, false);
+    float d_mont    = army_step_days(&pieton, BIO_MOUNTAINS, 0.80f, false, false);
+    printf("   franchir une case (10 piquiers) : plaine %.1f j | forêt %.1f j | montagne %.1f j\n",
+           d_plaine, d_foret, d_mont);
+    ok("la plaine se franchit plus vite que la forêt, la forêt plus vite que la montagne",
+       d_plaine < d_foret && d_foret < d_mont);
+    ok("un sommet, un glacier, un volcan, l'océan : INFRANCHISSABLES (jours infinis)",
+       terrain_impassable(BIO_PEAK) && terrain_impassable(BIO_GLACIER) &&
+       terrain_impassable(BIO_VOLCANO) && terrain_impassable(BIO_OCEAN) &&
+       isinf(army_step_days(&pieton, BIO_PEAK, 0.95f, false, false)));
+
+    /* on avance au pas du convoi : ajouter de la cavalerie rapide ne presse rien. */
+    ArmyState mixte; army_init(&mixte);
+    mixte.n_units=2;
+    mixte.units[0].type=U_CAV_LEGERE; mixte.units[0].count=5;   /* mouvement 8 */
+    mixte.units[1].type=U_PIQUIER;    mixte.units[1].count=5;   /* mouvement 2 (le plus lent) */
+    ok("la vitesse de l'armée = celle de l'unité LA PLUS LENTE (pas du convoi)",
+       army_slowest_move(&mixte) == unit_def(U_PIQUIER)->mouvement);
+    float d_mixte = army_step_days(&mixte, BIO_PLAINS, 0.10f, false, false);
+    ok("une armée mixte avance au pas du piéton, pas du cavalier", d_mixte == d_plaine);
+
+    /* la rivière ralentit (à découvert) ; la route presse. */
+    float d_riviere = army_step_days(&pieton, BIO_PLAINS, 0.10f, true,  false);
+    float d_route   = army_step_days(&pieton, BIO_PLAINS, 0.10f, false, true);
+    printf("   plaine : à gué %.1f j | sur route %.1f j (réf. %.1f j)\n", d_riviere, d_route, d_plaine);
+    ok("franchir un cours d'eau RALENTIT la marche (lent, à découvert)", d_riviere > d_plaine);
+    ok("une route ACCÉLÈRE la marche", d_route < d_plaine);
+
+    /* la marche use : le désert et le marais saignent plus que la plaine. */
+    ArmyState mil = one(U_EPEISTE, 100);
+    ArmyState mil2 = one(U_EPEISTE, 100);
+    long perdu_des = army_march_attrition(&mil,  BIO_DESERT, 12.f);
+    long perdu_pla = army_march_attrition(&mil2, BIO_PLAINS, 12.f);
+    printf("   attrition sur 12 jours (100 paquets) : désert -%ld | plaine -%ld\n", perdu_des, perdu_pla);
+    ok("la marche use les effectifs ; le désert saigne plus que la plaine",
+       perdu_des > perdu_pla && perdu_des > 0);
+    ok("le terrain infranchissable n'inflige pas d'attrition de marche (on n'y va pas)",
+       march_attrition_rate(BIO_GLACIER) == 0.f);
 
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
