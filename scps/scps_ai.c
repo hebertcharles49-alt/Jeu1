@@ -75,7 +75,9 @@ void ai_derive_weights(AiActor *a, const PopCulture *self){
                   : (self->ethos==ETHOS_ORDRE)        ? 1.2f
                   : (self->ethos==ETHOS_DOMINATEUR || self->ethos==ETHOS_HONNEUR) ? 0.6f
                   : 1.0f;
-    a->w_build = 0.5f * build_f;
+    a->w_build = 0.85f * build_f;   /* volonté de BÂTIR relevée (0.5→0.85) : l'IA développe
+                                     * plus volontiers ses institutions — désormais nourrie
+                                     * par les matériaux de la 2e ressource (§6b). */
 
     /* Foi : le prosélytisme pousse la guerre sainte / l'homogénéisation forcée. */
     a->w_faith = (self->credo==CREDO_PURIFICATEUR) ? 1.0f

@@ -179,7 +179,9 @@ typedef struct {
     bool     coastal;          /* touche la mer */
 
     /* Économie */
-    Resource resource;         /* bien commercial principal */
+    Resource resource;         /* bien commercial principal (brute dominante) */
+    Resource resource2;        /* §6b : brute SECONDAIRE mineure (raw_cap ×0.4) — casse
+                                * le « une seule brute par province », sauve les rares */
 
     /* Habitabilité [0..1] — calculée une fois à la génération (biome + temp + altitude).
      * 0 = région morte (glacier, pic, désert hyperaride) ;

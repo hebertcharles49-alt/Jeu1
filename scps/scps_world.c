@@ -2563,10 +2563,21 @@ static void gen_resources(World *w) {
          * Les biens de production (≥ RES_PROD_FIRST) seront posés plus tard
          * par les chaînes de transformation. */
         float tot=0.f; for (int r=1;r<RES_PROD_FIRST;r++) tot+=wt[r];
-        if (tot<1e-4f){ pr->resource = forested?RES_WOOD:RES_GRAIN; continue; }
+        if (tot<1e-4f){ pr->resource = forested?RES_WOOD:RES_GRAIN; pr->resource2=RES_NONE; continue; }
         float roll=rng_f()*tot, acc=0.f; Resource chosen=RES_GRAIN;
         for (int r=1;r<RES_PROD_FIRST;r++){ acc+=wt[r]; if(acc>=roll){chosen=(Resource)r;break;} }
         pr->resource=chosen;
+        /* §6b — SECONDE ressource (mineure) : re-tirage dans le MÊME panier pondéré,
+         * la dominante exclue → une province « grain » peut porter un filon de métal
+         * précieux ou un coin d'herbes. Casse le « une seule brute par province » et
+         * sauve les intrants rares du tirage unique, sans inonder la carte. */
+        pr->resource2=RES_NONE;
+        wt[chosen]=0.f;
+        float tot2=0.f; for (int r=1;r<RES_PROD_FIRST;r++) tot2+=wt[r];
+        if (tot2>1e-4f){
+            float roll2=rng_f()*tot2, acc2=0.f;
+            for (int r=1;r<RES_PROD_FIRST;r++){ acc2+=wt[r]; if(acc2>=roll2){ pr->resource2=(Resource)r; break; } }
+        }
 
         /* ---- Habitabilité de la province [0..1] -------------------------
          * Base biome (plafond dur) × confort thermique (pénalité froid/chaud).

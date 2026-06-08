@@ -368,10 +368,12 @@ void econ_init(WorldEconomy *e, const World *w) {
             if (pid<0||pid>=w->n_provinces) continue;
             const Province *pv=&w->province[pid];
             if (pv->coastal) coastal=true;
+            /* débit proportionnel à la surface de la province (brutes seules) */
+            float base = 1.5f + pv->area*0.05f;
             Resource r=pv->resource;
-            if (r<=RES_NONE || r>=RES_PROD_FIRST) continue;  /* brutes seules */
-            /* débit proportionnel à la surface de la province */
-            re->raw_cap[r] += 1.5f + pv->area*0.05f;
+            if (r>RES_NONE && r<RES_PROD_FIRST) re->raw_cap[r] += base;
+            Resource r2=pv->resource2;                      /* §6b : 2e brute, mineure ×0.4 */
+            if (r2>RES_NONE && r2<RES_PROD_FIRST) re->raw_cap[r2] += base*0.4f;
         }
 
         /* Subsistance locale : vivres et bois de feu dimensionnés pour couvrir
