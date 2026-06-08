@@ -14,6 +14,8 @@
 #define DEF_BASE          1.0f   /* défense de base d'une région colonisée */
 #define DEF_PER_BLD       0.25f  /* chaque édifice durcit la place */
 #define FOOD_MONTHS_FULL  12.f   /* food_sat 1.0 → un an de vivres en magasin */
+#define RIVER_BATTLE_MIN  40     /* débit (0..255) au-delà duquel la région a une ligne d'eau */
+#define RIVER_COMBAT_EDGE 1.25f  /* franchir sous le feu : le défenseur ×1.25 (annulé par un pont) */
 
 /* ---- Outils ----------------------------------------------------------- */
 static long force_units(const ArmyState *a){
@@ -83,6 +85,13 @@ void campaign_init(Campaign *c, const World *w, const WorldEconomy *econ){
         c->reg_biome[r]  = b;
         c->reg_height[r] = (n>0) ? hsum/(float)n : 0.2f;
     }
+    /* lignes d'eau : une région qu'un cours d'eau notable traverse (franchissement
+     * coûteux au choc — sauf pont, cf. field_battle). */
+    for (int i=0;i<SCPS_N;i++){
+        const Cell *cell=&w->cell[i];
+        if (cell->region<0 || cell->region>=SCPS_MAX_REG) continue;
+        if (cell->river >= RIVER_BATTLE_MIN) c->reg_river[cell->region]=true;
+    }
     for (int i=0;i<SCPS_MAX_COUNTRY;i++){
         c->army[i].active=false; c->army[i].owner=i;
         c->army[i].loc=-1; c->army[i].dest=-1; c->army[i].next=-1;
@@ -113,9 +122,28 @@ bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
     return true;
 }
 
-/* ---- La bataille de rencontre (§2/§3) --------------------------------- */
-static void field_battle(FieldArmy *A, FieldArmy *B, uint32_t *rng){
-    BattleResult r = resolve_battle(&A->force, &B->force, 1.f, rng);   /* terrain neutre */
+/* ---- La bataille de rencontre (§2/§3 + terrain défensif) -------------- *
+ * Le défenseur d'un FORT paie au choc selon le terrain (pente/couvert) et profite
+ * d'une rivière non pontée. EST défenseur : celui qui RELÈVE le siège (l'autre
+ * assiège), sinon le propriétaire de la région (garnison). Forts uniquement — une
+ * province sans défense ne donne aucun bonus.                                  */
+static void field_battle(const Campaign *c, const WorldEconomy *e, int loc,
+                         FieldArmy *A, FieldArmy *B, uint32_t *rng){
+    float terrainA = 1.f;                                /* neutre par défaut */
+    if (region_defense(e, loc) > 0.f){                   /* FORT (pas une province nue) */
+        int defender = 0;                                /* -1 = A défend, +1 = B défend, 0 = personne */
+        if      (A->phase==FA_SIEGE && B->phase!=FA_SIEGE) defender=+1;  /* A assiège → B relève → B défend */
+        else if (B->phase==FA_SIEGE && A->phase!=FA_SIEGE) defender=-1;  /* B assiège → A défend (on relève) */
+        else if (e->region[loc].owner==A->owner)           defender=-1;  /* garnison de A sur sa terre */
+        else if (e->region[loc].owner==B->owner)           defender=+1;  /* garnison de B */
+        if (defender!=0){
+            float adv = terrain_combat_bonus(c->reg_biome[loc]);         /* coline +5 %, montagne +20 %… */
+            bool bridged = e->region[loc].route_pe > 0.f;                /* une route = un pont */
+            if (c->reg_river[loc] && !bridged) adv *= RIVER_COMBAT_EDGE; /* franchir sous le feu */
+            terrainA = (defender<0) ? adv : (1.f/adv);                   /* le défenseur profite du sol */
+        }
+    }
+    BattleResult r = resolve_battle(&A->force, &B->force, terrainA, rng);
     A->battles++; B->battles++;
     FieldArmy *loser = (r.winner<0) ? B : (r.winner>0 ? A : NULL);
     if (!loser) return;                                  /* nul : nul ne cède */
@@ -140,7 +168,7 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
             if (c->army[i].loc != c->army[j].loc) continue;
             if (c->army[i].owner == c->army[j].owner) continue;
             if (diplo_status(dp, c->army[i].owner, c->army[j].owner)!=DIPLO_WAR) continue;
-            field_battle(&c->army[i], &c->army[j], rng);
+            field_battle(c, e, c->army[i].loc, &c->army[i], &c->army[j], rng);
         }
     }
 

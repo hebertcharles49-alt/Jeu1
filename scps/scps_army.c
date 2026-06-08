@@ -426,6 +426,17 @@ float terrain_defense_mult(Biome b, float height){
     return base * (1.f + RELIEF_DEFENSE * h);   /* le relief abrite (cf. §1 : il freinait la marche) */
 }
 
+float terrain_combat_bonus(Biome b){
+    switch (b){
+        case BIO_MOUNTAINS:                               return 1.20f;  /* +20 % : la pente paie au choc */
+        case BIO_JUNGLE:                                  return 1.15f;  /* couvert dense */
+        case BIO_FOREST: case BIO_WOODS:                  return 1.12f;  /* couvert */
+        case BIO_MARSH: case BIO_BOG: case BIO_MANGROVE:  return 1.10f;  /* approche brisée */
+        case BIO_HILLS: case BIO_HIGHLANDS:               return 1.05f;  /* +5 % : la hauteur */
+        default:                                          return 1.00f;  /* plaine & open : rien */
+    }
+}
+
 float siege_days(float defense_level, float food_months, float def_mult){
     if (defense_level <= 0.f) return SIEGE_WALK_DAYS;     /* nue : 14 jours, pas de siège */
     if (food_months < 0.f) food_months = 0.f;

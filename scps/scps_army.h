@@ -203,4 +203,11 @@ float terrain_defense_mult(Biome b, float height);
  * def_mult = terrain & multiplicateurs divers (cf. terrain_defense_mult). */
 float siege_days(float defense_level, float food_months, float def_mult);
 
+/* Bonus de COMBAT du défenseur selon le terrain (multiplicateur ≥1) : la pente et
+ * le couvert paient AU CHOC (distinct du siège, qui ne fait qu'allonger le temps).
+ * Coline +5 %, montagne +20 % ; le reste entre les deux (forêt/jungle = couvert,
+ * marais = approche brisée) ; plaine = rien. À passer côté défenseur dans
+ * resolve_battle (terrainA). */
+float terrain_combat_bonus(Biome b);
+
 #endif /* SCPS_ARMY_H */

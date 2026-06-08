@@ -310,6 +310,29 @@ int main(int argc, char **argv){
     ok("le siège est PLAFONNÉ à 2 ans (730 j) — même une citadelle pleine finit par tomber",
        siege_days(20.f, 60.f, 3.f) == 730.f);
 
+    /* ═══ 11. LE TERRAIN AU CHOC : le défenseur paie selon le sol ═════ */
+    printf("\n── 11. Le terrain au CHOC (distinct du siège) : coline +5%%, montagne +20%% (défenseur) ──\n");
+    float bo_plain = terrain_combat_bonus(BIO_PLAINS);
+    float bo_hill  = terrain_combat_bonus(BIO_HILLS);
+    float bo_for   = terrain_combat_bonus(BIO_FOREST);
+    float bo_mount = terrain_combat_bonus(BIO_MOUNTAINS);
+    printf("   bonus défensif : plaine %.2f | coline %.2f | forêt %.2f | montagne %.2f\n",
+           bo_plain, bo_hill, bo_for, bo_mount);
+    ok("la plaine ne donne RIEN au défenseur (×1.00)", bo_plain==1.f);
+    ok("la coline donne +5 % et la montagne +20 % (les deux ancres)", bo_hill==1.05f && bo_mount==1.20f);
+    ok("le reste se range ENTRE les deux (plaine < coline < forêt < montagne)",
+       bo_plain < bo_hill && bo_hill < bo_for && bo_for < bo_mount);
+    /* le bonus EN ACTION : à forces égales, le défenseur sur terrain fort l'emporte. */
+    int defw=0, defN=31;
+    for (int k=0;k<defN;k++){
+        ArmyState ATK=one(U_EPEISTE,6), DEF=one(U_EPEISTE,6);
+        uint32_t rng=seed+(uint32_t)k*2654435761u+17u;
+        /* DEF = B défend une montagne → terrainA = 1/bonus (désavantage l'attaquant). */
+        if (resolve_battle(&ATK,&DEF,1.f/bo_mount,&rng).winner==+1) defw++;   /* +1 = B (défenseur) gagne */
+    }
+    printf("   à épéistes égaux, le défenseur de MONTAGNE gagne %d/%d\n", defw, defN);
+    ok("le terrain DÉCIDE : à forces égales, le défenseur de montagne l'emporte", defw>=18);
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

@@ -55,6 +55,7 @@ typedef struct {
     /* table de terrain par région (bâtie à l'init depuis le World) */
     Biome     reg_biome [SCPS_MAX_REG];
     float     reg_height[SCPS_MAX_REG];
+    bool      reg_river [SCPS_MAX_REG];   /* un cours d'eau notable à franchir (pénalité de choc) */
 } Campaign;
 
 /* Bâtit la table de terrain par région et remet les armées à zéro. */
