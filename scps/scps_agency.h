@@ -34,14 +34,30 @@ typedef enum {
     EDIFICE_COUNT
 } Edifice;
 
+/* Coût d'un bâtiment (§1) : une RECETTE de matériaux, achetée AU MARCHÉ. Le joueur
+ * ne tient pas de stock de matériaux : les ressources vont dans le marché, et bâtir
+ * les y ACHÈTE en OR (à leur prix courant) — le manque renchérit (rareté = prix). Le
+ * coût monte avec le TIER (plus, et des matériaux plus avancés : bois → bois+métal →
+ * métal+précieux), pas avec l'étendue (un grenier coûte pareil partout). */
+#define BUILD_RES_MAX 3
+typedef struct {
+    Resource res[BUILD_RES_MAX];
+    float    qty[BUILD_RES_MAX];
+} BuildCost;
+
 typedef struct {
     const char *name;
     int         days;     /* durée de construction (l'arc de 250 ans) */
     ProvBuild   delta;    /* ce qu'il ajoute à la province à l'achèvement */
+    BuildCost   cost;     /* matériaux requis (achetés au marché en or) — §1 */
 } EdificeDef;
 
 const EdificeDef *edifice_def(Edifice e);
 const char       *edifice_name(Edifice e);
+
+/* Le PRIX en OR de la recette au marché de la région (Σ qty × prix courant) — un
+ * nombre de jeu (affichable). Sert au garde de construction ET à l'UI. */
+float agency_build_gold(const WorldEconomy *econ, int region, Edifice e);
 
 /* Trois familles d'action de province (le motif s'étend). */
 typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT } ActionKind;
@@ -63,8 +79,13 @@ typedef struct {
 } AgencyState;
 
 void agency_init(AgencyState *a);
-/* Met une action en file (false si pleine). */
+/* Met une action en file (false si pleine). NU — sans coût (bas niveau / bancs d'essai). */
 bool agency_order_build  (AgencyState *a, int region, Edifice e);
+
+/* Bâtir EN PAYANT (§1) : achète la recette AU MARCHÉ (or du trésor régional ; le
+ * marché est consommé), PUIS enfile le chantier. Refuse — pas de chantier — si le
+ * trésor ne couvre pas. C'est la voie de la sim vive (IA, joueur). */
+bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e);
 /* §4 Défrichement : convertit la terre → food, dérive la SUBSISTANCE locale vers
  * l'agriculture (impérialisme culturel sur la terre), et ronge L en niche
  * forestière (les peuples de la forêt voient leur monde rasé). */

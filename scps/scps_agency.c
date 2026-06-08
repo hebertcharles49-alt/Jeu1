@@ -9,38 +9,72 @@
 #include <string.h>
 
 static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
+    /* {name, jours, delta, recette} — la recette monte avec le TIER : bois (palier 0)
+     * → bois+métal (palier 1) → métal+précieux (palier 2). Achetée AU MARCHÉ en or. */
     /* Institutionnel → K (ce qui métabolise la distance, tient la diversité). */
-    [EDI_TRIBUNAL]     = { "Tribunal",      180,  { .K_inst=1.0f } },
-    [EDI_CHANCELLERIE] = { "Chancellerie",  365,  { .K_inst=1.5f } },
-    [EDI_ACADEMIE]     = { "Académie",      1800, { .K_inst=1.5f, .P_open=0.5f } },
+    [EDI_TRIBUNAL]     = { "Tribunal",      180,  { .K_inst=1.0f }, {{RES_WOOD},{40}} },
+    [EDI_CHANCELLERIE] = { "Chancellerie",  365,  { .K_inst=1.5f }, {{RES_WOOD,RES_METAL},{50,25}} },
+    [EDI_ACADEMIE]     = { "Académie",      1800, { .K_inst=1.5f, .P_open=0.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{60,15}} },
     /* Coercitif → H (tient l'ordre par la force — ronge L, voie fragile). */
-    [EDI_GARNISON]     = { "Garnison",      180,  { .H_coerc=1.0f } },
-    [EDI_FORTERESSE]   = { "Forteresse",    1100, { .H_coerc=2.0f } },
-    [EDI_CITADELLE]    = { "Citadelle",     2200, { .H_coerc=3.0f } },
+    [EDI_GARNISON]     = { "Garnison",      180,  { .H_coerc=1.0f }, {{RES_WOOD,RES_METAL},{40,20}} },
+    [EDI_FORTERESSE]   = { "Forteresse",    1100, { .H_coerc=2.0f }, {{RES_WOOD,RES_METAL},{60,50}} },
+    [EDI_CITADELLE]    = { "Citadelle",     2200, { .H_coerc=3.0f }, {{RES_METAL,RES_TOOLS},{100,30}} },
     /* Ouverture → P (porte d'assimilation, contact, routes maritimes). */
-    [EDI_PORT]         = { "Port",          540,  { .P_open=1.0f } },
-    [EDI_CARAVANSERAIL]= { "Caravansérail", 365,  { .P_open=0.7f } },
+    [EDI_PORT]         = { "Port",          540,  { .P_open=1.0f }, {{RES_WOOD,RES_METAL},{80,20}} },
+    [EDI_CARAVANSERAIL]= { "Caravansérail", 365,  { .P_open=0.7f }, {{RES_WOOD},{45}} },
     /* Prospérité → PE local (capte le carrefour). */
-    [EDI_MARCHE]       = { "Marché",        180,  { .PE_infra=1.0f } },
-    [EDI_ENTREPOT]     = { "Entrepôt",      270,  { .PE_infra=0.7f } },
+    [EDI_MARCHE]       = { "Marché",        180,  { .PE_infra=1.0f }, {{RES_WOOD},{35}} },
+    [EDI_ENTREPOT]     = { "Entrepôt",      270,  { .PE_infra=0.7f }, {{RES_WOOD},{45}} },
     /* Croissance → food (nourrit la pop ; l'aqueduc : santé urbaine → croissance). */
-    [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f } },
-    [EDI_IRRIGATION]   = { "Irrigation",    270,  { .food_cap=1.5f } },
-    [EDI_AQUEDUC]      = { "Aqueduc",       540,  { .food_cap=1.2f } },
+    [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f }, {{RES_WOOD},{25}} },
+    [EDI_IRRIGATION]   = { "Irrigation",    270,  { .food_cap=1.5f }, {{RES_WOOD,RES_METAL},{30,15}} },
+    [EDI_AQUEDUC]      = { "Aqueduc",       540,  { .food_cap=1.2f }, {{RES_WOOD,RES_METAL},{30,40}} },
     /* Foi → SOUTIENT L (sacraliser le trône apaise sans réprimer — §4 du catalogue). */
-    [EDI_SANCTUAIRE]   = { "Sanctuaire",    150,  { .faith=1.0f } },
-    [EDI_TEMPLE]       = { "Temple",        600,  { .faith=2.0f } },
-    [EDI_CATHEDRALE]   = { "Cathédrale",    2000, { .faith=3.5f } },
+    [EDI_SANCTUAIRE]   = { "Sanctuaire",    150,  { .faith=1.0f }, {{RES_WOOD},{30}} },
+    [EDI_TEMPLE]       = { "Temple",        600,  { .faith=2.0f }, {{RES_WOOD,RES_METAL},{50,30}} },
+    [EDI_CATHEDRALE]   = { "Cathédrale",    2000, { .faith=3.5f }, {{RES_METAL,RES_PRECIOUS_METAL},{70,25}} },
     /* Savoir → recherche (le monastère sacralise ET étudie — §5 du catalogue). */
-    [EDI_BIBLIOTHEQUE] = { "Bibliothèque",  500,  { .savoir=1.5f } },
-    [EDI_MONASTERE]    = { "Monastère",     900,  { .savoir=1.0f, .faith=1.0f } },
+    [EDI_BIBLIOTHEQUE] = { "Bibliothèque",  500,  { .savoir=1.5f }, {{RES_WOOD,RES_METAL},{40,20}} },
+    [EDI_MONASTERE]    = { "Monastère",     900,  { .savoir=1.0f, .faith=1.0f }, {{RES_WOOD,RES_METAL},{50,15}} },
     /* Commerce → PE local (capte le flux ; la banque finance l'État). */
-    [EDI_COMPTOIR]     = { "Comptoir",      200,  { .PE_infra=0.8f } },
-    [EDI_BANQUE]       = { "Banque",        700,  { .PE_infra=1.4f } },
+    [EDI_COMPTOIR]     = { "Comptoir",      200,  { .PE_infra=0.8f }, {{RES_WOOD},{30}} },
+    [EDI_BANQUE]       = { "Banque",        700,  { .PE_infra=1.4f }, {{RES_METAL,RES_PRECIOUS_METAL},{40,20}} },
 };
 
 const EdificeDef *edifice_def(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?&EDIFICES[e]:NULL; }
 const char       *edifice_name(Edifice e){ return (e>=0&&e<EDIFICE_COUNT)?EDIFICES[e].name:"?"; }
+
+/* ---- Coût des bâtiments (§1) : matériaux ACHETÉS au marché en or ------- */
+#define BUILD_MIN_PRICE 0.20f   /* plancher de prix : même un bien abondant n'est jamais gratuit */
+
+float agency_build_gold(const WorldEconomy *econ, int region, Edifice e){
+    if (e<0||e>=EDIFICE_COUNT || !econ || region<0 || region>=econ->n_regions) return 0.f;
+    const RegionEconomy *re=&econ->region[region];
+    const BuildCost *c=&EDIFICES[e].cost;
+    float gold=0.f;
+    for (int k=0;k<BUILD_RES_MAX;k++){
+        Resource r=c->res[k];
+        if (r<=RES_NONE || r>=RES_COUNT || c->qty[k]<=0.f) continue;
+        float price = re->price[r]; if (price < BUILD_MIN_PRICE) price = BUILD_MIN_PRICE;
+        gold += c->qty[k] * price;       /* le manque renchérit : la rareté monte le prix */
+    }
+    return gold;
+}
+
+bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e){
+    if (e<0||e>=EDIFICE_COUNT || !econ || region<0 || region>=econ->n_regions) return false;
+    RegionEconomy *re=&econ->region[region];
+    float gold = agency_build_gold(econ, region, e);
+    if (gold > re->treasury) return false;        /* pas l'or → pas de chantier (garde, comme colonize) */
+    re->treasury -= gold;                          /* on PAIE le marché en or */
+    const BuildCost *c=&EDIFICES[e].cost;          /* … et l'on CONSOMME les matériaux du marché */
+    for (int k=0;k<BUILD_RES_MAX;k++){
+        Resource r=c->res[k];
+        if (r<=RES_NONE || r>=RES_COUNT || c->qty[k]<=0.f) continue;
+        re->stock[r] -= c->qty[k]; if (re->stock[r] < 0.f) re->stock[r]=0.f;
+    }
+    return agency_order_build(a, region, e);       /* enfile le chantier (durée existante) */
+}
 
 /* Constantes des actions non-bâtiment (calibrables). */
 #define CLEAR_DAYS        200

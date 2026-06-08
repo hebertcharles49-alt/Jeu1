@@ -172,6 +172,33 @@ int main(int argc, char **argv){
         ok("défricher en niche forestière ronge L local",     Lf1 < Lf0);
     ok("exploiter monte l'extraction (raw_cap fer)",          iron1 > iron0 + 0.5f);
 
+    /* ═══ §1 — LE COÛT DES BÂTIMENTS : matériaux achetés AU MARCHÉ en or ════ */
+    printf("\n── §1. Coût des bâtiments : acheté au marché en or, ∝ tier ──\n");
+    {
+        RegionEconomy *re=&s.econ->region[s.cap_reg];
+        for (int r=0;r<RES_COUNT;r++) if (re->price[r] < 1.0f) re->price[r]=1.0f;  /* marché doté */
+        re->stock[RES_WOOD]=1000.f; re->stock[RES_METAL]=1000.f; re->treasury=100000.f;
+        float gold_grenier   = agency_build_gold(s.econ, s.cap_reg, EDI_GRENIER);
+        float gold_citadelle = agency_build_gold(s.econ, s.cap_reg, EDI_CITADELLE);
+        printf("   Grenier coûte %.0f or (bois) | Citadelle %.0f or (métal+outils, palier supérieur)\n",
+               gold_grenier, gold_citadelle);
+        ok("un bâtiment a un PRIX en or = Σ recette × prix marché", gold_grenier > 0.f);
+        ok("un palier SUPÉRIEUR coûte plus, en matériaux plus avancés (∝ tier)",
+           gold_citadelle > gold_grenier);
+        float tre0=re->treasury, wood0=re->stock[RES_WOOD];
+        bool built = agency_build(s.ag, s.econ, s.cap_reg, EDI_GRENIER);
+        ok("bâtir DÉDUIT l'or du trésor (acheté au marché)", built && re->treasury < tre0 - 1.f);
+        ok("… et CONSOMME les matériaux du marché (le stock baisse)", re->stock[RES_WOOD] < wood0);
+        re->treasury = 0.f;
+        int nbefore=s.ag->n;
+        bool blocked = agency_build(s.ag, s.econ, s.cap_reg, EDI_CITADELLE);
+        ok("sans or pour acheter les matériaux : REFUSÉ, pas de chantier",
+           !blocked && s.ag->n==nbefore);
+        re->treasury=100000.f;
+        ok("le coût vient du TIER (recette), pas de l'étendue (prix inchangé)",
+           agency_build_gold(s.econ, s.cap_reg, EDI_GRENIER) == gold_grenier);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

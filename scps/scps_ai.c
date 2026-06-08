@@ -395,7 +395,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
                          AgencyState *ag, RouteNetwork *rn, float brake){
     /* Famine d'abord : un peuple affamé ne bâtit ni cours ni comptoir. */
     if (v->food < AI_FOOD_FLOOR && a->home_region>=0){
-        if (agency_order_build(ag, a->home_region, EDI_GRENIER)) a->stats.builds_other++;
+        if (agency_build(ag, econ, a->home_region, EDI_GRENIER)) a->stats.builds_other++;
         return;
     }
 
@@ -413,7 +413,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
          * par la fiche ; le moteur d'ordre fait le verdict. */
         if (brake > AI_BRAKE_HARD && a->w_expand >= 0.60f){
             Edifice e = ai_next_h_edifice(econ, a->home_region);
-            if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)) a->stats.builds_h++;
+            if (a->home_region>=0 && agency_build(ag, econ, a->home_region, e)) a->stats.builds_h++;
         } else {
             /* RÉFORME : on métabolise (K). Mais un trône au consentement bas se
              * SACRALISE d'abord (la foi soutient L) ; institutions mûres, on
@@ -427,7 +427,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
                 e = ai_next_savoir_edifice(econ, hr);      /* institutions mûres → savoir */
             else
                 e = ai_next_k_edifice(econ, hr);           /* le métabolisme par défaut : K */
-            if (a->home_region>=0 && agency_order_build(ag, a->home_region, e)){
+            if (a->home_region>=0 && agency_build(ag, econ, a->home_region, e)){
                 /* développement institutionnel PROACTIF (la marque du Bâtisseur)
                  * vs DIGESTION imposée par le frein — on ne les confond pas. */
                 if (brake > AI_BRAKE_HARD) a->stats.builds_other++;
@@ -439,7 +439,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
         int p = ai_pick_trade_partner(econ, a->home_region, a->cid);
         if (p>=0 && routes_order(rn, econ, a->home_region, p, false)){
             a->stats.routes++;
-        } else if (a->home_region>=0 && agency_order_build(ag, a->home_region, EDI_MARCHE)){
+        } else if (a->home_region>=0 && agency_build(ag, econ, a->home_region, EDI_MARCHE)){
             a->stats.builds_other++;                       /* pas de partenaire : on bâtit le carrefour */
         }
     }

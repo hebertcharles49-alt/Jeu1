@@ -931,8 +931,10 @@ int main(int argc, char **argv) {
                 case SDLK_b:
                     if (sim.ready && selected>=0 && selected<world->n_provinces) {
                         int reg = world->province[selected].region;
-                        if (reg>=0 && agency_order_build(sim.ag, reg, EDI_TRIBUNAL))
-                            printf("\n[scps] Action : Tribunal mis en file (région %d) — construit en jours.\n", reg);
+                        if (reg>=0 && agency_build(sim.ag, sim.econ, reg, EDI_TRIBUNAL))
+                            printf("\n[scps] Action : Tribunal mis en file (région %d) — payé au marché, construit en jours.\n", reg);
+                        else
+                            printf("\n[scps] Tribunal : trésor insuffisant pour acheter les matériaux.\n");
                     }
                     break;
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
