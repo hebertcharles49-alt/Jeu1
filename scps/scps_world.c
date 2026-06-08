@@ -2511,8 +2511,8 @@ static void gen_resources(World *w) {
                 if (cold) ADD(RES_FUR,0.6f);
                 break;
             case BIO_SAVANNA:   ADD(RES_LIVESTOCK,2.4f); ADD(RES_WOOL,1.2f); ADD(RES_SUGAR,0.8f); ADD(RES_MED_HERBS,0.5f); break;
-            case BIO_DRYLANDS:  ADD(RES_COTTON,1.8f); ADD(RES_SALT,1.5f); ADD(RES_SALTPETER,1.4f); break;
-            case BIO_DESERT:    ADD(RES_SALT,2.0f); ADD(RES_SALTPETER,1.8f); break;
+            case BIO_DRYLANDS:  ADD(RES_COTTON,1.8f); ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,1.4f); break;
+            case BIO_DESERT:    ADD(RES_SALT,1.2f); ADD(RES_SALTPETER,1.8f); break;
             /* ── Forêts : le bois + les simples ── */
             case BIO_FOREST:
                 ADD(RES_WOOD,3.6f); ADD(RES_MED_HERBS,1.0f);
@@ -2521,22 +2521,22 @@ static void gen_resources(World *w) {
             case BIO_WOODS:     ADD(RES_WOOD,3.0f); ADD(RES_GRAIN,1.4f); ADD(RES_MED_HERBS,0.8f); break;
             case BIO_JUNGLE:    ADD(RES_WOOD,3.2f); ADD(RES_SUGAR,1.6f); ADD(RES_MED_HERBS,1.2f); break;
             /* ── Zones humides ── */
-            case BIO_MARSH:     ADD(RES_FISH,1.6f); ADD(RES_MED_HERBS,1.4f); ADD(RES_SALT,0.4f); break;
+            case BIO_MARSH:     ADD(RES_FISH,0.9f); ADD(RES_MED_HERBS,1.4f); ADD(RES_SALT,0.2f); break;
             case BIO_BOG:
                 ADD(RES_MED_HERBS,2.6f); ADD(RES_COAL,0.4f);
                 if (cold) ADD(RES_FUR,1.5f);
                 break;
-            /* ── Côtes & littoraux ── */
-            case BIO_COAST:     ADD(RES_FISH,2.6f); ADD(RES_SALT,0.8f); break;
-            case BIO_MANGROVE:  ADD(RES_FISH,1.6f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); break;
+            /* ── Côtes & littoraux (poisson/sel dégonflés ; perle + bétail d'appoint) ── */
+            case BIO_COAST:     ADD(RES_FISH,1.5f); ADD(RES_SALT,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.1f); break;
+            case BIO_MANGROVE:  ADD(RES_FISH,0.9f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.1f); break;
             case BIO_COASTAL_DESERT:
-                ADD(RES_SALT,1.6f); ADD(RES_SALTPETER,0.6f);
+                ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,0.6f); ADD(RES_PEARL,0.1f);
                 if (warm) ADD(RES_SUGAR,2.0f);
                 break;
             /* ── Reliefs : la laine + les minéraux ── */
             case BIO_HILLS:     ADD(RES_WOOL,2.2f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_COPPER,1.4f); ADD(RES_IRON,1.4f); ADD(RES_MED_HERBS,0.6f); break;
-            case BIO_HIGHLANDS: ADD(RES_WOOL,2.0f); ADD(RES_COPPER,1.2f); ADD(RES_IRON,1.2f); ADD(RES_MED_HERBS,1.0f); ADD(RES_GOLD,0.6f); break;
-            case BIO_MOUNTAINS: ADD(RES_IRON,2.0f); ADD(RES_COPPER,2.0f); ADD(RES_COAL,1.6f); ADD(RES_GOLD,2.6f);
+            case BIO_HIGHLANDS: ADD(RES_WOOL,2.0f); ADD(RES_COPPER,1.2f); ADD(RES_IRON,1.2f); ADD(RES_MED_HERBS,1.0f); ADD(RES_GOLD,0.3f); break;
+            case BIO_MOUNTAINS: ADD(RES_IRON,2.0f); ADD(RES_COPPER,2.0f); ADD(RES_COAL,1.6f); ADD(RES_GOLD,1.2f);  /* or dégonflé : trop d'or */
                                 ADD(RES_PRECIOUS_METAL,1.2f); ADD(RES_SULFUR,1.4f); ADD(RES_SALTPETER,0.6f); break;
             case BIO_VOLCANO:   ADD(RES_SULFUR,1.4f); ADD(RES_PRECIOUS_METAL,0.4f); break;   /* veines magmatiques */
             default: break;     /* océans · pic · glacier : terres mortes → rien (P4) */
@@ -2544,7 +2544,11 @@ static void gen_resources(World *w) {
         /* MESA (aride + relief) : filons de cuivre/fer à découvert (bonus). */
         if (mesa) { ADD(RES_COPPER,1.5f); ADD(RES_IRON,1.5f); }
         /* Grande rivière : pêche fluviale d'appoint (hors biomes déjà halieutiques). */
-        if (bigriver && B!=BIO_COAST && B!=BIO_MANGROVE && B!=BIO_MARSH) ADD(RES_FISH,1.6f);
+        if (bigriver && B!=BIO_COAST && B!=BIO_MANGROVE && B!=BIO_MARSH) ADD(RES_FISH,0.9f);
+        /* RARES STRATÉGIQUES (§3) : une pincée PARTOUT (0.05) pour que les chaînes de
+         * pointe ne meurent jamais — fer céleste (armes enchantées) & cristal arcanique
+         * (essence). Voulus rares, mais jamais absents (≥ 3-4 nœuds / ~100 régions). */
+        if (B!=BIO_PEAK && B!=BIO_GLACIER){ ADD(RES_CELESTIAL_IRON,0.05f); ADD(RES_ARCANE_CRYSTAL,0.05f); }
         #undef ADD
 
         /* Tirage pondéré — UNIQUEMENT parmi les ressources BRUTES.

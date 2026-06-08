@@ -39,6 +39,7 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_SALTPETER]     = 3.2f,
     [RES_GOLD]          = 8.0f,
     [RES_PRECIOUS_METAL]= 12.0f,
+    [RES_PEARL]         = 12.0f,   /* perle : prix habituel d'une ressource précieuse (≈ métal préc.) */
     /* manufacturés */
     [RES_CLOTH]         = 4.5f,
     [RES_NAVAL_SUPPLIES]= 4.0f,
@@ -64,6 +65,9 @@ typedef struct {
     Resource in2;  float q2;   /* in2 = RES_NONE si une seule entrée */
     Resource out;  float qout;
     float    labor;            /* besoin de main-d'œuvre par niveau */
+    Resource alt1; float alt1_q;  /* intrant de REPLI pour in1, à SA PROPRE quantité
+                                   * (perle pour l'or : 2× le métal par bijou). On puise
+                                   * in1 d'abord, le repli ensuite. RES_NONE = aucun. */
 } Recipe;
 
 static const Recipe RECIPE[BLD_TYPE_COUNT] = {
@@ -76,9 +80,10 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
      * mieux dispatché (scps_world) → la pénurie de vin (couv 25%) se résorbe. */
     [BLD_WINERY]    = { RES_SUGAR, 1.6f, RES_NONE,          0.f, RES_WINE,           1.4f, 0.9f },
     [BLD_BREWERY]   = { RES_GRAIN, 1.2f, RES_NONE,          0.f, RES_BEER,           1.0f, 0.8f },
-    /* JOAILLERIE : OR SEUL (1.0+métal-préc 1.0 → or 1.5) ; le statut n'est plus gaté
-     * à 11 régions (or OU métal-préc placent un atelier) → ~71 joailleries. */
-    [BLD_JEWELER]   = { RES_GOLD,  1.5f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  1.0f, 1.2f },
+    /* JOAILLERIE : OR, ou PERLE en repli (2× la quantité par bijou — littoral).
+     * Sortie TEMPÉRÉE (1.0→0.5) et intrant plus lourd (1.5→2.0) : l'orfèvrerie
+     * surinondait (couv ×170) → on vise un surplus DOUX, pas un raz-de-marée. */
+    [BLD_JEWELER]   = { RES_GOLD,  2.0f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  0.5f, 1.2f, RES_PEARL, 4.0f },
     [BLD_WEAVER_LUX]= { RES_CLOTH, 2.0f, RES_NONE,          0.f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f },
     /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
      * nourrit la Brèche (couplée plus bas dans econ_tick → arcane_charge). */
@@ -386,7 +391,7 @@ void econ_init(WorldEconomy *e, const World *w) {
          * nourrissent plus). */
         re->raw_cap[RES_GRAIN] += subsist * (1.15f + 0.70f*reg_hab[rid]);
         re->raw_cap[RES_WOOD]  += subsist * 0.44f;   /* §6a : socle bois +10 % (intrant + chauffe) */
-        if (coastal) re->raw_cap[RES_FISH] += subsist * 0.25f;   /* poisson surproduit ×20 : on calme */
+        if (coastal) re->raw_cap[RES_FISH] += subsist * 0.10f;   /* socle côtier minime : le poisson vient surtout des biomes halieutiques (§2) */
 
         /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux
          * failles profondes/volcaniques (proxy : présence de soufre ou de métal
@@ -409,8 +414,9 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_SUGAR] > 0.f) region_ensure_building(re,BLD_WINERY);
         /* Brasserie : la bière naît du grain — boisson du commun, partout où l'on cultive. */
         if (re->raw_cap[RES_GRAIN] > 0.f) region_ensure_building(re,BLD_BREWERY);
-        /* Joaillerie : OR SEUL suffit désormais (gate desserré) → ~71 ateliers. */
-        if (re->raw_cap[RES_GOLD] > 0.f) region_ensure_building(re,BLD_JEWELER);
+        /* Joaillerie : là où l'on extrait de l'OR ou des PERLES (littoral). */
+        if (re->raw_cap[RES_GOLD] > 0.f || re->raw_cap[RES_PEARL] > 0.f)
+            region_ensure_building(re,BLD_JEWELER);
         /* L'atelier de luxe a besoin de tissu : présent là où l'on file la laine. */
         if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
         /* Épine dorsale : fonderie + atelier d'outillage là où fer ET charbon. */
@@ -587,7 +593,11 @@ void econ_tick(WorldEconomy *e, float dt) {
             /* cap = niveau × effort de marché (SURPLUS NATUREL : on lit le prix sortie). */
             float cap = b->level * market_effort(re->price[rc->out], BASE_PRICE[rc->out]);
             float lim = cap;
-            if (rc->in1!=RES_NONE) lim=fminf(lim, re->stock[rc->in1]/fmaxf(rc->q1,EPS));
+            if (rc->in1!=RES_NONE){
+                float out_in1 = re->stock[rc->in1]/fmaxf(rc->q1,EPS);   /* sortie possible via in1 */
+                if (rc->alt1!=RES_NONE) out_in1 += re->stock[rc->alt1]/fmaxf(rc->alt1_q,EPS);  /* + repli (perle…) */
+                lim=fminf(lim, out_in1);
+            }
             if (rc->in2!=RES_NONE) lim=fminf(lim, re->stock[rc->in2]/fmaxf(rc->q2,EPS));
             /* RÉSERVE VIVRIÈRE : le grain NOURRIT avant de se brasser. On ne brasse
              * que le SURPLUS au-delà du besoin alimentaire (sinon la bière affame
@@ -607,9 +617,19 @@ void econ_tick(WorldEconomy *e, float dt) {
             lim=fminf(lim, cap*lratio);
             if (lim<=0.f){ b->workers=0.f; continue; }
 
-            /* Consomme intrants, produit sortie (valeur ajoutée = sortie − intrants). */
+            /* Consomme intrants, produit sortie (valeur ajoutée = sortie − intrants).
+             * in1 d'abord, puis le repli alt1 à SA quantité (perle = 2× l'or/bijou). */
             float val_in =0.f;
-            if (rc->in1!=RES_NONE){ re->stock[rc->in1]-=lim*rc->q1; demand[rc->in1]+=lim*rc->q1; val_in+=lim*rc->q1*re->price[rc->in1]; }
+            if (rc->in1!=RES_NONE){
+                float out1=fminf(lim, re->stock[rc->in1]/fmaxf(rc->q1,EPS));   /* part faite avec in1 */
+                float g1=out1*rc->q1;
+                re->stock[rc->in1]-=g1; demand[rc->in1]+=g1; val_in+=g1*re->price[rc->in1];
+                float rem=lim-out1;
+                if (rem>0.f && rc->alt1!=RES_NONE){
+                    float ga=rem*rc->alt1_q;
+                    re->stock[rc->alt1]-=ga; demand[rc->alt1]+=ga; val_in+=ga*re->price[rc->alt1];
+                }
+            }
             if (rc->in2!=RES_NONE){ re->stock[rc->in2]-=lim*rc->q2; demand[rc->in2]+=lim*rc->q2; val_in+=lim*rc->q2*re->price[rc->in2]; }
             float out=lim*rc->qout*prod_mult;   /* outils → productivité */
             out *= (1.f - 0.5f*re->revolt_scar); /* la cicatrice de révolte ronge la production */

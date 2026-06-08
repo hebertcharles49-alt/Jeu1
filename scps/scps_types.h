@@ -144,6 +144,7 @@ typedef enum {
     RES_SALTPETER,      /* arides / grottes (→ poudre)  */
     RES_GOLD,           /* montagnes (parfois artefact) */
     RES_PRECIOUS_METAL, /* mithril, adamantium — profond/rare */
+    RES_PEARL,          /* perle — littoral rare ; luxe ouvré (orfèvrerie premium ×2 or) */
     RES_ARCANE_CRYSTAL, /* cristal arcanique — RÉSIDU de la Conjonction, nœuds telluriques (TRÈS rare) */
     RES_CELESTIAL_IRON, /* fer céleste — météorique : cratères/sommets (TRÈS rare) → armes enchantées */
 

@@ -26,7 +26,7 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     [EDI_MARCHE]       = { "Marché",        180,  { .PE_infra=1.0f }, {{RES_WOOD},{35}} },
     [EDI_ENTREPOT]     = { "Entrepôt",      270,  { .PE_infra=0.7f }, {{RES_WOOD},{45}} },
     /* Croissance → food (nourrit la pop ; l'aqueduc : santé urbaine → croissance). */
-    [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f }, {{RES_WOOD},{25}} },
+    [EDI_GRENIER]      = { "Grenier",       90,   { .food_cap=1.0f }, {{RES_WOOD,RES_SALT},{25,18}} },  /* le sel CONSERVE : input passif du grenier (et débouché du sel) */
     [EDI_IRRIGATION]   = { "Irrigation",    270,  { .food_cap=1.5f }, {{RES_WOOD,RES_METAL},{30,15}} },
     [EDI_AQUEDUC]      = { "Aqueduc",       540,  { .food_cap=1.2f }, {{RES_WOOD,RES_METAL},{30,40}} },
     /* Foi → SOUTIENT L (sacraliser le trône apaise sans réprimer — §4 du catalogue). */
