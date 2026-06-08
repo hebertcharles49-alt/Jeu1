@@ -782,6 +782,110 @@ static void draw_hover_footer(SDL_Renderer *ren, int win_w, int win_h, int mx, i
     draw_text(ren, g_font, 12, win_h-fh+3, COL_PARCH, def);
 }
 
+/* Le PEUPLE dominant d'un empire (via la membrane : groupe majoritaire de sa
+ * capitale). Mot diégétique, jamais un nom SCPS. */
+static const char *army_people(const World *w, const WorldEconomy *econ,
+                               const ModifierStack *drift, int cid){
+    if (cid<0 || cid>=w->n_countries) return "—";
+    int cp=w->country[cid].capital_prov; if (cp<0 || cp>=w->n_provinces) return "—";
+    int reg=w->province[cp].region;      if (reg<0 || reg>=econ->n_regions) return "—";
+    if (econ->region[reg].pop.n_groups<=0) return "—";
+    GroupReadout gr[SCPS_MAX_GROUPS];
+    int ng=province_composition(&econ->region[reg].pop, drift, &econ->region[reg].culture,
+                                5.f, 5.f, gr, SCPS_MAX_GROUPS);
+    return (ng>0) ? gr[0].race : "—";
+}
+
+/* Centre-écran d'une région = barycentre des graines de ses PROVINCES (coords de
+ * grille géographiques ; Region.seed_x/y n'est pas peuplé). */
+static bool region_screen_pos(const World *w, const Cam *cam, int reg, int *osx, int *osy){
+    if (reg<0 || reg>=w->n_regions) return false;
+    const Region *R=&w->region[reg];
+    long ax=0, ay=0; int n=0;
+    for (int k=0;k<R->n_provinces && k<12;k++){
+        int pid=R->province_ids[k];
+        if (pid<0 || pid>=w->n_provinces) continue;
+        ax += w->province[pid].seed_x; ay += w->province[pid].seed_y; n++;
+    }
+    if (n==0) return false;
+    *osx=(int)(((float)ax/n - cam->ox)*cam->scale);
+    *osy=(int)(((float)ay/n - cam->oy)*cam->scale);
+    return true;
+}
+
+/* §4 — LE MARQUEUR D'ARMÉE : une armée de campagne posée sur la carte, en COULEUR
+ * D'EMPIRE, dimensionnée par l'effectif ; le survol détaille (peuple, inf/arch/cav,
+ * phase). Pour une armée ENNEMIE : ASYMÉTRIE d'information — on montre la TAILLE
+ * (un mot), pas le décompte. Membrane : ne lit que des nombres tangibles (paquets),
+ * des mots et la GÉOGRAPHIE (position de région) ; aucun flottant SCPS. */
+static char g_army_tip[SCPS_MAX_COUNTRY][192];
+static void draw_army_markers(SDL_Renderer *ren, const Cam *cam, const Sim *s,
+                              const World *w, int win_w, int win_h){
+    if (!s->camp) return;
+    for (int c=0; c<w->n_countries && c<SCPS_MAX_COUNTRY; c++){
+        if (!campaign_active(s->camp, c)) continue;
+        int reg = campaign_location(s->camp, c);
+        int sx, sy;
+        if (!region_screen_pos(w, cam, reg, &sx, &sy)) continue;
+        if (sx < -24 || sy < -24 || sx > win_w+24 || sy > win_h+24) continue;   /* hors champ */
+        long paquets   = campaign_units(s->camp, c);
+        FieldPhase ph  = campaign_phase(s->camp, c);
+        bool mine      = (c == s->player);
+        uint32_t col   = w->country[c].color;
+        SDL_Color ec = { (uint8_t)((col>>16)&0xFF), (uint8_t)((col>>8)&0xFF), (uint8_t)(col&0xFF), 0xFF };
+        SDL_Color dk = { 0x10,0x12,0x16,0xFF };
+
+        /* trait de marche : une fine ligne vers la région-but (ses propres armées). */
+        if (mine && ph==FA_MARCH){
+            int dx, dy;
+            if (region_screen_pos(w, cam, s->camp->army[c].dest, &dx, &dy)){
+                SDL_SetRenderDrawColor(ren, ec.r, ec.g, ec.b, 0x99);
+                SDL_RenderDrawLine(ren, sx, sy, dx, dy);
+            }
+        }
+        /* jeton : carré en couleur d'empire (taille ∝ effectif, 5..11), liseré clair. */
+        int rr = 5 + (int)(paquets/18); if (rr>11) rr=11;
+        fill_rect(ren, sx-rr, sy-rr, 2*rr, 2*rr, ec);
+        draw_box (ren, sx-rr, sy-rr, 2*rr, 2*rr, dk);
+        draw_box (ren, sx-rr-1, sy-rr-1, 2*rr+2, 2*rr+2, COL_PARCH);
+        if (ph==FA_SIEGE) draw_ring(ren, sx, sy, (float)(rr+3), COL_COPPER);   /* halo de siège */
+
+        /* étiquette : les SIENNES → le NOMBRE ; l'ENNEMIE → le MOT de taille (asymétrie). */
+        char lab[24];
+        if (mine) snprintf(lab, sizeof lab, "%ld", paquets);
+        else      snprintf(lab, sizeof lab, "%s", army_host_word(paquets));
+        if (g_font_small){
+            int lw=text_w(g_font_small, lab);
+            SDL_Color labbg = { 0x0f,0x16,0x22,0xcc };
+            fill_rect(ren, sx-lw/2-2, sy+rr+1, lw+4, 13, labbg);
+            draw_text(ren, g_font_small, sx-lw/2, sy+rr+1, COL_PARCH, lab);
+        }
+
+        /* survol : détail pour les siennes, taille seule pour l'ennemie. */
+        const char *people = army_people(w, s->econ, s->drift, c);
+        ArmyComposition cp = campaign_composition(s->camp, c);
+        if (mine)
+            snprintf(g_army_tip[c], sizeof g_army_tip[c],
+                     "%s (%s) — %s · %ld paquets : inf %ld · arch %ld · cav %ld%s · %s",
+                     w->country[c].name, people, army_host_word(paquets), paquets,
+                     cp.infanterie, cp.archers, cp.cavalerie,
+                     cp.mages? " · mages":"", campaign_phase_name(ph));
+        else
+            snprintf(g_army_tip[c], sizeof g_army_tip[c],
+                     "%s (%s) — %s (%s) · armée ENNEMIE : on en juge la taille, pas le détail",
+                     w->country[c].name, people, army_host_word(paquets), campaign_phase_name(ph));
+        zone_add((SDL_Rect){sx-rr-2, sy-rr-2, 2*rr+4, 2*rr+16}, g_army_tip[c]);
+    }
+}
+
+/* Une armée de campagne EST-ELLE en mouvement quelque part ? (sert au mode --war
+ * pour laisser une guerre mûrir avant la capture.) */
+static bool any_field_army(const Sim *s, const World *w){
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
+        if (campaign_active(s->camp,c) && campaign_phase(s->camp,c)!=FA_IDLE) return true;
+    return false;
+}
+
 /* Capture hors-écran (mode --shot) : sérialise le rendu courant en PPM, pour
  * vérifier l'UI sans display interactif. */
 static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
@@ -802,11 +906,12 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
 /* ======================================================================= */
 
 int main(int argc, char **argv) {
-    bool shot = false, shot_tree = false;
+    bool shot = false, shot_tree = false, shot_war = false;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
         else if (!strcmp(argv[i], "--tree")) { shot = true; shot_tree = true; }
+        else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
     }
 
@@ -917,11 +1022,15 @@ int main(int argc, char **argv) {
                 draw_hover_footer(ren, win_w, win_h, g_tree_x[g_tree_demo], g_tree_y[g_tree_demo]);
             }
         } else {
+            if (shot_war)                    /* §4 : laisse une guerre mûrir → des armées sur la carte */
+                for (int y=0; y<120 && !any_field_army(&sim, world); y++)
+                    for (int d=0; d<365; d++) sim_day(&sim, world);
             render_map(world, pb.pixels, pb.w, pb.h, &rp, VIEW_COUNTRIES);
             pixbuf_upload(&pb);
             if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
             if (sim.ready && g_font) {
                 zone_reset();
+                draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
@@ -1111,6 +1220,7 @@ int main(int argc, char **argv) {
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
             } else {
+                draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 if (selected >= 0)
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
