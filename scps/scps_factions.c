@@ -60,13 +60,20 @@ void group_ethos_lean(const PopCulture *c, float w[FAC_COUNT]){
     else w[FAC_COMMUNAUTAIRE]=1.f;
 }
 
-/* ---- Agrégation : Σ groupes (pop × class_clout × penchant) ------------- */
+/* ---- Agrégation : Σ groupes (pop pondérée par le poids de CLASSE × penchant) --- *
+ * Le poids de classe vient désormais de la composition ÉMERGENTE du groupe (§pop
+ * précise) : Σ_classe pop_by_class · clout(classe). Une vague de PROMOTIONS (plus de
+ * Nobles, clout ×3) PÈSE donc plus lourd — bâtir déplace la politique interne. Repli
+ * sur count·clout(klass) si l'émergence n'a pas encore couru. */
 static void accumulate(const ProvincePop *pp, double acc[FAC_COUNT]){
     for (int i=0; i<pp->n_groups; i++){
         const PopGroup *g=&pp->groups[i];
         if (g->count<=0) continue;
         float lean[FAC_COUNT]; group_ethos_lean(&g->culture, lean);
-        double wgt = (double)g->count * (double)class_clout(g->klass);
+        double wgt = (double)g->pop_by_class[CLASS_LABORER]  *(double)class_clout(CLASS_LABORER)
+                   + (double)g->pop_by_class[CLASS_BOURGEOIS] *(double)class_clout(CLASS_BOURGEOIS)
+                   + (double)g->pop_by_class[CLASS_ELITE]     *(double)class_clout(CLASS_ELITE);
+        if (wgt <= 0.0) wgt = (double)g->count * (double)class_clout(g->klass);   /* repli pré-émergence */
         for (int f=0; f<FAC_COUNT; f++) acc[f] += wgt * lean[f];
     }
 }

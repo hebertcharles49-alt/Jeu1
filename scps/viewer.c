@@ -975,9 +975,18 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         if (reg>=0 && reg<econ->n_regions) {
             ui_section(ren, x, &y, "POPULATION");
             const RegionEconomy *re2=&econ->region[reg];
-            long cp[3] = { (long)re2->strata[CLASS_LABORER].pop,
-                           (long)re2->strata[CLASS_BOURGEOIS].pop,
-                           (long)re2->strata[CLASS_ELITE].pop };
+            /* la composition de classe ÉMERGE des groupes (§pop précise) : Σ des
+             * pop_by_class de chaque groupe race×culture×foi. Repli sur les strates. */
+            long cp[3] = {0,0,0};
+            const ProvincePop *pp2=&re2->pop;
+            if (pp2->n_groups>0){
+                for (int gi=0; gi<pp2->n_groups; gi++)
+                    for (int cc=0; cc<3; cc++) cp[cc]+=pp2->groups[gi].pop_by_class[cc];
+            } else {
+                cp[0]=(long)re2->strata[CLASS_LABORER].pop;
+                cp[1]=(long)re2->strata[CLASS_BOURGEOIS].pop;
+                cp[2]=(long)re2->strata[CLASS_ELITE].pop;
+            }
             long tot=cp[0]+cp[1]+cp[2]; if(tot<1) tot=1;
             const SDL_Color cc[3]={ SLICE_PAL[0], SLICE_PAL[1], SLICE_PAL[3] };
             const char *chov[3]={

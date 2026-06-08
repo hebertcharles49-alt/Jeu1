@@ -117,8 +117,12 @@ typedef struct {
     Sphere       origin_sphere;  /* FIXE : pour le gouffre */
     PopCulture   origin;         /* substrat FIXE */
     PopCulture   culture;        /* fiche EFFECTIVE (cache = origine + dérive) */
-    SocialClass  klass;
+    SocialClass  klass;          /* (hérité) la classe « principale » du groupe */
     long         count;
+    /* CLASSE ÉMERGENTE (§pop précise) : combien de ce groupe (race×culture×foi) sont
+     * Journaliers / Bourgeois / Nobles — sort des EMPLOIS (capitale + ateliers), par
+     * paquets de 100. Σ pop_by_class = count. Jamais posé : recalculé au tick. */
+    long         pop_by_class[CLASS_COUNT];
     float        L;              /* légitimité du groupe envers la couronne */
     float        agit_base;      /* agitation VRAIE (la suppression la masque) */
     float        integration;    /* 0..1 → pilote l'assimilation */

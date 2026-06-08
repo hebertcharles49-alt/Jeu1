@@ -8,6 +8,7 @@
  */
 #include "scps_demography.h"
 #include "scps_culture.h"   /* ethos_name */
+#include "scps_labor.h"     /* capitale_max_tier : les emplois nobles dont la classe émerge (§pop précise) */
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -368,9 +369,45 @@ void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift){
         g->race=re->culture.race; g->origin_sphere=species_sphere(re->culture.race);
         g->origin=re->culture; g->culture=re->culture;     /* substrat = effective au départ */
         g->klass=CLASS_LABORER; g->count=total;
+        g->pop_by_class[CLASS_LABORER]=total;        /* repli : tout Journalier avant la 1re émergence */
+        g->pop_by_class[CLASS_BOURGEOIS]=0; g->pop_by_class[CLASS_ELITE]=0;
         g->L=7.f; g->agit_base=agit_from_L(7.f); g->integration=1.f;   /* natifs intégrés */
         g->diaspora=false; g->drift_id=id++;
         pp->n_groups=1;     /* MONO-GROUPE → non-régression (les nombres d'hier) */
+    }
+}
+
+/* ÉMERGENCE DE CLASSE (§pop précise) : la classe de CHAQUE groupe (race×culture×foi)
+ * sort des EMPLOIS de la région — la capitale (tier·100 emplois NOBLES, le tier que
+ * la pop débloque) + les ateliers (emploi BOURGEOIS ≈ ouvriers des manufactures),
+ * répartis sur les groupes AU PRORATA, par paquets de 100. Σ pop_by_class = count.
+ * Rien n'est posé : la structure d'emplois sculpte le tissu social, groupe par groupe. */
+static void demography_emerge_classes(RegionEconomy *re){
+    ProvincePop *pp=&re->pop;
+    long total=0; for (int i=0;i<pp->n_groups;i++) total+=pp->groups[i].count;
+    if (total<1){
+        for (int i=0;i<pp->n_groups;i++){
+            pp->groups[i].pop_by_class[CLASS_LABORER]=pp->groups[i].count;
+            pp->groups[i].pop_by_class[CLASS_BOURGEOIS]=0;
+            pp->groups[i].pop_by_class[CLASS_ELITE]=0;
+        }
+        return;
+    }
+    long elite_jobs   = (long)capitale_max_tier(total)*100;                  /* capitale : tier·100 */
+    long artisan_jobs = 0;
+    for (int b=0;b<re->n_bld;b++) artisan_jobs += (long)re->bld[b].workers;  /* ateliers : ouvriers */
+    artisan_jobs = (artisan_jobs/100)*100;
+    if (elite_jobs > total) elite_jobs=(total/100)*100;
+    if (elite_jobs+artisan_jobs > total) artisan_jobs=((total-elite_jobs)/100)*100;
+    for (int i=0;i<pp->n_groups;i++){
+        PopGroup *g=&pp->groups[i];
+        long e=((g->count*elite_jobs/total)/100)*100;       /* part noble de la bande */
+        long a=((g->count*artisan_jobs/total)/100)*100;     /* part bourgeoise */
+        if (e>g->count) e=(g->count/100)*100;
+        if (e+a>g->count) a=((g->count-e)/100)*100;
+        g->pop_by_class[CLASS_ELITE]=e;
+        g->pop_by_class[CLASS_BOURGEOIS]=a;
+        g->pop_by_class[CLASS_LABORER]=g->count-e-a;
     }
 }
 
@@ -411,6 +448,12 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
         if (amount<MIG_MIN) continue;
         int gi=(int)(dom-re->pop.groups);
         migration_move(&re->pop, &econ->region[best].pop, gi, amount, mig_id++);
+    }
+    /* 3. ÉMERGENCE DE CLASSE : la classe de chaque groupe sort des emplois (capitale
+     *    + ateliers). Après migration/assimilation, le tissu social se recompose. */
+    for (int r=0; r<econ->n_regions; r++){
+        RegionEconomy *re=&econ->region[r];
+        if (re->pop.n_groups>0 && re->culture.settled) demography_emerge_classes(re);
     }
 }
 
