@@ -173,7 +173,7 @@ static SDL_Color band_good(int idx, int n, bool higher_better) {
 }
 
 /* ---- Texte (SDL_ttf) -------------------------------------------------- */
-static TTF_Font *g_font = NULL, *g_font_big = NULL;
+static TTF_Font *g_font = NULL, *g_font_big = NULL, *g_font_small = NULL;
 static void draw_text(SDL_Renderer *ren, TTF_Font *f, int x, int y, SDL_Color col, const char *s) {
     if (!f || !s || !s[0]) return;
     SDL_Surface *su = TTF_RenderUTF8_Blended(f, s, col);
@@ -207,6 +207,10 @@ static void draw_box(SDL_Renderer *ren, int x,int y,int w,int h, SDL_Color c){
     fill_rect(ren,x,y,w,1,c); fill_rect(ren,x,y+h-1,w,1,c);
     fill_rect(ren,x,y,1,h,c); fill_rect(ren,x+w-1,y,1,h,c);
 }
+static void zone_add(SDL_Rect r, const char *def);   /* (défini plus bas — survol) */
+/* survol : nom + EFFET de chaque nœud (mots de jeu) ; positions pour la capture. */
+static char g_tree_hov[TECH_COUNT][240];
+static int  g_tree_x[TECH_COUNT], g_tree_y[TECH_COUNT], g_tree_demo;
 static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
                            WorldEconomy *econ, TechState *ts, World *w, int cid){
     fill_rect(ren, 0,0, win_w, win_h, (SDL_Color){0x0a,0x0e,0x16,0xff});
@@ -217,25 +221,29 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
     tech_tree_readout(&ts[cid], acc, pop, &tr);
 
     int cx=win_w/2, cy=win_h/2 - 4;
-    float ring = (float)win_h * 0.067f;     /* contraint par la HAUTEUR (fenêtre large) */
-    const float D2R=0.01745329f, TOP=-1.5707963f;     /* quartier 0 au sommet */
+    float ring = (float)win_h * 0.066f;
+    float R0   = ring*1.75f;                       /* le ROND INITIAL : les 1res tech y logent */
+    const float D2R=0.01745329f, TOP=-1.5707963f;  /* quartier 0 au sommet */
     SDL_Color tcol[3] = { {0x5a,0x86,0xd8,0xff}, {0xd8,0x86,0x42,0xff}, {0x5c,0xb8,0x6e,0xff} };
 
-    for (int t=0;t<=5;t++) draw_ring(ren,cx,cy,(t+1)*ring, COL_PANEL2);   /* anneaux = tiers */
-    for (int q=0;q<=9;q++){                                              /* rayons : thèmes (120°) & quartiers (40°) */
+    for (int t=0;t<=4;t++) draw_ring(ren,cx,cy, R0+t*ring, (t==0)?COL_COPPER:COL_PANEL2); /* rond initial accentué */
+    for (int q=0;q<=9;q++){                                              /* rayons : thèmes (cuivre) & quartiers */
         float a=(q*40.f)*D2R + TOP; SDL_Color c=(q%3==0)?COL_COPPER:COL_PANEL2;
         SDL_SetRenderDrawColor(ren,c.r,c.g,c.b,c.a);
-        SDL_RenderDrawLine(ren,cx,cy, cx+(int)(cosf(a)*6.3f*ring), cy+(int)(sinf(a)*6.3f*ring));
+        SDL_RenderDrawLine(ren, cx+(int)(cosf(a)*(R0-ring*0.55f)), cy+(int)(sinf(a)*(R0-ring*0.55f)),
+                                cx+(int)(cosf(a)*(R0+4.3f*ring)),  cy+(int)(sinf(a)*(R0+4.3f*ring)));
     }
     int cnt[9][8]={{0}}, seen[9][8]={{0}};
     for (int i=0;i<tr.n;i++){ int q=tr.node[i].quarter,t=tr.node[i].tier; if(q>=0&&q<9&&t>=0&&t<8)cnt[q][t]++; }
+    g_tree_demo=-1;
     for (int i=0;i<tr.n;i++){
         const TreeNodeReadout *nd=&tr.node[i];
         int q=nd->quarter,t=nd->tier; if(q<0||q>=9||t<0||t>=8) continue;
         int k=cnt[q][t], j=seen[q][t]++;
         float off=(k>1)? ((float)j-(k-1)/2.f)*(40.f/(k+1.f)) : 0.f;
-        float ang=(q*40.f+20.f+off)*D2R + TOP, rad=(t+1)*ring;
+        float ang=(q*40.f+20.f+off)*D2R + TOP, rad=R0 + t*ring;
         int x=cx+(int)(cosf(ang)*rad), y=cy+(int)(sinf(ang)*rad), theme=q/3;
+        g_tree_x[i]=x; g_tree_y[i]=y;
         SDL_Color c=tcol[theme];
         if (nd->state==TREE_LOCKED){ c.r/=3;c.g/=3;c.b/=3; }
         else if (nd->state==TREE_OPEN){ c.r=(uint8_t)((c.r+255)/2);c.g=(uint8_t)((c.g+255)/2);c.b=(uint8_t)((c.b+255)/2); }
@@ -243,25 +251,37 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
         fill_rect(ren,x-sz,y-sz,sz*2,sz*2,c);
         if (nd->faustian) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0xe0,0x44,0x30,0xff});
         else if (nd->orphan) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0x80,0x80,0x80,0xff});
-        if (g_font && nd->state!=TREE_LOCKED){                            /* libellé hors du nœud (acquis/disponible) */
-            SDL_Color lc=(nd->state==TREE_DONE)?COL_PARCH:COL_DIM;
-            int tx = (cosf(ang)>=0)? x+sz+3 : x-sz-3-text_w(g_font,nd->name);
-            draw_text(ren,g_font,tx,y-7,lc,nd->name);
+        if (g_font_small){                                               /* NOM compact sous la bulle ; le détail au survol */
+            SDL_Color lc = (nd->state==TREE_DONE)?COL_PARCH
+                         : (nd->state==TREE_OPEN)?COL_DIM : (SDL_Color){0x5b,0x56,0x4b,0xff};
+            int lw=text_w(g_font_small,nd->name);
+            draw_text(ren,g_font_small, x-lw/2, y+sz+1, lc, nd->name);
         }
+        /* l'EFFET, le coût et l'état précis viennent du SURVOL (zone de hover) */
+        snprintf(g_tree_hov[i],sizeof g_tree_hov[i], "%s — déverrouille %s · %s · coût %d pts (%s%s)",
+                 nd->name, nd->unlocks, nd->effet, nd->cost, label_tree_state(nd->state),
+                 nd->orphan? ", orpheline : greffe par la population" : "");
+        zone_add((SDL_Rect){x-sz-3,y-sz-3,sz*2+6,sz*2+6}, g_tree_hov[i]);
+        if (nd->faustian && (g_tree_demo<0 || nd->state==TREE_DONE)) g_tree_demo=i;  /* un faustien pour la démo (de préf. acquis) */
     }
     for (int th=0;th<3;th++){                                            /* étiquettes de thème au bord */
-        float a=(th*120.f+60.f)*D2R + TOP;
-        int lx=cx+(int)(cosf(a)*6.15f*ring), ly=cy+(int)(sinf(a)*6.15f*ring);
+        float a=(th*120.f+60.f)*D2R + TOP, rl=R0+4.0f*ring;
+        int lx=cx+(int)(cosf(a)*rl), ly=cy+(int)(sinf(a)*rl);
         draw_text(ren,g_font_big,lx-32,ly-9,tcol[th],tr.theme[th]);
     }
-    char hdr[200];
-    snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   centre = 6 bâtiments de base",
+    if (g_font){                                                         /* hub : le centre */
+        const char *l0="le centre :", *l1="6 bâtiments de base";
+        draw_text(ren,g_font,cx-text_w(g_font,l0)/2,cy-15,COL_DIM,l0);
+        draw_text(ren,g_font,cx-text_w(g_font,l1)/2,cy-1, COL_DIM,l1);
+    }
+    char hdr[220];
+    snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   SURVOLE un nœud pour son effet & son coût",
              w->country[cid].name, tr.points);
     draw_text(ren,g_font_big,18,12,COL_COPPER,hdr);
     draw_text(ren,g_font,18,win_h-40,COL_DIM,
-      "anneau = tier (rayon) · 3 secteurs = thèmes · 3 sous-secteurs = fonctions · cadre rouge = faustien · cadre gris = orphelin");
+      "rond initial = les 1res tech · anneau = tier · 3 secteurs = thèmes · cadre rouge = faustien · cadre gris = orphelin");
     draw_text(ren,g_font,18,win_h-22,COL_DIM,
-      "Savoir (bleu) · Forge (cuivre) · Société (vert)   —   vif = acquis · clair = disponible · sombre = verrouillé");
+      "Savoir (bleu) · Forge (cuivre) · Société (vert)  —  vif = acquis · clair = disponible · sombre = verrouillé");
 }
 
 /* ---- Zones de survol → « un mot, une définition » --------------------- */
@@ -675,6 +695,7 @@ int main(int argc, char **argv) {
     for (size_t i=0; i<sizeof(font_paths)/sizeof(font_paths[0]) && !g_font; i++) {
         g_font     = TTF_OpenFont(font_paths[i], 14);
         g_font_big = TTF_OpenFont(font_paths[i], 18);
+        g_font_small = TTF_OpenFont(font_paths[i], 10);
     }
     if (!g_font) fprintf(stderr, "[scps] police introuvable — panneau sans texte\n");
 
@@ -708,6 +729,7 @@ int main(int argc, char **argv) {
     double     day_accum = 0.0;
     uint32_t   last_ticks = SDL_GetTicks();
     int       selected = -1;
+    bool      show_tree = false;     /* superposition : l'arbre de tech (Tab) */
     bool      dirty    = true;
     bool      running  = true;
     bool      regen    = false;   /* demande de régénération du monde */
@@ -730,7 +752,7 @@ int main(int argc, char **argv) {
     printf("[scps] Génération (graine %u)…\n", seed);
     world_generate(world, &params);
     sim_rebuild(&sim, world);   /* peuple + simule 30 ans (bandeau + panneau) */
-    printf("[scps] Prêt. TAB/1-0=vues  R=regénère  clic=territoire\n");
+    printf("[scps] Prêt. TAB/1-0=vues  A=arbre de tech  R=regénère  clic=territoire\n");
     printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
     printf("       l=terres m=montagnes t=température h=humidité (Maj=baisse)\n");
 
@@ -745,6 +767,10 @@ int main(int argc, char **argv) {
         SDL_RenderClear(ren);
         if (shot_tree && sim.ready && g_font) {
             draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);   /* l'arbre concentrique du pays */
+            if (g_tree_demo>=0){                                              /* démo : un survol (nom + effet) */
+                draw_box(ren, g_tree_x[g_tree_demo]-9, g_tree_y[g_tree_demo]-9, 18,18, COL_PARCH);
+                draw_hover_footer(ren, win_w, win_h, g_tree_x[g_tree_demo], g_tree_y[g_tree_demo]);
+            }
         } else {
             render_map(world, pb.pixels, pb.w, pb.h, &rp, VIEW_COUNTRIES);
             pixbuf_upload(&pb);
@@ -835,6 +861,7 @@ int main(int argc, char **argv) {
                 /* --- Contrôle du TEMPS (§1) : Espace = pause ; +/- = vitesse --- */
                 case SDLK_SPACE:
                     speed = (speed==SPEED_PAUSE) ? SPEED_1 : SPEED_PAUSE; break;
+                case SDLK_a:     show_tree = !show_tree; break;   /* A = l'Arbre de tech concentrique */
                 case SDLK_PLUS: case SDLK_EQUALS: case SDLK_KP_PLUS:
                     if (speed<SPEED_5) speed++;
                     if (speed==SPEED_PAUSE) speed=SPEED_1;
@@ -934,10 +961,14 @@ int main(int argc, char **argv) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
             zone_reset();
             int cid = country_for_panel(world, selected);
-            draw_topbar(ren, win_w, &sim, world, cid, speed);
-            if (selected >= 0)
-                draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
-            draw_hover_footer(ren, win_w, win_h, mx2, my2);
+            if (show_tree) {                                    /* superposition de l'arbre (Tab) */
+                draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
+            } else {
+                draw_topbar(ren, win_w, &sim, world, cid, speed);
+                if (selected >= 0)
+                    draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
+            }
+            draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }
         SDL_RenderPresent(ren);
 
@@ -957,6 +988,7 @@ int main(int argc, char **argv) {
     free(sim.dp); free(sim.rn); free(sim.ai); free(sim.ai_on);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
+    if (g_font_small) TTF_CloseFont(g_font_small);
     TTF_Quit();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

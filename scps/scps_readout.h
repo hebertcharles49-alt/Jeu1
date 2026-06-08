@@ -203,6 +203,7 @@ typedef struct {
     bool        is_base;    /* bâtiment de base (le centre) */
     const char *name;
     const char *unlocks;    /* le bâtiment/capacité déverrouillé */
+    const char *effet;      /* l'EFFET en mots de jeu (ce que la tech fait) */
     int         cost;       /* points de recherche (0 pour les bases) — nombre tangible */
 } TreeNodeReadout;
 typedef struct {

@@ -450,6 +450,29 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
 const char *label_tree_state(TreeState s){
     switch(s){ case TREE_DONE: return "acquis"; case TREE_OPEN: return "disponible"; default: return "verrouillé"; }
 }
+/* L'EFFET d'un nœud, en mots de JEU (lu de son rôle : thème × fonction × faustien)
+ * — jamais un flottant. Le faustien prévient qu'il rapproche la Brèche. */
+static const char *tree_effect(const TechNode *n){
+    if (n->faustian){
+        if (n->func==FN_ARMEE)        return "⚠ puissance brute — monte la charge faustienne (la Brèche approche)";
+        if (n->func==FN_RENFORCEMENT) return "⚠ pouvoir interdit — monte la charge faustienne";
+        return "⚠ faustien — monte la charge ; sans la Société (K), on déréalise";
+    }
+    switch(n->theme){
+        case THM_SAVOIR:
+            if (n->func==FN_PRODUCTION)   return "accélère la recherche (capacité narrative K)";
+            if (n->func==FN_ARMEE)        return "magie de guerre — puissance militaire arcanique";
+            return "arcane durable — fédéralisme & ordre";
+        case THM_FORGE:
+            if (n->func==FN_PRODUCTION)   return "augmente la production économique (le multiplicateur de rendement)";
+            if (n->func==FN_ARMEE)        return "renforce l'armement (puissance militaire)";
+            return "fortifie — durabilité & défense";
+        default: /* THM_SOCIETE */
+            if (n->func==FN_PRODUCTION)   return "croissance, commerce, impôt (la prospérité)";
+            if (n->func==FN_ARMEE)        return "lève et organise les armées";
+            return "consolide l'ordre (K, légitimité, intégration) — métabolise le faustien";
+    }
+}
 void tech_tree_readout(const TechState *ts, unsigned race_access, float population,
                        TechTreeReadout *out){
     if (!out) return;
@@ -468,6 +491,7 @@ void tech_tree_readout(const TechState *ts, unsigned race_access, float populati
         nr->is_base  = tech_is_base((TechId)i);
         nr->name     = n->name;
         nr->unlocks  = n->unlocks;
+        nr->effet    = tree_effect(n);
         nr->cost     = (int)(tech_cost((TechId)i, population) + 0.5f);
         bool done = ts && ts->unlocked[i];
         bool open = ts && tech_can_research(ts, (TechId)i, race_access);
