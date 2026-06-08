@@ -67,8 +67,9 @@ typedef struct {
  * population), et si elle est ALIGNÉE à la direction (sinon elle s'aigrit/complote). */
 typedef struct {
     const char *name;
-    int         part;     /* 0-100 */
-    bool        aligned;  /* true = va dans le sens du régime ; false = aliénée */
+    int         part;          /* 0-100 : part de POUVOIR (poids dans la politique interne) */
+    int         satisfaction;  /* 0-100 : SATISFACTION (contentement vis-à-vis du régime) */
+    bool        aligned;       /* true = va dans le sens du régime ; false = aliénée */
 } FactionGauge;
 /* La sédition d'une politique interne : de la concorde au coup qui couve. */
 typedef enum { SED_CALME, SED_MURMURE, SED_TENDUE, SED_SEDITIEUSE } BandSedition;

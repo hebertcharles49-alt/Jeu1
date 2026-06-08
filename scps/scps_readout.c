@@ -356,11 +356,15 @@ FactionsReadout faction_readout(const World *w, const WorldEconomy *econ, int ci
     EthosFaction dom = faction_effective_distribution(w, econ, cid, wt);  /* base + leviers (§4) */
     fr.dominant = faction_name(dom);
     for (int f = 0; f < FAC_COUNT; f++) {
+        float opp  = faction_opposition((EthosFaction)f, dom);   /* 0..1 idéologique */
+        float grf  = faction_grievance(cid, (EthosFaction)f);    /* 0..1 politique (leviers) */
         fr.faction[f].name = faction_name((EthosFaction)f);
         fr.faction[f].part = iclamp((int)roundf(wt[f] * 100.f), 0, 100);
+        /* SATISFACTION 0-100 : la direction CONTENTE qui pense comme elle ; l'opposition
+         * idéologique et la rancune politique l'aliènent (vert → ambre → rouge). */
+        fr.faction[f].satisfaction = iclamp((int)roundf((1.f - 0.65f*opp - 0.55f*grf) * 100.f), 0, 100);
         /* alignée = peu opposée à la direction ET peu aigrie par la politique. */
-        fr.faction[f].aligned = (faction_opposition((EthosFaction)f, dom) < 0.5f)
-                             && (faction_grievance(cid, (EthosFaction)f) < 0.30f);
+        fr.faction[f].aligned = (opp < 0.5f) && (grf < 0.30f);
     }
     EthosFaction alienated;
     float tension = faction_coup_tension_c(w, econ, cid, &alienated);

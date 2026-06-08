@@ -664,40 +664,39 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
     xb = draw_reading(ren,xb,yB,"Prospérité",r.m_prosperite.value,label_prosp(r.prosperite), band_good(r.prosperite,5,true), hover_prosp());
     (void)xb;
 
-    /* — Rang C : la balance des FACTIONS-ÉTHOS (politique interne, §9) — jauges
-     *   cuivre par éthos ; une faction aliénée (opposée à la direction) vire au rouge. */
+    /* — Rang C : les FACTIONS-ÉTHOS par leur SATISFACTION (la signature, §9). Pastille
+     *   d'identité + % coloré (vert content → ambre tiède → rouge aliéné). PAS de mot
+     *   (ni « mène », ni « Sédition ») : le coup se lit d'une faction ROUGE & PUISSANTE.
+     *   Triées par satisfaction décroissante : l'aliéné saute à droite. */
     {
         FactionsReadout fc = faction_readout(w, s->econ, cid);
         TTF_Font *fs = g_font_small ? g_font_small : g_font;
         int yC=52, xc=12;
-        draw_text(ren, fs, xc, yC+3, COL_DIM, "Factions"); xc += 58;
-        static const char *AB[6]={"Conqu","March","Légis","Gardi","Trans","Commu"};
-        for (int f=0; f<6; f++){
-            SDL_Color col = fc.faction[f].aligned ? COL_COPPER : sense_color(0.12f);
-            draw_text(ren, fs, xc, yC, COL_DIM, AB[f]);
-            int bw = 2 + fc.faction[f].part/3;        /* largeur ∝ part (0-100 → ~0-35) */
-            fill_rect(ren, xc, yC+14, bw, 4, col);
-            char pz[128]; snprintf(pz,sizeof pz, "%s : %d%% de la politique interne%s",
-                                  fc.faction[f].name, fc.faction[f].part,
-                                  fc.faction[f].aligned ? "" : " — ALIÉNÉE (s'oppose à la direction)");
-            zone_add((SDL_Rect){xc-2,yC-2, 40, 22}, pz);
-            xc += 44;
-        }
-        xc += 6;
-        char dz[64]; snprintf(dz,sizeof dz, "%s mène", fc.dominant);
-        draw_text(ren, fs, xc, yC, COL_COPPER, dz);
-        char sz[64]; snprintf(sz,sizeof sz, "Sédition %s (%d)", fc.sedition.word, fc.sedition.value);
-        SDL_Color sc = (fc.sedition.value>=32) ? sense_color(0.10f) : COL_PARCH;
-        draw_text(ren, fs, xc, yC+12, sc, sz);
-        zone_add((SDL_Rect){xc-2,yC-2, 160, 22}, hover_sedition());
-        xc += text_w(fs, sz) + 28;
-        /* La mission décennale en cours (rythme + récompense) — un but lisible. */
-        const Mission *mis = mission_of(s->missions, cid);
-        if (mis){
-            char mz[140]; snprintf(mz,sizeof mz, "Mission : %s%s", mis->text, mis->done?"  (accomplie)":"");
-            draw_text(ren, fs, xc, yC+6, mis->done?COL_COPPER:COL_PARCH, mz);
-            zone_add((SDL_Rect){xc-2,yC-2, text_w(fs,mz)+6, 22},
-                     "Mission décennale : un but tiré de l'état du pays ; l'accomplir verse or + matières.");
+        static const char *AB[6]   = {"Conqu","March","Légis","Gardi","Trans","Commu"};
+        static const SDL_Color FCOL[6] = {
+            {0xc0,0x55,0x4a,0xff}, {0xc9,0xa2,0x4b,0xff}, {0x5f,0x8a,0xb0,0xff},
+            {0x7a,0x5c,0x99,0xff}, {0x8a,0x3a,0x6a,0xff}, {0x6f,0x9a,0x5a,0xff},
+        };
+        draw_text(ren, fs, xc, yC+2, COL_DIM, "Factions · satisfaction"); xc += 150;
+        int ord[6]={0,1,2,3,4,5};
+        for (int i=0;i<6;i++) for (int j=i+1;j<6;j++)
+            if (fc.faction[ord[j]].satisfaction > fc.faction[ord[i]].satisfaction){ int t=ord[i];ord[i]=ord[j];ord[j]=t; }
+        static char fhov[6][160];
+        for (int k=0;k<6;k++){
+            int f=ord[k];
+            fill_rect(ren, xc, yC+2, 9, 9, FCOL[f]);              /* pastille d'identité */
+            draw_box (ren, xc, yC+2, 9, 9, COL_DIM);
+            draw_text(ren, fs, xc+13, yC, COL_DIM, AB[f]);
+            int aw = text_w(fs, AB[f]);
+            char pz[8]; snprintf(pz,sizeof pz, "%d%%", fc.faction[f].satisfaction);
+            draw_text(ren, fs, xc+13+aw+4, yC, sense_color(fc.faction[f].satisfaction/100.f), pz);
+            int total = 13+aw+4+text_w(fs,pz);
+            bool coup = (!fc.faction[f].aligned && fc.faction[f].part >= 25);
+            snprintf(fhov[k],sizeof fhov[k], "%s — satisfaction %d%% · part de pouvoir %d%%%s",
+                     fc.faction[f].name, fc.faction[f].satisfaction, fc.faction[f].part,
+                     coup ? " · ALIÉNÉE & PUISSANTE : le coup couve." : "");
+            zone_add((SDL_Rect){xc-2,yC-2, total+6, 20}, fhov[k]);
+            xc += total + 14;
         }
     }
 
