@@ -91,17 +91,22 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
 
 /* Besoins par tête et par strate (unités/100 hab/tick). Le grain (vivres)
  * est universel ; le reste monte en gamme avec la classe. */
+/* §3 — table REVISITÉE. La case RES_WINE = palier MORAL (servi bière/vin selon
+ * la préférence) ; la case RES_PRECIOUS_WARE = palier STATUT (orfèvrerie/étoffe
+ * précieuse). On dégonfle les biens chroniquement rares (étoffe, vin, orfèvrerie,
+ * sel surproduit) et on dote ENFIN le commun d'un palier moral (bière). */
 static const float NEED[CLASS_COUNT][RES_COUNT] = {
     [CLASS_LABORER] = {
-        [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.30f, [RES_CLOTH]=0.20f,
+        [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.30f, [RES_CLOTH]=0.14f,
+        [RES_WINE]=0.15f,   /* palier MORAL du commun (routé bière/vin par préférence, §2) */
     },
     [CLASS_BOURGEOIS] = {
-        [RES_GRAIN]=1.00f, [RES_CLOTH]=0.50f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
-        [RES_SALT]=0.20f, [RES_REMEDE]=0.15f,   /* santé urbaine (apothicaire) */
+        [RES_GRAIN]=1.00f, [RES_CLOTH]=0.35f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
+        [RES_SALT]=0.12f, [RES_REMEDE]=0.15f,   /* santé urbaine (apothicaire) */
     },
     [CLASS_ELITE] = {
-        [RES_GRAIN]=1.00f, [RES_WINE]=0.70f, [RES_PAPER]=0.35f, [RES_FUR]=0.30f,
-        [RES_PRECIOUS_WARE]=0.90f,   /* palier STATUT : servi en orfèvrerie OU étoffe selon la culture */
+        [RES_GRAIN]=1.00f, [RES_WINE]=0.55f, [RES_PAPER]=0.35f, [RES_FUR]=0.30f,
+        [RES_PRECIOUS_WARE]=0.70f,   /* palier STATUT : servi en orfèvrerie OU étoffe selon la culture */
     },
 };
 
@@ -627,12 +632,24 @@ void econ_tick(WorldEconomy *e, float dt) {
         }
         re->over_tax = clampf(over_tax[CLASS_LABORER], 0.f, 1.f);   /* grief des laboureurs → révolte */
 
-        /* ---- 4. DEMANDE de consommation par strate --------------------- */
+        /* ---- 4. DEMANDE de consommation par strate ---------------------
+         * §2 (CORRECTIF D'INTÉGRATION) : la demande des paliers VARIANTES suit la
+         * PRÉFÉRENCE culturelle, EXACTEMENT comme la satisfaction (étape 5). Le
+         * besoin inscrit dans la case canonique (RES_WINE = palier moral,
+         * RES_PRECIOUS_WARE = palier statut) est ROUTÉ vers la variante préférée
+         * (bière/vin, orfèvrerie/étoffe précieuse). Sans cela, bière & étoffe
+         * précieuse restent à demande nulle (prix planché, jamais tirées par le
+         * marché) tandis que vin & orfèvrerie portent TOUTE la demande (prix
+         * plafond, pénurie structurelle) → l'élite ne reçoit pas son statut → coup. */
         for (int c=0;c<CLASS_COUNT;c++) {
             float units=re->strata[c].pop/100.f;   /* besoins exprimés /100 hab */
             for (int r=0;r<RES_COUNT;r++) {
                 float need=NEED[c][r];
-                if (need>0.f) demand[r]+=need*units;
+                if (need<=0.f) continue;
+                Resource tgt=(Resource)r;
+                if      (r==RES_WINE)          tgt=preferred_drink(&re->culture);
+                else if (r==RES_PRECIOUS_WARE) tgt=preferred_luxe(&re->culture);
+                demand[tgt]+=need*units;
             }
         }
 
