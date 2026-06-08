@@ -802,6 +802,44 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         y = fy + fr + 8;
     }
 
+    /* POPULATION — barre EMPILÉE des classes + nom + chiffre ; le qui-fait-quoi et
+     * le penchant de faction vont au SURVOL (rien de plus en surface). */
+    {
+        int reg = (pid>=0 && pid<w->n_provinces) ? w->province[pid].region : -1;
+        if (reg>=0 && reg<econ->n_regions) {
+            ui_section(ren, x, &y, "POPULATION");
+            const RegionEconomy *re2=&econ->region[reg];
+            long cp[3] = { (long)re2->strata[CLASS_LABORER].pop,
+                           (long)re2->strata[CLASS_BOURGEOIS].pop,
+                           (long)re2->strata[CLASS_ELITE].pop };
+            long tot=cp[0]+cp[1]+cp[2]; if(tot<1) tot=1;
+            const SDL_Color cc[3]={ SLICE_PAL[0], SLICE_PAL[1], SLICE_PAL[3] };
+            const char *chov[3]={
+                "Laboureurs — aux terres et à l'armée. Penchant de faction : Communautaire.",
+                "Artisans (bourgeois) — aux ateliers. Penchant de faction : Marchand.",
+                "Noblesse — officiels et armée. Penchant de faction : Conquérant · Légiste." };
+            /* la barre empilée */
+            int bh=12, acc=0;
+            for (int i=0;i<3;i++){
+                int segw = (i==2) ? (rw-acc) : (int)((float)cp[i]/tot*rw);
+                if (segw<0) segw=0;
+                fill_rect(ren, x+acc, y, segw, bh, cc[i]);
+                zone_add((SDL_Rect){x+acc,y,segw,bh}, chov[i]);
+                acc += segw;
+            }
+            draw_box(ren, x, y, rw, bh, COL_DIM);
+            y += bh+5;
+            /* la légende : pastille + nom + chiffre, par classe. */
+            for (int i=0;i<3;i++){
+                fill_rect(ren, x, y+3, 9,9, cc[i]);
+                char l[64]; snprintf(l,sizeof l, "%s %ld", labor_class_word((SocialClass)i), cp[i]);
+                draw_text(ren, g_font, x+16, y, COL_PARCH, l);
+                zone_add((SDL_Rect){x-2,y-2,rw,18}, chov[i]);
+                y += 18;
+            }
+        }
+    }
+
     ui_section(ren, x, &y, "ÉCONOMIE");
     ui_row(ren,x,&y,rw,"Vocation", p.vocation, COL_PARCH,
            "Ce que la province fait de mieux ; sa place dans l'économie du royaume.");
