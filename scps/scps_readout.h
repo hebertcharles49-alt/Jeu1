@@ -63,6 +63,16 @@ typedef struct {
     const char *hover;   /* la définition du concept — jamais sa valeur */
 } MetricReadout;
 
+/* Une jauge de faction-éthos : son MOT, sa PART (0-100, tangible comme une part de
+ * population), et si elle est ALIGNÉE à la direction (sinon elle s'aigrit/complote). */
+typedef struct {
+    const char *name;
+    int         part;     /* 0-100 */
+    bool        aligned;  /* true = va dans le sens du régime ; false = aliénée */
+} FactionGauge;
+/* La sédition d'une politique interne : de la concorde au coup qui couve. */
+typedef enum { SED_CALME, SED_MURMURE, SED_TENDUE, SED_SEDITIEUSE } BandSedition;
+
 /* ===================================================================== */
 /* READOUTS — ce que le renderer reçoit (bandes + chaînes, AUCUN float)   */
 /* ===================================================================== */
@@ -81,6 +91,16 @@ typedef struct {
     MetricReadout m_stabilite, m_prosperite, m_legitimite, m_cohesion, m_savoir;
     int           influence;    /* 0-100 — réputation diplomatique (posée par le statecraft) */
 } CountryReadout;
+
+/* LA BALANCE DES FACTIONS-ÉTHOS (la politique interne) — six jauges (part 0-100, un
+ * nombre tangible comme une part de population) + alignement à la direction. La
+ * dominante EST l'éthos effectif ; la sédition jauge la faction forte aliénée. Lecture
+ * À PART (elle a besoin de l'économie, que le bandeau du royaume n'a pas). */
+typedef struct {
+    FactionGauge  faction[6];
+    const char   *dominant;     /* mot : la faction qui mène (la direction effective) */
+    MetricReadout sedition;     /* 0-100 : tension de coup (faction forte opposée à la direction) */
+} FactionsReadout;
 
 typedef struct {
     BandHumeur humeur;
@@ -194,6 +214,9 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
                                  const WorldProsperity *wp, const WorldLegitimacy *wl,
                                  int province_id);
 
+/* La balance des factions-éthos d'un pays (politique interne) — mots + parts 0-100. */
+FactionsReadout faction_readout(const World *w, const WorldEconomy *econ, int cid);
+
 /* ===================================================================== */
 /* ARBRE DE TECH — la membrane de l'arbre CONCENTRIQUE (mots + nombres)    */
 /* ===================================================================== */
@@ -238,6 +261,8 @@ const char *label_tree_state(TreeState s);   /* "verrouillé"/"disponible"/"acqu
 const char *label_stab(BandStab b);        const char *hover_stab(void);
 const char *label_assise(BandAssise b);    const char *hover_assise(void);
 const char *label_legit(BandLegit b);      const char *hover_legit(void);
+const char *label_sedition(BandSedition b);const char *hover_sedition(void);
+BandSedition band_sedition(float coup_tension_0_1);
 const char *label_concorde(BandConcorde b);const char *hover_concorde(void);
 const char *label_prosp(BandProsp b);      const char *hover_prosp(void);
 const char *label_savoir(BandSavoir b);    const char *hover_savoir(void);

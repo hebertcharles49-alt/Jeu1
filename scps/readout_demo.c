@@ -99,7 +99,11 @@ int main(void) {
     COVER(label_lignee,   hover_lignee,   6);
     COVER(label_agitation,hover_agitation,4);
     COVER(label_foi,      hover_foi,      3);
+    COVER(label_sedition, hover_sedition, 4);
     #undef COVER
+    /* La sédition (politique des factions) projette la tension de coup en bande. */
+    ok("tension nulle → Concorde ; tension haute → Séditieuse",
+       band_sedition(0.02f)==SED_CALME && band_sedition(0.40f)==SED_SEDITIEUSE);
     ok("chaque bande a un mot ET une définition non vides", all_labeled);
 
     /* ---- 3. Le vocabulaire d'allégeance (province) lit la structure ------ */

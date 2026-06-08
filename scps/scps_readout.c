@@ -11,6 +11,7 @@
  * de la légitimité (Partie 1/1.5).
  */
 #include "scps_readout.h"
+#include "scps_factions.h"   /* la balance des factions-éthos (§9) */
 #include <stddef.h>   /* NULL */
 #include <string.h>   /* memset */
 #include <math.h>     /* roundf */
@@ -231,7 +232,14 @@ LBL(label_lignee,   BandLignee,   "Du même sang","Cousine","Sœur lointaine","�
                                   "Hérétique proche","Inassimilable")
 LBL(label_agitation,BandAgitation,"Calme","Frémissante","Agitée","Insurgée")
 LBL(label_foi,      BandFoi,      "Dévote","Tiède","Hérétique")
+LBL(label_sedition, BandSedition, "Concorde","Murmures","Tendue","Séditieuse")
 #undef LBL
+BandSedition band_sedition(float t){
+    if (t < 0.10f) return SED_CALME;
+    if (t < 0.20f) return SED_MURMURE;
+    if (t < 0.32f) return SED_TENDUE;
+    return SED_SEDITIEUSE;
+}
 
 /* ===================================================================== */
 /* LEXIQUE — hovers (la DÉFINITION, jamais la valeur)                     */
@@ -266,6 +274,8 @@ const char *hover_agitation(void){ return
     "La colère qui monte dans la province ; soutenue, elle vire à la révolte — qu'apaisent la stabilité du royaume, la garnison et la légitimité."; }
 const char *hover_foi(void){ return
     "La ferveur de la province envers le culte du trône ; dévote, elle nourrit la légitimité sacrée — hérétique, elle couve le schisme."; }
+const char *hover_sedition(void){ return
+    "La tension d'une faction forte dont les valeurs s'opposent à la direction du régime ; séditieuse, elle complote le coup d'État pour imposer son éthos."; }
 
 /* ===================================================================== */
 /* ENVELOPPES SIM — lisent les sorties STOCKÉES, jamais scps_core         */
@@ -335,6 +345,27 @@ CountryReadout country_readout(const WorldProsperity *wp, const TechState *ts,
         default:                 r.augure = NULL;
     }
     return r;
+}
+
+/* ===================================================================== */
+/* §9 — LA BALANCE DES FACTIONS-ÉTHOS (politique interne, mots + 0-100)    */
+/* ===================================================================== */
+FactionsReadout faction_readout(const World *w, const WorldEconomy *econ, int cid) {
+    FactionsReadout fr; memset(&fr, 0, sizeof fr);
+    float wt[FAC_COUNT];
+    EthosFaction dom = country_faction_weights(w, econ, cid, wt);
+    fr.dominant = faction_name(dom);
+    for (int f = 0; f < FAC_COUNT; f++) {
+        fr.faction[f].name = faction_name((EthosFaction)f);
+        fr.faction[f].part = iclamp((int)roundf(wt[f] * 100.f), 0, 100);
+        /* alignée = peu opposée à la direction dominante (sinon elle s'aigrit). */
+        fr.faction[f].aligned = (faction_opposition((EthosFaction)f, dom) < 0.5f);
+    }
+    EthosFaction alienated;
+    float tension = faction_coup_tension(wt, &alienated);
+    fr.sedition = mk_metric(iclamp((int)roundf(tension * 200.f), 0, 100),  /* tension ~0..0.5 → 0..100 */
+                            label_sedition(band_sedition(tension)), hover_sedition());
+    return fr;
 }
 
 ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,

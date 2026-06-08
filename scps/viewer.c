@@ -494,7 +494,7 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
                         GameSpeed sp) {
     CountryReadout r = country_readout(s->wp, s->ts, w, cid);
     r.influence = statecraft_influence(s->sc, cid);
-    int bh = 52;
+    int bh = 74;
     fill_rect(ren, 0,0, win_w, bh, COL_PANEL);
     fill_rect(ren, 0,bh, win_w, 2, COL_COPPER);
 
@@ -542,6 +542,34 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
                       "La réputation diplomatique : prospérité, taille et accords tenus la nourrissent ; elle plafonne les diplomates en mission.");
     if (r.presage != PG_CALME)
         draw_reading(ren,xb,yB,"Présage",   -1,                  label_presage(r.presage),  band_good(r.presage,4,false),   hover_presage());
+
+    /* — Rang C : la balance des FACTIONS-ÉTHOS (politique interne, §9) — jauges
+     *   cuivre par éthos ; une faction aliénée (opposée à la direction) vire au rouge. */
+    {
+        FactionsReadout fc = faction_readout(w, s->econ, cid);
+        TTF_Font *fs = g_font_small ? g_font_small : g_font;
+        int yC=52, xc=12;
+        draw_text(ren, fs, xc, yC+3, COL_DIM, "Factions"); xc += 58;
+        static const char *AB[6]={"Conqu","March","Légis","Gardi","Trans","Commu"};
+        for (int f=0; f<6; f++){
+            SDL_Color col = fc.faction[f].aligned ? COL_COPPER : sense_color(0.12f);
+            draw_text(ren, fs, xc, yC, COL_DIM, AB[f]);
+            int bw = 2 + fc.faction[f].part/3;        /* largeur ∝ part (0-100 → ~0-35) */
+            fill_rect(ren, xc, yC+14, bw, 4, col);
+            char pz[128]; snprintf(pz,sizeof pz, "%s : %d%% de la politique interne%s",
+                                  fc.faction[f].name, fc.faction[f].part,
+                                  fc.faction[f].aligned ? "" : " — ALIÉNÉE (s'oppose à la direction)");
+            zone_add((SDL_Rect){xc-2,yC-2, 40, 22}, pz);
+            xc += 44;
+        }
+        xc += 6;
+        char dz[64]; snprintf(dz,sizeof dz, "%s mène", fc.dominant);
+        draw_text(ren, fs, xc, yC, COL_COPPER, dz);
+        char sz[64]; snprintf(sz,sizeof sz, "Sédition %s (%d)", fc.sedition.word, fc.sedition.value);
+        SDL_Color sc = (fc.sedition.value>=32) ? sense_color(0.10f) : COL_PARCH;
+        draw_text(ren, fs, xc, yC+12, sc, sz);
+        zone_add((SDL_Rect){xc-2,yC-2, 160, 22}, hover_sedition());
+    }
 
     if (r.augure) {  /* ligne d'alerte / augure sous la topbar (réemploi machinerie IA) */
         fill_rect(ren, 0,bh+2, win_w, 20, COL_PANEL2);
