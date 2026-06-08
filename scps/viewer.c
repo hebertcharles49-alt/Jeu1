@@ -367,6 +367,14 @@ static const char *zone_hit(int mx,int my){
         if (mx>=r->x && mx<r->x+r->w && my>=r->y && my<r->y+r->h) return g_zones[i].def; }
     return NULL;
 }
+/* SLOTS DE BÂTIMENT cliquables (§4 panneau) : le panneau les pose chaque frame,
+ * la boucle d'évènements les teste au clic (vide → bâtir l'édifice). */
+typedef struct { SDL_Rect r; int reg; int edifice; } BuildSlot;
+static BuildSlot g_bslots[8]; static int g_nbslots;
+static void bslot_reset(void){ g_nbslots=0; }
+static void bslot_add(SDL_Rect r, int reg, int edifice){
+    if (g_nbslots<8){ g_bslots[g_nbslots].r=r; g_bslots[g_nbslots].reg=reg; g_bslots[g_nbslots].edifice=edifice; g_nbslots++; }
+}
 
 /* ---- Sim branchée (snapshot de N ticks, déterministe par graine) ------ */
 typedef struct {
@@ -798,7 +806,11 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
             draw_face(ren, x+fr + i*(2*fr+gap), fy, fr, (float)i/(nf-1), i==lit);
         char nb[16]; snprintf(nb,sizeof nb,"%d", p.m_humeur.value);
         draw_text(ren, g_font, x + nf*(2*fr+gap) + 6, y, sense_color(moodv), nb);
-        zone_add((SDL_Rect){x-2,y-2,rw,2*fr+4}, hover_humeur());
+        static char hh[200];
+        snprintf(hh,sizeof hh,
+                 "Humeur %d/100 — l'allégeance ressentie (légitimité). Agitation %d/100 : ce qui la mine "
+                 "(légitimité basse, coercition, tension de diversité).", p.m_humeur.value, p.agitation.value);
+        zone_add((SDL_Rect){x-2,y-2,rw,2*fr+4}, hh);
         y = fy + fr + 8;
     }
 
@@ -873,43 +885,61 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         y += 4;
     }
 
-    ui_section(ren, x, &y, "ALLÉGEANCE");
-    ui_row(ren,x,&y,rw,"Lignée", label_lignee(p.lignee), band_good(p.lignee,6,false), hover_lignee());
-    ui_row(ren,x,&y,rw,"Foi", label_foi(p.foi), band_good(p.foi,3,false), hover_foi());
-    snprintf(line,sizeof line, "%d", p.agitation.value);
-    ui_row(ren,x,&y,rw,"Agitation", line, band_good(band_agitation(p.agitation.value),4,false), hover_agitation());
+    /* Le seuil de révolte reste signalé (gameplay) ; lignée/foi vivent dans les
+     * camemberts, l'agitation dans le survol de l'humeur — surface non dense. */
     if (p.seuil_revolte) {
-        draw_text(ren, g_font, x, y, sense_color(0.06f), "⚑ Au bord de la révolte");
+        snprintf(line,sizeof line, "⚑ Au bord de la révolte (agitation %d)", p.agitation.value);
+        draw_text(ren, g_font, x, y, sense_color(0.06f), line);
         zone_add((SDL_Rect){x-2,y-2,rw,19},
-                 "L'agitation a franchi le seuil : maintenue, elle vire à la révolte ouverte.");
-        y += 20;
+                 "L'agitation a franchi le seuil : maintenue, elle vire à la révolte ouverte. "
+                 "Lignée, foi et moteurs d'humeur : voir les camemberts et le survol des visages.");
+        y += 22;
     }
 
-    /* BÂTIMENTS — chaque âme consomme 1 logement + 1 service : on affiche les places
-     * ENCORE LIBRES (capacité − pop), pas un score. Plus deux SLOTS RÉSERVÉS :
-     * Défense (palissade→citadelle) et Spécialisation (port/mine/atelier). */
+    /* BÂTIMENTS — une grille 6 + 2 : 6 emplacements ordinaires + 2 SPÉCIAUX
+     * (optimisation · défense), visuellement distincts (liseré cuivre). Survol =
+     * l'effet (si bâti) ou ce qu'on peut y bâtir. PAS de bouton « Bâtir » : on
+     * clique un slot (vide → bâtir ; plein → améliorer/remplacer). */
     ui_section(ren, x, &y, "BÂTIMENTS");
-    if (p.logements_libres>=0) snprintf(line,sizeof line, "%ld libres / %ld", p.logements_libres, p.logements_cap);
-    else                       snprintf(line,sizeof line, "complet · manque %ld", -p.logements_libres);
-    ui_row(ren,x,&y,rw,"Logements", line, p.logements_libres>=0?COL_PARCH:sense_color(0.10f),
-           "Places d'habitat encore libres (capacité bâtie − population). Saturé = bâtir greniers/aqueducs pour loger la croissance.");
-    if (p.services_libres>=0) snprintf(line,sizeof line, "%ld libres / %ld", p.services_libres, p.services_cap);
-    else                      snprintf(line,sizeof line, "sous-équipé · manque %ld", -p.services_libres);
-    ui_row(ren,x,&y,rw,"Services", line, p.services_libres>=0?COL_PARCH:sense_color(0.10f),
-           "Services encore disponibles (capacité bâtie − population). Sous-équipé = bâtir tribunal/temple/bibliothèque.");
-    ui_row(ren,x,&y,rw,"Défense", p.defense,
-           (p.defense[0]=='a')?COL_DIM:COL_COPPER, p.defense_hover);
-    ui_row(ren,x,&y,rw,"Spécialisation", p.specialisation, COL_COPPER, p.specialisation_hover);
+    {
+        int reg = (pid>=0 && pid<w->n_provinces) ? w->province[pid].region : -1;
+        ProvBuild b; memset(&b,0,sizeof b);
+        int nbld=0;
+        if (reg>=0 && reg<econ->n_regions){ b=econ->region[reg].build; nbld=econ->region[reg].n_bld; }
+        bool opt_built = (nbld>0);
+        struct { const char *name,*abbr,*eff,*todo; float lvl; bool special; int edi; } S[8] = {
+            {"Ordre","Or",  "monte la capacité du royaume (K)",       "Tribunal : ordre & administration",            b.K_inst,  false, EDI_TRIBUNAL},
+            {"Vivres","Vi", "loge et nourrit la croissance",         "Grenier : nourrir & loger",                    b.food_cap,false, EDI_GRENIER},
+            {"Foi","Fo",    "apaise l'agitation, soutient la légitimité","Temple : apaiser & légitimer",              b.faith,   false, EDI_TEMPLE},
+            {"Savoir","Sa", "accélère la recherche locale",          "Bibliothèque : hâter le savoir",               b.savoir,  false, EDI_BIBLIOTHEQUE},
+            {"Marché","Ma", "capte la prospérité locale (PE)",       "Marché : capter la prospérité",                b.PE_infra,false, EDI_MARCHE},
+            {"Ouvert.","Ov","perméabilité aux échanges",             "Port : perméer aux échanges",                  b.P_open,  false, EDI_PORT},
+            {"Optim.","Op", p.specialisation,                        "Entrepôt : optimiser la production locale",    opt_built?1.f:0.f, true, EDI_ENTREPOT},
+            {"Défense","Df",p.defense,                               "fortifier : garnison → forteresse → citadelle",b.H_coerc, true, EDI_GARNISON},
+        };
+        int sw=30, sg=(rw-4*sw)/3, sy0=y;
+        static char bhov[8][192];
+        for (int i=0;i<8;i++){
+            int col=i%4, row=i/4, sx=x+col*(sw+sg), sy=sy0+row*(sw+8);
+            bool built = S[i].lvl > 0.3f;
+            SDL_Color fc = S[i].special ? COL_COPPER : SLICE_PAL[i%6];
+            fill_rect(ren, sx, sy, sw, sw, built ? fc : COL_PANEL2);
+            draw_box(ren, sx, sy, sw, sw, COL_DIM);
+            if (S[i].special) draw_box(ren, sx-1, sy-1, sw+2, sw+2, COL_COPPER);  /* liseré distinct */
+            int aw=text_w(g_font_small, S[i].abbr);
+            draw_text(ren, g_font_small, sx+(sw-aw)/2, sy+sw/2-7, built?COL_PANEL:COL_DIM, S[i].abbr);
+            if (built) snprintf(bhov[i],sizeof bhov[i],
+                       "%s — bâti : %s. Clic : améliorer ou remplacer.", S[i].name, S[i].eff?S[i].eff:"—");
+            else       snprintf(bhov[i],sizeof bhov[i],
+                       "%s — vide. À bâtir : %s. Clic : bâtir (payé au marché, construit en jours).", S[i].name, S[i].todo);
+            zone_add((SDL_Rect){sx,sy,sw,sw}, bhov[i]);
+            if (reg>=0) bslot_add((SDL_Rect){sx,sy,sw,sw}, reg, S[i].edi);   /* cliquable */
+        }
+        y = sy0 + 2*(sw+8) + 4;
+    }
 
-    /* ACTIONS (§4) — tout passe par la couche d'agency, en JOURS. Le survol dit
-     * le coût. Sur une minorité restive : DEUX chemins distincts (réprimer vs intégrer). */
-    ui_section(ren, x, &y, "ACTIONS");
-    draw_text(ren, g_font, x, y, COL_PARCH, "▸ Bâtir  [B]");
-    zone_add((SDL_Rect){x-2,y-2,rw,19},
-             "Met une construction en file (couche d'agency) : rien d'instantané, tout en jours ; "
-             "coûte des matériaux (prix de marché si le stock manque). [B] file un Tribunal.");
-    y += 20;
     if (restive) {
+        ui_section(ren, x, &y, "ACTIONS");
         draw_text(ren, g_font, x, y, sense_color(0.30f), "▸ Réprimer (la poigne)");
         zone_add((SDL_Rect){x-2,y-2,rw,19},
                  "Réprimer : calme immédiat de l'agitation — MAIS la légitimité du groupe est rongée "
@@ -1227,7 +1257,22 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
-                    /* Sélectionner la province au clic */
+                    /* §4 panneau : un clic sur un SLOT de bâtiment bâtit l'édifice
+                     * (payé au marché, en jours) — pas de bouton « Bâtir ». */
+                    int hit=-1;
+                    for (int i=0;i<g_nbslots;i++){ SDL_Rect *r=&g_bslots[i].r;
+                        if (ev.button.x>=r->x && ev.button.x<r->x+r->w &&
+                            ev.button.y>=r->y && ev.button.y<r->y+r->h){ hit=i; break; } }
+                    if (hit>=0){
+                        if (sim.ready && agency_build(sim.ag, sim.econ, g_bslots[hit].reg, g_bslots[hit].edifice))
+                            printf("\n[scps] Bâtir %s (région %d) — payé au marché, construit en jours.\n",
+                                   edifice_name(g_bslots[hit].edifice), g_bslots[hit].reg);
+                        else
+                            printf("\n[scps] Bâtir : trésor insuffisant pour les matériaux.\n");
+                        dirty = true;
+                        break;
+                    }
+                    /* Sinon : sélectionner la province au clic */
                     int cx = (int)(ev.button.x / cam.scale + cam.ox);
                     int cy = (int)(ev.button.y / cam.scale + cam.oy);
                     if (cx>=0&&cx<SCPS_W&&cy>=0&&cy<SCPS_H) {
@@ -1366,7 +1411,7 @@ int main(int argc, char **argv) {
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
-            zone_reset();
+            zone_reset(); bslot_reset();
             int cid = country_for_panel(world, selected);
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
