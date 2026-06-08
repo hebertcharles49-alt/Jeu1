@@ -143,9 +143,11 @@ static inline Resource preferred_luxe(const PopCulture *c){
     return (c->subsistance < 5.f) ? RES_PRECIOUS_WARE : RES_PRECIOUS_CLOTH;
 }
 
-#define TAX_RATE     0.15f   /* part de la valeur produite captée par les élites */
+#define TAX_RATE     0.20f   /* part de la valeur produite captée par les élites (RENTE) —
+                              * relevée 0.15→0.20 : re-dote l'élite du monde LEAN (pauvre en
+                              * montagnes) pour qu'elle s'offre son statut → moins de coups. */
 #define WAGE_SHARE   0.55f   /* part de la valeur → salaires (laborers) */
-/* le reste (1 - TAX - WAGE) = profit bourgeois */
+/* le reste (1 - TAX - WAGE) = profit bourgeois (résidu 0.25 — reste sain) */
 #define TECH_RATE    0.010f  /* conversion richesse élite → tech */
 #define PRICE_INERTIA 0.65f  /* lissage du prix (0=instantané,1=figé) */
 #define EPS          1e-4f

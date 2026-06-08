@@ -98,6 +98,13 @@ MAPSHOT_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 mapshot: $(MAPSHOT_OBJS)
 	$(CC) $(MAPSHOT_OBJS) -o $@ -lm
 
+# ---- Diagnostic éco headless : satisfaction par strate & prix (réglage TAX_RATE) -
+ECON_SCAN_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_scan.o
+econ_scan: $(ECON_SCAN_OBJS)
+	$(CC) $(ECON_SCAN_OBJS) -o $@ -lm
+
 # ---- Planche-contact de 5 mondes (montage.bmp) ---------------------------
 SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_batch.o
