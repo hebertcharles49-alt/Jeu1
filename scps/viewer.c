@@ -443,6 +443,14 @@ static void modebtn_reset(void){ g_nmodebtns=0; }
 static void modebtn_add(SDL_Rect r, int mode){
     if (g_nmodebtns<6){ g_modebtns[g_nmodebtns].r=r; g_modebtns[g_nmodebtns].mode=mode; g_nmodebtns++; }
 }
+/* §1 — Le bandeau est un SOMMAIRE : chaque ressource OUVRE son système (clic). */
+enum { SYS_FINANCES=0, SYS_SUBSISTANCE, SYS_CHAINES, SYS_TECH, SYS_DIPLO };
+typedef struct { SDL_Rect r; int sys; } TopBtn;
+static TopBtn g_topbtns[8]; static int g_ntopbtns;
+static void topbtn_reset(void){ g_ntopbtns=0; }
+static void topbtn_add(SDL_Rect r, int sys){
+    if (g_ntopbtns<8){ g_topbtns[g_ntopbtns].r=r; g_topbtns[g_ntopbtns].sys=sys; g_ntopbtns++; }
+}
 /* Teintes diégétiques par culture (éthos) et par foi (branche) — le viewer les
  * calcule, le renderer les blende (membrane : pas de flottant SCPS au rendu). */
 static uint32_t ethos_tint(int e){
@@ -710,21 +718,27 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
 
     /* — Rang A : DÉPENSABLE | ACCUMULABLE (clusters séparés) · temps/âge/vitesse (droite).
      *   Le bandeau est un SOMMAIRE : chaque ressource ouvre son système (clic). — */
-    int x=12, yA=6;
-    /* Dépensable : Or · Nourriture · Matériaux (stock + flux +N/j). */
-    x = draw_res(ren,x,yA, lres_name(LR_GOLD),      s->labor->stock[LR_GOLD],      (float)s->labor->flow[LR_GOLD],
+    int x=12, yA=6, x0;
+    /* Dépensable : Or · Nourriture · Matériaux (stock + flux +N/j) — chaque ressource
+     * est une PORTE : un clic ouvre le menu de son système. */
+    x0=x; x = draw_res(ren,x,yA, lres_name(LR_GOLD),      s->labor->stock[LR_GOLD],      (float)s->labor->flow[LR_GOLD],
                  "Or en caisse (clic → Finances : revenus, commerce, taxation réglable). Taxes + surplus vendu au marché.");
-    x = draw_res(ren,x,yA, lres_name(LR_FOOD),      s->labor->stock[LR_FOOD],      (float)s->labor->flow[LR_FOOD],
+    topbtn_add((SDL_Rect){x0-3,yA-2,x-x0,19}, SYS_FINANCES);
+    x0=x; x = draw_res(ren,x,yA, lres_name(LR_FOOD),      s->labor->stock[LR_FOOD],      (float)s->labor->flow[LR_FOOD],
                  "Vivres (clic → Subsistance & démographie). La famine stoppe la croissance de la population.");
-    x = draw_res(ren,x,yA, lres_name(LR_MATERIALS), s->labor->stock[LR_MATERIALS], (float)s->labor->flow[LR_MATERIALS],
+    topbtn_add((SDL_Rect){x0-3,yA-2,x-x0,19}, SYS_SUBSISTANCE);
+    x0=x; x = draw_res(ren,x,yA, lres_name(LR_MATERIALS), s->labor->stock[LR_MATERIALS], (float)s->labor->flow[LR_MATERIALS],
                  "Matériaux (clic → Chaînes de production & stock du marché). Bâtir, coloniser et armer en consomment.");
+    topbtn_add((SDL_Rect){x0-3,yA-2,x-x0,19}, SYS_CHAINES);
     x = topbar_sep(ren, x, yA);
-    /* Accumulable : Savoir (points de recherche) · Influence — stock + flux. */
+    /* Accumulable : Savoir (clic → l'Arbre de tech, qui EXISTE) · Influence. */
     float ppop = ai_country_population(w, s->econ, cid);
-    x = draw_res(ren,x,yA, "Savoir",    (long)r.m_savoir.value, ai_research_income(&s->ts[cid], ppop),
+    x0=x; x = draw_res(ren,x,yA, "Savoir",    (long)r.m_savoir.value, ai_research_income(&s->ts[cid], ppop),
                  "Savoir — le niveau de lumière du royaume 0-100 (clic → Arbre de tech) ; le flux est la recherche que la population produit par jour.");
-    x = draw_res(ren,x,yA, "Influence", (long)statecraft_influence(s->sc,cid), statecraft_influence_flux(s->sc,s->econ,s->wp,cid),
+    topbtn_add((SDL_Rect){x0-3,yA-2,x-x0,19}, SYS_TECH);
+    x0=x; x = draw_res(ren,x,yA, "Influence", (long)statecraft_influence(s->sc,cid), statecraft_influence_flux(s->sc,s->econ,s->wp,cid),
                  "Influence diplomatique (clic → Diplomatie). Prospérité + taille + accords tenus la nourrissent ; elle plafonne les diplomates.");
+    topbtn_add((SDL_Rect){x0-3,yA-2,x-x0,19}, SYS_DIPLO);
     /* droite : date · barre 250 ans · âge · VITESSE (Espace = pause, +/-) */
     char date[48]; snprintf(date,sizeof date, "An %d / %d", s->year, GAME_YEARS);
     const char *age = (s->ev->ages.last_dawned>=0) ? age_name((AgeId)s->ev->ages.last_dawned) : "Aube du monde";
@@ -1544,7 +1558,7 @@ int main(int argc, char **argv) {
                 minimap_fit(&mmp.cam_scale,&mmp.cam_ox,&mmp.cam_oy);
                 render_map(world, mm_pb.pixels, mm_pb.w, mm_pb.h, &mmp, smode); pixbuf_upload(&mm_pb); }
             if (sim.ready && g_font) {
-                zone_reset(); bslot_reset(); orow_reset(); modebtn_reset();
+                zone_reset(); bslot_reset(); orow_reset(); modebtn_reset(); topbtn_reset();
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
                 draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : l'outliner */
@@ -1594,6 +1608,24 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
+                    /* §1 : le bandeau est un SOMMAIRE — un clic sur une RESSOURCE ouvre
+                     * son système. Le Savoir ouvre l'ARBRE DE TECH (qui existe) ; les
+                     * autres écrans (finances, subsistance, chaînes, diplomatie) sont à
+                     * venir — le clic les annonce. */
+                    int tb=-1;
+                    for (int i=0;i<g_ntopbtns;i++){ SDL_Rect *r=&g_topbtns[i].r;
+                        if (ev.button.x>=r->x && ev.button.x<r->x+r->w &&
+                            ev.button.y>=r->y && ev.button.y<r->y+r->h){ tb=i; break; } }
+                    if (tb>=0){
+                        switch (g_topbtns[tb].sys){
+                            case SYS_TECH: show_tree = !show_tree; break;
+                            case SYS_FINANCES:    printf("\n[scps] Finances (revenus · commerce · taxation) — écran détaillé à venir.\n"); break;
+                            case SYS_SUBSISTANCE: printf("\n[scps] Subsistance & démographie — écran détaillé à venir.\n"); break;
+                            case SYS_CHAINES:     printf("\n[scps] Chaînes de production & marché — écran détaillé à venir.\n"); break;
+                            default:              printf("\n[scps] Diplomatie — écran détaillé à venir.\n"); break;
+                        }
+                        dirty=true; break;
+                    }
                     /* §5 : un clic sur un BOUTON DE MODE change la vue de carte. */
                     int mb=-1;
                     for (int i=0;i<g_nmodebtns;i++){ SDL_Rect *r=&g_modebtns[i].r;
@@ -1803,7 +1835,7 @@ int main(int argc, char **argv) {
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
-            zone_reset(); bslot_reset(); orow_reset(); modebtn_reset();
+            zone_reset(); bslot_reset(); orow_reset(); modebtn_reset(); topbtn_reset();
             int cid = country_for_panel(world, selected);
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
