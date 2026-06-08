@@ -20,6 +20,7 @@
 #include "scps_routes.h"
 #include "scps_intertrade.h"
 #include "scps_warhost.h"
+#include "scps_campaign.h"
 #include "scps_diplo.h"
 #include "scps_events.h"
 #include "scps_modifier.h"
@@ -41,6 +42,8 @@ typedef struct {
     LaborEcon *labor; DiploState *dp; RouteNetwork *rn; AiActor *ai; bool *ai_on;
     RevoltState *rs;
     WarHost     *host;   /* armées levées par pays (mobilisation) */
+    Campaign    *camp;   /* armées de campagne : marche/siège/bataille sur la carte (non-invasif) */
+    uint32_t     camp_rng;
     MissionsState *missions; /* missions décennales (rythme + injection de ressources) */
     int16_t prev_owner_mo[SCPS_MAX_REG];   /* propriétaires au mois précédent (détection de conquête) */
     int prev_dawned;         /* dernier âge avéné traité (engagement d'âge §7) */
@@ -48,6 +51,31 @@ typedef struct {
 } Sim;
 
 static int regions_of(const WorldEconomy *e, int c);   /* défini plus bas */
+
+/* Les armées de CAMPAGNE : chaque pays mobilisé ET en guerre projette sa force vers
+ * le front ennemi adjacent (marche §1 → siège → bataille §2/§3). NON-INVASIF : la
+ * campagne LIT econ, ne change JAMAIS la propriété des régions — la conquête
+ * abstraite (prix/volume) reste seule maîtresse du qui-tient-quoi ; ici, les armées
+ * VIVENT seulement sur la carte (la fondation que l'UI §4 dessinera). */
+static void sim_campaign_year(Sim *s, World *w) {
+    for (int c=0; c<w->n_countries && c<SCPS_MAX_COUNTRY; c++) {
+        if (campaign_active(s->camp,c) && campaign_phase(s->camp,c)!=FA_IDLE) continue; /* déjà en route */
+        if (warhost_units(s->host, c) <= 0) continue;                                   /* rien à projeter */
+        int frontier=-1, target=-1;
+        for (int r=0; r<s->econ->n_regions && frontier<0; r++) {
+            if (s->econ->region[r].owner!=c) continue;
+            for (int sn=0; sn<s->econ->n_regions; sn++) {
+                if (!s->econ->adj[r][sn]) continue;
+                int ob=s->econ->region[sn].owner;
+                if (ob<0 || ob==c || diplo_status(s->dp,c,ob)!=DIPLO_WAR) continue;
+                frontier=r; target=sn; break;                       /* une frontière chaude */
+            }
+        }
+        if (frontier>=0)
+            campaign_order(s->camp, s->econ, c, frontier, target, &s->host->army[c]);
+    }
+    campaign_tick(s->camp, w, s->econ, s->dp, &s->camp_rng, 365.f);  /* une année de campagne */
+}
 
 static void sim_day(Sim *s, World *w) {
     agency_advance(s->ag, w, s->econ, s->wl, 1);
@@ -108,6 +136,7 @@ static void sim_day(Sim *s, World *w) {
          * (la guerre peut reprendre après le répit), et le SCORE DE GUERRE (bras-de-fer
          * + attrition qui saigne les armes). */
         warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
+        sim_campaign_year(s, w);                           /* … et MARCHENT : campagne sur la carte */
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
@@ -141,6 +170,8 @@ static void sim_init(Sim *s, World *w) {
     }
     demography_attach(w, s->econ, s->drift);
     revolt_init(s->rs); warhost_init(s->host); missions_init(s->missions);
+    campaign_init(s->camp, w, s->econ);                  /* armées de campagne : table de terrain + RAZ */
+    s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne, propre à la sim */
     faction_levers_reset();   /* §4 : stances de factions remises à zéro pour cette sim */
     s->prev_dawned=-1;        /* §7 : aucun âge encore traité */
     for (int r=0;r<SCPS_MAX_REG;r++)
@@ -262,9 +293,9 @@ int main(int argc, char **argv){
     s.dp=malloc(sizeof(DiploState)); s.rn=malloc(sizeof(RouteNetwork));
     s.ai=calloc(SCPS_MAX_COUNTRY,sizeof(AiActor)); s.ai_on=calloc(SCPS_MAX_COUNTRY,sizeof(bool));
     s.rs=malloc(sizeof(RevoltState)); s.host=malloc(sizeof(WarHost));
-    s.missions=malloc(sizeof(MissionsState));
+    s.missions=malloc(sizeof(MissionsState)); s.camp=malloc(sizeof(Campaign));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
-        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs||!s.host||!s.missions){
+        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs||!s.host||!s.missions||!s.camp){
         fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
@@ -275,7 +306,7 @@ int main(int argc, char **argv){
     /* Agrégats sur toutes les sims */
     long tot_wars=0, tot_absorbed=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
-    long tot_techs=0, tot_faustian=0;
+    long tot_techs=0, tot_faustian=0, tot_campaign=0;
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
     for (int k=0;k<nsims;k++){
@@ -406,6 +437,17 @@ int main(int argc, char **argv){
           printf("              recherche : %d nœuds déverrouillés (dont %d faustiens)\n", sim_techs, sim_faust);
           tot_techs += sim_techs; tot_faustian += sim_faust; }
 
+        /* CAMPAGNE : les armées ont-elles VÉCU sur la carte (marche/siège/bataille) ?
+         * Réductions = sièges menés à terme (enregistrés, PAS appliqués à econ). */
+        { int reduced=0, moving=0;
+          for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+              reduced += campaign_taken(s.camp,c);
+              if (campaign_active(s.camp,c) && campaign_phase(s.camp,c)!=FA_IDLE) moving++;
+          }
+          printf("              campagne : %d région(s) réduite(s) par les armées de terrain · %d en mouvement (non-invasif)\n",
+                 reduced, moving);
+          tot_campaign += reduced; }
+
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_peakrev += peak_rev; tot_ages += nages;
         tot_conq += conq_prov;
         tot_ignited += s.rs->n_ignited; tot_seceded += s.rs->n_seceded; tot_coup += s.rs->n_coup;
@@ -421,6 +463,7 @@ int main(int argc, char **argv){
     printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
     printf("   pays absorbés (total) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
     printf("   nœuds de tech débloqués ..... %ld   (moy. %.1f/sim ; %ld faustiens)\n", tot_techs, (double)tot_techs/nsims, tot_faustian);
+    printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
     printf("   soulèvements incarnés ....... %ld allumés → %ld sécession(s) · %ld coup(s) · %ld concession(s) · %ld écrasé(s)\n",
            tot_ignited, tot_seceded, tot_coup, tot_concession, tot_crushed);
@@ -431,6 +474,6 @@ int main(int argc, char **argv){
 
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);
     free(s.ag); free(s.ev); free(s.drift); free(s.labor); free(s.dp); free(s.rn);
-    warhost_free(s.host); free(s.ai); free(s.ai_on); free(s.rs); free(s.host);
+    warhost_free(s.host); free(s.camp); free(s.ai); free(s.ai_on); free(s.rs); free(s.host);
     return 0;
 }

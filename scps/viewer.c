@@ -38,6 +38,7 @@
 #include "scps_revolt.h"    /* la révolte INCARNÉE : sécessions/coups dans le jeu vivant */
 #include "scps_intertrade.h"/* commerce inter-pays : grandes routes marchandes + embargo */
 #include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
+#include "scps_campaign.h"  /* … et MARCHENT : campagne sur la carte (marche/siège/bataille) */
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
@@ -331,6 +332,8 @@ typedef struct {
     RouteNetwork    *rn;       /* routes commerciales */
     RevoltState     *rs;       /* soulèvements incarnés (sécessions, coups) */
     WarHost         *host;     /* armées levées par pays (mobilisation) */
+    Campaign        *camp;     /* armées de campagne : marche/siège/bataille sur la carte (non-invasif) */
+    uint32_t         camp_rng;
     MissionsState   *missions; /* missions décennales (rythme + injection de ressources) */
     int              prev_dawned; /* dernier âge avéné traité (engagement d'âge §7) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
@@ -346,6 +349,30 @@ typedef struct {
  * agency/évènements/statecraft/labor en JOURS ; l'économie/légitimité/prospérité/
  * démographie à l'ANNÉE (comme les bancs d'essai — on ne dérègle pas le pacing).
  * Le joueur n'est qu'un acteur : ses actions sont déjà en file dans s->ag. */
+/* Les armées de CAMPAGNE : chaque pays mobilisé ET en guerre projette sa force vers
+ * le front ennemi adjacent (marche §1 → siège → bataille §2/§3). NON-INVASIF : lit
+ * econ, ne change JAMAIS la propriété des régions — les armées VIVENT sur la carte
+ * (la fondation que l'UI §4 dessine). */
+static void sim_campaign_year(Sim *s, World *w) {
+    for (int c=0; c<w->n_countries && c<SCPS_MAX_COUNTRY; c++) {
+        if (campaign_active(s->camp,c) && campaign_phase(s->camp,c)!=FA_IDLE) continue;
+        if (warhost_units(s->host, c) <= 0) continue;
+        int frontier=-1, target=-1;
+        for (int r=0; r<s->econ->n_regions && frontier<0; r++) {
+            if (s->econ->region[r].owner!=c) continue;
+            for (int sn=0; sn<s->econ->n_regions; sn++) {
+                if (!s->econ->adj[r][sn]) continue;
+                int ob=s->econ->region[sn].owner;
+                if (ob<0 || ob==c || diplo_status(s->dp,c,ob)!=DIPLO_WAR) continue;
+                frontier=r; target=sn; break;
+            }
+        }
+        if (frontier>=0)
+            campaign_order(s->camp, s->econ, c, frontier, target, &s->host->army[c]);
+    }
+    campaign_tick(s->camp, w, s->econ, s->dp, &s->camp_rng, 365.f);
+}
+
 static void sim_day(Sim *s, World *w) {
     /* — quotidien — */
     agency_advance(s->ag, w, s->econ, s->wl, 1);            /* les actions progressent */
@@ -403,6 +430,7 @@ static void sim_day(Sim *s, World *w) {
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
         /* Diplomatie annuelle : usure de guerre, fonte des trêves/momentum, score de guerre. */
         warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
+        sim_campaign_year(s, w);                           /* … et MARCHENT : campagne sur la carte */
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
@@ -427,7 +455,7 @@ static void sim_day(Sim *s, World *w) {
  * la partie avance par sim_day (plus de snapshot figé). */
 static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
-        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host) return;
+        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);
@@ -454,6 +482,8 @@ static void sim_rebuild(Sim *s, World *w) {
     labor_seed_from_world(s->labor, w, s->econ, s->player);
     revolt_init(s->rs);                                  /* les soulèvements incarnés */
     warhost_init(s->host);                               /* les armées levées par pays */
+    campaign_init(s->camp, w, s->econ);                  /* … qui marcheront sur la carte (terrain + RAZ) */
+    s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne propre à la partie */
     missions_init(s->missions);                          /* missions décennales */
     faction_levers_reset();                              /* §4 : stances de factions à zéro */
     s->prev_dawned=-1;                                   /* §7 : aucun âge encore traité */
@@ -826,6 +856,7 @@ int main(int argc, char **argv) {
     sim.rn   = (RouteNetwork*)    malloc(sizeof(RouteNetwork));
     sim.rs   = (RevoltState*)     malloc(sizeof(RevoltState));
     sim.host = (WarHost*)         malloc(sizeof(WarHost));
+    sim.camp = (Campaign*)        malloc(sizeof(Campaign));
     sim.missions = (MissionsState*) malloc(sizeof(MissionsState));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
@@ -1102,7 +1133,7 @@ int main(int argc, char **argv) {
     free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
     free(sim.ag); free(sim.ev); free(sim.drift); free(sim.labor);
     warhost_free(sim.host);
-    free(sim.dp); free(sim.rn); free(sim.rs); free(sim.host); free(sim.ai); free(sim.ai_on);
+    free(sim.dp); free(sim.rn); free(sim.rs); free(sim.host); free(sim.camp); free(sim.ai); free(sim.ai_on);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);

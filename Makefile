@@ -74,7 +74,7 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_scps_events.o \
              $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o \
              $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_scps_missions.o $(OBJDIR)/scps_scps_intertrade.o \
-             $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_warhost.o \
+             $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_campaign.o \
              $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
@@ -265,7 +265,7 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_events.o $(OBJDIR)/scps_scps_demography.o \
                   $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_modifier.o \
                   $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_scps_army.o \
-                  $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_missions.o \
+                  $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_campaign.o $(OBJDIR)/scps_scps_missions.o \
                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
 chronicle: $(CHRONICLE_OBJS)
 	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
