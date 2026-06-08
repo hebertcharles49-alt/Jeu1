@@ -35,6 +35,7 @@
 #include "scps_demography.h"/* GROUPES par province (composition) + H/intégration */
 #include "scps_labor.h"     /* topbar : Or / Nourriture / Matériaux */
 #include "scps_ai.h"        /* les voisins VIVENT : lecteurs de coordonnées, mêmes leviers */
+#include "scps_revolt.h"    /* la révolte INCARNÉE : sécessions/coups dans le jeu vivant */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -324,8 +325,10 @@ typedef struct {
     LaborEcon       *labor;    /* économie de pop du joueur (topbar) */
     DiploState      *dp;       /* relations / guerres */
     RouteNetwork    *rn;       /* routes commerciales */
+    RevoltState     *rs;       /* soulèvements incarnés (sécessions, coups) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
+    int16_t          prev_owner_mo[SCPS_MAX_REG];  /* propriétaires du mois (détection de conquête) */
     int              day;      /* jour de jeu (1 tick = 1 jour) */
     int              year;
     int              player;   /* pays du joueur */
@@ -352,6 +355,34 @@ static void sim_day(Sim *s, World *w) {
         econ_tick(s->econ, 1.f/12.f);
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
+        /* — conquête du mois : un peuple passé sous une couronne ÉTRANGÈRE devient
+         *   restif (intégration à zéro, L au plancher) → terreau de sécession. */
+        for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++){
+            int16_t no=s->econ->region[r].owner, po=s->prev_owner_mo[r];
+            if (po>=0 && no>=0 && no!=po){
+                demography_on_conquest(w, s->econ, s->drift, r, no);
+                revolt_on_conquest(s->rs, r);
+            }
+            s->prev_owner_mo[r]=no;
+        }
+        /* — la révolte INCARNÉE : misère soutenue → soulèvement → sécession/coup/
+         *   jacquerie/écrasement ; un pays NÉ d'une sécession prend vie (IA). */
+        revolt_scan(s->rs, w, s->econ, s->drift, 30);
+        revolt_tick(s->rs, w, s->econ, s->drift, s->wl, s->wp, 30);
+        if (s->rs->last_spawned>=0){
+            for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+                if (c==s->player || s->ai_on[c]) continue;
+                int nreg=0; for (int r=0;r<s->econ->n_regions;r++) if (s->econ->region[r].owner==c) nreg++;
+                if (w->country[c].role==POLITY_ANTAGONIST && w->country[c].capital_prov>=0 && nreg>0){
+                    s->ai_on[c]=true;
+                    ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
+                }
+            }
+            /* une sécession a changé des propriétaires CE mois : resynchroniser, sinon
+             * la détection du mois prochain prendrait l'indépendance pour une invasion. */
+            for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)
+                s->prev_owner_mo[r]=s->econ->region[r].owner;
+        }
     }
     /* — annuel (le tour stratégique) — */
     if (s->day % 365 == 364) {
@@ -374,7 +405,7 @@ static void sim_day(Sim *s, World *w) {
  * la partie avance par sim_day (plus de snapshot figé). */
 static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
-        || !s->ag || !s->ev || !s->drift || !s->labor) return;
+        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);
@@ -399,6 +430,9 @@ static void sim_rebuild(Sim *s, World *w) {
     events_init(s->ev, w, w->seed);
     labor_init(s->labor, w);
     labor_seed_from_world(s->labor, w, s->econ, s->player);
+    revolt_init(s->rs);                                  /* les soulèvements incarnés */
+    for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
+        s->prev_owner_mo[r]=s->econ->region[r].owner;
     s->day=0; s->year=0;
     for (int t=0; t<3*365; t++) sim_day(s, w);           /* amorce : une carte déjà vivante */
     s->ready = true;
@@ -726,6 +760,7 @@ int main(int argc, char **argv) {
     sim.labor= (LaborEcon*)       malloc(sizeof(LaborEcon));
     sim.dp   = (DiploState*)      malloc(sizeof(DiploState));
     sim.rn   = (RouteNetwork*)    malloc(sizeof(RouteNetwork));
+    sim.rs   = (RevoltState*)     malloc(sizeof(RevoltState));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 
@@ -998,7 +1033,7 @@ int main(int argc, char **argv) {
     free(world);
     free(sim.econ); free(sim.wp); free(sim.wl); free(sim.net); free(sim.ts); free(sim.sc);
     free(sim.ag); free(sim.ev); free(sim.drift); free(sim.labor);
-    free(sim.dp); free(sim.rn); free(sim.ai); free(sim.ai_on);
+    free(sim.dp); free(sim.rn); free(sim.rs); free(sim.ai); free(sim.ai_on);
     if (g_font)     TTF_CloseFont(g_font);
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);
