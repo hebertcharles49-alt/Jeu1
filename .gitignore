@@ -55,3 +55,7 @@ warhost_demo
 factions_demo
 missions_demo
 campaign_demo
+
+# captures écran (dev)
+full*.png
+z[A-Z].png
