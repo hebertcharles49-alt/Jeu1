@@ -27,6 +27,9 @@
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
 #define AI_CRUSADE_W      4.0f   /* croisade : l'orthodoxe vise qui développe le faustien (chance ∝ ferveur) */
+#define AI_ANNEX_SURCHARGE 2     /* la DERNIÈRE région (capitale) coûte le DOUBLE : 2 « points » de domination */
+                                 /*   militaire au lieu d'1 (revendication ≥ déjà-pris + 2). Sous ce seuil, la */
+                                 /*   paix proportionnelle ÉPARGNE la capitale — l'annexion exige une domination nette. */
 /* ---- Recherche (l'arbre de tech vivant) ------------------------------- */
 #define AI_RESEARCH_CADENCE 365  /* ~1 an entre déverrouillages potentiels */
 #define AI_RESEARCH_RATE    14.f /* points/an de base, × rendement Savoir × f(pop) */
@@ -401,10 +404,30 @@ static Resource ai_war_want(const AiView *v){
     return v->chain_gap;
 }
 
+static int ai_owned_regions(const WorldEconomy *econ, int cid){
+    int n=0; for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid) n++; return n;
+}
+/* COUP DE GRÂCE (absorption RARE) — l'anti-snowball tient, mais l'élimination
+ * cesse d'être impossible. La DERNIÈRE région d'un pays (sa capitale) coûte le
+ * DOUBLE à prendre : la paix proportionnelle l'ÉPARGNE par défaut ; seul un
+ * agresseur de CONQUÊTE dont la REVENDICATION (∝ domination militaire) couvre le
+ * déjà-pris PLUS le surcoût de la capitale peut l'arracher et ANNEXER. Une
+ * coalition qui relève la défense fait retomber la revendication et sauve le vaincu. */
+static bool ai_annex_ok(const DiploState *diplo, const World *w, const WorldEconomy *econ,
+                        int attacker, int defender){
+    if (attacker<0||defender<0||attacker==defender) return false;
+    if (diplo_status(diplo,attacker,defender)!=DIPLO_WAR) return false;
+    CasusBelli cb=diplo_war_goal(diplo,attacker,defender);
+    if (cb!=CB_TERRITORIAL && cb!=CB_NONE) return false;       /* humiliation/source/foi : pas d'annexion */
+    int taken = (attacker<SCPS_MAX_COUNTRY && defender<SCPS_MAX_COUNTRY) ? diplo->conquered[attacker][defender] : 0;
+    return diplo_war_claim(diplo,w,econ,attacker,defender) >= taken + AI_ANNEX_SURCHARGE;   /* le PRIX DOUBLE */
+}
+
 /* Stratégie : conquérir, déclarer la guerre, ou CONSOLIDER (le frein). */
 static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
                           WorldLegitimacy *wl, DiploState *diplo, const AiView *v,
                           float brake, int day){
+    if (ai_owned_regions(econ, a->cid)==0) return;      /* polité ABSORBÉE : inerte (plus de stratégie) */
     /* FREIN DUR : on a trop avalé / l'ordre craque → paix générale + verrou. */
     if (brake > AI_BRAKE_HARD){
         a->credit_consolidate += brake;
@@ -427,6 +450,7 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         if (diplo_war_goal(diplo,b,a->cid)==CB_NONE) continue;          /* b est l'attaquant */
         float their_score = diplo_war_score(diplo, b, a->cid);
         if (their_score >= AI_SURRENDER && v->armee < AI_ARMY_MARGIN*diplo_mil_power(w,econ,b)){
+            if (ai_owned_regions(econ,a->cid)<=1 && ai_annex_ok(diplo,w,econ,b,a->cid)) continue;  /* acculé à sa capitale, le prix double payé : nul tribut ne sauve */
             diplo_reparations(diplo, w, econ, a->cid, b);               /* le vaincu indemnise le vainqueur */
             diplo_make_peace(diplo, a->cid, b);                         /* capitulation */
         }
@@ -450,7 +474,15 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         CasusBelli goal = (enemy>=0)? diplo_war_goal(diplo, a->cid, enemy) : CB_TERRITORIAL;
         int er = ai_pick_enemy_region(econ, diplo, a->cid);
         if (er>=0){
-            if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
+            int victim = econ->region[er].owner;
+            /* COUP DE GRÂCE : la DERNIÈRE région (capitale) du vaincu coûte le DOUBLE.
+             * Si er est sa seule terre et que le prix n'est PAS payé (score < seuil),
+             * on l'ÉPARGNE et on signe la paix proportionnelle. Sinon on l'arrache → 0
+             * région → pays ABSORBÉ. (Une terre non-capitale se prend normalement.) */
+            if (victim>=0 && ai_owned_regions(econ,victim)<=1 && !ai_annex_ok(diplo,w,econ,a->cid,victim)){
+                diplo_reparations(diplo, w, econ, a->cid, victim);
+                diplo_make_peace(diplo, a->cid, victim);
+            } else if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
                 a->credit_war -= 1.f; a->stats.conquests++;
                 /* §5 PAIX PROPORTIONNELLE : un casus belli non-territorial est SATISFAIT
                  * par une prise (la source / l'humiliation) ; le territorial ENCAISSE sa
