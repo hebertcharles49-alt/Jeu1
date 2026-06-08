@@ -171,6 +171,16 @@ DIPLO_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
 diplo_demo: $(DIPLO_DEMO_OBJS)
 	$(CC) $(DIPLO_DEMO_OBJS) -o $@ -lm
 
+FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
+                   $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
+                   $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
+                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_faith.o \
+                   $(OBJDIR)/scps_faith_demo.o
+faith_demo: $(FAITH_DEMO_OBJS)
+	$(CC) $(FAITH_DEMO_OBJS) -o $@ -lm
+
 # ---- Routes commerciales : la cloche f(D̄) faite action (§7) --------------
 ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
