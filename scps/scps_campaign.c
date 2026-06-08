@@ -8,6 +8,7 @@
  * de la conquête abstraite.
  */
 #include "scps_campaign.h"
+#include "scps_labor.h"   /* capitale_defense / capitale_max_tier : la défense passive de la capitale */
 #include <string.h>
 
 /* ---- Calibrage : ce que l'éco régionale dit au siège ------------------ */
@@ -60,7 +61,11 @@ static int next_hop(const Campaign *c, const WorldEconomy *e, int from, int dest
 static float region_defense(const WorldEconomy *e, int r){
     const RegionEconomy *R=&e->region[r];
     if (!R->colonized) return 0.f;                        /* vacante : on entre (14 j) */
-    return DEF_BASE + DEF_PER_BLD * (float)R->n_bld;
+    /* la CAPITALE ajoute une défense PASSIVE : un niveau par tier (que la pop débloque)
+     * — elle allonge le siège comme un rempart (mais sans bonus défenseur au combat). */
+    long pop = (long)(R->strata[CLASS_LABORER].pop + R->strata[CLASS_BOURGEOIS].pop + R->strata[CLASS_ELITE].pop);
+    float cap_def = (float)capitale_defense(capitale_max_tier(pop));
+    return DEF_BASE + DEF_PER_BLD * (float)R->n_bld + cap_def;
 }
 static float region_food_months(const WorldEconomy *e, int r){
     float f=e->region[r].food_sat;

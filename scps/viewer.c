@@ -874,9 +874,10 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                  "Prospérité de la province (0-100) : l'aisance matérielle, du dénuement au faste — "
                  "tirée par la production, le commerce et la paix.");
     }
-    snprintf(line,sizeof line, "%s · %s · %s", p.climat, p.relief, label_stature(p.stature));
+    snprintf(line,sizeof line, "%s · %s · %s", p.climat, p.relief, capitale_status(capitale_max_tier(p.ames)));
     draw_text(ren, g_font, x+hsz+8, y+18, COL_PARCH, line);
-    zone_add((SDL_Rect){x+hsz+6, y+16, rw-hsz-6, 18}, "Climat · relief · taille de la province.");
+    zone_add((SDL_Rect){x+hsz+6, y+16, rw-hsz-6, 18},
+             "Climat · relief · TAILLE (le statut vient du tier de la capitale : Hameau → Métropole).");
     y += hsz + 8;
     /* HABITANTS — un nombre, rien de plus (le détail va aux camemberts). */
     snprintf(line,sizeof line, "%ld habitants", p.ames);
@@ -1034,6 +1035,39 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         y += 22;
     }
 
+    /* CAPITALE — l'ossature administrative (§capitale) : son TIER (que la pop débloque)
+     * donne le statut ; les Nobles en poste (paquets de 100) délivrent logement +
+     * services + productivité. Calculée de l'éco (pop + Nobles). */
+    {
+        int reg = (pid>=0 && pid<w->n_provinces) ? w->province[pid].region : -1;
+        if (reg>=0 && reg<econ->n_regions) {
+            long pop = p.ames;
+            int  tier  = capitale_max_tier(pop);
+            /* Nobles à l'administration : la mobilité ÉMERGENTE en promeut autant que
+             * l'admin en réclame (tier·100), borné par la pop disponible (paquets de 100). */
+            long admin = capitale_admin_pop(tier); if (admin > pop) admin = (pop/100)*100;
+            long house = capitale_housing(tier, admin);
+            long serv  = capitale_housing(tier, admin);
+            int  prodp = (int)((capitale_prodmult(tier, admin)-1.f)*100.f + 0.5f);
+            ui_section(ren, x, &y, "CAPITALE");
+            char l[96];
+            snprintf(l,sizeof l, "%s · tier %d", capitale_status(tier), tier);
+            ui_row(ren,x,&y,rw,"Statut", l, COL_COPPER,
+                   "L'ossature administrative. La pop DÉBLOQUE le tier, une recette de plus en plus précieuse le PAIE ; le tier nomme la taille.");
+            long libres = house - pop;
+            if (libres>=0) snprintf(l,sizeof l, "%ld libres / %ld", libres, house);
+            else           snprintf(l,sizeof l, "complet · manque %ld → agitation", -libres);
+            ui_row(ren,x,&y,rw,"Logement", l, libres>=0?COL_PARCH:sense_color(0.12f),
+                   "Le LOGEMENT délivré par la capitale (au prorata des paquets de Nobles en poste). Surpeuplé = grogne.");
+            snprintf(l,sizeof l, "%ld", serv);
+            ui_row(ren,x,&y,rw,"Services", l, serv>=pop?COL_PARCH:sense_color(0.30f),
+                   "Les SERVICES délivrés ; sous-équipé, le contentement baisse.");
+            snprintf(l,sizeof l, "+%d %%", prodp);
+            ui_row(ren,x,&y,rw,"Productivité", l, prodp>0?sense_color(0.75f):COL_DIM,
+                   "La PRODUCTIVITÉ que la capitale ajoute à la collecte (+5 % par tier servi par un paquet de Nobles).");
+        }
+    }
+
     /* BÂTIMENTS — une grille 6 + 2 : 6 emplacements ordinaires + 2 SPÉCIAUX
      * (optimisation · défense), visuellement distincts (liseré cuivre). Survol =
      * l'effet (si bâti) ou ce qu'on peut y bâtir. PAS de bouton « Bâtir » : on
@@ -1095,16 +1129,10 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
 /* ===================================================================== */
 /* L'OUTLINER — « ce que je possède », groupé par URBANISATION (§6)        */
 /* ===================================================================== */
-static BandStature stature_of_pop(long pop){
-    if (pop<50)   return STA_DESERT;
-    if (pop<500)  return STA_HAMEAU;
-    if (pop<2000) return STA_BOURG;
-    if (pop<6000) return STA_CITE;
-    return STA_METROPOLE;
-}
-static const char *stature_group(BandStature st){
-    switch(st){ case STA_METROPOLE:return "Métropoles"; case STA_CITE:return "Cités";
-                case STA_BOURG:return "Bourgs"; case STA_HAMEAU:return "Hameaux"; default:return "Avant-postes"; }
+/* L'urbanisation vient du TIER de la capitale (§capitale) : on groupe l'outliner
+ * par tier (statut), pas par terrain ni par pop brute. */
+static long region_pop_of(const RegionEconomy *re){
+    return (long)(re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop + re->strata[CLASS_ELITE].pop);
 }
 /* Un emplacement institutionnel encore LIBRE (un axe ProvBuild vide) ? Avec un
  * bâtiment de base toujours posable, c'est la condition du MARTEAU (§6b). */
@@ -1121,23 +1149,24 @@ static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s,
     TTF_Font *fs = g_font_small?g_font_small:g_font;
     int x=px+12, y=py+10, rw=pw-22, bottom=py+ph-4, oi=0;
     draw_text(ren, g_font, x, y, COL_COPPER, "Domaine · par urbanisation"); y+=20;
-    /* régions groupées par URBANISATION (grand → petit), pas par terrain. */
-    for (int st=STA_METROPOLE; st>=STA_HAMEAU && y<bottom-16; st--){
+    /* régions groupées par URBANISATION = le TIER de la capitale (grand → petit). */
+    for (int tier=7; tier>=1 && y<bottom-16; tier--){
         int cnt=0;
         for (int r=0;r<s->econ->n_regions;r++){
             const RegionEconomy *re=&s->econ->region[r];
             if (re->owner!=player) continue;
-            long pop=(long)(re->strata[0].pop+re->strata[1].pop+re->strata[2].pop);
-            if (stature_of_pop(pop)==(BandStature)st) cnt++;
+            if (capitale_max_tier(region_pop_of(re))==tier) cnt++;
         }
         if (!cnt) continue;
-        char gh[40]; snprintf(gh,sizeof gh,"%s (%d)", stature_group((BandStature)st), cnt);
+        const char *st=capitale_status(tier); size_t sl=strlen(st);   /* pluriel FR : -eau → -eaux */
+        const char *plur=(sl>=3 && !strcmp(st+sl-3,"eau"))?"x":"s";
+        char gh[44]; snprintf(gh,sizeof gh,"%s%s (%d)", st, plur, cnt);
         draw_text(ren, fs, x, y, COL_DIM, gh); y+=15;
         for (int r=0;r<s->econ->n_regions && y<bottom-15;r++){
             const RegionEconomy *re=&s->econ->region[r];
             if (re->owner!=player) continue;
-            long pop=(long)(re->strata[0].pop+re->strata[1].pop+re->strata[2].pop);
-            if (stature_of_pop(pop)!=(BandStature)st) continue;
+            long pop=region_pop_of(re);
+            if (capitale_max_tier(pop)!=tier) continue;
             int pid=(r<w->n_regions && w->region[r].n_provinces>0)? w->region[r].province_ids[0]:-1;
             Resource res=(pid>=0 && pid<w->n_provinces)? w->province[pid].resource:RES_NONE;
             fill_rect(ren, x+2, y+2, 9,9, SLICE_PAL[((int)res)&7]); draw_box(ren,x+2,y+2,9,9,COL_DIM);  /* icône-ressource */
