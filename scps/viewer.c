@@ -221,33 +221,48 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
     tech_tree_readout(&ts[cid], acc, pop, &tr);
 
     int cx=win_w/2, cy=win_h/2 - 4;
-    float ring = (float)win_h * 0.066f;
-    float R0   = ring*1.75f;                       /* le ROND INITIAL : les 1res tech y logent */
+    float ring = (float)win_h * 0.082f;            /* 4 anneaux (tiers 1..4) tiennent dans la hauteur */
+    float GAP  = 0.45f*ring;                        /* écart du POINT central au 1er anneau */
     const float D2R=0.01745329f, TOP=-1.5707963f;  /* quartier 0 au sommet */
     SDL_Color tcol[3] = { {0x5a,0x86,0xd8,0xff}, {0xd8,0x86,0x42,0xff}, {0x5c,0xb8,0x6e,0xff} };
 
-    for (int t=0;t<=4;t++) draw_ring(ren,cx,cy, R0+t*ring, (t==0)?COL_COPPER:COL_PANEL2); /* rond initial accentué */
+    for (int t=1;t<=4;t++) draw_ring(ren,cx,cy, GAP+t*ring, COL_PANEL2); /* anneaux = tiers (1..4) */
     for (int q=0;q<=9;q++){                                              /* rayons : thèmes (cuivre) & quartiers */
         float a=(q*40.f)*D2R + TOP; SDL_Color c=(q%3==0)?COL_COPPER:COL_PANEL2;
         SDL_SetRenderDrawColor(ren,c.r,c.g,c.b,c.a);
-        SDL_RenderDrawLine(ren, cx+(int)(cosf(a)*(R0-ring*0.55f)), cy+(int)(sinf(a)*(R0-ring*0.55f)),
-                                cx+(int)(cosf(a)*(R0+4.3f*ring)),  cy+(int)(sinf(a)*(R0+4.3f*ring)));
+        SDL_RenderDrawLine(ren, cx+(int)(cosf(a)*ring*0.30f),     cy+(int)(sinf(a)*ring*0.30f),
+                                cx+(int)(cosf(a)*(GAP+4.4f*ring)),cy+(int)(sinf(a)*(GAP+4.4f*ring)));
     }
+    /* LE CENTRE (anneau 0) = un POINT. Les 6 bâtiments de base s'y logent ; le
+     * survol les décrit (ils sont le départ, acquis d'emblée). */
+    static char center_hov[300];
+    { int p=snprintf(center_hov,sizeof center_hov,
+        "Le centre (anneau 0) — les 6 bâtiments de base, acquis au départ : ");
+      bool first=true;
+      for (int i=0;i<tr.n && p<(int)sizeof center_hov-2;i++) if (tr.node[i].is_base){
+          p += snprintf(center_hov+p, sizeof center_hov-p, "%s%s", first?"":" · ", tr.node[i].name);
+          first=false;
+      } }
+    fill_rect(ren, cx-4, cy-4, 8, 8, COL_COPPER);                        /* le point central */
+    draw_box(ren, cx-6, cy-6, 12, 12, COL_PARCH);
+    zone_add((SDL_Rect){cx-9,cy-9,18,18}, center_hov);
+
     int cnt[9][8]={{0}}, seen[9][8]={{0}};
-    for (int i=0;i<tr.n;i++){ int q=tr.node[i].quarter,t=tr.node[i].tier; if(q>=0&&q<9&&t>=0&&t<8)cnt[q][t]++; }
+    for (int i=0;i<tr.n;i++){ int q=tr.node[i].quarter,t=tr.node[i].tier; if(q>=0&&q<9&&t>=1&&t<8)cnt[q][t]++; }
     g_tree_demo=-1;
     for (int i=0;i<tr.n;i++){
         const TreeNodeReadout *nd=&tr.node[i];
-        int q=nd->quarter,t=nd->tier; if(q<0||q>=9||t<0||t>=8) continue;
+        if (nd->is_base) continue;                                       /* les bases SONT le centre */
+        int q=nd->quarter,t=nd->tier; if(q<0||q>=9||t<1||t>=8) continue;
         int k=cnt[q][t], j=seen[q][t]++;
         float off=(k>1)? ((float)j-(k-1)/2.f)*(40.f/(k+1.f)) : 0.f;
-        float ang=(q*40.f+20.f+off)*D2R + TOP, rad=R0 + t*ring;
+        float ang=(q*40.f+20.f+off)*D2R + TOP, rad=GAP+t*ring;
         int x=cx+(int)(cosf(ang)*rad), y=cy+(int)(sinf(ang)*rad), theme=q/3;
         g_tree_x[i]=x; g_tree_y[i]=y;
         SDL_Color c=tcol[theme];
         if (nd->state==TREE_LOCKED){ c.r/=3;c.g/=3;c.b/=3; }
         else if (nd->state==TREE_OPEN){ c.r=(uint8_t)((c.r+255)/2);c.g=(uint8_t)((c.g+255)/2);c.b=(uint8_t)((c.b+255)/2); }
-        int sz=nd->is_base?6:5;
+        int sz=5;
         fill_rect(ren,x-sz,y-sz,sz*2,sz*2,c);
         if (nd->faustian) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0xe0,0x44,0x30,0xff});
         else if (nd->orphan) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0x80,0x80,0x80,0xff});
@@ -262,24 +277,19 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
                  nd->name, nd->unlocks, nd->effet, nd->cost, label_tree_state(nd->state),
                  nd->orphan? ", orpheline : greffe par la population" : "");
         zone_add((SDL_Rect){x-sz-3,y-sz-3,sz*2+6,sz*2+6}, g_tree_hov[i]);
-        if (nd->faustian && (g_tree_demo<0 || nd->state==TREE_DONE)) g_tree_demo=i;  /* un faustien pour la démo (de préf. acquis) */
+        if (nd->faustian && (g_tree_demo<0 || nd->state==TREE_DONE)) g_tree_demo=i;  /* un faustien pour la démo */
     }
-    for (int th=0;th<3;th++){                                            /* étiquettes de thème au bord */
-        float a=(th*120.f+60.f)*D2R + TOP, rl=R0+4.0f*ring;
+    for (int th=0;th<3;th++){                                            /* étiquettes de thème EXCENTRÉES (hors des nœuds) */
+        float a=(th*120.f+60.f)*D2R + TOP, rl=GAP+4.75f*ring;
         int lx=cx+(int)(cosf(a)*rl), ly=cy+(int)(sinf(a)*rl);
-        draw_text(ren,g_font_big,lx-32,ly-9,tcol[th],tr.theme[th]);
-    }
-    if (g_font){                                                         /* hub : le centre */
-        const char *l0="le centre :", *l1="6 bâtiments de base";
-        draw_text(ren,g_font,cx-text_w(g_font,l0)/2,cy-15,COL_DIM,l0);
-        draw_text(ren,g_font,cx-text_w(g_font,l1)/2,cy-1, COL_DIM,l1);
+        draw_text(ren,g_font_big,lx-text_w(g_font_big,tr.theme[th])/2,ly-9,tcol[th],tr.theme[th]);
     }
     char hdr[220];
     snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   SURVOLE un nœud pour son effet & son coût",
              w->country[cid].name, tr.points);
     draw_text(ren,g_font_big,18,12,COL_COPPER,hdr);
     draw_text(ren,g_font,18,win_h-40,COL_DIM,
-      "rond initial = les 1res tech · anneau = tier · 3 secteurs = thèmes · cadre rouge = faustien · cadre gris = orphelin");
+      "centre = point (les 6 bases, au survol) · anneau = tier · 3 secteurs = thèmes · cadre rouge = faustien · cadre gris = orphelin");
     draw_text(ren,g_font,18,win_h-22,COL_DIM,
       "Savoir (bleu) · Forge (cuivre) · Société (vert)  —  vif = acquis · clair = disponible · sombre = verrouillé");
 }

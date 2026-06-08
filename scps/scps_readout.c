@@ -450,27 +450,28 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
 const char *label_tree_state(TreeState s){
     switch(s){ case TREE_DONE: return "acquis"; case TREE_OPEN: return "disponible"; default: return "verrouillé"; }
 }
-/* L'EFFET d'un nœud, en mots de JEU (lu de son rôle : thème × fonction × faustien)
- * — jamais un flottant. Le faustien prévient qu'il rapproche la Brèche. */
+/* L'EFFET d'un nœud, en mots DIÉGÉTIQUES (lu de son rôle : thème × fonction ×
+ * faustien) — JAMAIS un nom de coordonnée SCPS. Le faustien prévient, en mots de
+ * jeu, qu'il rapproche la Brèche / appelle la catastrophe. */
 static const char *tree_effect(const TechNode *n){
     if (n->faustian){
-        if (n->func==FN_ARMEE)        return "⚠ puissance brute — monte la charge faustienne (la Brèche approche)";
-        if (n->func==FN_RENFORCEMENT) return "⚠ pouvoir interdit — monte la charge faustienne";
-        return "⚠ faustien — monte la charge ; sans la Société (K), on déréalise";
+        if (n->func==FN_ARMEE)        return "⚠ pouvoir interdit : une puissance fulgurante, mais la Brèche se rapproche";
+        if (n->func==FN_RENFORCEMENT) return "⚠ savoir interdit : un grand pouvoir, mais la Brèche se rapproche";
+        return "⚠ faustien : une grande puissance, au prix de la catastrophe qui vient";
     }
     switch(n->theme){
         case THM_SAVOIR:
-            if (n->func==FN_PRODUCTION)   return "accélère la recherche (capacité narrative K)";
-            if (n->func==FN_ARMEE)        return "magie de guerre — puissance militaire arcanique";
-            return "arcane durable — fédéralisme & ordre";
+            if (n->func==FN_PRODUCTION)   return "accélère la recherche";
+            if (n->func==FN_ARMEE)        return "magie de guerre : renforce l'armée";
+            return "arcane protectrice : aide à tenir un royaume de peuples divers";
         case THM_FORGE:
-            if (n->func==FN_PRODUCTION)   return "augmente la production économique (le multiplicateur de rendement)";
-            if (n->func==FN_ARMEE)        return "renforce l'armement (puissance militaire)";
-            return "fortifie — durabilité & défense";
+            if (n->func==FN_PRODUCTION)   return "augmente la production (le multiplicateur de rendement)";
+            if (n->func==FN_ARMEE)        return "forge des armes : renforce l'armée";
+            return "fortifie : durabilité et défense";
         default: /* THM_SOCIETE */
-            if (n->func==FN_PRODUCTION)   return "croissance, commerce, impôt (la prospérité)";
+            if (n->func==FN_PRODUCTION)   return "croissance, commerce et impôt (la prospérité)";
             if (n->func==FN_ARMEE)        return "lève et organise les armées";
-            return "consolide l'ordre (K, légitimité, intégration) — métabolise le faustien";
+            return "consolide l'ordre (justice, foi, intégration) — la seule voie qui encaisse le faustien";
     }
 }
 void tech_tree_readout(const TechState *ts, unsigned race_access, float population,
