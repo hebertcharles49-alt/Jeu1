@@ -247,6 +247,24 @@ static const SDL_Color SLICE_PAL[8] = {
     {0xb8,0x73,0x33,0xff}, {0x4e,0x8d,0x8a,0xff}, {0xc9,0xa2,0x4b,0xff}, {0x7a,0x5c,0x99,0xff},
     {0x9a,0x8f,0x78,0xff}, {0x5f,0x8a,0xb0,0xff}, {0xa8,0x5a,0x5a,0xff}, {0x6f,0x9a,0x5a,0xff},
 };
+/* Un VISAGE : cercle + yeux + bouche parabolique dont la courbure suit l'humeur
+ * (0 = triste/∩, 1 = content/∪). Allumé = en couleur ; éteint = gris muet. */
+static void draw_face(SDL_Renderer *ren, int cx,int cy,int r, float mood, bool lit){
+    SDL_Color c = lit ? sense_color(mood) : (SDL_Color){0x4a,0x52,0x5e,0xff};
+    draw_ring(ren, cx, cy, (float)r, c);
+    fill_rect(ren, cx-r/2,   cy-r/4, 2,2, c);     /* œil gauche */
+    fill_rect(ren, cx+r/2-1, cy-r/4, 2,2, c);     /* œil droit */
+    float curve=(mood-0.5f)*2.f;                  /* -1 = grimace … +1 = sourire */
+    int span=r/2, my=cy+r/4, prevx=0, prevy=0;
+    SDL_SetRenderDrawColor(ren, c.r,c.g,c.b,c.a);
+    for (int k=0;k<=8;k++){
+        float t=(float)k/8.f*2.f-1.f;             /* -1..1 */
+        int mxk=cx+(int)(t*span);
+        int myk=my+(int)(curve*(r/3.f)*(1.f-t*t));
+        if (k>0) SDL_RenderDrawLine(ren, prevx,prevy, mxk,myk);
+        prevx=mxk; prevy=myk;
+    }
+}
 static void zone_add(SDL_Rect r, const char *def);   /* (défini plus bas — survol) */
 /* survol : nom + EFFET de chaque nœud (mots de jeu) ; positions pour la capture. */
 static char g_tree_hov[TECH_COUNT][240];
@@ -769,7 +787,20 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                    "L'espèce de la population.");
         }
     }
-    ui_row(ren,x,&y,rw,"Flux", label_flux(p.flux), band_good(p.flux,5,true), hover_flux());
+
+    /* HUMEUR — une rangée de VISAGES (triste→content), le courant allumé, + le chiffre. */
+    {
+        ui_section(ren, x, &y, "HUMEUR");
+        int nf=5, fr=9, gap=8, fy=y+fr;
+        float moodv = p.m_humeur.value/100.f;
+        int lit = (int)(moodv*(nf-1)+0.5f);
+        for (int i=0;i<nf;i++)
+            draw_face(ren, x+fr + i*(2*fr+gap), fy, fr, (float)i/(nf-1), i==lit);
+        char nb[16]; snprintf(nb,sizeof nb,"%d", p.m_humeur.value);
+        draw_text(ren, g_font, x + nf*(2*fr+gap) + 6, y, sense_color(moodv), nb);
+        zone_add((SDL_Rect){x-2,y-2,rw,2*fr+4}, hover_humeur());
+        y = fy + fr + 8;
+    }
 
     ui_section(ren, x, &y, "ÉCONOMIE");
     ui_row(ren,x,&y,rw,"Vocation", p.vocation, COL_PARCH,
@@ -781,7 +812,6 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         ui_row(ren,x,&y,rw,"Carrefour", label_carrefour(p.carrefour), band_good(p.carrefour,4,true), hover_carrefour());
 
     ui_section(ren, x, &y, "ALLÉGEANCE");
-    ui_row(ren,x,&y,rw,"Humeur", label_humeur(p.humeur), band_good(p.humeur,5,true), hover_humeur());
     ui_row(ren,x,&y,rw,"Lignée", label_lignee(p.lignee), band_good(p.lignee,6,false), hover_lignee());
     ui_row(ren,x,&y,rw,"Foi", label_foi(p.foi), band_good(p.foi,3,false), hover_foi());
     snprintf(line,sizeof line, "%d", p.agitation.value);
