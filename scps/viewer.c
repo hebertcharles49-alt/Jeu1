@@ -430,7 +430,8 @@ static void bslot_add(SDL_Rect r, int reg, int edifice){
  * où bâtir (-1 = pas de marteau). */
 typedef struct { SDL_Rect row; SDL_Rect ham; int prov; int hammer_reg; } OutRow;
 static OutRow g_orows[80]; static int g_norows;
-static void orow_reset(void){ g_norows=0; }
+static SDL_Rect g_refill_btn; static int g_refill_owner = -1;   /* bouton « remplir » l'armée */
+static void orow_reset(void){ g_norows=0; g_refill_owner=-1; }
 static void orow_add(SDL_Rect row, SDL_Rect ham, int prov, int hammer_reg){
     if (g_norows<80){ g_orows[g_norows].row=row; g_orows[g_norows].ham=ham;
                       g_orows[g_norows].prov=prov; g_orows[g_norows].hammer_reg=hammer_reg; g_norows++; }
@@ -1208,6 +1209,21 @@ static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s,
         int lp=(loc>=0&&loc<w->n_regions&&w->region[loc].n_provinces>0)?w->region[loc].province_ids[0]:-1;
         orow_add((SDL_Rect){x,y-1,rw,14}, (SDL_Rect){0,0,0,0}, lp, -1);
         y+=15;
+        /* « REMPLIR » : recompléter l'armée en TERRITOIRE AMI (note). */
+        if (campaign_can_refill(s->camp, s->econ, player) && y<bottom-16){
+            long rm, mat; campaign_refill_cost(s->camp, player, &rm, &mat);
+            int bw=text_w(fs,"Remplir")+16;
+            fill_round(ren, x+16, y, bw, 15, COL_PANEL2, 4);
+            round_box (ren, x+16, y, bw, 15, COL_COPPER, 4);
+            draw_text (ren, fs, x+24, y+1, COL_COPPER, "Remplir");
+            static char rh[180];
+            snprintf(rh,sizeof rh,
+                     "Remplir l'armée (en territoire ami) : +%ld hommes levés · %ld matériaux pour les armes "
+                     "(achetés au marché, en or si le stock manque).", rm, mat);
+            zone_add((SDL_Rect){x+16,y,bw,15}, rh);
+            g_refill_btn=(SDL_Rect){x+16,y,bw,15}; g_refill_owner=player;
+            y+=17;
+        }
     }
 }
 
@@ -1606,6 +1622,14 @@ int main(int argc, char **argv) {
                             printf("\n[scps] Bâtir : trésor insuffisant pour les matériaux.\n");
                         dirty = true;
                         break;
+                    }
+                    /* Note armée : clic sur « Remplir » → recomplète l'armée (territoire ami). */
+                    if (g_refill_owner>=0 &&
+                        ev.button.x>=g_refill_btn.x && ev.button.x<g_refill_btn.x+g_refill_btn.w &&
+                        ev.button.y>=g_refill_btn.y && ev.button.y<g_refill_btn.y+g_refill_btn.h){
+                        int added = campaign_refill(sim.camp, g_refill_owner, sim.labor);
+                        printf("\n[scps] Remplir : +%d paquet(s) levé(s) (territoire ami, payé au marché).\n", added);
+                        dirty=true; break;
                     }
                     /* §6 OUTLINER : clic sur le marteau → bâtir ; clic sur la ligne → saut. */
                     int orhit=-1;

@@ -94,4 +94,15 @@ ArmyComposition campaign_composition(const Campaign *c, int owner);
  * armée ennemie, pas son décompte exact). « éclaireurs » → « horde ». */
 const char *army_host_word(long paquets);
 
+/* ---- RENFORT (« remplir ») — recompléter une armée en TERRITOIRE AMI -------- */
+/* Peut-on renforcer l'armée de `owner` ? (active ET la région où elle se tient lui
+ * appartient — on ne se renforce que chez soi). */
+bool campaign_can_refill(const Campaign *c, const WorldEconomy *econ, int owner);
+/* Coût d'un renfort (+1 paquet de 100 par type d'unité présent) : `men` hommes
+ * levés, `mat` matériaux pour les armes (achetés au marché, or si manque). Lecture. */
+void campaign_refill_cost(const Campaign *c, int owner, long *men, long *mat);
+/* RENFORCE l'armée : +1 paquet par type d'unité (fabrique l'arme en pompant le
+ * marché si besoin, lève la pop), payé sur l'éco `labor`. Renvoie les paquets ajoutés. */
+int  campaign_refill(Campaign *c, int owner, LaborEcon *labor);
+
 #endif /* SCPS_CAMPAIGN_H */
