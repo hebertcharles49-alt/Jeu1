@@ -1,94 +1,92 @@
 /*
- * scps_tech.h — ARBRE DE TECHNOLOGIES (prototype)
+ * scps_tech.h — ARBRE DE TECHNOLOGIES — concentrique & fractal
  *
- * Voir « Arbre de technologies — Document de conception ». L'arbre n'est PAS
- * une échelle de progrès : c'est l'axe de défaite. Un unique curseur
+ * L'UI lit un arbre CONCENTRIQUE. Centre = 0 (les 6 bâtiments de base). Il se
+ * divise en 3 THÈMES (Savoir · Forge · Société) ; chaque thème rejoue 3 FONCTIONS
+ * (Production · Armée · Renforcement) — auto-similaire → 9 QUARTIERS. Le RAYON est
+ * la profondeur (tier) : plus loin = plus cher, plus puissant, plus risqué. Le
+ * FAUSTIEN est au bord ; les techs ORPHELINES de race s'y greffent.
  *
- *      RÉSILIENCE ◄──────────────────────────────► FAUSTIEN
- *        SOCIÉTÉ            FORGE                     MAGIE
- *        bâtit K            puissance, bascule        puissance brute,
- *        charge ≈ 0         faustienne                appelle la catastrophe
+ *      angle = quartier (3 thèmes × 3 fonctions)   rayon = profondeur/tier
  *
- * Verrou SCPS (partout) : tout flux qui afflue au-delà de ce que K peut narrer
- * génère de la DÉRÉALISATION :
+ * MAGIE ⊂ SAVOIR : l'arcane EST du savoir ; ses bouts faustiens (Invocation,
+ * L'Éveil, Savoir interdit) vivent dans Savoir·Armée / Savoir·Renforcement.
  *
- *      dereal = max(0, (P/10)·C + flux_faustien − K)
+ * Une tech = UN déverrouillage (un bâtiment, une capacité). Au départ, SEULS les
+ * 6 bâtiments de base existent ; tout le reste se déverrouille vers l'extérieur.
  *
- * avec C = charge faustienne accumulée, P = puissance, flux_faustien = somme
- * des flux permanents des nœuds Forge/Magie pris. Seule la Société (qui monte
- * K) permet de métaboliser Forge/Magie sans se fissurer.
+ * Verrou SCPS (la Brèche) : tout flux qui afflue au-delà de ce que K peut narrer
+ * déréalise — dereal = max(0, (P/10)·C + flux − K). Le faustien (de CHAQUE thème)
+ * monte flux/charge/fracture ; seule la SOCIÉTÉ monte K pour métaboliser.
  *
- * La charge pilote (1) la proximité de la crise de fin et (2) l'ampleur du choc
- * quand elle tombe (plus de magie = plus gros dragon).
- *
- * NOTE — valeurs chiffrées INDICATIVES (à calibrer contre le moteur headless).
- * La structure (branches, prérequis, directions d'écriture SCPS) est, elle,
- * fixe. Choix de design retenus ici :
- *   - Recherche : la charge ne se rembourse PAS (sens unique). Abjurer la magie
- *     stoppe le flux nouveau mais la charge déjà appelée reste (le pacte est
- *     scellé). Cf. §8 « Réversibilité ».
+ * COÛT : une tech coûte d'autant plus que l'empire est ÉTENDU (∝ population) →
+ * frein au snowball, jeu « tall » viable. Cf. tech_cost().
  */
 #ifndef SCPS_TECH_H
 #define SCPS_TECH_H
 
 #include <stdbool.h>
+#include "scps_species.h"   /* SpeciesArchetype : la race native d'une tech signature */
 
-/* ---- Branches --------------------------------------------------------- */
-typedef enum {
-    TBR_SOCIETY = 0,   /* Le Socle — résilience */
-    TBR_FORGE,         /* L'Atelier — milieu vénéneux */
-    TBR_MAGIC,         /* L'Arcane — faustien */
-    TBR_COUNT
-} TechBranch;
+/* ---- Thèmes (3) — la Magie est fondue dans le Savoir ------------------- */
+typedef enum { THM_SAVOIR = 0, THM_FORGE, THM_SOCIETE, THM_COUNT } TechTheme;
 
-/* ---- Identifiants de nœuds (I.x / II.x / III.x du document) ----------- */
+/* ---- Fonctions (3) — chaque thème les rejoue (fractal) ----------------- */
+typedef enum { FN_PRODUCTION = 0, FN_ARMEE, FN_RENFORCEMENT, FN_COUNT } TechFunction;
+
+/* 9 quartiers = THM_COUNT × FN_COUNT (l'angle de l'arbre). */
+#define TECH_QUARTERS (THM_COUNT*FN_COUNT)
+
+/* ---- Identifiants de nœuds (chaque nœud = un déverrouillage) ----------- */
 typedef enum {
-    /* Société */
-    TECH_I1_COUTUME = 0,   /* Coutume codifiée */
-    TECH_I2_CHARTE,        /* Charte des terres */
-    TECH_I3_GRENIERS,      /* Greniers communs */
-    TECH_I4_CONSEIL,       /* Conseil des sphères */
-    TECH_I5_CHANCELLERIE,  /* Chancellerie (archive vivante) */
-    TECH_I6_INTEGRATION,   /* Droit d'intégration */
-    TECH_I7_PACTE,         /* ★ Pacte des peuples (capstone résilience) */
-    /* Forge */
-    TECH_II1_METALLURGIE,
-    TECH_II2_HYDRAULIQUE,
-    TECH_II3_FONDERIE,
-    TECH_II4_MANUFACTURE,
-    TECH_II5_GUERRE,       /* Ingénierie de guerre */
-    TECH_II6_FORGE_PROF,   /* Forge profonde */
-    TECH_II7_INDUSTRIE,    /* Industrie de masse */
-    TECH_II8_OEUVRE,       /* ★ L'Œuvre noire (capstone forge) */
-    /* Magie */
-    TECH_III1_SAVOIR,      /* Savoir ancien */
-    TECH_III2_RUNES,       /* Runes liantes */
-    TECH_III3_MIROIRS,     /* Miroirs lointains */
-    TECH_III4_ELEMENTS,    /* Maîtrise des éléments */
-    TECH_III5_PACTES,      /* Pactes anciens */
-    TECH_III6_EVEIL,       /* L'Éveil (déclenche la crise) */
-    TECH_III7_COURONNE,    /* ★ La Couronne ardente (capstone magie) */
+    /* SAVOIR · Production (spine sûre — vitesse de recherche) */
+    TECH_BIBLIOTHEQUE = 0,   /* ◎ base */
+    TECH_SCRIPTORIUM, TECH_ACADEMIE, TECH_UNIVERSITE,
+    /* SAVOIR · Armée (arcane offensif — faustien) */
+    TECH_SAVOIR_GUERRE, TECH_MAGIE_BATAILLE, TECH_INVOCATION, TECH_EVEIL,
+    /* SAVOIR · Renforcement (arcane durable — faustien) */
+    TECH_WARDS, TECH_SCRYING, TECH_COMMUNION, TECH_SAVOIR_INTERDIT,
+    /* FORGE · Production (sortie — le multiplicateur de rendement) */
+    TECH_COLLECTE_BOIS,      /* ◎ base */
+    TECH_COLLECTE_ARGILE,    /* ◎ base */
+    TECH_FONDERIE, TECH_OUTILLAGE, TECH_MANUFACTURE, TECH_INDUSTRIE,
+    /* FORGE · Armée (armes — faustien) */
+    TECH_ARMURERIE, TECH_POUDRIERE, TECH_FORGE_RUNES, TECH_OEUVRE_NOIRE,
+    /* FORGE · Renforcement (durabilité / fortification) */
+    TECH_ATELIER,            /* ◎ base */
+    TECH_QUALITE_MATERIAUX, TECH_FORTIFICATIONS, TECH_AUTOMATES,
+    /* SOCIÉTÉ · Production (croissance / commerce / impôt) */
+    TECH_COLLECTE_NOURRITURE,/* ◎ base */
+    TECH_IRRIGATION, TECH_COMMERCE, TECH_CADASTRE, TECH_ABONDANCE,
+    /* SOCIÉTÉ · Armée (levée — faustien : l'esclavage) */
+    TECH_CASERNE,            /* ◎ base */
+    TECH_CONSCRIPTION, TECH_ORGANISATION, TECH_ESCLAVAGE, TECH_CASTE_MARTIALE,
+    /* SOCIÉTÉ · Renforcement (K / L / intégration — la spine métabolisante) */
+    TECH_CHANCELLERIE, TECH_FOI, TECH_INTEGRATION, TECH_CULTE_IMPERIAL,
     TECH_COUNT
 } TechId;
 
 /* ---- Définition d'un nœud (table statique) ---------------------------- */
 typedef struct {
-    const char *name;
-    TechBranch  branch;
-    int         tier;          /* 1..5 */
-    TechId      prereq[2];     /* -1 = aucun (codé TECH_COUNT) */
-    bool        needs_ruins;   /* porte d'entrée Magie : accès ruine/relique */
-    bool        capstone;      /* définit le pôle de la run */
+    const char     *name;
+    const char     *unlocks;     /* le bâtiment/capacité déverrouillé (mot de JEU) */
+    TechTheme       theme;
+    TechFunction    func;
+    int             tier;        /* le RAYON : 0 = base (centre), 1.. = profondeur */
+    TechId          prereq;      /* nœud précédent (TECH_COUNT = aucun) */
+    bool            faustian;    /* ⚠ bout interdit (monte charge/flux → Brèche) */
+    bool            needs_ruins; /* porte arcane : accès ruine/relique */
+    SpeciesArchetype native;     /* race signature ; RACE_COUNT = universelle */
 
-    /* Écriture SCPS (deltas appliqués à la recherche). */
-    float dK, dL, dF;          /* socle : capacité narrative, ordre, fédéralisme */
-    float dEco, dMil;          /* puissance économique / militaire */
-    float dH;                  /* coercition / dureté */
-    float dFracture;           /* tension interne (peuples tenus de force) */
-    float dPuissance;          /* puissance brute (surtout magie) */
-    float flux;                /* FLUX PERMANENT que K doit narrer (≥0) */
-    float charge;              /* contribution à la charge faustienne */
-    bool  triggers_crisis;     /* tire soi-même la gâchette de la fin */
+    /* Écriture SCPS (deltas appliqués au TechState). */
+    float dK, dL, dF;            /* socle : capacité narrative, ordre, fédéralisme */
+    float dEco, dMil;            /* puissance économique / militaire */
+    float dH;                    /* coercition / dureté */
+    float dFracture;             /* tension interne (peuples tenus de force) */
+    float dPuissance;            /* puissance brute (surtout arcane) */
+    float flux;                  /* FLUX PERMANENT que K doit narrer (≥0) */
+    float charge;                /* contribution à la charge faustienne */
+    bool  triggers_crisis;       /* tire soi-même la gâchette de la fin */
 } TechNode;
 
 /* ---- État techno d'un empire (axes SCPS écrits par l'arbre) ----------- */
@@ -107,11 +105,11 @@ typedef struct {
 
     bool  unlocked[TECH_COUNT];
     int   n_unlocked;
-    bool  has_ruins_access;   /* porte de la branche Magie */
+    bool  has_ruins_access;   /* porte de l'arcane (Savoir faustien profond) */
     bool  crisis_triggered;   /* la crise de fin est-elle convoquée ? */
 } TechState;
 
-/* ---- Catégories d'intrants pour la fusion (§7) ------------------------ */
+/* ---- Catégories d'intrants pour la fusion ----------------------------- */
 typedef enum {
     ING_COMBURANT = 0,   /* salpêtre */
     ING_COMBUSTIBLE,     /* soufre, charbon */
@@ -121,42 +119,52 @@ typedef enum {
     ING_COUNT
 } TechIngredient;
 
-/* Recette de fusion : intrants + tech habilitante → tech-produit nommée. */
 typedef struct {
     const char    *name;
     TechIngredient in1, in2;
     TechId         enabler;     /* tech requise pour réaliser la fusion */
-    /* effet du produit */
     float dMil, dEco;
-    float flux;                 /* >0 si le produit appelle de la dereal */
-    float charge;               /* contribution faustienne du produit */
+    float flux;
+    float charge;
 } FusionRecipe;
 
 #define FUSION_COUNT 5
 
-/* ---- API -------------------------------------------------------------- */
+/* ---- API : état & recherche ------------------------------------------- */
 void        tech_state_init(TechState *s, bool has_ruins_access);
-const char *tech_name(TechId id);
-const char *tech_branch_name(TechBranch b);
+
+/* Accesseurs de nœud (pour l'IA, l'UI, la membrane). */
 const TechNode *tech_node(TechId id);
+const char *tech_name(TechId id);
+const char *tech_unlocks(TechId id);          /* le bâtiment/capacité déverrouillé */
+const char *tech_theme_name(TechTheme t);     /* "Savoir"/"Forge"/"Société" */
+const char *tech_function_name(TechFunction f);/* "Production"/"Armée"/"Renforcement" */
+int         tech_quarter(TechTheme t, TechFunction f);  /* 0..8 — l'angle */
+bool        tech_is_base(TechId id);          /* tier 0 = bâtiment de base (centre) */
 
-/* Prérequis remplis, pas déjà pris, porte d'accès ok ? */
-bool  tech_can_research(const TechState *s, TechId id);
-/* Applique les deltas SCPS, la charge et le flux ; marque comme acquis. */
-bool  tech_research(TechState *s, TechId id);
+/* Masque de RACES accessibles à un empire (sa propre race + races conquises/
+ * migrées). Une tech native d'une race n'est recherchable qu'avec l'accès. */
+unsigned    tech_race_bit(SpeciesArchetype r);
 
-/* dereal = max(0, (P/10)·C + flux_faustien − K). */
-float tech_dereal(const TechState *s);
-/* flux faustien permanent (somme des flux des nœuds pris). */
-float tech_flux(const TechState *s);
-/* Proximité de la crise de fin [0..1], saturante en charge. */
-float tech_crisis_proximity(const TechState *s);
-/* Ampleur du choc quand la crise tombe (croît avec charge ET magie). */
-float tech_shock_amplitude(const TechState *s);
-/* Fragilité structurelle : fracture rapportée à l'ordre L (≥5 = on craque). */
-float tech_fragility(const TechState *s);
+/* Prérequis remplis, pas déjà pris, porte arcane ok, ACCÈS de race ok ? */
+bool  tech_can_research(const TechState *s, TechId id, unsigned race_access);
+/* Applique les deltas SCPS, la charge et le flux ; marque comme acquis.
+ * (Le PAIEMENT en points de recherche est géré par l'appelant via tech_cost.) */
+bool  tech_research(TechState *s, TechId id, unsigned race_access);
 
-/* Fusion : liste les recettes réalisables (intrants dispo + enabler pris). */
+/* COÛT en points de recherche : BASE_COST[tier] × (1 + EXTENT_W·population/BASE).
+ * Plus l'empire est ÉTENDU (∝ population), plus CHAQUE tech coûte → frein au
+ * snowball, « tall » viable. Les bâtiments de base (tier 0) coûtent 0. */
+float tech_cost(TechId id, float population);
+
+/* ---- API : la Brèche (verrou SCPS, inchangé) -------------------------- */
+float tech_dereal(const TechState *s);          /* max(0,(P/10)·C + flux − K) */
+float tech_flux(const TechState *s);            /* flux faustien permanent */
+float tech_crisis_proximity(const TechState *s);/* proximité de la crise [0..1] */
+float tech_shock_amplitude(const TechState *s); /* ampleur du choc (croît avec magie) */
+float tech_fragility(const TechState *s);       /* fracture / ordre net */
+
+/* ---- API : fusion (intrants géologiques + enabler) -------------------- */
 const FusionRecipe *tech_fusion_table(void);
 bool  tech_fusion_available(const TechState *s, int recipe_idx,
                             const bool has_ingredient[ING_COUNT]);
