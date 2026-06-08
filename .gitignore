@@ -60,3 +60,5 @@ campaign_demo
 full*.png
 z[A-Z].png
 pop_demo
+econ_scan
+econ_scan.c
