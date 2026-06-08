@@ -38,6 +38,7 @@
 #include "scps_revolt.h"    /* la révolte INCARNÉE : sécessions/coups dans le jeu vivant */
 #include "scps_intertrade.h"/* commerce inter-pays : grandes routes marchandes + embargo */
 #include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
+#include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -329,6 +330,7 @@ typedef struct {
     RouteNetwork    *rn;       /* routes commerciales */
     RevoltState     *rs;       /* soulèvements incarnés (sécessions, coups) */
     WarHost         *host;     /* armées levées par pays (mobilisation) */
+    MissionsState   *missions; /* missions décennales (rythme + injection de ressources) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
     int16_t          prev_owner_mo[SCPS_MAX_REG];  /* propriétaires du mois (détection de conquête) */
@@ -403,6 +405,7 @@ static void sim_day(Sim *s, World *w) {
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
+        missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales */
     }
     if (++s->day % 365 == 0) s->year++;
 }
@@ -439,6 +442,7 @@ static void sim_rebuild(Sim *s, World *w) {
     labor_seed_from_world(s->labor, w, s->econ, s->player);
     revolt_init(s->rs);                                  /* les soulèvements incarnés */
     warhost_init(s->host);                               /* les armées levées par pays */
+    missions_init(s->missions);                          /* missions décennales */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
         s->prev_owner_mo[r]=s->econ->region[r].owner;
     s->day=0; s->year=0;
@@ -569,6 +573,15 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
         SDL_Color sc = (fc.sedition.value>=32) ? sense_color(0.10f) : COL_PARCH;
         draw_text(ren, fs, xc, yC+12, sc, sz);
         zone_add((SDL_Rect){xc-2,yC-2, 160, 22}, hover_sedition());
+        xc += text_w(fs, sz) + 28;
+        /* La mission décennale en cours (rythme + récompense) — un but lisible. */
+        const Mission *mis = mission_of(s->missions, cid);
+        if (mis){
+            char mz[140]; snprintf(mz,sizeof mz, "Mission : %s%s", mis->text, mis->done?"  (accomplie)":"");
+            draw_text(ren, fs, xc, yC+6, mis->done?COL_COPPER:COL_PARCH, mz);
+            zone_add((SDL_Rect){xc-2,yC-2, text_w(fs,mz)+6, 22},
+                     "Mission décennale : un but tiré de l'état du pays ; l'accomplir verse or + matières.");
+        }
     }
 
     if (r.augure) {  /* ligne d'alerte / augure sous la topbar (réemploi machinerie IA) */
@@ -799,6 +812,7 @@ int main(int argc, char **argv) {
     sim.rn   = (RouteNetwork*)    malloc(sizeof(RouteNetwork));
     sim.rs   = (RevoltState*)     malloc(sizeof(RevoltState));
     sim.host = (WarHost*)         malloc(sizeof(WarHost));
+    sim.missions = (MissionsState*) malloc(sizeof(MissionsState));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 

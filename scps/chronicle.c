@@ -25,6 +25,7 @@
 #include "scps_modifier.h"
 #include "scps_demography.h"
 #include "scps_revolt.h"
+#include "scps_missions.h"
 #include "scps_labor.h"
 #include "scps_ai.h"
 #include "scps_species.h"
@@ -39,6 +40,7 @@ typedef struct {
     LaborEcon *labor; DiploState *dp; RouteNetwork *rn; AiActor *ai; bool *ai_on;
     RevoltState *rs;
     WarHost     *host;   /* armées levées par pays (mobilisation) */
+    MissionsState *missions; /* missions décennales (rythme + injection de ressources) */
     int16_t prev_owner_mo[SCPS_MAX_REG];   /* propriétaires au mois précédent (détection de conquête) */
     int day, year, player;
 } Sim;
@@ -108,6 +110,7 @@ static void sim_day(Sim *s, World *w) {
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
+        missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales : rythme + récompense */
     }
     if (++s->day % 365 == 0) s->year++;
 }
@@ -127,7 +130,7 @@ static void sim_init(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);
-    revolt_init(s->rs); warhost_init(s->host);
+    revolt_init(s->rs); warhost_init(s->host); missions_init(s->missions);
     for (int r=0;r<SCPS_MAX_REG;r++)
         s->prev_owner_mo[r] = (r<s->econ->n_regions)? s->econ->region[r].owner : -1;
     events_init(s->ev, w, w->seed);
@@ -247,6 +250,7 @@ int main(int argc, char **argv){
     s.dp=malloc(sizeof(DiploState)); s.rn=malloc(sizeof(RouteNetwork));
     s.ai=calloc(SCPS_MAX_COUNTRY,sizeof(AiActor)); s.ai_on=calloc(SCPS_MAX_COUNTRY,sizeof(bool));
     s.rs=malloc(sizeof(RevoltState)); s.host=malloc(sizeof(WarHost));
+    s.missions=malloc(sizeof(MissionsState));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
         ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs){ fprintf(stderr,"OOM\n"); return 1; }
 
