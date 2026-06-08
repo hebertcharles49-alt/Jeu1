@@ -1,0 +1,165 @@
+================================================================================
+  SCPS — SYNTHÈSE : LA GUERRE DISPUTABLE (résolution de guerre, 6 passes)
+================================================================================
+  Branche SCPS · arc « Guerre disputable » · état au terme de la passe 6/N
+  Modules touchés : scps_diplo.{h,c}, scps_ai.c, scps_econ.{h,c}, chronicle.c,
+                    diplo_demo.c (banc d'essai)
+--------------------------------------------------------------------------------
+
+INTENTION
+---------
+Avant cet arc, la guerre était un interrupteur : on déclarait, on prenait des
+provinces adjacentes jusqu'à épuisement, on signait. Aucune RAISON, aucun PRIX,
+aucune CONSÉQUENCE durable. La guerre est désormais DISPUTABLE : elle naît d'un
+grief, se joue comme un bras-de-fer, dépouille ce qu'elle prend, se solde par des
+termes proportionnels, laisse une rancune, et — pour les sociétés de proie —
+déporte des captifs qui fracturent le cœur.
+
+Tout reste fidèle au moteur : aucune branche « si pays==X », aucune interdiction
+brutale. Les freins sont des RÉTROACTIONS NÉGATIVES (la surexpansion ligue le
+monde ; l'esclavage fracture le maître). L'IA est BIAISÉE, jamais bridée.
+
+DISCIPLINE MEMBRANE
+-------------------
+Le rendu (viewer.c / scps_render.c) n'inclut PAS scps_core.h et ne lit AUCUN
+flottant SCPS : il ne reçoit que des mots et des nombres de jeu (0–100, tangibles).
+Vérifié par grep à chaque passe — aucune fuite de coordonnée.
+
+
+================================================================================
+  LES SIX PASSES
+================================================================================
+
+PASSE 1 — LE CASUS BELLI  (commit 3bb20e7)
+------------------------------------------
+La guerre a une RAISON, lue de la relation, jamais posée à la main. Son type fixe
+le BUT de guerre (et donc ce qui est exigible à la paix). Priorité de lecture :
+
+    ÉCONOMIQUE      un bien aigu MONOPOLISÉ par la cible (le Mercantile bloqué)
+    TERRITORIAL/    une RANCUNE (irrédentisme, passe 5) — sans même l'adjacence
+    RELIGIEUX       schisme (branche proche + prosélytisme), seuil 0.45
+    TERRITORIAL     adjacence / frontière (la raison la plus commune)
+    ASSUJETTISSEMENT on projette > 1.6× la puissance de la cible
+
+  CB_NONE → l'IA ne PEUT pas déclarer : elle renonce ou attend. Le but est
+  mémorisé (d->cb[a][b]) et gate la paix.
+
+PASSE 2 — LE SCORE DE GUERRE  (commit 472bc09)
+----------------------------------------------
+Un bras-de-fer, du point de vue de l'attaquant (celui qui porte le CB) :
+
+    score = battles (≤ +50)  +  occupation (+50 → +100)  −  attrition (→ −100)
+
+  - battles : l'avantage militaire pousse le battle_score vers +50 (WAR_BATTLE_W
+    14/an), PLAFONNÉ — les batailles SEULES ne gagnent pas la guerre ;
+  - occupation : +12 par région prise (WAR_OCCUPY_PER), l'autre moitié du score ;
+  - attrition : la guerre SAIGNE les armes des deux camps (0.18/an ; le perdant
+    ×1.6, le gagnant ×0.6) → mil_power baisse → la guerre s'épuise (pression à la
+    paix).
+  Un défenseur sans espoir (score adverse ≥ AI_SURRENDER 55 + armée trop faible)
+  CAPITULE plutôt que de se faire anéantir.
+
+PASSE 3 — LE SACCAGE  (commit 6137f18)
+--------------------------------------
+Prendre une province la DÉPOUILLE, une seule fois, 1×/5 ans/province :
+
+    butin = 0.6 × trésor provincial  +  0.5 × entrepôt (valorisé au prix courant)
+    → fondu dans le trésor de la CAPITALE du conquérant.
+
+  La province pillée est vidée (plus de revenu immédiat) et sa cicatrice passe au
+  plancher (gel du développement, −50 % croissance & production). Un compteur
+  anti-saccage (pillage_cd, dans RegionEconomy) se rouvre après ~5 ans.
+  EFFET D'ÉQUILIBRE : une province saccagée est un territoire sans valeur et
+  restif → tenir le sol cesse de payer → la guerre se tempère d'elle-même.
+
+PASSE 4 — LA PAIX PROPORTIONNELLE  (commit e1e1cc1)
+---------------------------------------------------
+Le score ACHÈTE des termes ; la victoire ne balaie plus tout.
+
+  - REVENDICATION légitime (diplo_war_claim) ∝ domination militaire :
+        territorial → 1 + (CLAIM_DOM 18 × max(0, ratio−0.5))  provinces
+        autre CB    → 1 prise (la source / l'humiliation)
+        sans CB     → 1 tampon si l'on domine, 0 sinon
+    L'IA BANQUE à la revendication : elle empoche son dû puis signe.
+  - SUREXPANSION : prendre AU-DELÀ est ILLÉGITIME → surcroît de fulgurance
+    (+CLAIM_ILLEGIT_MOM 2.0 au momentum → le monde se ligue, coalition) et plaie
+    plus profonde. Biaisé, jamais interdit.
+  - RÉPARATIONS : le vaincu net (|score| ≥ 20) indemnise le vainqueur
+    (jusqu'à 0.5 × ses trésors provinciaux, ∝ score) → capitale du vainqueur.
+
+PASSE 5 — LA RANCUNE NATIONALE  (commit 9e42ea9)
+------------------------------------------------
+La défaite territoriale laisse un GRIEF (rancor[a][b], asymétrique) :
+
+  - posé sur le DÉPOSSÉDÉ à chaque province perdue (+1), CREUSÉ si la prise fut
+    illégitime (+1) ;
+  - SURVIT à la paix (le grief n'est pas la guerre) et s'oublie sur ~une
+    génération (RANCOR_DECAY = 1/10 ans) ;
+  - IRRÉDENTISME : donne un casus belli TERRITORIAL même SANS adjacence — on peut
+    revenir reprendre ses terres (seuil 0.75) ;
+  - RALLIEMENT : qui reprend SES terres se bat avec fureur — multiplicateur de
+    morale (jusqu'à +0.6, saturation douce) sur l'accumulation du score ;
+  - BIAIS D'IA : on vise en priorité qui nous a pris nos terres (AI_RANCOR_W 3.0).
+
+PASSE 6 — L'ESCLAVAGE  (commit 0ca1ab3)
+---------------------------------------
+Une société de RAZZIA déporte ~¼ de la population conquise vers son CŒUR :
+
+  - une cohorte DIASPORA non-intégrée, de culture étrangère, TOUJOURS DISTINCTE
+    (jamais fondue dans un groupe libre co-culturel) ;
+  - le D̄ (diversité moyenne) du maître MONTE → la fracture s'installe au CENTRE,
+    pas seulement à la frontière ;
+  - carburant à révolte : revolt_classify lit une diaspora soulevée comme une
+    JACQUERIE (révolte d'esclaves), jamais une sécession ;
+  - GARDE-FOU : on n'injecte pas dans une région mono-groupe (cela masquerait sa
+    population native) ;
+  - EFFET D'ÉQUILIBRE : l'alien au cœur → fracture interne → le maître CONSOLIDE
+    au lieu de s'étendre. L'esclavage se châtie lui-même.
+
+  GATE PROVISOIRE : traditions prédatrices (horde montée, razzia maritime,
+  thalasso-prédatrice). La tech d'asservissement arrive au prochain jet et se
+  branchera dans la SEULE fonction society_enslaves() (un « || » de plus).
+
+
+================================================================================
+  PREUVE — BANCS D'ESSAI (auto-vérifiants, 0 warning)
+================================================================================
+  diplo_demo .... 45 réussis / 0 échoués   (9 sections : relations, conquête,
+                  équilibre, casus belli, score de guerre, saccage, paix
+                  proportionnelle, rancune, esclavage)
+  social_demo ... 10 / 0      revolt_demo ... 23 / 0      ai_demo ... 16 / 0
+
+  Build : `make <cible>` depuis la racine du dépôt. 0 warning (-Wall -Wextra).
+
+
+================================================================================
+  ÉQUILIBRE — BALAYAGE HEADLESS (chronicle, 10 sims × 200 ans, sans joueur)
+================================================================================
+                                 avant l'arc   passe 4        après (passes 5+6)
+                                  (11 sims)     (11 sims)        (10 sims)
+  guerres déclenchées ........      96            102              69
+  provinces prises de force ..     281            274             208
+  PAYS ABSORBÉS ..............       0              0               0   ← invariant
+  soulèvements → sécessions ..    98→54         108→51           75→47
+  morts au combat (révoltes) .    1625           2064             863
+
+  LECTURE. L'INVARIANT TIENT à chaque passe : 0 pays absorbé — le monde reste
+  MULTIPOLAIRE et VIVANT (révoltes, sécessions, guerres présentes partout).
+  Le balayage est passé de 11 à 10 sims (on a retiré la carte à 12 empires, la
+  plus peuplée et la plus sanglante : les morts au combat sont dominées par
+  quelques sims aberrants) — l'essentiel de la baisse des totaux vient de là.
+  Le résidu est l'effet FIDÈLE de l'arc : la surexpansion se paie en coalition,
+  le saccage rend le sol sans valeur, l'esclavage fracture le maître — autant de
+  rétroactions qui tempèrent la conquête là où elle a lieu, sans aucun plafond
+  artificiel. Un monde plus calme, jamais figé, jamais absorbé.
+
+
+================================================================================
+  EN ATTENTE
+================================================================================
+  - §4c (tech) : brancher la tech d'asservissement dans society_enslaves()
+    (arrive au prochain prompt — le point d'ancrage est isolé et prêt).
+  - §1b : CASUS BELLI FABRIQUÉ — mission de diplomate (~2 ans) qui forge un
+    casus belli, décroissant s'il n'est pas encaissé.
+
+================================================================================
