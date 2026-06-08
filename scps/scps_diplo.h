@@ -117,4 +117,17 @@ void  diplo_war_tick (DiploState *d, World *w, WorldEconomy *econ,
  * batailles (≤+50) + occupation (+50→+100) − attrition (vers −100). */
 float diplo_war_score(const DiploState *d, int a, int b);
 
+/* ---- PAIX PROPORTIONNELLE (§5) — la victoire ACHÈTE des termes -------- *
+ * REVENDICATION légitime de a contre b : combien de provinces la domination
+ * MILITAIRE justifie d'annexer. Territorial → 1 + ∝ dominance ; les autres CB →
+ * 1 prise (la source / l'humiliation) ; sans CB → 1 province tampon si l'on
+ * domine, 0 sinon. PRENDRE AU-DELÀ est de la SUREXPANSION : diplo_conquer_region
+ * la punit en fulgurance (→ coalition) — biaisé, jamais interdit. */
+int   diplo_war_claim (const DiploState *d, const World *w,
+                       const WorldEconomy *econ, int a, int b);
+/* RÉPARATIONS : à la paix, le VAINCU (score adverse net) indemnise le vainqueur
+ * ∝ |score de guerre| — ponction des trésors provinciaux du perdant → capitale du
+ * vainqueur. Renvoie l'or transféré ; 0 si match nul (pas de vainqueur net). */
+float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int b);
+
 #endif /* SCPS_DIPLO_H */

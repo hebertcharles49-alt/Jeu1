@@ -32,6 +32,11 @@ static inline float absf(float v){return v<0?-v:v;}
 #define WAR_ATTRITION    0.18f  /* part d'armes perdue/an (saigne les deux ; le perdant ×plus) */
 #define WAR_ATTR_LOSER   1.6f
 #define WAR_ATTR_WINNER  0.6f
+/* ---- Paix proportionnelle (§5) --------------------------------------- */
+#define CLAIM_DOM         18.f  /* provinces légitimes de plus par cran de domination militaire */
+#define CLAIM_ILLEGIT_MOM 2.0f  /* surcroît de fulgurance par prise ILLÉGITIME (→ coalition) */
+#define REP_MIN_SCORE     20.f  /* en-deçà de ce score : match nul → aucune indemnité */
+#define REP_RATE          0.5f  /* part max du trésor du perdant exigée (à 100 de score) */
 
 void diplo_init(DiploState *d){ memset(d,0,sizeof(*d)); }
 
@@ -234,8 +239,16 @@ bool diplo_conquer_region(DiploState *d, World *w, WorldEconomy *econ,
     re->revolt_scar = 1.0f;           /* la conquête CONVULSE : −50 % dévelop. quelques années */
     if (conqueror<SCPS_MAX_COUNTRY){
         d->momentum[conqueror] += MOMENTUM_PER_CONQ;   /* la fulgurance EFFRAIE (→ coalition) */
-        if (defender>=0 && defender<SCPS_MAX_COUNTRY)
+        if (defender>=0 && defender<SCPS_MAX_COUNTRY){
             d->conquered[conqueror][defender]++;        /* OCCUPATION : pousse le score de guerre */
+            /* §5 LÉGITIMITÉ : au-delà de ce que la domination militaire justifie (la
+             * revendication), la prise est de la SUREXPANSION — surcroît de fulgurance
+             * (le monde se ligue) et plaie plus profonde (intégration déjà à zéro). */
+            if (d->conquered[conqueror][defender] > diplo_war_claim(d,w,econ,conqueror,defender)){
+                d->momentum[conqueror] += CLAIM_ILLEGIT_MOM;
+                re->revolt_scar = 1.0f;
+            }
+        }
     }
     legitimacy_on_conquest(wl, region);   /* L au plancher, intégration à zéro */
     /* SACCAGE : la prise DÉPOUILLE la province (or + production → trésor de
@@ -326,6 +339,33 @@ float diplo_war_score(const DiploState *d, int a, int b){
     if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0.f;
     float occ = fminf(50.f, WAR_OCCUPY_PER*(float)d->conquered[a][b]);  /* +50→+100 par l'occupation */
     return clampf(d->battle_score[a][b] + occ, -100.f, 100.f);
+}
+
+/* ---- Paix proportionnelle (§5) : la victoire achète des termes -------- */
+int diplo_war_claim(const DiploState *d, const World *w, const WorldEconomy *econ, int a, int b){
+    if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0;
+    CasusBelli cb=(CasusBelli)d->cb[a][b];
+    float pA=diplo_mil_power(w,econ,a), pB=diplo_mil_power(w,econ,b);
+    float ratio=pA/(pA+pB+0.01f);                        /* domination militaire de l'attaquant */
+    if (cb==CB_NONE)        return ratio>0.5f ? 1 : 0;   /* conquête nue : 1 tampon si l'on domine */
+    if (cb!=CB_TERRITORIAL) return 1;                    /* humiliation/source/vassalité : une prise */
+    return 1 + (int)(CLAIM_DOM*fmaxf(0.f, ratio-0.5f));  /* territorial : ∝ domination */
+}
+float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int b){
+    if (a<0||a>=w->n_countries||b<0||b>=w->n_countries||a==b) return 0.f;
+    float s=diplo_war_score(d,a,b);                      /* point de vue de a */
+    if (absf(s) < REP_MIN_SCORE) return 0.f;             /* match nul → pas de vainqueur net */
+    int winner=(s>0.f)?a:b, loser=(s>0.f)?b:a;
+    float frac=REP_RATE*fminf(1.f, absf(s)/100.f);       /* plus la défaite est nette, plus on saigne */
+    int cap=w->country[winner].capital_prov;
+    int dst=(cap>=0&&cap<w->n_provinces)?w->province[cap].region:-1;
+    float total=0.f;
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==loser){
+        float pay=frac*econ->region[r].treasury;
+        econ->region[r].treasury-=pay; total+=pay;       /* indemnité prélevée sur tout le royaume */
+    }
+    if (dst>=0&&dst<econ->n_regions) econ->region[dst].treasury+=total;
+    return total;
 }
 
 void diplo_tick(DiploState *d, float dt){

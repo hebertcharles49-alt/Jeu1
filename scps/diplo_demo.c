@@ -240,6 +240,76 @@ int main(int argc,char**argv){
         ok("après ~5 ans, la province REDEVIENT saccageable", rv->pillage_cd <= 0.f);
     } else ok("(monde trop petit pour le test de saccage)", true);
 
+    /* ---- 7. Paix proportionnelle (§5) : revendication ∝ domination · surexpansion → coalition ---- */
+    printf("\n── 7. Paix proportionnelle (revendication ∝ domination · indemnité · surexpansion) ──\n");
+    {
+        /* B = le pays NON-joueur le plus ÉTOFFÉ (≥2 régions) : prendre UNE province ne
+         * l'anéantit pas → sa puissance reste lisible (claim stable) et il reste un
+         * trésor à ponctionner après. */
+        int A=player, B=-1, Bn=0;
+        for(int c=0;c<w->n_countries;c++){
+            if(c==A||w->country[c].role==POLITY_UNCLAIMED) continue;
+            int n=0; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==c) n++;
+            if(n>Bn){ Bn=n; B=c; }
+        }
+        if(B>=0 && Bn>=2){
+            /* REVENDICATION ∝ domination militaire : un dominant annexe LÉGITIMEMENT plus. */
+            for(int r=0;r<econ->n_regions;r++){
+                econ->region[r].stock[RES_ARMS]=econ->region[r].stock[RES_GUNPOWDER]=econ->region[r].stock[RES_ENCHANTED_ARMS]=0.f;
+                if(econ->region[r].owner==B) econ->region[r].stock[RES_ENCHANTED_ARMS]=4000.f; /* B surarme → A marginal */
+            }
+            diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+            int claim_marg=diplo_war_claim(dp,w,econ,A,B);
+            for(int r=0;r<econ->n_regions;r++){
+                econ->region[r].stock[RES_ENCHANTED_ARMS]=0.f;
+                if(econ->region[r].owner==A) econ->region[r].stock[RES_ENCHANTED_ARMS]=4000.f; /* A surarme → A dominant */
+            }
+            int claim_dom=diplo_war_claim(dp,w,econ,A,B);
+            printf("   revendication territoriale : marginal=%d prov · dominant=%d prov\n",claim_marg,claim_dom);
+            ok("un attaquant DOMINANT a une revendication légitime plus large", claim_dom > claim_marg);
+            ok("un attaquant marginal n'a droit qu'à la province-frontière (≥1)", claim_marg >= 1);
+
+            /* un casus belli NON-territorial ne donne droit qu'à UNE prise (humiliation/source). */
+            diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_RELIGIOUS);
+            ok("un casus belli non-territorial ne vaut qu'UNE prise (pas d'annexion étendue)",
+               diplo_war_claim(dp,w,econ,A,B)==1);
+
+            /* SUREXPANSION : prendre AU-DELÀ de la revendication = surcroît de fulgurance.
+             * On garde B FORT (surarmé, plusieurs régions) → revendication=1 STABLE même
+             * après une prise → la 2e prise est ILLÉGITIME. */
+            for(int r=0;r<econ->n_regions;r++){
+                econ->region[r].stock[RES_ARMS]=econ->region[r].stock[RES_GUNPOWDER]=0.f;
+                econ->region[r].stock[RES_ENCHANTED_ARMS]=(econ->region[r].owner==B)?6000.f:0.f;
+            }
+            diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+            int claim=diplo_war_claim(dp,w,econ,A,B);
+            dp->conquered[A][B]=claim;                   /* pile à la limite légitime */
+            int Br=-1; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B && econ->region[r].culture.settled){Br=r;break;}
+            if(Br>=0 && claim==1){
+                float mom0=dp->momentum[A];
+                diplo_conquer_region(dp,w,econ,wl,A,Br);  /* la prise (claim+1) = ILLÉGITIME */
+                ok("prendre AU-DELÀ de la revendication = SUREXPANSION (fulgurance ↑↑ → coalition)",
+                   dp->momentum[A] > mom0 + 2.0f);        /* base 1 + surcharge 2 → > 2 prouve la surcharge */
+            } else ok("(pas de cible nette pour le test de surexpansion)", true);
+
+            /* RÉPARATIONS : le vaincu net indemnise le vainqueur ∝ score. */
+            diplo_init(dp); diplo_declare_war_cb(dp,A,B,CB_TERRITORIAL);
+            dp->battle_score[A][B]=50.f; dp->conquered[A][B]=5;          /* score de A ≈ +100 */
+            for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==B) econ->region[r].treasury=1000.f;
+            int capA=w->province[w->country[A].capital_prov].region;
+            float capA0=(capA>=0)?econ->region[capA].treasury:0.f;
+            float rep=diplo_reparations(dp,w,econ,A,B);
+            printf("   indemnité de guerre extorquée : %.0f or\n",rep);
+            ok("le VAINCU net paie une indemnité au vainqueur (∝ score)", rep>0.f);
+            ok("le trésor du VAINQUEUR enfle de l'indemnité", capA>=0 && econ->region[capA].treasury > capA0);
+
+            /* match nul : aucune indemnité (pas de vainqueur net). */
+            diplo_init(dp);
+            ok("un MATCH NUL (score sous le seuil) n'extorque aucune indemnité",
+               diplo_reparations(dp,w,econ,A,B)==0.f);
+        } else ok("(monde trop petit pour le test de paix proportionnelle)", true);
+    }
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n",g_pass,g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

@@ -407,8 +407,10 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_WAR) continue;
         if (diplo_war_goal(diplo,b,a->cid)==CB_NONE) continue;          /* b est l'attaquant */
         float their_score = diplo_war_score(diplo, b, a->cid);
-        if (their_score >= AI_SURRENDER && v->armee < AI_ARMY_MARGIN*diplo_mil_power(w,econ,b))
+        if (their_score >= AI_SURRENDER && v->armee < AI_ARMY_MARGIN*diplo_mil_power(w,econ,b)){
+            diplo_reparations(diplo, w, econ, a->cid, b);               /* le vaincu indemnise le vainqueur */
             diplo_make_peace(diplo, a->cid, b);                         /* capitulation */
+        }
     }
 
     if (day < a->peace_lock_until) return;                  /* on tient la paix (digestion) */
@@ -431,17 +433,26 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         if (er>=0){
             if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er)){
                 a->credit_war -= 1.f; a->stats.conquests++;
-                /* BUT GATÉ PAR LE CB : un casus belli religieux/économique/assujettissement
-                 * est SATISFAIT par une prise (la source / l'humiliation) → on impose la paix.
-                 * Seul le territorial autorise l'annexion étendue (province après province). */
-                if (goal!=CB_TERRITORIAL && enemy>=0) diplo_make_peace(diplo, a->cid, enemy);
+                /* §5 PAIX PROPORTIONNELLE : un casus belli non-territorial est SATISFAIT
+                 * par une prise (la source / l'humiliation) ; le territorial ENCAISSE sa
+                 * REVENDICATION (∝ domination militaire) puis SIGNE — l'IA banque le gain
+                 * légitime plutôt que de sur-étendre (prendre au-delà ligue le monde). */
+                bool done = (goal!=CB_TERRITORIAL) ||
+                            (enemy>=0 && diplo->conquered[a->cid][enemy]
+                                          >= diplo_war_claim(diplo,w,econ,a->cid,enemy));
+                if (done && enemy>=0){
+                    diplo_reparations(diplo, w, econ, a->cid, enemy);   /* le vaincu indemnise */
+                    diplo_make_peace(diplo, a->cid, enemy);
+                }
             }
         } else {
-            /* plus de territoire ennemi adjacent : la guerre est GAGNÉE → on signe
-             * la paix (et l'on pourra viser une autre cible au prochain réveil). */
+            /* plus de territoire ennemi adjacent : la guerre est GAGNÉE → on signe la
+             * paix (indemnité au passage) et l'on pourra viser une autre cible plus tard. */
             for (int b=0; b<w->n_countries; b++)
-                if (b!=a->cid && diplo_status(diplo, a->cid, b)==DIPLO_WAR)
+                if (b!=a->cid && diplo_status(diplo, a->cid, b)==DIPLO_WAR){
+                    diplo_reparations(diplo, w, econ, a->cid, b);
                     diplo_make_peace(diplo, a->cid, b);
+                }
         }
         return;
     }
