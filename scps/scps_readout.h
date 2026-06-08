@@ -112,6 +112,8 @@ typedef struct {
 typedef struct {
     const char   *nom;
     const char   *terrain;     /* mot (biome nommé) */
+    const char   *climat;      /* mot (climat dérivé : Tempéré/Aride/Tropical/Froid…) */
+    const char   *relief;      /* mot (relief dérivé de l'altitude : Plaines/Collines/Montagnes) */
     const char   *race;        /* mot (espèce de la population) */
     BandStature   stature;
     long          ames;        /* population — nombre tangible */
@@ -125,6 +127,8 @@ typedef struct {
     BandFoi       foi;         /* humeur religieuse face au culte du trône */
     bool          diaspora;
     MetricReadout agitation;   /* 0-100 : L bas + coercition + tension de diversité */
+    MetricReadout m_aisance;   /* 0-100 : la PROSPÉRITÉ locale (la jauge rouge→vert de l'en-tête) */
+    MetricReadout m_humeur;    /* 0-100 : l'HUMEUR (les visages) */
     bool          seuil_revolte;/* l'agitation a franchi le seuil de révolte */
     /* BÂTIMENTS — la population consomme 1 logement + 1 service chacun ; on
      * affiche les places ENCORE DISPONIBLES (capacité bâtie − population), pas un

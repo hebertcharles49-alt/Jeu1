@@ -213,6 +213,19 @@ static void draw_box(SDL_Renderer *ren, int x,int y,int w,int h, SDL_Color c){
     fill_rect(ren,x,y,w,1,c); fill_rect(ren,x,y+h-1,w,1,c);
     fill_rect(ren,x,y,1,h,c); fill_rect(ren,x+w-1,y,1,h,c);
 }
+/* Jauge 0-100 : un dégradé ROUGE(bas)→VERT(haut) avec un marqueur clair à la
+ * valeur. SDL n'a pas de gradient → on peint colonne par colonne (sense_color). */
+static void draw_gauge(SDL_Renderer *ren, int x,int y,int gw,int gh,int value){
+    if (value<0) value=0;
+    if (value>100) value=100;
+    for (int i=0;i<gw;i++){
+        float t = (gw>1)? (float)i/(gw-1) : 0.f;     /* 0=rouge … 1=vert */
+        fill_rect(ren, x+i, y, 1, gh, sense_color(t));
+    }
+    draw_box(ren, x-1, y-1, gw+2, gh+2, COL_DIM);
+    int mx = x + (int)(value/100.f*(gw-1));
+    fill_rect(ren, mx-1, y-2, 3, gh+4, COL_PARCH);   /* le curseur à la valeur */
+}
 static void zone_add(SDL_Rect r, const char *def);   /* (défini plus bas — survol) */
 /* survol : nom + EFFET de chaque nœud (mots de jeu) ; positions pour la capture. */
 static char g_tree_hov[TECH_COUNT][240];
@@ -659,10 +672,31 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     char line[192];
     bool restive=false;     /* une minorité frondeuse présente → chemins H / Intégrer */
 
-    draw_text(ren, g_font_big, x, y, COL_COPPER, p.nom); y += 28;
-    snprintf(line,sizeof line, "%s · %s", p.terrain, label_stature(p.stature));
+    /* EN-TÊTE : place d'héraldique réservée · nom · climat·relief·taille · jauge
+     * de prospérité (rouge→vert, chiffrée, calée en haut à droite). */
+    int hsz=30;
+    draw_box(ren, x, y+2, hsz, hsz, COL_COPPER);
+    fill_rect(ren, x+1, y+3, hsz-2, hsz-2, COL_PANEL2);
+    zone_add((SDL_Rect){x,y+2,hsz,hsz}, "Place réservée à l'héraldique du royaume (à venir).");
+    draw_text(ren, g_font_big, x+hsz+8, y, COL_COPPER, p.nom);
+    {   /* la jauge de prospérité, en haut à droite, avec son chiffre. */
+        int gw=64, gh=10, gx=px+pw-16-gw, gy=y+4;
+        draw_gauge(ren, gx, gy, gw, gh, p.m_aisance.value);
+        char nb[8]; snprintf(nb,sizeof nb,"%d", p.m_aisance.value);
+        int nbw=text_w(g_font, nb);
+        draw_text(ren, g_font, gx-nbw-6, y, COL_PARCH, nb);
+        zone_add((SDL_Rect){gx-nbw-8, y-2, gw+nbw+12, gh+8},
+                 "Prospérité de la province (0-100) : l'aisance matérielle, du dénuement au faste — "
+                 "tirée par la production, le commerce et la paix.");
+    }
+    snprintf(line,sizeof line, "%s · %s · %s", p.climat, p.relief, label_stature(p.stature));
+    draw_text(ren, g_font, x+hsz+8, y+18, COL_PARCH, line);
+    zone_add((SDL_Rect){x+hsz+6, y+16, rw-hsz-6, 18}, "Climat · relief · taille de la province.");
+    y += hsz + 8;
+    /* HABITANTS — un nombre, rien de plus (le détail va aux camemberts). */
+    snprintf(line,sizeof line, "%ld habitants", p.ames);
     draw_text(ren, g_font, x, y, COL_PARCH, line);
-    zone_add((SDL_Rect){x-2,y-2,rw,19}, hover_stature()); y += 22;
+    zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 22;
 
     /* COMPOSITION — la ventilation des GROUPES de la province (le payoff du
      * refactor démographique). race/classe diégétiques ; loyauté en MOT ; état. */
@@ -698,16 +732,10 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                 if (i>0 && gr[i].loyaute <= HU_FRONDEUSE) restive=true;   /* minorité restive */
                 y += 20;
             }
-            snprintf(line,sizeof line, "Âmes %ld", p.ames);
-            draw_text(ren, g_font, x, y, COL_DIM, line);
-            zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 20;
         } else {
             ui_section(ren, x, &y, "PEUPLE");
             ui_row(ren,x,&y,rw,"Race", p.race, COL_PARCH,
                    "L'espèce de la population.");
-            snprintf(line,sizeof line, "Âmes %ld", p.ames);
-            draw_text(ren, g_font, x, y, COL_PARCH, line);
-            zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre d'habitants."); y += 20;
         }
     }
     ui_row(ren,x,&y,rw,"Flux", label_flux(p.flux), band_good(p.flux,5,true), hover_flux());

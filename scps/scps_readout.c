@@ -369,6 +369,33 @@ FactionsReadout faction_readout(const World *w, const WorldEconomy *econ, int ci
     return fr;
 }
 
+/* Climat : un MOT dérivé de la latitude et du biome (le biome porte l'aridité/
+ * l'humidité ; la latitude porte le chaud/froid). Pas un nom qui imite un climat. */
+static const char *climat_word(float lat, Biome b) {
+    switch (b) {
+        case BIO_DESERT: case BIO_COASTAL_DESERT: case BIO_DRYLANDS: return "Aride";
+        case BIO_JUNGLE: case BIO_MANGROVE:                          return "Tropical";
+        case BIO_SAVANNA:                                            return "Chaud";
+        case BIO_GLACIER: case BIO_PEAK:                             return "Glacial";
+        case BIO_MARSH: case BIO_BOG:                                return "Humide";
+        default: break;
+    }
+    if (lat < 0.28f) return "Tropical";
+    if (lat > 0.82f) return "Glacial";
+    if (lat > 0.62f) return "Froid";
+    return "Tempéré";
+}
+/* Relief : un MOT dérivé de l'altitude moyenne (0..1). */
+static const char *relief_word(float height_avg, Biome b) {
+    if (b==BIO_MOUNTAINS || b==BIO_PEAK || b==BIO_VOLCANO) return "Montagnes";
+    if (b==BIO_HILLS)                                      return "Collines";
+    if (b==BIO_HIGHLANDS)                                  return "Hauts plateaux";
+    if (height_avg > 0.72f) return "Montagnes";
+    if (height_avg > 0.55f) return "Hauts plateaux";
+    if (height_avg > 0.42f) return "Collines";
+    return "Plaines";
+}
+
 ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
                                  const WorldProsperity *wp, const WorldLegitimacy *wl,
                                  int pid) {
@@ -379,6 +406,8 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
 
     pr.nom       = (reg >= 0 && w->region[reg].name[0]) ? w->region[reg].name : "—";
     pr.terrain   = biome_name(p->biome_dominant);
+    pr.climat    = climat_word(p->lat, p->biome_dominant);
+    pr.relief    = relief_word(p->height_avg, p->biome_dominant);
     pr.ressource = (p->resource > RES_NONE) ? resource_name(p->resource) : "—";
 
     const RegionEconomy *re = (reg >= 0 && reg < econ->n_regions) ? &econ->region[reg] : NULL;
@@ -399,6 +428,9 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     else if (sat < 0.55f) pr.aisance = AI_SUFFISANCE;
     else if (sat < 0.80f) pr.aisance = AI_AISANCE;
     else                  pr.aisance = AI_FASTE;
+    /* PROSPÉRITÉ 0-100 (la jauge de l'en-tête) : l'indice local 0..10 projeté. */
+    pr.m_aisance = mk_metric(metric_prosperity(re ? re->prosperity : 5.f),
+                             label_aisance(pr.aisance), hover_aisance());
 
     /* Flux : proxy (la migration crée de la diaspora à destination → afflux).
      * La vraie balance migratoire par province viendra avec la prospérité locale. */
@@ -424,6 +456,7 @@ ProvinceReadout province_readout(const World *w, const WorldEconomy *econ,
     /* Allégeance — les lectures les plus proches du SCPS. */
     float L_local = (wl && reg >= 0 && reg < SCPS_MAX_REG) ? wl->L[reg] : 5.f;
     pr.humeur = band_humeur(L_local);
+    pr.m_humeur = mk_metric(metric_legitimacy(L_local), label_humeur(pr.humeur), hover_humeur());
 
     int cid = re ? re->owner : -1;
     const PopCulture *ruling = (cid >= 0) ? pc_ruling(w, econ, cid) : NULL;
