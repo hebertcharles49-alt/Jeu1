@@ -375,6 +375,16 @@ static void bslot_reset(void){ g_nbslots=0; }
 static void bslot_add(SDL_Rect r, int reg, int edifice){
     if (g_nbslots<8){ g_bslots[g_nbslots].r=r; g_bslots[g_nbslots].reg=reg; g_bslots[g_nbslots].edifice=edifice; g_nbslots++; }
 }
+/* LIGNES de l'OUTLINER cliquables : clic sur la ligne → saute à la région ; clic
+ * sur le marteau → bâtir. `prov` = province à sélectionner ; `hammer_reg` = région
+ * où bâtir (-1 = pas de marteau). */
+typedef struct { SDL_Rect row; SDL_Rect ham; int prov; int hammer_reg; } OutRow;
+static OutRow g_orows[80]; static int g_norows;
+static void orow_reset(void){ g_norows=0; }
+static void orow_add(SDL_Rect row, SDL_Rect ham, int prov, int hammer_reg){
+    if (g_norows<80){ g_orows[g_norows].row=row; g_orows[g_norows].ham=ham;
+                      g_orows[g_norows].prov=prov; g_orows[g_norows].hammer_reg=hammer_reg; g_norows++; }
+}
 
 /* ---- Sim branchée (snapshot de N ticks, déterministe par graine) ------ */
 typedef struct {
@@ -770,9 +780,10 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                                 const WorldProsperity *wp, const WorldLegitimacy *wl,
                                 const ModifierStack *drift, int pid) {
     ProvinceReadout p = province_readout(w, econ, wp, wl, pid);
-    int pw=312, px=win_w-pw, py=56, ph=win_h-py-26;
+    (void)win_w;
+    int pw=312, px=0, py=102, ph=win_h-py-26;   /* à GAUCHE, sous le bandeau + alertes (§7) */
     fill_rect(ren, px,py, pw,ph, COL_PANEL);
-    fill_rect(ren, px,py, 2,ph, COL_COPPER);
+    fill_rect(ren, px+pw-2,py, 2,ph, COL_COPPER);   /* liseré cuivre sur le bord intérieur (droite) */
     int x=px+16, y=py+14, rw=pw-30;
     char line[192];
     bool restive=false;     /* une minorité frondeuse présente → chemins H / Intégrer */
@@ -1008,6 +1019,96 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
                  "Intégrer : métabolise lentement (capacité + ouverture + légitimité + temps) — durable et vrai, "
                  "mais long (∝ la distance culturelle : le gouffre prend des générations).");
         y += 20;
+    }
+}
+
+/* ===================================================================== */
+/* L'OUTLINER — « ce que je possède », groupé par URBANISATION (§6)        */
+/* ===================================================================== */
+static BandStature stature_of_pop(long pop){
+    if (pop<50)   return STA_DESERT;
+    if (pop<500)  return STA_HAMEAU;
+    if (pop<2000) return STA_BOURG;
+    if (pop<6000) return STA_CITE;
+    return STA_METROPOLE;
+}
+static const char *stature_group(BandStature st){
+    switch(st){ case STA_METROPOLE:return "Métropoles"; case STA_CITE:return "Cités";
+                case STA_BOURG:return "Bourgs"; case STA_HAMEAU:return "Hameaux"; default:return "Avant-postes"; }
+}
+/* Un emplacement institutionnel encore LIBRE (un axe ProvBuild vide) ? Avec un
+ * bâtiment de base toujours posable, c'est la condition du MARTEAU (§6b). */
+static bool region_free_slot(const RegionEconomy *re){
+    const ProvBuild *b=&re->build;
+    return b->K_inst<0.3f||b->food_cap<0.3f||b->faith<0.3f||b->savoir<0.3f||b->PE_infra<0.3f||b->P_open<0.3f;
+}
+static char g_ohov[80][200];
+static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s, const World *w){
+    int player=s->player; if (player<0) return;
+    int pw=234, px=win_w-pw, py=102, ph=win_h-py-26;
+    fill_rect(ren, px,py, pw,ph, COL_PANEL);
+    fill_rect(ren, px,py, 2,ph, COL_COPPER);
+    TTF_Font *fs = g_font_small?g_font_small:g_font;
+    int x=px+12, y=py+10, rw=pw-22, bottom=py+ph-4, oi=0;
+    draw_text(ren, g_font, x, y, COL_COPPER, "Domaine · par urbanisation"); y+=20;
+    /* régions groupées par URBANISATION (grand → petit), pas par terrain. */
+    for (int st=STA_METROPOLE; st>=STA_HAMEAU && y<bottom-16; st--){
+        int cnt=0;
+        for (int r=0;r<s->econ->n_regions;r++){
+            const RegionEconomy *re=&s->econ->region[r];
+            if (re->owner!=player) continue;
+            long pop=(long)(re->strata[0].pop+re->strata[1].pop+re->strata[2].pop);
+            if (stature_of_pop(pop)==(BandStature)st) cnt++;
+        }
+        if (!cnt) continue;
+        char gh[40]; snprintf(gh,sizeof gh,"%s (%d)", stature_group((BandStature)st), cnt);
+        draw_text(ren, fs, x, y, COL_DIM, gh); y+=15;
+        for (int r=0;r<s->econ->n_regions && y<bottom-15;r++){
+            const RegionEconomy *re=&s->econ->region[r];
+            if (re->owner!=player) continue;
+            long pop=(long)(re->strata[0].pop+re->strata[1].pop+re->strata[2].pop);
+            if (stature_of_pop(pop)!=(BandStature)st) continue;
+            int pid=(r<w->n_regions && w->region[r].n_provinces>0)? w->region[r].province_ids[0]:-1;
+            Resource res=(pid>=0 && pid<w->n_provinces)? w->province[pid].resource:RES_NONE;
+            fill_rect(ren, x+2, y+2, 9,9, SLICE_PAL[((int)res)&7]); draw_box(ren,x+2,y+2,9,9,COL_DIM);  /* icône-ressource */
+            const char *nm=(r<w->n_regions && w->region[r].name[0])? w->region[r].name:"—";
+            draw_text(ren, fs, x+16, y, COL_PARCH, nm);
+            char pz[24]; snprintf(pz,sizeof pz,"%ld",pop); int pzw=text_w(fs,pz);
+            draw_text(ren, fs, x+rw-pzw, y, COL_DIM, pz);                 /* population : la stat-clé */
+            bool ham=region_free_slot(re); SDL_Rect hr={0,0,0,0};
+            if (ham){ hr=(SDL_Rect){x+rw-pzw-15, y, 11,12};               /* le MARTEAU (slot libre × tech) */
+                fill_rect(ren,hr.x,hr.y+1,10,10,COL_COPPER); draw_box(ren,hr.x,hr.y+1,10,10,COL_DIM);
+                draw_text(ren, fs, hr.x+2, hr.y, COL_PANEL, "+"); }
+            if (oi<80){                                                   /* survol : détail rapide */
+                IncomeReadout inc=province_income(s->econ,r); int n=0;
+                n+=snprintf(g_ohov[oi]+n,(size_t)(sizeof g_ohov[oi])-n,"%s — Laboureurs %ld · Artisans %ld · Nobles %ld",
+                            nm,(long)re->strata[0].pop,(long)re->strata[1].pop,(long)re->strata[2].pop);
+                if (inc.n>0) n+=snprintf(g_ohov[oi]+n,(size_t)(sizeof g_ohov[oi])-n," · produit +%.1f %s/j",inc.line[0].per_day,inc.line[0].source);
+                n+=snprintf(g_ohov[oi]+n,(size_t)(sizeof g_ohov[oi])-n, ham?" · slot libre (marteau : bâtir)":" · complet");
+                zone_add((SDL_Rect){x,y-1,rw,14}, g_ohov[oi]);
+                orow_add((SDL_Rect){x,y-1,rw-pzw-17,14}, hr, pid, ham?r:-1);
+                oi++;
+            }
+            y+=15;
+        }
+        y+=3;
+    }
+    /* ARMÉES — l'effectif en HOMMES (×100) ; survol = composition. */
+    if (s->camp && campaign_active(s->camp,player) && y<bottom-15 && oi<80){
+        draw_text(ren, fs, x, y, COL_DIM, "Armées (1)"); y+=15;
+        long men=campaign_units(s->camp,player)*100;
+        fill_rect(ren, x+2,y+2,9,9, COL_COPPER); draw_box(ren,x+2,y+2,9,9,COL_DIM);
+        draw_text(ren, fs, x+16, y, COL_PARCH, "Armée de campagne");
+        char pz[24]; snprintf(pz,sizeof pz,"%ld",men); int pzw=text_w(fs,pz);
+        draw_text(ren, fs, x+rw-pzw, y, COL_DIM, pz);
+        ArmyComposition cp=campaign_composition(s->camp,player);
+        snprintf(g_ohov[oi],sizeof g_ohov[oi],"Armée de campagne — %ld hommes : inf %ld · arch %ld · cav %ld · %s",
+                 men, cp.infanterie*100, cp.archers*100, cp.cavalerie*100, campaign_phase_name(campaign_phase(s->camp,player)));
+        zone_add((SDL_Rect){x,y-1,rw,14}, g_ohov[oi]);
+        int loc=campaign_location(s->camp,player);
+        int lp=(loc>=0&&loc<w->n_regions&&w->region[loc].n_provinces>0)?w->region[loc].province_ids[0]:-1;
+        orow_add((SDL_Rect){x,y-1,rw,14}, (SDL_Rect){0,0,0,0}, lp, -1);
+        y+=15;
     }
 }
 
@@ -1269,9 +1370,10 @@ int main(int argc, char **argv) {
             pixbuf_upload(&pb);
             if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
             if (sim.ready && g_font) {
-                zone_reset();
+                zone_reset(); bslot_reset(); orow_reset();
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
+                draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : l'outliner */
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
         }
@@ -1331,6 +1433,22 @@ int main(int argc, char **argv) {
                         dirty = true;
                         break;
                     }
+                    /* §6 OUTLINER : clic sur le marteau → bâtir ; clic sur la ligne → saut. */
+                    int orhit=-1;
+                    for (int i=0;i<g_norows;i++){
+                        SDL_Rect *hm=&g_orows[i].ham;
+                        if (g_orows[i].hammer_reg>=0 && hm->w>0 &&
+                            ev.button.x>=hm->x && ev.button.x<hm->x+hm->w &&
+                            ev.button.y>=hm->y && ev.button.y<hm->y+hm->h){
+                            if (sim.ready) agency_build(sim.ag, sim.econ, g_orows[i].hammer_reg, EDI_TRIBUNAL);
+                            dirty=true; orhit=-2; break;
+                        }
+                        SDL_Rect *rw=&g_orows[i].row;
+                        if (ev.button.x>=rw->x && ev.button.x<rw->x+rw->w &&
+                            ev.button.y>=rw->y && ev.button.y<rw->y+rw->h){ orhit=i; break; }
+                    }
+                    if (orhit==-2) break;                       /* marteau cliqué */
+                    if (orhit>=0){ selected = g_orows[orhit].prov; dirty=true; break; }   /* saut à la région */
                     /* Sinon : sélectionner la province au clic */
                     int cx = (int)(ev.button.x / cam.scale + cam.ox);
                     int cy = (int)(ev.button.y / cam.scale + cam.oy);
@@ -1470,13 +1588,14 @@ int main(int argc, char **argv) {
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
-            zone_reset(); bslot_reset();
+            zone_reset(); bslot_reset(); orow_reset();
             int cid = country_for_panel(world, selected);
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
             } else {
                 draw_army_markers(ren, &cam, &sim, world, win_w, win_h);   /* §4 : les armées sur la carte */
                 draw_topbar(ren, win_w, &sim, world, cid, speed);
+                draw_outliner(ren, win_w, win_h, &sim, world);            /* §6 : « ce que je possède » */
                 if (selected >= 0)
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
             }
