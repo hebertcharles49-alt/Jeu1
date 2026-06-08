@@ -191,6 +191,36 @@ int main(int argc, char **argv){
     ok("le terrain infranchissable n'inflige pas d'attrition de marche (on n'y va pas)",
        march_attrition_rate(BIO_GLACIER) == 0.f);
 
+    /* ═══ 8. LA BATAILLE DANS LE TEMPS : choc → retrait → poursuite (§2) ═ */
+    printf("\n── 8. La bataille a un ARC : le choc use, la poursuite tue (les armées sont CLOUÉES) ──\n");
+    /* (a) Une bataille COÛTE du temps ; les deux armées y sont immobilisées. */
+    ArmyState A8=one(U_EPEISTE,12), B8=one(U_EPEISTE,3);     /* miroir décisif (12 vs 3) */
+    uint32_t rng8=seed^0x8a;
+    BattleResult r8=resolve_battle(&A8,&B8,1.f,&rng8);
+    printf("   miroir 12 vs 3 : vainqueur %s, %d manches → %.1f j, phase « %s », poursuivis %d\n",
+           r8.winner<0?"A":(r8.winner>0?"B":"nul"), r8.rounds, r8.days,
+           battle_phase_name(r8.last_phase), r8.pursued);
+    ok("une bataille COÛTE du temps (les deux armées sont clouées pendant r.days)", r8.days > 0.f);
+    ok("à vitesse ÉGALE, le vainqueur ne court pas le vaincu : il ROMPT sans le tailler (retrait, 0 poursuivi)",
+       r8.winner!=0 && r8.last_phase==PH_RETRAIT && r8.pursued==0);
+
+    /* (b) La POURSUITE : une pointe rapide rattrape et fauche le vaincu lent. */
+    ArmyState A8b=one(U_CAV_LOURDE,20), B8b=one(U_EPEISTE,6); /* cav (mvt 6) écrase épéistes (mvt 3) */
+    uint32_t rng8b=seed^0xb2;
+    BattleResult r8b=resolve_battle(&A8b,&B8b,1.f,&rng8b);
+    printf("   cav. lourde 20 vs épéistes 6 : vainqueur %s, phase « %s », poursuivis %d paquets, %.1f j\n",
+           r8b.winner<0?"cavalerie":(r8b.winner>0?"épéistes":"nul"),
+           battle_phase_name(r8b.last_phase), r8b.pursued, r8b.days);
+    ok("un vainqueur plus RAPIDE rattrape : la POURSUITE fauche le vaincu (phase poursuite, paquets perdus)",
+       r8b.winner<0 && r8b.last_phase==PH_POURSUITE && r8b.pursued>0);
+    ok("la poursuite AJOUTE du temps (le vainqueur s'éparpille à la curée)",
+       r8b.days > (float)r8b.rounds*0.18f);
+
+    /* (c) army_fastest_move : la pointe qui poursuit ≥ le pas du convoi. */
+    ok("la pointe rapide (fastest) ≥ le pas du convoi (slowest) pour une armée mixte",
+       army_fastest_move(&mixte) >= army_slowest_move(&mixte) &&
+       army_fastest_move(&mixte) == unit_def(U_CAV_LEGERE)->mouvement);
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

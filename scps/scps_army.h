@@ -60,11 +60,21 @@ typedef struct {
     long pop_by_class_in_army[LAB_CLASS_COUNT];   /* affectées (toujours dans le pool labor) */
 } ArmyState;
 
+/* ---- Phases d'une bataille dans le temps (§2) ------------------------- */
+/* Une bataille n'est pas un instant : elle a un ARC. Le CHOC (l'échange) use le
+ * moral ; quand une armée rompt vient le RETRAIT (elle se dérobe) puis, si le
+ * vainqueur est plus rapide, la POURSUITE — la curée où tombe le gros des morts. */
+typedef enum { PH_CHOC=0, PH_RETRAIT, PH_POURSUITE, PH_COUNT } BattlePhase;
+
 /* ---- Résultat de bataille --------------------------------------------- */
 typedef struct {
-    int winner;   /* -1 = A gagne, +1 = B gagne, 0 = nul */
-    int routA, routB;
-    int rounds;
+    int   winner;   /* -1 = A gagne, +1 = B gagne, 0 = nul */
+    int   routA, routB;
+    int   rounds;
+    /* §2 : la bataille dans le temps */
+    float       days;        /* durée totale — les deux armées sont CLOUÉES ce temps */
+    BattlePhase last_phase;  /* phase atteinte (choc / retrait / poursuite) */
+    int         pursued;     /* paquets de 100 fauchés à la poursuite (le vaincu) */
 } BattleResult;
 
 /* ===================================================================== */
@@ -130,6 +140,12 @@ float march_attrition_rate(Biome b);
 /* Vitesse de carte de l'armée = celle de son unité LA PLUS LENTE (pas du
  * convoi). 0 si l'armée est vide ou sans unité vivante. */
 float army_slowest_move(const ArmyState *a);
+
+/* Vitesse de l'unité LA PLUS RAPIDE (la pointe qui poursuit, §2). 0 si vide. */
+float army_fastest_move(const ArmyState *a);
+
+/* Nom diégétique d'une phase de bataille (Choc / Retrait / Poursuite). */
+const char *battle_phase_name(BattlePhase ph);
 
 /* Jours pour qu'une armée franchisse une case de biome `to` (hauteur `height`).
  * `river_crossing` : on franchit un cours d'eau (lent, à découvert) ;

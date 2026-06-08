@@ -18,6 +18,10 @@
 #define M_LOSE          0.5f
 #define M_NEUTRAL       1.0f
 #define RECRUIT_MAT     1      /* coût matériaux par paquet de 100 (hors arme) */
+/* §2 — la bataille dans le temps (utilisés par resolve_battle, plus bas) */
+#define ROUND_DAYS      0.18f  /* chaque manche de mêlée ≈ un sixième de jour */
+#define PURSUIT_DAYS    2.5f   /* la poursuite s'étire sur quelques jours (éparpille le vainqueur) */
+#define PURSUIT_KILL    0.35f  /* fraction max du vaincu fauchée s'il est entièrement rattrapé */
 
 /* ---- Définitions d'unités (§2, §5) ------------------------------------ */
 static const UnitDef UNITS[U_COUNT] = {
@@ -176,7 +180,8 @@ BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t
     float terrainB = 1.f/terrainA;       /* le terrain qui sert A dessert B (et inversement) */
 
     int nA=count_present(A), nB=count_present(B);
-    for (int round=0; round<ARM_MAX_ROUNDS; round++){
+    int decided=0;
+    for (int round=0; round<ARM_MAX_ROUNDS && !decided; round++){
         r.rounds=round+1;
         /* A frappe B */
         for (int i=0;i<A->n_units;i++){
@@ -200,14 +205,65 @@ BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t
                 resolve_contact(&B->units[i], &A->units[j], terrainB, rng);
         }
         r.routA=count_routed(A); r.routB=count_routed(B);
-        if (r.routB>=nB){ r.winner=-1; return r; }   /* toute l'armée B rompue → A gagne */
-        if (r.routA>=nA){ r.winner=+1; return r; }
+        if      (r.routB>=nB){ r.winner=-1; decided=1; }   /* toute l'armée B rompue → A gagne */
+        else if (r.routA>=nA){ r.winner=+1; decided=1; }
     }
-    /* l'armée la plus rompue recule. */
-    if      (r.routA < r.routB) r.winner=-1;
-    else if (r.routB < r.routA) r.winner=+1;
-    else                        r.winner=0;
+    if (!decided){
+        /* personne n'a rompu dans le temps imparti : la plus entamée cède le champ. */
+        if      (r.routA < r.routB) r.winner=-1;
+        else if (r.routB < r.routA) r.winner=+1;
+        else                        r.winner=0;
+    }
+
+    /* ── §2 : la bataille DANS LE TEMPS ──────────────────────────────────
+     * Le CHOC a duré r.rounds manches (du temps). Si une armée a rompu, le
+     * vaincu se RETIRE ; le vainqueur le POURSUIT seulement s'il est plus
+     * rapide — et c'est là, dans la curée, que tombe le gros des morts. */
+    r.days       = (float)r.rounds * ROUND_DAYS;
+    r.last_phase = PH_CHOC;
+    r.pursued    = 0;
+    if (r.winner != 0){
+        ArmyState *win  = (r.winner<0) ? A : B;
+        ArmyState *lose = (r.winner<0) ? B : A;
+        r.last_phase = PH_RETRAIT;                       /* le vaincu rompt et se dérobe */
+        float escape = army_slowest_move(lose);          /* il fuit au pas de ses traînards */
+        float chase  = army_fastest_move(win);           /* la pointe rapide le talonne */
+        float caught = (chase>escape && chase>0.f) ? (chase-escape)/chase : 0.f;
+        if (caught > 0.f){
+            r.last_phase = PH_POURSUITE;                 /* rattrapé : la curée */
+            float kill = PURSUIT_KILL * caught;
+            for (int i=0;i<lose->n_units;i++){
+                Unit *u=&lose->units[i];
+                if (u->count<=0) continue;
+                long k=(long)((float)u->count*kill + 0.5f);
+                if (k>u->count) k=u->count;
+                u->count   -= k;                          /* la poursuite TUE (le choc ne fait que rompre) */
+                r.pursued  += (int)k;
+            }
+            r.days += PURSUIT_DAYS * caught;             /* poursuivre éparpille le vainqueur (du temps) */
+        }
+    }
     return r;
+}
+
+float army_fastest_move(const ArmyState *a){
+    if (!a) return 0.f;
+    float fast=0.f; bool any=false;
+    for (int i=0;i<a->n_units;i++){
+        if (a->units[i].count<=0) continue;
+        float m=UNITS[a->units[i].type].mouvement;
+        if (!any || m>fast){ fast=m; any=true; }
+    }
+    return any?fast:0.f;
+}
+
+const char *battle_phase_name(BattlePhase ph){
+    switch (ph){
+        case PH_CHOC:      return "Choc";
+        case PH_RETRAIT:   return "Retrait";
+        case PH_POURSUITE: return "Poursuite";
+        default:           return "?";
+    }
 }
 
 /* ===================================================================== */
