@@ -605,6 +605,21 @@ static int topbar_sep(SDL_Renderer *ren, int x, int y){
 
 /* LA TOPBAR (§2) : ressources · métriques 0-100 · temps/âge/vitesse. Deux rangs,
  * cuivre sur bleu nuit. Aucun flottant SCPS — tout par la membrane (mots + 0-100). */
+/* Une pastille d'ALERTE : un accent de couleur (nature) + le texte diégétique.
+ * ambre = opportunité/mission · rouge = menace · bleu = information. Extensible :
+ * les pastilles s'empilent horizontalement. Renvoie le x suivant. */
+static int draw_alert(SDL_Renderer *ren, int x, int y, SDL_Color accent,
+                      const char *text, const char *hov){
+    TTF_Font *fs = g_font_small ? g_font_small : g_font;
+    int tw = text_w(fs, text), w = tw + 16;
+    fill_rect(ren, x, y, w, 18, COL_PANEL);
+    fill_rect(ren, x, y, 3, 18, accent);             /* l'accent de nature */
+    draw_box (ren, x, y, w, 18, COL_DIM);
+    draw_text(ren, fs, x+8, y+1, COL_PARCH, text);
+    if (hov) zone_add((SDL_Rect){x,y,w,18}, hov);
+    return x + w + 6;
+}
+
 static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World *w, int cid,
                         GameSpeed sp) {
     CountryReadout r = country_readout(s->wp, s->ts, w, cid);
@@ -700,9 +715,40 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
         }
     }
 
-    if (r.augure) {  /* ligne d'alerte / augure sous la topbar (réemploi machinerie IA) */
-        fill_rect(ren, 0,bh+2, win_w, 20, COL_PANEL2);
-        draw_text(ren, g_font, 12, bh+3, sense_color(0.12f), r.augure);
+    /* — La RANGÉE D'ALERTES : tout ce qui réclame une décision, en pastilles
+     *   diégétiques empilables, accent par nature (ambre opportunité · rouge menace ·
+     *   bleu information). Scalable : elles s'ajoutent à mesure qu'elles surgissent. — */
+    {
+        SDL_Color AMBER = sense_color(0.62f), RED = sense_color(0.10f), BLUE = (SDL_Color){0x5f,0x8a,0xb0,0xff};
+        int ay=bh+4, ax=8, used=0;
+        fill_rect(ren, 0, bh+2, win_w, 24, COL_PANEL2);
+        /* 1. mission décennale (opportunité) */
+        const Mission *mis = mission_of(s->missions, cid);
+        if (mis && !mis->done){
+            char mz[120]; snprintf(mz,sizeof mz, "Mission · %s", mis->text);
+            ax = draw_alert(ren, ax, ay, AMBER, mz,
+                            "Mission décennale : un but tiré de l'état du pays ; l'accomplir verse or + matières."); used++;
+        }
+        /* 2. faction aliénée & puissante (le coup qui couve — menace) */
+        {
+            FactionsReadout fc = faction_readout(w, s->econ, cid);
+            for (int f=0; f<6; f++)
+                if (!fc.faction[f].aligned && fc.faction[f].part >= 25){
+                    char cz[120]; snprintf(cz,sizeof cz, "Cour · les %ss s'aliènent", fc.faction[f].name);
+                    static char chov[140]; snprintf(chov,sizeof chov,
+                        "Une faction PUISSANTE (%d%% du pouvoir) et ALIÉNÉE (satisfaction %d%%) : le coup couve.",
+                        fc.faction[f].part, fc.faction[f].satisfaction);
+                    ax = draw_alert(ren, ax, ay, RED, cz, chov); used++;
+                    break;   /* une seule pastille de cour suffit */
+                }
+        }
+        /* 3. l'augure (menace lue de l'état : sécession, révolte, coercition fragile) */
+        if (r.augure) ax = draw_alert(ren, ax, ay, RED, r.augure,
+                          "Un péril lu de l'état du royaume : sécession qui gronde, révolte, ou poigne qui s'effrite."), used++;
+        /* 4. présage (information) */
+        if (r.presage != PG_CALME)
+            ax = draw_alert(ren, ax, ay, BLUE, label_presage(r.presage), hover_presage()), used++;
+        if (!used) draw_text(ren, g_font_small?g_font_small:g_font, 10, bh+5, COL_DIM, "Rien ne presse.");
     }
 }
 
@@ -1043,9 +1089,10 @@ static void draw_army_markers(SDL_Renderer *ren, const Cam *cam, const Sim *s,
         draw_box (ren, sx-rr-1, sy-rr-1, 2*rr+2, 2*rr+2, COL_PARCH);
         if (ph==FA_SIEGE) draw_ring(ren, sx, sy, (float)(rr+3), COL_COPPER);   /* halo de siège */
 
-        /* étiquette : les SIENNES → le NOMBRE ; l'ENNEMIE → le MOT de taille (asymétrie). */
+        /* étiquette : les SIENNES → le NOMBRE D'HOMMES (multiple de 100) ; l'ENNEMIE
+         * → le MOT de taille (asymétrie). Jamais « 12 » : on lève par paquets de 100. */
         char lab[24];
-        if (mine) snprintf(lab, sizeof lab, "%ld", paquets);
+        if (mine) snprintf(lab, sizeof lab, "%ld", paquets*100);
         else      snprintf(lab, sizeof lab, "%s", army_host_word(paquets));
         if (g_font_small){
             int lw=text_w(g_font_small, lab);
@@ -1059,9 +1106,9 @@ static void draw_army_markers(SDL_Renderer *ren, const Cam *cam, const Sim *s,
         ArmyComposition cp = campaign_composition(s->camp, c);
         if (mine)
             snprintf(g_army_tip[c], sizeof g_army_tip[c],
-                     "%s (%s) — %s · %ld paquets : inf %ld · arch %ld · cav %ld%s · %s",
-                     w->country[c].name, people, army_host_word(paquets), paquets,
-                     cp.infanterie, cp.archers, cp.cavalerie,
+                     "%s (%s) — %s · %ld hommes : inf %ld · arch %ld · cav %ld%s · %s",
+                     w->country[c].name, people, army_host_word(paquets), paquets*100,
+                     cp.infanterie*100, cp.archers*100, cp.cavalerie*100,
                      cp.mages? " · mages":"", campaign_phase_name(ph));
         else
             snprintf(g_army_tip[c], sizeof g_army_tip[c],
