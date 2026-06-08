@@ -1,0 +1,113 @@
+══════════════════════════════════════════════════════════════════════════════
+ SCPS — SYNTHÈSE : REBALANCE ÉCO (biens nobles) + VALIDATION + ÉTAT DES LIEUX
+══════════════════════════════════════════════════════════════════════════════
+
+Point de départ : l'élite « starve » (satisfaction ≈ 0) → coups d'État en série
+(cascade de la graine 310). Cause racine confirmée par scan marché : les biens de
+STATUT et de MORAL n'étaient pas correctement intégrés à la boucle marchande.
+
+
+1. CE QUI A ÉTÉ IMPLÉMENTÉ, COMMITÉ & POUSSÉ (branche SCPS)
+───────────────────────────────────────────────────────────
+  4c30240  Routage de la demande des variantes vers la PRÉFÉRENCE (le « vrai fix »)
+           - étape demande : RES_WINE → preferred_drink, RES_PRECIOUS_WARE →
+             preferred_luxe, comme la satisfaction. Bière & étoffe précieuse
+             cessent d'avoir une demande NULLE ; vin & orfèvrerie ne portent plus
+             toute la demande.
+  c313aa1  Rebalance éco (rapport « ajustements éco », valeurs validées)
+           - SURPLUS NATUREL : market_effort(prix,base)=clamp(0.25+0.85·prix/base,
+             0.22,1.5) sur l'extraction (out & main-d'œuvre : le glut libère des
+             bras) et la manufacture (cap = niveau·effort). On lit le prix.
+           - DEMANDE TENDUE : DEMAND_TENSION 1.10 sur `units` (demande ET
+             satisfaction) → +10 % de besoins partout, marché pressé en permanence.
+           - RECIPE : textile laine 2.0→1.5 / étoffe 1.0→1.8 ; vin sucre 2.0→1.6 /
+             1.0→1.4 ; joaillerie {or+métal-préc} → OR SEUL 1.5.
+           - NEED : laborer étoffe 0.20→0.12, bois 0.30→0.26 ; bourgeois étoffe
+             0.50→0.34.
+           - PLACEMENT : joaillerie gatée à or>0 (→ ~71 ateliers) ; poisson côtier
+             raw_cap 0.55→0.25.
+           - DISPATCH (scps_world) : laine pastoral 1.5→2.6 / collines 1.5→2.2 /
+             +prés 1.2 ; sucre +tropical 1.8 / +savane 0.8 ; herbes +forêt 1.0 /
+             +pâture 0.7 ; fourrure 3.0→2.0.
+
+
+2. MARCHÉ MESURÉ  (scan econ_scan, base 7 · 6 mondes × 60 ans · 180 rég à élite)
+────────────────────────────────────────────────────────────────────────────────
+  BIEN            couv%   verdict
+  Céréales        113 %   sain (pas de famine)
+  Bière         20941 %   routée, surplus (479 brasseries — glut connu)
+  Orfèvrerie    12472 %   STATUT ASSURÉ (0%→ : 37 joailleries, prix 132→33)
+  Ét.préc.       2067 %   routée enfin (était demande-0)
+  Remède         2028 %   santé couverte (0→13 apothicaires)
+  Vin             216 %   surplus
+  Céréales/Sel/Fourrure   en glut (mono-source de niche, non tendus par le +10 %)
+  Bois             81 %   à l'équilibre tendu
+  Étoffe           66 %   ENCORE en déficit ⚠  (voir §5)
+
+  Note : ces couv% (outil econ_scan) diffèrent en absolu de celles de ton rapport
+  (étoffe 120 %, orfèvrerie 1034 %…) — outil de mesure et jeu de graines différents
+  (mon scan accumule le stock sur 60 ans sans décroissance). La validation qui FAIT
+  FOI est la chronique (§3), qui tourne le vrai moteur.
+
+
+3. VALIDATION — CHRONIQUE  (chronicle 20240607 10 200, sans joueur)
+────────────────────────────────────────────────────────────────────
+                          TON RAPPORT (+tension)   MA RÉ-APPLICATION
+  pays absorbés .........  0                         0          ← INVARIANT TENU
+  guerres / sim .........  5.2                       4.9
+  provinces prises / sim   15.3                      14.4
+  soulèvements (total) ..  495                       537
+    dont coups ..........  468                       512
+  population ............  saine                     saine (4–27k/sim, croissante)
+
+  → Concordance : l'invariant « 0 pays absorbé » tient, la population reste saine,
+    les grandeurs sont dans le même registre. Re-application FIDÈLE et validée.
+  → Les coups restent ~95 % des soulèvements : c'est le mécanisme FACTIONS (seuil de
+    coup + zèle), INDÉPENDANT de l'éco — non touché ici (relève de l'autre rapport).
+    Nourrir l'élite ne suffit pas tant que le DÉCLENCHEUR de coup n'est pas retouché.
+
+
+4. TES TROIS QUESTIONS — RÉPONSES HONNÊTES
+────────────────────────────────────────────
+  a) RESSOURCE SECONDAIRE PAR PROVINCE (§6b du 1er rapport) — ❌ NON IMPLÉMENTÉE.
+     Province ne porte qu'un `resource` dominant. Le fix VALIDÉ (2e rapport) a
+     remplacé cette piste par des POIDS DE TIRAGE retouchés (laine/sucre/herbes/
+     fourrure — eux, bien en place). La 2e ressource « mineure ×0.4 » reste à faire
+     (Province.resource2 + world-gen + econ_init) — c'est le levier le plus propre
+     pour les intrants rares, je peux le poser.
+
+  b) NOUVEAUX COÛTS DE BÂTIMENTS (§7 du 1er rapport) — ❌ NON IMPLÉMENTÉS.
+     La table EDIFICES (scps_agency.c) est intacte (aucun index sur le tier de
+     capitale ni l'étendue n_régions, aucun renchérissement des intrants rares de
+     tier 3). Ce point était explicitement « à coupler avec l'autre rapport (taxer
+     le flux, pas le stock) » et n'était PAS dans le fix validé. À faire sur demande.
+
+  c) EST-CE QUE L'IA UPGRADE SES BÂTIMENTS ? — réponse à TROIS étages :
+     • MANUFACTURES (textile, joaillerie… les producteurs de biens) : PAS l'IA.
+       Leur niveau monte PASSIVEMENT par réinvestissement bourgeois (econ_tick :
+       2 % du capital bourgeois → level, plafonné). L'IA n'a AUCUN levier pour
+       investir dans la production. ⇒ aucun coût d'or, donc §7 ne les toucherait pas.
+     • ÉDIFICES (Tribunal/Chancellerie/Académie, Garnison/Forteresse/Citadelle, foi,
+       savoir) : OUI. L'IA les BÂTIT (agency_build) et MONTE EN GAMME — ai_next_k/h/
+       faith/savoir_edifice choisit le tier suivant selon le niveau institutionnel
+       courant (Tribunal→Chancellerie→Académie à mesure que K monte, etc.).
+     • CAPITALE (scps_labor) : montée AUTOMATIQUE dans labor_tick (capitale_upgrade
+       pour chaque province) — gâtée par la pop qui débloque le tier ET payée au
+       trésor. Pas un choix pondéré de l'IA : c'est mécanique au tick.
+
+
+5. POINTS OUVERTS (honnêtes)
+──────────────────────────────
+  • ÉTOFFE encore à ~66 % (déficit) dans mon scan : l'atelier d'étoffe précieuse, tiré
+    par un prix de statut élevé (effort →1.5), DRAINE le tissu commun (laine→étoffe→
+    étoffe préc.) au détriment des laborers/bourgeois. Ton rapport l'avait à 120 %
+    (graines/outil différents). Piste : gater le placement des ateliers ou borner
+    leur effort. NON fait (hors de ton fix validé).
+  • COUPS toujours ~95 % des soulèvements : déclencheur FACTIONS non touché (ton §4
+    le note : « relève de l'autre rapport, seuil de coup + zèle »).
+  • §6b (2e ressource) et §7 (coûts bâtiments) : prêts à être posés sur ton feu vert.
+
+══════════════════════════════════════════════════════════════════════════════
+ FIN — rebalance éco appliqué & validé (0 pays absorbé tenu). Reste : déclencheur de
+ coup (factions), 2e ressource, coûts d'édifices — sur ta décision.
+══════════════════════════════════════════════════════════════════════════════
