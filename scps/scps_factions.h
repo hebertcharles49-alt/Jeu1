@@ -119,4 +119,18 @@ EthosFaction faction_effective_distribution(const World *w, const WorldEconomy *
 float faction_coup_tension_c(const World *w, const WorldEconomy *econ,
                              int cid, EthosFaction *out_alienated);
 
+/* ===================================================================== */
+/* ENGAGEMENT D'ÂGE (§7) — à chaque lever d'âge, une faction s'avance       */
+/* ===================================================================== */
+/* La faction PATRONNE d'un âge (age = valeur d'AgeId, passée en int pour éviter un
+ * cycle d'en-têtes) : Commerce→Marchands, Raison/Lumières→Légistes, Empires→
+ * Conquérants, Brèche→Transgresseurs, Soulèvements→Communautaires, Ordre de Fer→
+ * Conquérants. À l'avènement, elle propose une PLEDGE. */
+EthosFaction age_patron(int age);
+
+/* Tenir la pledge d'âge : renforce le patron (une pledge tenue = un vote) ET apaise
+ * (la satisfaction de l'ordre monte un temps — cohésion du régime). Appelé à
+ * l'avènement de l'âge pour un pays (l'IA accepte ; le joueur choisira). */
+void faction_age_engage(const World *w, WorldEconomy *econ, int cid, int age);
+
 #endif /* SCPS_FACTIONS_H */

@@ -192,6 +192,30 @@ float faction_grievance(int cid, EthosFaction f){
     if (cid<0||cid>=SCPS_MAX_COUNTRY||f<0||f>=FAC_COUNT) return 0.f;
     return g_lever_grief[cid][f];
 }
+/* ---- Engagement d'âge (§7) -------------------------------------------- */
+#define ENGAGE_LEVER 0.10f   /* la pledge tenue RENFORCE le patron (un vote) */
+#define ENGAGE_SAT   0.08f   /* … et APAISE (satisfaction de l'ordre ↑ un temps) */
+EthosFaction age_patron(int age){
+    switch (age){                                  /* cf. AgeId (scps_events.h) */
+        case 0: return FAC_MARCHAND;        /* Commerce mondial : s'ouvrir au négoce */
+        case 1: return FAC_LEGISTE;         /* Raison : codifier */
+        case 2: return FAC_CONQUERANT;      /* Empires : l'expansion */
+        case 3: return FAC_TRANSGRESSEUR;   /* Brèche : la puissance ultime */
+        case 4: return FAC_LEGISTE;         /* Lumières : la raison, l'institution */
+        case 5: return FAC_COMMUNAUTAIRE;   /* Soulèvements : le peuple, la réforme */
+        case 6: return FAC_CONQUERANT;      /* Ordre de Fer : la poigne */
+        default: return FAC_LEGISTE;
+    }
+}
+void faction_age_engage(const World *w, WorldEconomy *econ, int cid, int age){
+    (void)w;
+    if (!econ || cid<0) return;
+    faction_lever_apply(cid, age_patron(age), ENGAGE_LEVER);   /* la faction de l'heure s'avance */
+    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
+        float s=econ->region[r].satisfaction + ENGAGE_SAT;     /* cohésion du régime (apaise l'agitation) */
+        econ->region[r].satisfaction = s>1.f?1.f:s;
+    }
+}
 void faction_levers_on_coup(int cid){
     /* Le coup a basculé le régime : la rancœur accumulée se DÉCHARGE (sinon le pays
      * recouve aussitôt — un coup tous les deux ans). La pression politique est purgée. */

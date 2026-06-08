@@ -332,6 +332,7 @@ typedef struct {
     RevoltState     *rs;       /* soulèvements incarnés (sécessions, coups) */
     WarHost         *host;     /* armées levées par pays (mobilisation) */
     MissionsState   *missions; /* missions décennales (rythme + injection de ressources) */
+    int              prev_dawned; /* dernier âge avéné traité (engagement d'âge §7) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
     int16_t          prev_owner_mo[SCPS_MAX_REG];  /* propriétaires du mois (détection de conquête) */
@@ -408,6 +409,15 @@ static void sim_day(Sim *s, World *w) {
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales */
         faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface */
+        if (s->ev->ages.last_dawned != s->prev_dawned){          /* §7 : un âge se lève → engagement */
+            int age=s->ev->ages.last_dawned;
+            if (age>=0) for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+                if (w->country[c].role==POLITY_UNCLAIMED) continue;
+                int nr=0; for (int r=0;r<s->econ->n_regions;r++) if (s->econ->region[r].owner==c) nr++;
+                if (nr>0) faction_age_engage(w, s->econ, c, age);
+            }
+            s->prev_dawned = s->ev->ages.last_dawned;
+        }
     }
     if (++s->day % 365 == 0) s->year++;
 }
@@ -446,6 +456,7 @@ static void sim_rebuild(Sim *s, World *w) {
     warhost_init(s->host);                               /* les armées levées par pays */
     missions_init(s->missions);                          /* missions décennales */
     faction_levers_reset();                              /* §4 : stances de factions à zéro */
+    s->prev_dawned=-1;                                   /* §7 : aucun âge encore traité */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
         s->prev_owner_mo[r]=s->econ->region[r].owner;
     s->day=0; s->year=0;
