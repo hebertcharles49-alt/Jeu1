@@ -405,9 +405,9 @@ static float continental_mask(int x, int y, float seed_f) {
         for (int l=0;l<cs->n;l++) {
             ContLobe *cl=&cs->lobe[l];
             float ddx=wrap_dx(fx-cl->cx), ddy=fy-cl->cy;   /* écart cylindrique en X */
-            float rx=ddx*cl->cosA+ddy*cl->sinA;
-            float ry=-ddx*cl->sinA+ddy*cl->cosA;
-            float d=sqrtf((rx/cl->ax)*(rx/cl->ax)+(ry/cl->ay)*(ry/cl->ay));
+            float lrx=ddx*cl->cosA+ddy*cl->sinA;
+            float lry=-ddx*cl->sinA+ddy*cl->cosA;
+            float d=sqrtf((lrx/cl->ax)*(lrx/cl->ax)+(lry/cl->ay)*(lry/cl->ay));
             if (l==0) d-=wedge;          /* Wegener : pousse/creuse le bord qui fait face */
             /* Effilement : la côte recule vers la pointe de dérive → base large,
              * pointe étroite (silhouette Amérique du Sud / pointe sud africaine). */
@@ -425,9 +425,9 @@ static float continental_mask(int x, int y, float seed_f) {
     for (int i=0;i<g_nislet;i++) {
         Islet *il=&g_islet[i];
         float ddx=wrap_dx(fx-il->cx), ddy=fy-il->cy;
-        float rx=ddx*il->cosA+ddy*il->sinA;
-        float ry=-ddx*il->sinA+ddy*il->cosA;
-        float d=sqrtf((rx/il->ax)*(rx/il->ax)+(ry/il->ay)*(ry/il->ay));
+        float lrx=ddx*il->cosA+ddy*il->sinA;
+        float lry=-ddx*il->sinA+ddy*il->cosA;
+        float d=sqrtf((lrx/il->ax)*(lrx/il->ax)+(lry/il->ay)*(lry/il->ay));
         float lobe=1.f-clampf(d,0.f,1.f);
         lobe=lobe*lobe*(3.f-2.f*lobe)*0.55f;
         if (lobe>best) best=lobe;

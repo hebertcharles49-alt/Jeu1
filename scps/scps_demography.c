@@ -69,6 +69,7 @@ static const PopCulture *dom_ruling_culture(const World *w, const WorldEconomy *
 }
 
 PopCulture group_culture_effective(const PopGroup *g, const ModifierStack *drift){
+    if (!g){ PopCulture z; memset(&z,0,sizeof z); return z; }  /* NULL-safe : cohérent avec le module défensif */
     PopCulture c = g->origin;
     if (drift){
         GroupDrift d = modstack_group_drift(drift, g->drift_id);
@@ -311,6 +312,7 @@ int province_composition(const ProvincePop *pp, const ModifierStack *drift,
                          const PopCulture *crown, float P, float K,
                          GroupReadout out[], int max){
     static char etat_buf[DEMO_MAX_GROUPS][48];
+    if (pp->n_groups<=0) return 0;                  /* province vide : nulle composition (province_dominant→NULL) */
     long total=province_total_pop(pp); if(total<1)total=1;
     const PopGroup *dom=province_dominant(pp);
     PopCulture domc=group_culture_effective(dom,drift);

@@ -156,7 +156,7 @@ AGENCY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                    $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_agency.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_agency.o \
                     $(OBJDIR)/scps_agency_demo.o
 agency_demo: $(AGENCY_DEMO_OBJS)
 	$(CC) $(AGENCY_DEMO_OBJS) -o $@ -lm
@@ -167,7 +167,7 @@ DIPLO_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_diplo_demo.o
 diplo_demo: $(DIPLO_DEMO_OBJS)
 	$(CC) $(DIPLO_DEMO_OBJS) -o $@ -lm
@@ -177,7 +177,7 @@ FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_faith.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_faith.o \
                    $(OBJDIR)/scps_faith_demo.o
 faith_demo: $(FAITH_DEMO_OBJS)
 	$(CC) $(FAITH_DEMO_OBJS) -o $@ -lm
@@ -201,7 +201,7 @@ INTERTRADE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                    $(OBJDIR)/scps_intertrade_demo.o
 intertrade_demo: $(INTERTRADE_DEMO_OBJS)
@@ -212,7 +212,7 @@ WARHOST_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_labor.o \
                    $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_warhost_demo.o
 warhost_demo: $(WARHOST_DEMO_OBJS)
@@ -224,7 +224,7 @@ ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                    $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_routes.o \
                     $(OBJDIR)/scps_routes_demo.o
 routes_demo: $(ROUTES_DEMO_OBJS)
 	$(CC) $(ROUTES_DEMO_OBJS) -o $@ -lm
@@ -263,7 +263,7 @@ STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                         $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                         $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                         $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                        $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
+                        $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
                         $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                         $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_statecraft_demo.o
 statecraft_demo: $(STATECRAFT_DEMO_OBJS)
@@ -276,7 +276,7 @@ EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                     $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_events.o \
                     $(OBJDIR)/scps_events_demo.o
@@ -318,7 +318,7 @@ DEMOGRAPHY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                    $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_modifier.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_modifier.o \
                     $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_demography_demo.o
 demography_demo: $(DEMOGRAPHY_DEMO_OBJS)
 	$(CC) $(DEMOGRAPHY_DEMO_OBJS) -o $@ -lm
@@ -328,7 +328,7 @@ DEMOGRAPHY_INTEG_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o 
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
                     $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_demography.o \
                     $(OBJDIR)/scps_demography_integ_demo.o
 demography_integ_demo: $(DEMOGRAPHY_INTEG_OBJS)
@@ -355,7 +355,7 @@ SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_modifier.o \
                     $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_social_demo.o
 social_demo: $(SOCIAL_DEMO_OBJS)

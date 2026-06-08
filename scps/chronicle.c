@@ -252,7 +252,8 @@ int main(int argc, char **argv){
     s.rs=malloc(sizeof(RevoltState)); s.host=malloc(sizeof(WarHost));
     s.missions=malloc(sizeof(MissionsState));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
-        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs){ fprintf(stderr,"OOM\n"); return 1; }
+        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs||!s.host||!s.missions){
+        fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
     printf(" CHRONIQUE — balayage : %d sims, %d ans (empires 2→%d, cités 5→%d ; sans joueur)\n",
