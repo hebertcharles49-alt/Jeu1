@@ -55,6 +55,10 @@ typedef struct {
      * génération. Donne à a un casus belli territorial (irrédentisme, sans adjacence)
      * et galvanise sa guerre de reconquête (ralliement). */
     float       rancor     [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
+    /* SOUILLURE FAUSTIENNE — faustian[c] = à quel point c développe l'interdit
+     * (synchronisé sur sa charge de tech). Une foi ORTHODOXE a une CHANCE de
+     * croiser contre un empire qui développe le faustien (Gardiens vs Transgresseurs). */
+    float       faustian   [SCPS_MAX_COUNTRY];
 } DiploState;
 
 void diplo_init(DiploState *d);
@@ -147,5 +151,13 @@ float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int 
  * de reconquête) et l'UI. Posée par diplo_conquer_region sur le DÉPOSSÉDÉ, plus
  * profonde si la prise fut ILLÉGITIME ; survit à la paix, décroît dans diplo_tick. */
 float diplo_rancor(const DiploState *d, int a, int b);
+
+/* SOUILLURE FAUSTIENNE — synchronisée chaque an depuis la charge de tech d'un pays.
+ * diplo_faustian_cb : un attaquant ORTHODOXE (foi régnante austère) contre un
+ * empire qui développe nettement le faustien a une RAISON religieuse (croisade). */
+void  diplo_set_faustian(DiploState *d, int cid, float level);
+float diplo_faustian    (const DiploState *d, int cid);
+bool  diplo_faustian_cb (const World *w, const WorldEconomy *econ, const DiploState *d,
+                         int attacker, int target);
 
 #endif /* SCPS_DIPLO_H */

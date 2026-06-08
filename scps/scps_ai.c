@@ -26,6 +26,7 @@
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
+#define AI_CRUSADE_W      4.0f   /* croisade : l'orthodoxe vise qui développe le faustien (chance ∝ ferveur) */
 /* ---- Recherche (l'arbre de tech vivant) ------------------------------- */
 #define AI_RESEARCH_CADENCE 365  /* ~1 an entre déverrouillages potentiels */
 #define AI_RESEARCH_RATE    14.f /* points/an de base, × rendement Savoir × f(pop) */
@@ -224,10 +225,14 @@ static int ai_pick_rival(const AiActor *a, const World *w, const WorldEconomy *e
         /* On frappe ce qui MENACE — et, à proportion de l'appétit de conquête, ce
          * qui est FAIBLE. La RANCUNE pèse (on veut reprendre nos terres) ; la
          * parenté/alliance et le risque d'élargissement retiennent. */
+        /* CROISADE : une foi orthodoxe a une CHANCE de frapper qui développe le
+         * faustien — pesée par sa ferveur (w_faith). Gardiens vs Transgresseurs. */
+        float crusade = diplo_faustian_cb(w,econ,diplo,a->cid,b) ? AI_CRUSADE_W*(0.4f+a->w_faith) : 0.f;
         float score = rel.threat
                     + a->w_expand * 3.0f * (opportunism>0.f ? opportunism : 0.f)
                     + a->w_faith  * 5.0f * rel.schism
                     + AI_RANCOR_W * diplo_rancor(diplo, a->cid, b)
+                    + crusade
                     - rel.alliance
                     - AI_WIDEN_W * widen;
         if (score > bestscore){ bestscore=score; best=b; }

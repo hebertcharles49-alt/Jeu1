@@ -399,6 +399,8 @@ static void sim_day(Sim *s, World *w) {
         prosperity_tick(s->wp, w, s->econ, s->net, s->ts, s->wl);
         /* Diplomatie annuelle : usure de guerre, fonte des trêves/momentum, score de guerre. */
         warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
+            diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }

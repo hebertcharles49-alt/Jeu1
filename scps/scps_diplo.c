@@ -228,6 +228,9 @@ CasusBelli diplo_casus_belli(const World *w, const WorldEconomy *econ, const Wor
      * de b et on garde le grief → on peut revenir les reprendre, même sans adjacence. */
     if (d && a<SCPS_MAX_COUNTRY && b<SCPS_MAX_COUNTRY && d->rancor[a][b] > RANCOR_CB_SEUIL)
         return CB_TERRITORIAL;
+    /* RELIGIEUX — la CROISADE faustienne : une foi orthodoxe contre un empire qui
+     * développe l'interdit (Gardiens vs Transgresseurs). */
+    if (diplo_faustian_cb(w,econ,d,a,b)) return CB_RELIGIOUS;
     /* RELIGIEUX — schisme (branche proche + prosélytisme = ennemi naturel). */
     Relation rel = diplo_relation(w,econ,wp,d,a,b);
     if (rel.schism > 0.45f) return CB_RELIGIOUS;
@@ -424,6 +427,33 @@ float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int 
 float diplo_rancor(const DiploState *d, int a, int b){
     if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return 0.f;
     return d->rancor[a][b];
+}
+
+/* ---- Croisade contre le faustien : Gardiens vs Transgresseurs ---------- */
+#define FAUST_CRUSADE_ORTHO  0.22f   /* foi régnante austère (orthodoxe) en deçà */
+#define FAUST_CRUSADE_TAINT  4.0f    /* souillure faustienne nette au-delà (charge ~Brèche=5) */
+void  diplo_set_faustian(DiploState *d, int cid, float level){
+    if (cid>=0 && cid<SCPS_MAX_COUNTRY) d->faustian[cid]=level;
+}
+float diplo_faustian(const DiploState *d, int cid){
+    return (cid>=0&&cid<SCPS_MAX_COUNTRY) ? d->faustian[cid] : 0.f;
+}
+/* posture de la foi régnante (orthodoxe bas ↔ permissif haut), lue de l'éthos. */
+static float diplo_orthodoxy_of(const World *w, const WorldEconomy *econ, int cid){
+    const PopCulture *pc=cap_culture(w,econ,cid);
+    if (!pc) return 0.3f;
+    switch(pc->ethos){
+        case ETHOS_ORDRE: return 0.10f; case ETHOS_BUREAUCRATE: return 0.14f;
+        case ETHOS_PACIFISTE: return 0.20f; case ETHOS_MERCANTILE: return 0.26f;
+        case ETHOS_HONNEUR: return 0.30f; case ETHOS_DOMINATEUR: return 0.36f;
+        default: return 0.20f;
+    }
+}
+bool diplo_faustian_cb(const World *w, const WorldEconomy *econ, const DiploState *d,
+                       int attacker, int target){
+    if (attacker<0||attacker>=w->n_countries||target<0||target>=w->n_countries||attacker==target) return false;
+    return diplo_orthodoxy_of(w,econ,attacker) < FAUST_CRUSADE_ORTHO
+        && diplo_faustian(d,target) > FAUST_CRUSADE_TAINT;
 }
 
 void diplo_tick(DiploState *d, float dt){

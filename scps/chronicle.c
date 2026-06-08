@@ -104,6 +104,8 @@ static void sim_day(Sim *s, World *w) {
          * (la guerre peut reprendre après le répit), et le SCORE DE GUERRE (bras-de-fer
          * + attrition qui saigne les armes). */
         warhost_tick(s->host, w, s->econ, s->dp, 1.0f);   /* la mobilisation : les armées vivent */
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
+            diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
     }

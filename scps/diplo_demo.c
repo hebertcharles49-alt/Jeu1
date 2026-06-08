@@ -190,6 +190,29 @@ int main(int argc,char**argv){
                diplo_casus_belli(w,econ,wp,dp,A,Badj,RES_NONE)!=CB_NONE);
     }
 
+    /* ---- 4b. CROISADE faustienne : Gardiens orthodoxes vs Transgresseurs ---- */
+    printf("\n── 4b. La croisade faustienne (l'orthodoxe frappe le développeur de l'interdit) ──\n");
+    {
+        int crusader=player, heretic=-1;
+        for(int c=0;c<w->n_countries;c++) if(c!=crusader && w->country[c].role!=POLITY_UNCLAIMED){ heretic=c; break; }
+        if(heretic>=0){
+            diplo_init(dp);
+            int capR=w->province[w->country[crusader].capital_prov].region;
+            econ->region[capR].culture.ethos=ETHOS_ORDRE;          /* le croisé est ORTHODOXE */
+            diplo_set_faustian(dp,heretic,6.0f);                    /* l'hérétique développe l'interdit */
+            ok("la souillure faustienne se LIT", diplo_faustian(dp,heretic)==6.0f);
+            ok("un orthodoxe a un CASUS BELLI (croisade) contre un développeur faustien",
+               diplo_faustian_cb(w,econ,dp,crusader,heretic) &&
+               diplo_casus_belli(w,econ,wp,dp,crusader,heretic,RES_NONE)==CB_RELIGIOUS);
+            diplo_set_faustian(dp,heretic,0.f);
+            ok("sans souillure faustienne, PAS de croisade", !diplo_faustian_cb(w,econ,dp,crusader,heretic));
+            econ->region[capR].culture.ethos=ETHOS_DOMINATEUR;     /* un empire permissif */
+            diplo_set_faustian(dp,heretic,6.0f);
+            ok("un empire PERMISSIF ne croise pas (il cède lui-même à l'interdit)",
+               !diplo_faustian_cb(w,econ,dp,crusader,heretic));
+        } else ok("(monde trop petit pour la croisade)", true);
+    }
+
     /* ---- 5. Score de guerre (§2) : le bras-de-fer (batailles, occupation, attrition) ---- */
     printf("\n── 5. Score de guerre (batailles plafonnées +50 · occupation · attrition) ──\n");
     {
