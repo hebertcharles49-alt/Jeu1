@@ -221,6 +221,72 @@ int main(int argc, char **argv){
        army_fastest_move(&mixte) >= army_slowest_move(&mixte) &&
        army_fastest_move(&mixte) == unit_def(U_CAV_LEGERE)->mouvement);
 
+    /* ═══ 9. LA CASCADE TECHNOLOGIQUE : l'arbre façonne la doctrine (§3) ═ */
+    printf("\n── 9. La tech façonne l'armée : Forge→armes, Société→moral, Savoir→arcane/invocation ──\n");
+    /* on isole chaque branche dans son propre arbre pour prouver une vertu à la fois. */
+    TechState t0; tech_state_init(&t0, true);              /* seulement la base */
+    ArmyDoctrine d0 = army_doctrine(&t0);
+    ok("un empire à la seule base est NEUTRE (doctrine 1·1·1, pas d'invocation)",
+       d0.weapon_power==1.f && d0.moral_mul==1.f && d0.arcane_power==1.f && !d0.can_summon);
+
+    TechState tf; tech_state_init(&tf, true);              /* FORGE·Armée pure */
+    tf.unlocked[TECH_ARMURERIE]=tf.unlocked[TECH_POUDRIERE]=true;
+    tf.unlocked[TECH_FORGE_RUNES]=tf.unlocked[TECH_OEUVRE_NOIRE]=true;
+    ArmyDoctrine df = army_doctrine(&tf);
+    printf("   forge complète → weapon_power %.2f | société → moral_mul ? | savoir → arcane ?\n", df.weapon_power);
+    ok("FORGE·Armée muscle l'ARME (weapon_power > 1) sans toucher moral ni arcane",
+       df.weapon_power>1.f && df.moral_mul==1.f && df.arcane_power==1.f);
+
+    TechState tsoc; tech_state_init(&tsoc, true);          /* SOCIÉTÉ·Armée pure */
+    tsoc.unlocked[TECH_CONSCRIPTION]=tsoc.unlocked[TECH_ORGANISATION]=true;
+    tsoc.unlocked[TECH_CASTE_MARTIALE]=true;
+    ArmyDoctrine ds = army_doctrine(&tsoc);
+    ok("SOCIÉTÉ·Armée muscle le MORAL (moral_mul > 1) sans toucher l'arme",
+       ds.moral_mul>1.f && ds.weapon_power==1.f);
+
+    TechState tk; tech_state_init(&tk, true);              /* SAVOIR·Armée */
+    tk.unlocked[TECH_SAVOIR_GUERRE]=tk.unlocked[TECH_MAGIE_BATAILLE]=true;
+    ArmyDoctrine dk1 = army_doctrine(&tk);
+    ok("SAVOIR·Armée non faustien : l'arcane monte, l'INVOCATION reste verrouillée",
+       dk1.arcane_power>1.f && !dk1.can_summon);
+    tk.unlocked[TECH_INVOCATION]=true;                     /* le bord faustien */
+    ArmyDoctrine dk = army_doctrine(&tk);
+    ok("le bord FAUSTIEN (Invocation) déverrouille l'INVOCATION (l'armée sans pop)",
+       dk.can_summon && dk.arcane_power>dk1.arcane_power);
+
+    /* (a) doctrine EN ACTION : à épéistes ÉGAUX, la meilleure FORGE l'emporte. */
+    int forged=0, N9=21;
+    for (int k=0;k<N9;k++){
+        ArmyState F=one(U_EPEISTE,4), P=one(U_EPEISTE,4);
+        F.doctrine=df;                                     /* l'un forgé, l'autre nu */
+        uint32_t rng=seed+(uint32_t)k*2246822519u+3u;
+        if (resolve_battle(&F,&P,1.f,&rng).winner==-1) forged++;
+    }
+    printf("   à épéistes égaux, l'armée FORGÉE gagne %d/%d\n", forged, N9);
+    ok("la cascade décide la bataille : à armes égales, la meilleure FORGE l'emporte", forged>=15);
+
+    /* (b) l'ORGANISATION en action : plus de moral → on survit au grain. */
+    int held=0;
+    for (int k=0;k<N9;k++){
+        ArmyState O=one(U_EPEISTE,4), P=one(U_EPEISTE,4);
+        O.doctrine=ds;                                     /* moral renforcé */
+        uint32_t rng=seed+(uint32_t)k*2654435761u+5u;
+        if (resolve_battle(&O,&P,1.f,&rng).winner==-1) held++;
+    }
+    printf("   à épéistes égaux, l'armée ORGANISÉE (moral) gagne %d/%d\n", held, N9);
+    ok("l'organisation décide : un moral renforcé tient et l'emporte au grain", held>=15);
+
+    /* (c) l'ARCANE en action : un mage doté de SAVOIR·Armée écrase un mage nu. */
+    int arc=0;
+    for (int k=0;k<N9;k++){
+        ArmyState M=one(U_MAGE,3), m=one(U_MAGE,3);
+        M.doctrine=dk;                                     /* arcane boosté (weapon_power=1) */
+        uint32_t rng=seed+(uint32_t)k*40503u+11u;
+        if (resolve_battle(&M,&m,1.f,&rng).winner==-1) arc++;
+    }
+    printf("   miroir de mages, l'un doté de SAVOIR·Armée : il gagne %d/%d\n", arc, N9);
+    ok("l'ARCANE décide le duel de mages (SAVOIR·Armée pèse sur les dégâts du mage)", arc>=15);
+
     printf("\n══════════════════════════════════════════════════════════════\n");
     printf(" BILAN : %d réussis, %d échoués\n", g_pass, g_fail);
     printf("══════════════════════════════════════════════════════════════\n");

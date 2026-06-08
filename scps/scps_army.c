@@ -22,6 +22,10 @@
 #define ROUND_DAYS      0.18f  /* chaque manche de mêlée ≈ un sixième de jour */
 #define PURSUIT_DAYS    2.5f   /* la poursuite s'étire sur quelques jours (éparpille le vainqueur) */
 #define PURSUIT_KILL    0.35f  /* fraction max du vaincu fauchée s'il est entièrement rattrapé */
+/* §3 — la cascade technologique (gain par TIER de nœud Armée déverrouillé) */
+#define FORGE_STEP      0.05f  /* FORGE·Armée   : +5 % de dégâts par tier (arme) */
+#define SOCIETE_STEP    0.05f  /* SOCIÉTÉ·Armée : +5 % de moral par tier (organisation) */
+#define SAVOIR_STEP     0.07f  /* SAVOIR·Armée  : +7 % aux dégâts du mage par tier (arcane) */
 
 /* ---- Définitions d'unités (§2, §5) ------------------------------------ */
 static const UnitDef UNITS[U_COUNT] = {
@@ -86,7 +90,35 @@ float matchup(UnitType a, UnitType b){
 /* ===================================================================== */
 /* ARMES & RECRUTEMENT (§0, §1)                                           */
 /* ===================================================================== */
-void army_init(ArmyState *a){ memset(a,0,sizeof(*a)); }
+void army_init(ArmyState *a){ memset(a,0,sizeof(*a)); a->doctrine = army_doctrine_base(); }
+
+/* ---- §3 : la doctrine lue depuis l'arbre ------------------------------- */
+ArmyDoctrine army_doctrine_base(void){
+    ArmyDoctrine d; d.weapon_power=1.f; d.moral_mul=1.f; d.arcane_power=1.f; d.can_summon=false;
+    return d;
+}
+ArmyDoctrine army_doctrine(const TechState *t){
+    ArmyDoctrine d = army_doctrine_base();
+    if (!t) return d;
+    /* on parcourt l'arbre : tout nœud ARMÉE déverrouillé pèse selon sa PROFONDEUR
+     * (tier) — la base (tier 0, universelle) ne différencie personne ; le bord
+     * faustien (tier élevé) décuple. Chaque thème nourrit sa propre vertu. */
+    for (int id=0; id<TECH_COUNT; id++){
+        if (!t->unlocked[id]) continue;
+        const TechNode *n = tech_node((TechId)id);
+        if (!n || n->func != FN_ARMEE) continue;
+        float w = (float)n->tier;                 /* poids ∝ tier (0 = base, neutre) */
+        switch (n->theme){
+            case THM_FORGE:   d.weapon_power += FORGE_STEP   * w; break;
+            case THM_SOCIETE: d.moral_mul    += SOCIETE_STEP * w; break;
+            case THM_SAVOIR:  d.arcane_power += SAVOIR_STEP  * w;
+                              if (n->faustian) d.can_summon = true;   /* Invocation / Éveil */
+                              break;
+            default: break;
+        }
+    }
+    return d;
+}
 
 long army_fabricate_weapon(ArmyState *a, LaborEcon *e, ArmWeapon wp, long qty){
     if (wp<0||wp>=W_COUNT||qty<=0) return 0;
@@ -154,11 +186,19 @@ float arm_damage(UnitType a, UnitType b, long count_a, float disc_b, float terra
     return dmg;
 }
 
-/* un contact : a frappe b (jet pondéré). */
-static void resolve_contact(Unit *a, Unit *b, float terrain, uint32_t *rng){
+/* un contact : a frappe b (jet pondéré). `power` = la doctrine de l'attaquant
+ * (FORGE pour tous, ×ARCANE en plus pour le mage — §3). */
+static void resolve_contact(Unit *a, Unit *b, float terrain, float power, uint32_t *rng){
     if (a->count<=0 || b->moral_courant<=0.f) return;
     if (!arm_hit(UNITS[a->type].commandement, roll_d20(rng))) return;     /* le dé + commandement */
-    b->moral_courant -= arm_damage(a->type, b->type, a->count, UNITS[b->type].discipline, terrain);
+    b->moral_courant -= arm_damage(a->type, b->type, a->count, UNITS[b->type].discipline, terrain) * power;
+}
+/* la force de frappe d'une unité sous sa doctrine : l'arme pour tous, l'arcane
+ * en plus pour le mage. */
+static float unit_power(UnitType t, const ArmyDoctrine *d){
+    float p = d->weapon_power;
+    if (t==U_MAGE) p *= d->arcane_power;
+    return p;
 }
 static int first_live(const ArmyState *S){
     for (int i=0;i<S->n_units;i++) if (S->units[i].count>0 && S->units[i].moral_courant>0.f) return i;
@@ -175,8 +215,9 @@ static int count_present(const ArmyState *S){
 
 BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t *rng){
     BattleResult r; memset(&r,0,sizeof r);
-    for (int i=0;i<A->n_units;i++) A->units[i].moral_courant = UNITS[A->units[i].type].moral*(float)A->units[i].count;
-    for (int i=0;i<B->n_units;i++) B->units[i].moral_courant = UNITS[B->units[i].type].moral*(float)B->units[i].count;
+    /* moral de départ : la réserve × la doctrine SOCIÉTÉ·Armée (organisation). */
+    for (int i=0;i<A->n_units;i++) A->units[i].moral_courant = UNITS[A->units[i].type].moral*(float)A->units[i].count*A->doctrine.moral_mul;
+    for (int i=0;i<B->n_units;i++) B->units[i].moral_courant = UNITS[B->units[i].type].moral*(float)B->units[i].count*B->doctrine.moral_mul;
     float terrainB = 1.f/terrainA;       /* le terrain qui sert A dessert B (et inversement) */
 
     int nA=count_present(A), nB=count_present(B);
@@ -187,22 +228,24 @@ BattleResult resolve_battle(ArmyState *A, ArmyState *B, float terrainA, uint32_t
         for (int i=0;i<A->n_units;i++){
             if (A->units[i].count<=0 || A->units[i].moral_courant<=0.f) continue;
             int j=first_live(B); if (j<0) break;
-            resolve_contact(&A->units[i], &B->units[j], terrainA, rng);
+            float pw=unit_power(A->units[i].type,&A->doctrine);
+            resolve_contact(&A->units[i], &B->units[j], terrainA, pw, rng);
             /* débordement : un mouvement supérieur offre un contact bonus (flanc) —
              * MAIS la mobilité n'amplifie qu'un matchup FAVORABLE : on ne déborde
              * pas un mur qui vous contre frontalement (le contre prime). */
             if (UNITS[A->units[i].type].mouvement > UNITS[B->units[j].type].mouvement + ARM_FLANK_GAP
                 && matchup(A->units[i].type, B->units[j].type) >= 1.0f)
-                resolve_contact(&A->units[i], &B->units[j], terrainA, rng);
+                resolve_contact(&A->units[i], &B->units[j], terrainA, pw, rng);
         }
         /* B frappe A */
         for (int i=0;i<B->n_units;i++){
             if (B->units[i].count<=0 || B->units[i].moral_courant<=0.f) continue;
             int j=first_live(A); if (j<0) break;
-            resolve_contact(&B->units[i], &A->units[j], terrainB, rng);
+            float pw=unit_power(B->units[i].type,&B->doctrine);
+            resolve_contact(&B->units[i], &A->units[j], terrainB, pw, rng);
             if (UNITS[B->units[i].type].mouvement > UNITS[A->units[j].type].mouvement + ARM_FLANK_GAP
                 && matchup(B->units[i].type, A->units[j].type) >= 1.0f)
-                resolve_contact(&B->units[i], &A->units[j], terrainB, rng);
+                resolve_contact(&B->units[i], &A->units[j], terrainB, pw, rng);
         }
         r.routA=count_routed(A); r.routB=count_routed(B);
         if      (r.routB>=nB){ r.winner=-1; decided=1; }   /* toute l'armée B rompue → A gagne */

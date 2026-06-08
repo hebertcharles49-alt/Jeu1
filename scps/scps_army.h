@@ -16,6 +16,7 @@
  * cavalerie d'élite.
  */
 #include "scps_labor.h"   /* LaborEcon : pop par classe, matériaux, armes fabriquées */
+#include "scps_tech.h"    /* TechState : l'arbre qui façonne la doctrine d'armée (§3) */
 
 #define POP_PER_UNIT     100   /* enrôlement par paquets de 100 */
 #define ARMY_MAX_UNITS   32
@@ -53,11 +54,22 @@ typedef struct {
     float    moral_courant;  /* la réserve de moral qui s'épuise au combat */
 } Unit;
 
+/* ---- §3 : LA DOCTRINE — ce que la TECH fait à une armée ---------------- */
+/* L'arbre (scps_tech) façonne la guerre par sa fonction ARMÉE, thème par thème.
+ * Le poids d'un nœud ∝ sa PROFONDEUR (tier) : le bord faustien pèse le plus. */
+typedef struct {
+    float weapon_power;   /* FORGE·Armée   : multiplie les dégâts (meilleures armes ; ≥1) */
+    float moral_mul;      /* SOCIÉTÉ·Armée : multiplie la réserve de moral (tient plus ; ≥1) */
+    float arcane_power;   /* SAVOIR·Armée  : multiplie les dégâts du MAGE (l'arcane ; ≥1) */
+    bool  can_summon;     /* SAVOIR·Armée faustien : l'INVOCATION déverrouillée */
+} ArmyDoctrine;
+
 typedef struct {
     Unit units[ARMY_MAX_UNITS];
     int  n_units;
     long weapons[W_COUNT];               /* stock d'armes fabriquées */
     long pop_by_class_in_army[LAB_CLASS_COUNT];   /* affectées (toujours dans le pool labor) */
+    ArmyDoctrine doctrine;               /* §3 : façonnée par la tech (neutre par défaut) */
 } ArmyState;
 
 /* ---- Phases d'une bataille dans le temps (§2) ------------------------- */
@@ -146,6 +158,15 @@ float army_fastest_move(const ArmyState *a);
 
 /* Nom diégétique d'une phase de bataille (Choc / Retrait / Poursuite). */
 const char *battle_phase_name(BattlePhase ph);
+
+/* ---- §3 : la cascade technologique → la doctrine ---------------------- *
+ *   FORGE·Armée   → de meilleures ARMES (les coups mordent plus fort)
+ *   SOCIÉTÉ·Armée → ORGANISATION & MORAL (l'armée tient avant de rompre)
+ *   SAVOIR·Armée  → l'ARCANE (le mage frappe plus fort) et, au bord faustien,
+ *                   l'INVOCATION (une armée sans pop). Plus le nœud est PROFOND
+ *                   (tier), plus il pèse — le bord faustien décuple.            */
+ArmyDoctrine army_doctrine_base(void);          /* neutre : tout à 1, pas d'invocation */
+ArmyDoctrine army_doctrine(const TechState *t); /* lue depuis l'arbre déverrouillé d'un empire */
 
 /* Jours pour qu'une armée franchisse une case de biome `to` (hauteur `height`).
  * `river_crossing` : on franchit un cours d'eau (lent, à découvert) ;

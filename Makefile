@@ -308,7 +308,7 @@ labor_demo: $(LABOR_DEMO_OBJS)
 # ---- Les armées : recrutement, armes, contres, combat au dé ---------------
 # Bâti sur l'économie (pop par classe + armes fabriquées). Autonome (pas de SDL).
 ARMY_DEMO_OBJS := $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_army.o \
-                  $(OBJDIR)/scps_army_demo.o
+                  $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_army_demo.o
 army_demo: $(ARMY_DEMO_OBJS)
 	$(CC) $(ARMY_DEMO_OBJS) -o $@ -lm
 
