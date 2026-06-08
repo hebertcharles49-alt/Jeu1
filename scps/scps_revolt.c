@@ -242,18 +242,22 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
             if (!cdone[o]){ ctens[o]=faction_coup_tension_c(w,econ,o,&cfac[o]); cdone[o]=1; }
             ct=ctens[o]; cf=cfac[o];
         }
-        float worst=0.f;
+        float worst=0.f, min_integ=1.f;
         for (int i=0;i<re->pop.n_groups;i++){
             float d=revolt_group_deficit(&re->pop.groups[i], drift, crown,
                                          re->food_sat, re->society_sat, re->over_tax, re->coercion)
                   + ethos_coup_boost(&re->pop.groups[i], cf, ct);   /* §5 : grief politique */
             if (d>1.f) d=1.f;
             if (d>worst) worst=d;
+            if (re->pop.groups[i].integration < min_integ) min_integ = re->pop.groups[i].integration;
         }
-        /* SUREXTENSION : un empire trop vaste tient mal ses marches → le grief
-         * séparatiste monte avec la taille (les conquêtes excédentaires se détachent). */
+        /* SUREXTENSION : un empire trop vaste tient mal ses MARCHES — le grief monte
+         * avec la taille, mais surtout là où la province est MAL INTÉGRÉE (conquête
+         * étrangère) → SÉCESSION (un pays naît), pas coup du cœur natif. Le cœur ne
+         * subit qu'un tiers du grief (un empire homogène fragmente moins). */
         if (o>=0 && o<SCPS_MAX_COUNTRY && owned[o]>OVEREXT_FREE){
             float overext = clampf((float)(owned[o]-OVEREXT_FREE)*OVEREXT_PER_REG, 0.f, OVEREXT_CAP);
+            overext *= (0.30f + 0.70f*(1.f - clampf(min_integ,0.f,1.f)));   /* biais marches étrangères */
             worst = clampf(worst + overext, 0.f, 1.f);
         }
         /* le séparatisme post-conquête désespère la province « quoi qu'il arrive » */
