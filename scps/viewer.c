@@ -853,28 +853,24 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
         if (shown==0) snprintf(res,sizeof res, "%s", p.ressource);      /* repli : la ressource géo */
         draw_text(ren, g_font, x, y, COL_PARCH, res);
         char rhov[160]; snprintf(rhov,sizeof rhov,
-                 "Les biens extraits sur place (vocation : %s). Le détail des entrées est dans Revenus.", p.vocation);
+                 "Les biens extraits sur place (vocation : %s). Les quantités produites sont dans Production.", p.vocation);
         zone_add((SDL_Rect){x-2,y-2,rw,19}, rhov); y += 22;
     }
     {
-        ui_section(ren, x, &y, "REVENUS");
+        ui_section(ren, x, &y, "PRODUCTION");
         for (int i=0;i<inc.n;i++){
             char l[24]; snprintf(l,sizeof l, "+%.1f/j", inc.line[i].per_day);
             draw_text(ren, g_font, x, y, sense_color(0.62f), l);
             draw_text(ren, g_font, x+74, y, COL_DIM, inc.line[i].source);
-            char hv[160]; snprintf(hv,sizeof hv, "%s · %s : +%.1f or/jour (offre × prix).",
+            char hv[176]; snprintf(hv,sizeof hv,
+                     "%s · %s : +%.1f unité(s)/jour. C'est l'income en RESSOURCE (en or si c'est de l'or) ; "
+                     "la VENTE (→ or par le commerce) est une autre histoire.",
                      inc.line[i].manufactured?"Sortie d'atelier (bourgeois)":"Collecte (laboureurs)",
                      inc.line[i].source, inc.line[i].per_day);
             zone_add((SDL_Rect){x-2,y-2,rw,18}, hv); y += 18;
         }
         if (inc.n==0){ draw_text(ren, g_font, x, y, COL_DIM, "rien de notable"); y += 18; }
-        char nl[24]; snprintf(nl,sizeof nl, "+%.1f/j", inc.net_per_day);
-        draw_text(ren, g_font, x, y, COL_PARCH, "Net");
-        draw_text(ren, g_font, x+74, y, sense_color(0.80f), nl);
-        zone_add((SDL_Rect){x-2,y-2,rw,18},
-                 "Net : la VALEUR AJOUTÉE de la province par jour (le PIB local) — collecte + ateliers, "
-                 "nette des intrants consommés. (L'impôt d'État et l'entretien remontent au royaume.)");
-        y += 22;
+        y += 4;
     }
 
     ui_section(ren, x, &y, "ALLÉGEANCE");

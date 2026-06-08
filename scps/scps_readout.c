@@ -396,29 +396,28 @@ static const char *relief_word(float height_avg, Biome b) {
     return "Plaines";
 }
 
-/* REVENUS — décompose la production d'une région en flux journaliers (+N/j), via
- * les champs réels : offre×prix par bien (collecte des brutes / sortie des ateliers),
- * et le PIB local pour le net. Le tick économique vaut un MOIS → /30 pour le jour. */
+/* PRODUCTION — la QUANTITÉ produite par bien et par jour (unités/jour), via l'offre
+ * réelle du dernier tick. PAS de prix : c'est l'income en ressource (ou en or si le
+ * bien EST de l'or) ; la vente est une autre histoire. Le tick vaut un MOIS → /30. */
 IncomeReadout province_income(const WorldEconomy *econ, int region) {
     IncomeReadout r; memset(&r, 0, sizeof r);
     if (!econ || region < 0 || region >= econ->n_regions) return r;
     const RegionEconomy *re = &econ->region[region];
-    /* valeur/jour par ressource produite (offre du dernier tick × prix courant). */
-    float val[RES_COUNT];
-    for (int i=0;i<RES_COUNT;i++) val[i] = re->supply[i] * re->price[i] / 30.f;
-    /* sélection des 6 plus grosses sources. */
+    /* quantité/jour par bien produit (offre du dernier tick, sans le prix). */
+    float qty[RES_COUNT];
+    for (int i=0;i<RES_COUNT;i++) qty[i] = re->supply[i] / 30.f;
+    /* sélection des 6 biens les plus produits. */
     bool taken[RES_COUNT]; memset(taken,0,sizeof taken);
     for (int k=0;k<6;k++){
-        int best=-1; float bv=0.05f;                 /* seuil : ~1.5/mois, ignore les miettes (pas de +0.0/j) */
-        for (int i=1;i<RES_COUNT;i++){ if (taken[i]) continue; if (val[i]>bv){ bv=val[i]; best=i; } }
+        int best=-1; float bv=0.05f;                 /* seuil : ~1.5/mois, ignore les miettes */
+        for (int i=1;i<RES_COUNT;i++){ if (taken[i]) continue; if (qty[i]>bv){ bv=qty[i]; best=i; } }
         if (best<0) break;
         taken[best]=true;
         r.line[r.n].source       = resource_name((Resource)best);
-        r.line[r.n].per_day      = val[best];         /* valeur/jour (1 décimale à l'affichage) */
+        r.line[r.n].per_day      = qty[best];         /* unités/jour (1 décimale à l'affichage) */
         r.line[r.n].manufactured = (best >= RES_PROD_FIRST);
         r.n++;
     }
-    r.net_per_day = re->gdp/30.f;                      /* la valeur ajoutée/jour = le PIB local */
     return r;
 }
 
