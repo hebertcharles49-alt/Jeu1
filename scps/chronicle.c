@@ -366,6 +366,8 @@ int main(int argc, char **argv){
     uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
     int nsims     = (argc>2)?atoi(argv[2]):10;   /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
     int years     = (argc>3)?atoi(argv[3]):200;
+    int fix_emp   = (argc>4)?atoi(argv[4]):0;    /* >0 : empires FIXES (sinon cycle 2+k) */
+    int fix_cs    = (argc>5)?atoi(argv[5]):0;    /* >0 : cités-états FIXES (sinon cycle 5+k) */
     if (nsims<1) nsims=1;
     if (years<1) years=1;
 
@@ -385,8 +387,12 @@ int main(int argc, char **argv){
         fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
-    printf(" CHRONIQUE — balayage : %d sims, %d ans (empires 2→%d, cités 5→%d ; sans joueur)\n",
-           nsims, years, 1+nsims, 4+nsims);
+    if (fix_emp>0 || fix_cs>0)
+        printf(" CHRONIQUE — balayage : %d sims, %d ans (empires %d, cités %d FIXES ; sans joueur)\n",
+               nsims, years, fix_emp>0?fix_emp:2, fix_cs>0?fix_cs:5);
+    else
+        printf(" CHRONIQUE — balayage : %d sims, %d ans (empires 2→%d, cités 5→%d ; sans joueur)\n",
+               nsims, years, 1+nsims, 4+nsims);
     printf("══════════════════════════════════════════════════════════════════════\n");
 
     /* Agrégats sur toutes les sims */
@@ -405,8 +411,8 @@ int main(int argc, char **argv){
          * premières sims, puis on REBOUCLE : un balayage de 100 sims reste faisable
          * (sinon 2+k saturerait SCPS_MAX_COUNTRY=56 et chaque sim tardive ramperait).
          * Graines toutes distinctes (base+k·101) → 100 mondes différents. */
-        p.n_empires     = 2 + (k % 10);
-        p.n_city_states = 5 + (k % 10);
+        p.n_empires     = (fix_emp>0)? fix_emp : 2 + (k % 10);
+        p.n_city_states = (fix_cs >0)? fix_cs  : 5 + (k % 10);
         world_generate(w, &p);
         /* silence le bruit de génération : on a déjà tout imprimé par sim plus bas */
         sim_init(&s, w);
