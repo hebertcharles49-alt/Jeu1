@@ -35,6 +35,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define CORR_CAPTURED 30   /* §C3 : seuil « polity tenue par une faction » (corr 0-100) */
+
 /* ── État de simulation (copié de viewer.c, sans SDL) ───────────────────── */
 typedef struct {
     WorldEconomy *econ; WorldProsperity *wp; WorldLegitimacy *wl; TradeNetwork *net;
@@ -347,6 +349,7 @@ int main(int argc, char **argv){
     long tot_wars=0, tot_absorbed=0, tot_emerged=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
     long tot_techs=0, tot_faustian=0, tot_campaign=0;
+    long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
     for (int k=0;k<nsims;k++){
@@ -510,6 +513,27 @@ int main(int argc, char **argv){
         /* SOULÈVEMENTS INCARNÉS : qui s'est levé et ce qu'il est advenu (acteurs réels). */
         printf("              soulèvements : %d allumés → %d sécession(s) · %d coup(s) · %d concession(s) · %d écrasé(s) (%ld morts au combat)\n",
                s.rs->n_ignited, s.rs->n_seceded, s.rs->n_coup, s.rs->n_concession, s.rs->n_crushed, s.rs->pop_lost);
+        /* §C3 — LA CONCESSION A UN PRIX, EN CLAIR : le rot s'accumule sur la polity qui
+         * CÈDE (souvent une marche faible ou une cité-état, PAS le 1er empire), donc on
+         * balaie TOUTES les polities vivantes — pas seulement les empires affichés plus
+         * haut — sinon la capture reste invisible là où elle mord vraiment. */
+        {
+            int worst_c=-1, worst_corr=0, n_captured=0;
+            for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+                if (w->country[c].role==POLITY_UNCLAIMED || regions_of(s.econ,c)==0) continue;
+                int cor = faction_corruption_0_100(c);
+                if (cor>=CORR_CAPTURED) n_captured++;
+                if (cor>worst_corr){ worst_corr=cor; worst_c=c; }
+            }
+            if (worst_c>=0 && worst_corr>0)
+                printf("              corruption : %d polity(s) capturée(s) (corr≥%d) · la plus pourrie « %s » corr %d — tenue par les %s\n",
+                       n_captured, CORR_CAPTURED, w->country[worst_c].name, worst_corr,
+                       faction_name(faction_captor(worst_c)));
+            else
+                printf("              corruption : aucune capture notable (l'élite n'a pas eu à céder)\n");
+            tot_captured += n_captured; tot_worstcorr += worst_corr;
+            if (n_captured>0) worlds_with_capture++;
+        }
 
         /* RECHERCHE : l'arbre VIT — nœuds déverrouillés (dont des bouts faustiens). */
         { int sim_techs=0, sim_faust=0;
@@ -548,6 +572,8 @@ int main(int argc, char **argv){
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
     printf("   soulèvements incarnés ....... %ld allumés → %ld sécession(s) · %ld coup(s) · %ld concession(s) · %ld écrasé(s)\n",
            tot_ignited, tot_seceded, tot_coup, tot_concession, tot_crushed);
+    printf("   corruption (le prix des concessions) : %d/%d sims avec ≥1 polity capturée · %.1f capturée(s)/sim · pire-corr moy %.0f/100\n",
+           worlds_with_capture, nsims, (double)tot_captured/nsims, (double)tot_worstcorr/nsims);
     printf("   morts au combat (révoltes) .. %ld   (moy. %.0f/sim)\n", tot_revdead, (double)tot_revdead/nsims);
     printf("   sims atteignant les Soulèvements : %d/%d   l'Ordre de Fer : %d/%d\n",
            worlds_with_uprising, nsims, worlds_with_ironorder, nsims);
