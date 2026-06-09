@@ -713,6 +713,42 @@ static SpeciesArchetype ai_capital_race(const World *w, const WorldEconomy *econ
     if (cr<0||cr>=econ->n_regions) return RACE_HUMAIN;
     return econ->region[cr].culture.race;
 }
+static Ethos ai_capital_ethos(const World *w, const WorldEconomy *econ, int cid){
+    if (cid<0||cid>=w->n_countries) return ETHOS_ORDRE;
+    int cp=w->country[cid].capital_prov; if (cp<0||cp>=w->n_provinces) return ETHOS_ORDRE;
+    int cr=w->province[cp].region;       if (cr<0||cr>=econ->n_regions) return ETHOS_ORDRE;
+    return econ->region[cr].culture.ethos;
+}
+/* §éthos — BIAIS DE COÛT (briefs Savoir/Forge/Société §3 : « biais, jamais mur »).
+ * L'éthos rend une FONCTION plus/moins chère à pousser et pèse sur l'attrait du faustien ;
+ * multiplicateur BORNÉ → il ne ferme JAMAIS une branche (un Dominateur atteint l'Université,
+ * juste plus cher ; la pointe arcane reste accessible à un Pacifiste, au prix fort). */
+static float ai_tech_cost_mult(Ethos e, const TechNode *n){
+    float m=1.0f;
+    switch (n->func){
+        case FN_PRODUCTION:                                    /* savoir/commerce/industrie au service de l'État */
+            if (e==ETHOS_BUREAUCRATE || e==ETHOS_MERCANTILE) m*=0.80f;
+            else if (e==ETHOS_PACIFISTE) m*=0.88f;
+            break;
+        case FN_ARMEE:                                         /* la levée / l'arme */
+            if (e==ETHOS_DOMINATEUR || e==ETHOS_HONNEUR) m*=0.80f;
+            else if (e==ETHOS_PACIFISTE) m*=1.30f;
+            else if (e==ETHOS_MERCANTILE) m*=1.10f;
+            break;
+        case FN_RENFORCEMENT:                                  /* tenir : institutions, intégration, foi */
+            if (e==ETHOS_BUREAUCRATE) m*=0.80f;                /* tient la diversité, assimile à bas coût */
+            else if (e==ETHOS_ORDRE)  m*=0.85f;
+            else if (e==ETHOS_HONNEUR) m*=1.20f;               /* mauvais intégrateur */
+            break;
+        default: break;
+    }
+    if (n->faustian){                                          /* l'interdit : fui ou embrassé selon l'éthos */
+        if      (e==ETHOS_PACIFISTE)  m*=1.40f;
+        else if (e==ETHOS_ORDRE)      m*=1.15f;
+        else if (e==ETHOS_DOMINATEUR) m*=0.90f;
+    }
+    return clampf(m, 0.6f, 1.6f);                              /* biais borné : jamais un mur */
+}
 /* §4 RELIGION — la posture de la foi régnante sur l'interdit [0..1] (orthodoxe bas
  * ↔ culte haut), lue de l'éthos de la culture-capitale (même barème que scps_faith).
  * L'orthodoxe INTERDIT le faustien (sacrilège) ; le culte le SACRALISE. */
@@ -811,14 +847,15 @@ static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w
     AiView v = ai_observe(wp, w, econ, a->cid);
     float brake = ai_consolidation_pressure(&v);
     TechTheme affinity = tech_race_affinity(ai_capital_race(w,econ,a->cid));
+    Ethos eth = ai_capital_ethos(w,econ,a->cid);           /* §éthos : biais de coût par fonction */
     float faith_stance = ai_faith_stance(w,econ,a->cid);   /* §4 : orthodoxe interdit, culte sacralise */
     TechId best=TECH_COUNT; float bestscore=-1e30f;
     for (int i=0;i<TECH_COUNT;i++){
         TechId id=(TechId)i;
         if (!tech_can_research(ts,id,access)) continue;
-        float cost=tech_cost(id,pop);
-        if (cost > ts->research_points + 0.01f) continue;          /* pas encore les moyens */
         const TechNode *n=tech_node(id);
+        float cost=tech_cost(id,pop) * ai_tech_cost_mult(eth,n);   /* l'éthos pèse sur le coût (biais, jamais mur) */
+        if (cost > ts->research_points + 0.01f) continue;          /* pas encore les moyens */
         float score=0.f;
         /* BUTS — la fonction du nœud répond à un besoin lu de la VUE (pas de script). */
         if (n->func==FN_ARMEE)        score += 1.2f*a->w_expand + 2.0f*v.take_pressure + 0.25f*n->dMil;
@@ -857,7 +894,7 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     unsigned access = ai_race_access(w, econ, a->cid);
     TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
     if (pick!=TECH_COUNT){
-        float cost = tech_cost(pick, pop);
+        float cost = tech_cost(pick, pop) * ai_tech_cost_mult(ai_capital_ethos(w,econ,a->cid), tech_node(pick));
         if (ts->research_points >= cost && tech_research(ts, pick, access)){
             ts->research_points -= cost;
             a->stats.techs++;
