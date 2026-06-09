@@ -753,7 +753,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             float ratio = (want_labor>0.f)? clampf(avail/want_labor,0.f,1.f) : 0.f;
             float eff  = market_effort(re->price[r], BASE_PRICE[r]);   /* SURPLUS NATUREL : l'effort suit le prix */
             float out = re->raw_cap[r]*pop_intens*ratio*prod_mult*eff; /* √pop × terrain × outils × effort */
-            if (r==RES_WOOD || r==RES_IRON) out *= 2.0f;               /* apport BOIS & FER doublé (épine métal/outils + chauffe) */
+            if (r==RES_WOOD || r==RES_IRON || r==RES_GOLD) out *= 2.0f; /* apport BOIS & FER doublé (épine métal/outils + chauffe) ; OR doublé → nourrir la joaillerie (voie or martiale) */
             labor_used += want_labor*ratio*eff;                        /* le glut LIBÈRE des bras */
             re->stock[r] += out;
             supply[r]    += out;
@@ -791,13 +791,14 @@ void econ_tick(WorldEconomy *e, float dt) {
                 float gq = (rc->in1==RES_GRAIN)?rc->q1:rc->q2;
                 lim = fminf(lim, spare/fmaxf(gq,EPS));
             }
-            /* §gate — ORFÈVRERIE bornée à la DEMANDE EFFECTIVE : la joaillerie a une
-             * demande réelle (statut d'élite) mais surinonde (le market_effort la tient
-             * à son plancher) → prix planché, or/perle gaspillés. On borne sa SORTIE au
-             * comblement de la demande effective (conso élite du tick passé, déjà routée
-             * par préférence culturelle) au-delà du stock. lim est en « lots » → on
-             * convertit la sortie voulue par qout·prod_mult. (Les outils, eux, sont déjà
-             * régulés par leur demande passive ∝ main-d'œuvre — pas de gate explicite.) */
+            /* §gate — ORFÈVRERIE bornée à la DEMANDE EFFECTIVE. NB : l'orfèvrerie n'est PAS
+             * engorgée mais un LUXE de STATUT à variante culturelle — seules les élites
+             * MARTIALES (preferred_luxe) la réclament ; les raffinées prennent l'étoffe
+             * précieuse (voie murex). Le gate borne la sortie à la demande réelle pour ne
+             * pas brûler l'OR rare (désormais nourri, voie or martiale) en biens que nul ne
+             * veut : nul chez les raffinées (demande ~0 → sortie 0), servie chez les martiales.
+             * lim est en « lots » → on convertit la sortie voulue par qout·prod_mult. (Les
+             * outils, eux, sont régulés par leur demande passive ∝ main-d'œuvre.) */
             if (rc->out==RES_PRECIOUS_WARE){
                 float gap = re->demand[rc->out]*GATE_DEMAND_BUFFER - re->stock[rc->out];
                 lim = fminf(lim, fmaxf(0.f,gap)/fmaxf(rc->qout*prod_mult,EPS));
