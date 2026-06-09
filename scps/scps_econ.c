@@ -42,8 +42,11 @@ static const float BASE_PRICE[RES_COUNT] = {
     [RES_GOLD]          = 8.0f,
     [RES_PRECIOUS_METAL]= 12.0f,
     [RES_PEARL]         = 12.0f,   /* perle : prix habituel d'une ressource précieuse (≈ métal préc.) */
+    [RES_MUREX]         = 11.0f,   /* teinture pourpre — rare comme une précieuse (gate du luxe-tissu) */
+    [RES_INDIGO]        = 10.0f,   /* teinture bleue — bas-pays chaud (gate alternatif du luxe-tissu) */
     /* manufacturés */
     [RES_CLOTH]         = 4.5f,
+    [RES_TUNIQUE]       = 5.5f,    /* vêtement fini du commun — étoffe + façon (un cran au-dessus du tissu) */
     [RES_NAVAL_SUPPLIES]= 4.0f,
     [RES_WINE]          = 5.0f,
     [RES_BEER]          = 3.0f,    /* la boisson du commun — moins chère que le vin */
@@ -75,7 +78,7 @@ typedef struct {
 static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* TEXTILE : intrant allégé (2.0→1.5) et sortie relevée (1.0→1.8) → la pénurie
      * d'étoffe (couv 22%) se résorbe ; la laine est mieux dispatchée (scps_world). */
-    [BLD_TEXTILE]   = { RES_WOOL,  1.5f, RES_NONE,          0.f, RES_CLOTH,          1.8f, 1.0f },
+    [BLD_TEXTILE]   = { RES_WOOL,  1.5f, RES_NONE,          0.f, RES_CLOTH,          2.8f, 1.0f },  /* rendement étoffe relevé (1.8→2.8) : l'étoffe nourrit DEUX chaînes (tunique + précieuse 1:4) — il en faut plus */
     [BLD_SAWMILL]   = { RES_WOOD,  2.0f, RES_NONE,          0.f, RES_NAVAL_SUPPLIES, 1.0f, 0.8f },
     [BLD_PAPERMILL] = { RES_WOOD,  1.5f, RES_NONE,          0.f, RES_PAPER,          1.0f, 0.7f },
     /* VIN : sucre allégé (2.0→1.6), sortie relevée (1.0→1.4) ; le sucre tropical est
@@ -86,7 +89,15 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
      * Sortie TEMPÉRÉE (1.0→0.5) et intrant plus lourd (1.5→2.0) : l'orfèvrerie
      * surinondait (couv ×170) → on vise un surplus DOUX, pas un raz-de-marée. */
     [BLD_JEWELER]   = { RES_GOLD,  2.0f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  0.5f, 1.2f, RES_PEARL, 4.0f },
-    [BLD_WEAVER_LUX]= { RES_CLOTH, 2.0f, RES_NONE,          0.f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f },
+    /* ÉTOFFE PRÉCIEUSE — désormais GATÉE PAR LA TEINTURE (murex côtier, ou indigo du
+     * bas-pays chaud en repli), comme l'orfèvrerie l'est par l'or. Recette 1:4 :
+     * 1 teinture + 4 ÉTOFFES → 1 précieuse. Le précieux est ainsi PLAFONNÉ par la
+     * teinture (rare), PAS par l'étoffe → quand la teinture manque, l'étoffe REFLUE
+     * vers les tuniques (les journaliers servis). in1=teinture, in2=4 étoffes. */
+    [BLD_WEAVER_LUX]= { RES_MUREX, 0.25f, RES_CLOTH, 4.0f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f, RES_INDIGO, 0.25f },  /* teinture potente (0.25/précieuse) : place-gate (où murex/indigo existent) ; l'étoffe 1:4 borne le volume */
+    /* TUNIQUE — la chaîne SÉPARÉE des journaliers : étoffe → tunique (1:1). Bien fini
+     * propre au commun → plus de prix-exclusion par le luxe sur le même tissu. */
+    [BLD_TUNIC]     = { RES_CLOTH, 1.0f, RES_NONE,          0.f, RES_TUNIQUE,       1.0f, 0.8f },
     /* ARCANE : on BRÛLE le cristal pour raffiner l'essence (mana). Sa combustion
      * nourrit la Brèche (couplée plus bas dans econ_tick → arcane_charge). */
     [BLD_MAGE_WORKSHOP]={ RES_ARCANE_CRYSTAL, 1.0f, RES_NONE, 0.f, RES_ESSENCE,    1.0f, 1.3f },
@@ -110,7 +121,7 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
  * tend de +10 % via DEMAND_TENSION appliqué à `units` (demande tendue permanente). */
 static const float NEED[CLASS_COUNT][RES_COUNT] = {
     [CLASS_LABORER] = {
-        [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.26f, [RES_CLOTH]=0.12f,
+        [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.26f, [RES_TUNIQUE]=0.12f, /* §tissu : le commun s'habille de TUNIQUE, plus d'étoffe brute → fini la prix-exclusion par le luxe */
     },
     [CLASS_BOURGEOIS] = {
         [RES_GRAIN]=1.00f, [RES_CLOTH]=0.34f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
@@ -237,12 +248,14 @@ const char *social_class_name(SocialClass c) {
 }
 const char *building_name(BuildingType b) {
     static const char *N[BLD_TYPE_COUNT]={
-        "Manufacture textile","Scierie navale","Papeterie",
-        "Domaine viticole","Brasserie","Joaillerie","Atelier d'étoffe précieuse",
-        "Atelier de mage","Forge céleste","Haut-fourneau","Atelier d'outillage",
-        "Armurerie","Poudrière","Apothicaire"
+        [BLD_TEXTILE]="Manufacture textile",[BLD_SAWMILL]="Scierie navale",[BLD_PAPERMILL]="Papeterie",
+        [BLD_WINERY]="Domaine viticole",[BLD_BREWERY]="Brasserie",[BLD_JEWELER]="Joaillerie",
+        [BLD_WEAVER_LUX]="Atelier d'étoffe précieuse",[BLD_MAGE_WORKSHOP]="Atelier de mage",
+        [BLD_CELESTIAL_FORGE]="Forge céleste",[BLD_FOUNDRY]="Haut-fourneau",[BLD_TOOLWORKS]="Atelier d'outillage",
+        [BLD_ARMORY]="Armurerie",[BLD_POWDERMILL]="Poudrière",[BLD_APOTHECARY]="Apothicaire",
+        [BLD_TUNIC]="Atelier de tunique",
     };
-    return (b>=0&&b<BLD_TYPE_COUNT)?N[b]:"?";
+    return (b>=0&&b<BLD_TYPE_COUNT&&N[b])?N[b]:"?";
 }
 
 /* ====================================================================== */
@@ -416,7 +429,8 @@ void econ_init(WorldEconomy *e, const World *w) {
 
         /* ---- Manufactures : implantées là où l'intrant est extrait dans
          *      la région (cohérence géographique de la chaîne de prod). */
-        if (re->raw_cap[RES_WOOL] > 0.f)  region_ensure_building(re,BLD_TEXTILE);
+        if (re->raw_cap[RES_WOOL] > 0.f){ region_ensure_building(re,BLD_TEXTILE);
+                                          region_ensure_building(re,BLD_TUNIC); }  /* la tunique naît où l'on file */
         if (re->raw_cap[RES_WOOD] > 0.f) {
             region_ensure_building(re,BLD_SAWMILL);
             region_ensure_building(re,BLD_PAPERMILL);
@@ -428,7 +442,11 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_GOLD] > 0.f || re->raw_cap[RES_PEARL] > 0.f)
             region_ensure_building(re,BLD_JEWELER);
         /* L'atelier de luxe a besoin de tissu : présent là où l'on file la laine. */
-        if (re->raw_cap[RES_WOOL] > 0.f) region_ensure_building(re,BLD_WEAVER_LUX);
+        /* L'atelier de luxe-tissu s'élève là où l'on EXTRAIT la TEINTURE (murex côtier
+         * ou indigo du bas-pays) — place-gated comme la joaillerie l'est par l'or.
+         * (La rétroaction négative §NF en bâtira d'autres là où la teinture est importée.) */
+        if (re->raw_cap[RES_MUREX] > 0.f || re->raw_cap[RES_INDIGO] > 0.f)
+            region_ensure_building(re,BLD_WEAVER_LUX);
         /* Épine dorsale : fonderie + atelier d'outillage là où fer ET charbon. */
         if (re->raw_cap[RES_IRON] > 0.f && re->raw_cap[RES_COAL] > 0.f){
             region_ensure_building(re,BLD_FOUNDRY);

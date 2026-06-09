@@ -147,6 +147,8 @@ typedef enum {
     RES_PEARL,          /* perle — littoral rare ; luxe ouvré (orfèvrerie premium ×2 or) */
     RES_ARCANE_CRYSTAL, /* cristal arcanique — RÉSIDU de la Conjonction, nœuds telluriques (TRÈS rare) */
     RES_CELESTIAL_IRON, /* fer céleste — météorique : cratères/sommets (TRÈS rare) → armes enchantées */
+    RES_MUREX,          /* teinture POURPRE — côtière (arbitrage pêche/sel) → étoffe précieuse */
+    RES_INDIGO,         /* teinture BLEUE — bas-pays chaud, plante (arbitrage grain) → étoffe précieuse */
 
     /* === Frontière : tout ce qui suit est un bien de PRODUCTION === */
     RES_PROD_FIRST,
@@ -164,6 +166,7 @@ typedef enum {
     RES_ARMS,                   /* armes & armures (fer → Armurerie) → puissance militaire de BASE */
     RES_GUNPOWDER,              /* poudre (salpêtre + charbon → Poudrière) → puissance militaire */
     RES_REMEDE,                 /* remèdes (simples → Apothicaire) → santé (besoin de confort) */
+    RES_TUNIQUE,                /* TUNIQUE — vêtement fini des JOURNALIERS (étoffe → tunique 1:1) */
     RES_COUNT
 } Resource;
 

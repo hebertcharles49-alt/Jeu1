@@ -2507,15 +2507,15 @@ static void gen_resources(World *w) {
          * glut absurde. La « bonne chose au bon endroit, en bonne proportion » (P2-P3). */
         switch (B) {
             /* ── Plaines fertiles : le grenier ── */
-            case BIO_FARMLAND:  ADD(RES_GRAIN,5.5f); ADD(RES_WOOL,1.0f); ADD(RES_COTTON,0.4f); break;
-            case BIO_PLAINS:    ADD(RES_GRAIN,4.4f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_WOOL,1.2f); break;
-            case BIO_GRASSLAND: ADD(RES_GRAIN,3.0f); ADD(RES_LIVESTOCK,2.2f); ADD(RES_WOOL,2.0f); ADD(RES_MED_HERBS,0.5f); break;
+            case BIO_FARMLAND:  ADD(RES_GRAIN,5.5f); ADD(RES_WOOL,1.0f); ADD(RES_COTTON,0.4f); if (warm) ADD(RES_INDIGO,1.5f); break;  /* indigo : culture de rente du bas-pays chaud (arbitre le grain ; socle vivrier préservé) */
+            case BIO_PLAINS:    ADD(RES_GRAIN,4.4f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_WOOL,1.2f); if (warm) ADD(RES_INDIGO,1.4f); break;
+            case BIO_GRASSLAND: ADD(RES_GRAIN,3.0f); ADD(RES_LIVESTOCK,2.2f); ADD(RES_WOOL,2.0f); ADD(RES_MED_HERBS,0.5f); if (warm) ADD(RES_INDIGO,1.3f); break;
             /* ── Pastoral & sec ── */
             case BIO_STEPPE:
                 ADD(RES_LIVESTOCK,2.6f); ADD(RES_WOOL,2.2f); ADD(RES_SALTPETER,0.4f);
                 if (cold) ADD(RES_FUR,0.6f);
                 break;
-            case BIO_SAVANNA:   ADD(RES_LIVESTOCK,2.4f); ADD(RES_WOOL,1.2f); ADD(RES_SUGAR,0.8f); ADD(RES_MED_HERBS,0.5f); break;
+            case BIO_SAVANNA:   ADD(RES_LIVESTOCK,2.4f); ADD(RES_WOOL,1.2f); ADD(RES_SUGAR,0.8f); ADD(RES_MED_HERBS,0.5f); ADD(RES_INDIGO,1.3f); break;  /* savane : chaude par nature → indigo */
             case BIO_DRYLANDS:  ADD(RES_COTTON,1.8f); ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,1.4f); break;
             case BIO_DESERT:    ADD(RES_SALT,1.2f); ADD(RES_SALTPETER,1.8f); break;
             /* ── Forêts : le bois + les simples ── */
@@ -2532,10 +2532,10 @@ static void gen_resources(World *w) {
                 if (cold) ADD(RES_FUR,1.5f);
                 break;
             /* ── Côtes & littoraux (poisson/sel dégonflés ; perle + bétail d'appoint) ── */
-            case BIO_COAST:     ADD(RES_FISH,1.5f); ADD(RES_SALT,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); break;
-            case BIO_MANGROVE:  ADD(RES_FISH,0.9f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); break;
+            case BIO_COAST:     ADD(RES_FISH,1.5f); ADD(RES_SALT,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); ADD(RES_MUREX,0.9f); break;  /* murex : arbitre pêche/sel (tirage à 2 brutes) */
+            case BIO_MANGROVE:  ADD(RES_FISH,0.9f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); ADD(RES_MUREX,0.9f); break;
             case BIO_COASTAL_DESERT:
-                ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,0.6f); ADD(RES_PEARL,0.15f);
+                ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,0.6f); ADD(RES_PEARL,0.15f); ADD(RES_MUREX,0.7f);
                 if (warm) ADD(RES_SUGAR,2.0f);
                 break;
             /* ── Reliefs : la laine + les minéraux ── */
@@ -2940,11 +2940,12 @@ const char *resource_name(Resource r) {
         [RES_COPPER]="Cuivre",[RES_IRON]="Fer",[RES_COAL]="Charbon",[RES_SULFUR]="Soufre",[RES_SALTPETER]="Salpêtre",
         [RES_GOLD]="Or",[RES_PRECIOUS_METAL]="Métaux précieux",[RES_PEARL]="Perle",
         [RES_ARCANE_CRYSTAL]="Cristal arcanique",[RES_CELESTIAL_IRON]="Fer céleste",
+        [RES_MUREX]="Murex",[RES_INDIGO]="Indigo",
         /* production */
         [RES_CLOTH]="Étoffe",[RES_NAVAL_SUPPLIES]="Fournitures navales",[RES_WINE]="Vin",[RES_BEER]="Bière",
         [RES_PRECIOUS_WARE]="Bien précieux",[RES_PRECIOUS_CLOTH]="Étoffe précieuse",[RES_PAPER]="Papier",
         [RES_METAL]="Métal",[RES_TOOLS]="Outils",[RES_ESSENCE]="Essence",[RES_ENCHANTED_ARMS]="Armes enchantées",
-        [RES_ARMS]="Armes",[RES_GUNPOWDER]="Poudre",[RES_REMEDE]="Remèdes",
+        [RES_ARMS]="Armes",[RES_GUNPOWDER]="Poudre",[RES_REMEDE]="Remèdes",[RES_TUNIQUE]="Tunique",
     };
     return (r>=0&&r<RES_COUNT)?(N[(int)r]?N[(int)r]:"?"):"?";
 }
@@ -2959,11 +2960,12 @@ uint32_t resource_color(Resource r) {
         [RES_COPPER]=0xFFB87333u,[RES_IRON]=0xFF8090A0u,[RES_COAL]=0xFF303030u,[RES_SULFUR]=0xFFD8D040u,[RES_SALTPETER]=0xFFC8B090u,
         [RES_GOLD]=0xFFFFD000u,[RES_PRECIOUS_METAL]=0xFF80E0E0u,[RES_PEARL]=0xFFF0E0E8u,
         [RES_ARCANE_CRYSTAL]=0xFF8040C0u,[RES_CELESTIAL_IRON]=0xFFA0C0FFu,
+        [RES_MUREX]=0xFF902870u,[RES_INDIGO]=0xFF304890u,   /* pourpre · bleu indigo */
         /* production */
         [RES_CLOTH]=0xFFC8B0C0u,[RES_NAVAL_SUPPLIES]=0xFF386848u,[RES_WINE]=0xFF902848u,[RES_BEER]=0xFFC08020u,
         [RES_PRECIOUS_WARE]=0xFF60C0C0u,[RES_PRECIOUS_CLOTH]=0xFFE8E0F0u,[RES_PAPER]=0xFFF0E8D0u,
         [RES_METAL]=0xFFA0A0B0u,[RES_TOOLS]=0xFFB08040u,[RES_ESSENCE]=0xFF40E0C0u,[RES_ENCHANTED_ARMS]=0xFFC0A0FFu,
-        [RES_ARMS]=0xFF707080u,[RES_GUNPOWDER]=0xFF505050u,[RES_REMEDE]=0xFF60B080u,
+        [RES_ARMS]=0xFF707080u,[RES_GUNPOWDER]=0xFF505050u,[RES_REMEDE]=0xFF60B080u,[RES_TUNIQUE]=0xFFB8A088u,
     };
     return (r>=0&&r<RES_COUNT)?C[(int)r]:0xFFFF00FFu;
 }
