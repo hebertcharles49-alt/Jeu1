@@ -128,10 +128,29 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
         [RES_SALT]=0.20f, [RES_REMEDE]=0.15f,   /* santé urbaine (apothicaire) */
     },
     [CLASS_ELITE] = {
-        [RES_GRAIN]=1.00f, [RES_WINE]=0.70f, [RES_PAPER]=0.35f, [RES_FUR]=0.30f,
-        [RES_PRECIOUS_WARE]=0.90f,   /* palier STATUT : servi en orfèvrerie OU étoffe selon la culture */
+        /* §panier — rééquilibré vers les paliers PRODUCTIBLES (le statut écrasait à 73 %).
+         * Conforts relevés (fourrure/papier/vin, que l'éco SAIT fournir), STATUT abaissé
+         * (orfèvrerie 0.90→0.55, le maillon rare). Combiné au déblocage progressif. */
+        [RES_GRAIN]=1.00f, [RES_FUR]=0.45f, [RES_PAPER]=0.45f, [RES_WINE]=0.80f,
+        [RES_PRECIOUS_WARE]=0.55f,   /* palier STATUT : servi en orfèvrerie OU étoffe ; débloqué EN DERNIER */
     },
 };
+/* §besoins progressifs — ORDRE de priorité par classe (subsistance → confort → STATUT).
+ * Le nombre de besoins COMPTÉS dans la satisfaction = f(niveau de capitale, ∝ pop) : un
+ * petit centre n'aspire qu'aux bases (2 besoins), une grande capitale développée à tout
+ * le panier (statut compris). Ainsi le luxe se MÉRITE avec le développement — et l'élite
+ * d'un bourg n'est pas punie de ne pas avoir d'orfèvrerie. Le palier STATUT vient DERNIER. */
+static const Resource NEED_ORDER[CLASS_COUNT][8] = {
+    [CLASS_LABORER]   = { RES_GRAIN, RES_FISH, RES_WOOD, RES_TUNIQUE, RES_NONE },
+    [CLASS_BOURGEOIS] = { RES_GRAIN, RES_SALT, RES_CLOTH, RES_REMEDE, RES_WINE, RES_PAPER, RES_NONE },
+    [CLASS_ELITE]     = { RES_GRAIN, RES_FUR, RES_PAPER, RES_WINE, RES_PRECIOUS_WARE, RES_NONE },
+};
+/* rang de priorité d'un besoin (0 = vital) ; 99 = hors panier (jamais débloqué). */
+static int need_rank(int c, Resource r){
+    if (c<0||c>=CLASS_COUNT) return 99;
+    for (int i=0;i<8 && NEED_ORDER[c][i]!=RES_NONE;i++) if (NEED_ORDER[c][i]==r) return i;
+    return 99;
+}
 
 /* Part de chaque strate dans la population à l'initialisation. */
 static const float CLASS_SHARE[CLASS_COUNT] = { 0.80f, 0.15f, 0.05f };
@@ -156,10 +175,10 @@ static inline Resource preferred_luxe(const PopCulture *c){
     return (c->subsistance < 5.f) ? RES_PRECIOUS_WARE : RES_PRECIOUS_CLOTH;
 }
 
-#define TAX_RATE     0.20f   /* part de la valeur produite captée par les élites (RENTE) —
-                              * relevée 0.15→0.20 : re-dote l'élite du monde LEAN (pauvre en
-                              * montagnes) pour qu'elle s'offre son statut → moins de coups. */
-#define WAGE_SHARE   0.55f   /* part de la valeur → salaires (laborers) */
+#define TAX_RATE     0.24f   /* part de la valeur produite captée par les élites (RENTE) —
+                              * 0.15→0.20→0.24 : comble en partie le déficit de financement
+                              * d'élite (audit §3 : ~−13 pts) → de quoi s'offrir le panier débloqué. */
+#define WAGE_SHARE   0.53f   /* part de la valeur → salaires (laborers ; 0.55→0.53 pour la rente) */
 /* le reste (1 - TAX - WAGE) = profit bourgeois (résidu 0.25 — reste sain) */
 /* §NF — CONSTRUCTION PAR RÉTROACTION NÉGATIVE : un bien en pénurie appelle son
  * producteur, qu'on bâtit spontanément — mais JAMAIS dans le vide (pop + intrant). */
@@ -785,6 +804,14 @@ void econ_tick(WorldEconomy *e, float dt) {
          * travaux) : il ne s'agit plus de hoarder. L'expansion (§1) est, elle, portée par
          * le signal-prix — le pouvoir d'achat rendu ici en est le carburant indirect. */
 
+        /* §besoins progressifs — combien de besoins (par ordre de priorité) sont ACTIFS
+         * dans cette région : f(niveau de capitale, que la POP débloque). Petit centre →
+         * 2 besoins (les bases) ; grande capitale → tout le panier (statut compris). Un
+         * besoin non encore débloqué ne crée NI demande NI manque de satisfaction. */
+        long rpop_nd = (long)(re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                            + re->strata[CLASS_ELITE].pop);
+        int active_needs = 1 + capitale_max_tier(rpop_nd);   /* tier 1 → 2 besoins, +1 par tier */
+
         /* ---- 4. DEMANDE de consommation par strate ---------------------
          * §2 (CORRECTIF D'INTÉGRATION) : la demande des paliers VARIANTES suit la
          * PRÉFÉRENCE culturelle, EXACTEMENT comme la satisfaction (étape 5). Le
@@ -799,6 +826,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             for (int r=0;r<RES_COUNT;r++) {
                 float need=NEED[c][r];
                 if (need<=0.f) continue;
+                if (need_rank(c,(Resource)r) >= active_needs) continue;   /* besoin pas encore débloqué */
                 Resource tgt=(Resource)r;
                 if      (r==RES_WINE)          tgt=preferred_drink(&re->culture);
                 else if (r==RES_PRECIOUS_WARE) tgt=preferred_luxe(&re->culture);
@@ -830,6 +858,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             for (int r=0;r<RES_COUNT;r++) {
                 float need=NEED[c][r]*units;
                 if (need<=0.f) continue;
+                if (need_rank(c,(Resource)r) >= active_needs) continue;   /* §progressif : besoin pas encore débloqué → ne pèse pas */
                 /* ── Palier MORAL (boisson) : VARIANTE culturelle bière/vin ──
                  * On sert la boisson PRÉFÉRÉE de la culture locale d'abord ; la
                  * mauvaise ne comble qu'à moitié (un nain boude le vin). */
