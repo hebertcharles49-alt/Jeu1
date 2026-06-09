@@ -167,6 +167,13 @@ static inline Resource preferred_luxe(const PopCulture *c){
 #define NF_POP_FLOOR  80.f   /* pop régionale minimale : sous ce seuil, on ne bâtit pas (le vide) */
 #define NF_STOCK_MIN  5.0f   /* stock d'intrant comptant comme « approvisionné » (extraction OU import) */
 #define NF_SEED_LEVEL 1.0f   /* niveau de NAISSANCE du bâtiment (puis l'expansion §1 le fait croître) */
+/* §collecte — INTENSIFICATION : la récolte d'une tuile suit les BRAS qui l'occupent, pas
+ * le seul terrain. raw_cap = RICHESSE de référence ; l'intensité ∝ √(pop/réf) (rendements
+ * DÉCROISSANTS, plafonnés). Une région peuplée tire plus de sa terre → la production SUIT
+ * la population, sans toucher les manufactures. EXTRACT_POP_REF : pop active donnant une
+ * intensité de 1 (réglage du seuil). EXTRACT_INTENS_CAP : plafond physique de la tuile. */
+#define EXTRACT_POP_REF    300.f
+#define EXTRACT_INTENS_CAP 2.5f
 #define TECH_RATE    0.010f  /* conversion richesse élite → tech */
 #define PRICE_INERTIA 0.65f  /* lissage du prix (0=instantané,1=figé) */
 #define EPS          1e-4f
@@ -644,16 +651,21 @@ void econ_tick(WorldEconomy *e, float dt) {
             prod_mult *= (1.f + cap_bonus);
         }
 
-        /* ---- 1. EXTRACTION des matières premières ----------------------
-         * Emploie des laborers ; chaque unité extraite demande 0.5 de
-         * main-d'œuvre. Limité par la main-d'œuvre disponible. */
+        /* ---- 1. EXTRACTION = COLLECTE PASSIVE (∝ JOURNALIERS × TERRAIN) -
+         * La récolte suit les BRAS qui occupent la tuile, pas le seul terrain : plus de
+         * journaliers → plus de collecte, en rendements DÉCROISSANTS (√, la tuile sature).
+         * raw_cap = RICHESSE de référence ; pop_intens l'exploite ∝ √(pop/réf). Une région
+         * peuplée tire plus de sa terre qu'une région vide → la production SUIT la pop.
+         * Borné par la main-d'œuvre dispo (ratio) et l'effort de marché (demande). */
+        float pop_active = re->strata[CLASS_LABORER].pop;
+        float pop_intens = clampf(sqrtf(fmaxf(pop_active,0.f)/EXTRACT_POP_REF), 0.25f, EXTRACT_INTENS_CAP);
         for (int r=0;r<RES_COUNT;r++) {
             if (re->raw_cap[r]<=0.f) continue;
-            float want_labor = re->raw_cap[r]*0.5f;
+            float want_labor = re->raw_cap[r]*0.5f*pop_intens;        /* la collecte intensifiée occupe plus de bras */
             float avail = labor_avail-labor_used;
             float ratio = (want_labor>0.f)? clampf(avail/want_labor,0.f,1.f) : 0.f;
             float eff  = market_effort(re->price[r], BASE_PRICE[r]);   /* SURPLUS NATUREL : l'effort suit le prix */
-            float out = re->raw_cap[r]*ratio*prod_mult*eff;            /* outils + effort de marché */
+            float out = re->raw_cap[r]*pop_intens*ratio*prod_mult*eff; /* √pop × terrain × outils × effort */
             labor_used += want_labor*ratio*eff;                        /* le glut LIBÈRE des bras */
             re->stock[r] += out;
             supply[r]    += out;
