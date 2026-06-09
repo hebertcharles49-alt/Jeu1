@@ -28,6 +28,8 @@ int main(int argc,char**argv){
     double wealth_w[CLASS_COUNT]={0};
     double pg=0,pc=0,pw=0,pv=0,pt=0; int np=0;
     long n_reg=0;
+    long bld_count[BLD_TYPE_COUNT]={0}; double bld_level[BLD_TYPE_COUNT]={0};
+    double good_sup[RES_COUNT]={0}, good_dem[RES_COUNT]={0};
 
     for (int k=0;k<nsims;k++){
         uint32_t seed=base+(uint32_t)k*101u;
@@ -42,6 +44,8 @@ int main(int argc,char**argv){
             RegionEconomy *re=&e->region[r];
             if (!re->active || !re->colonized) continue;
             n_reg++;
+            for (int i=0;i<re->n_bld;i++){ bld_count[re->bld[i].type]++; bld_level[re->bld[i].type]+=re->bld[i].level; }
+            for (int g=0;g<RES_COUNT;g++){ good_sup[g]+=re->supply[g]; good_dem[g]+=re->demand[g]; }
             for (int c=0;c<CLASS_COUNT;c++){
                 double pop=re->strata[c].pop;
                 sat_w[c]+=re->strata[c].satisfaction*pop; pop_w[c]+=pop;
@@ -62,6 +66,17 @@ int main(int argc,char**argv){
     if (np>0)
         printf("  marché : grain %.2f · étoffe %.2f · orfèvrerie %.2f · vin %.2f · outils %.2f\n",
                pg/np, pc/np, pw/np, pv/np, pt/np);
+    printf("══════════════════════════════════════════════════════════════════════\n");
+    printf(" AUDIT BÂTIMENTS — branchés ? inputs consommés ? (sur %ld rég colonisées)\n", n_reg);
+    printf("  %-18s %6s %9s | %-14s %9s | %-12s %9s\n","bâtiment","count","levelΣ","sortie","supplyΣ","intrant","demandΣ");
+    for (int b=0;b<BLD_TYPE_COUNT;b++){
+        Resource in1=RES_NONE,in2=RES_NONE,out=RES_NONE; building_recipe((BuildingType)b,&in1,&in2,&out);
+        double sup=(out>=0&&out<RES_COUNT)?good_sup[out]:-1, dem=(in1>=0&&in1<RES_COUNT)?good_dem[in1]:-1;
+        printf("  %-18s %6ld %9.1f | %-14s %9.1f | %-12s %9.1f\n",
+               building_name((BuildingType)b), bld_count[b], bld_level[b],
+               (out!=RES_NONE)?resource_name(out):"—", sup,
+               (in1!=RES_NONE)?resource_name(in1):"—", dem);
+    }
     printf("══════════════════════════════════════════════════════════════════════\n");
     free(w); free(e);
     return 0;

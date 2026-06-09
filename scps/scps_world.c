@@ -2932,32 +2932,38 @@ const char *biome_name(Biome b) {
 
 const char *resource_name(Resource r) {
     static const char *N[RES_COUNT]={
-        "—",
+        [RES_NONE]="—",
         /* brutes agricoles */
-        "Céréales","Bétail","Laine","Poisson","Fourrure",
-        "Sel","Coton","Sucre","Bois","Herbes médicinales",
-        /* brutes minérales */
-        "Cuivre","Fer","Charbon","Soufre","Salpêtre",
-        "Or","Métaux précieux",
+        [RES_GRAIN]="Céréales",[RES_LIVESTOCK]="Bétail",[RES_WOOL]="Laine",[RES_FISH]="Poisson",[RES_FUR]="Fourrure",
+        [RES_SALT]="Sel",[RES_COTTON]="Coton",[RES_SUGAR]="Sucre",[RES_WOOD]="Bois",[RES_MED_HERBS]="Herbes médicinales",
+        /* brutes minérales & rares */
+        [RES_COPPER]="Cuivre",[RES_IRON]="Fer",[RES_COAL]="Charbon",[RES_SULFUR]="Soufre",[RES_SALTPETER]="Salpêtre",
+        [RES_GOLD]="Or",[RES_PRECIOUS_METAL]="Métaux précieux",[RES_PEARL]="Perle",
+        [RES_ARCANE_CRYSTAL]="Cristal arcanique",[RES_CELESTIAL_IRON]="Fer céleste",
         /* production */
-        "Étoffe","Fournitures navales","Vin",
-        "Bien précieux","Étoffe précieuse","Papier",
+        [RES_CLOTH]="Étoffe",[RES_NAVAL_SUPPLIES]="Fournitures navales",[RES_WINE]="Vin",[RES_BEER]="Bière",
+        [RES_PRECIOUS_WARE]="Bien précieux",[RES_PRECIOUS_CLOTH]="Étoffe précieuse",[RES_PAPER]="Papier",
+        [RES_METAL]="Métal",[RES_TOOLS]="Outils",[RES_ESSENCE]="Essence",[RES_ENCHANTED_ARMS]="Armes enchantées",
+        [RES_ARMS]="Armes",[RES_GUNPOWDER]="Poudre",[RES_REMEDE]="Remèdes",
     };
-    return (r>=0&&r<RES_COUNT)?N[(int)r]:"?";
+    return (r>=0&&r<RES_COUNT)?(N[(int)r]?N[(int)r]:"?"):"?";
 }
 
 uint32_t resource_color(Resource r) {
     static const uint32_t C[RES_COUNT]={
-        0xFF404040u,                                              /* NONE */
+        [RES_NONE]=0xFF404040u,
         /* agricoles */
-        0xFFE8C84Cu,0xFFB07840u,0xFFE0D0B0u,0xFF4078A0u,0xFF7B4A28u, /* grain,livestock,wool,fish,fur */
-        0xFFF0F0F0u,0xFFF0E0E0u,0xFFE0A040u,0xFF386020u,0xFF80B070u, /* salt,cotton,sugar,wood,herbs */
-        /* minéraux */
-        0xFFB87333u,0xFF8090A0u,0xFF303030u,0xFFD8D040u,0xFFC8B090u, /* copper,iron,coal,sulfur,saltpeter */
-        0xFFFFD000u,0xFF80E0E0u,                                     /* gold, precious metal */
+        [RES_GRAIN]=0xFFE8C84Cu,[RES_LIVESTOCK]=0xFFB07840u,[RES_WOOL]=0xFFE0D0B0u,[RES_FISH]=0xFF4078A0u,[RES_FUR]=0xFF7B4A28u,
+        [RES_SALT]=0xFFF0F0F0u,[RES_COTTON]=0xFFF0E0E0u,[RES_SUGAR]=0xFFE0A040u,[RES_WOOD]=0xFF386020u,[RES_MED_HERBS]=0xFF80B070u,
+        /* minéraux & rares */
+        [RES_COPPER]=0xFFB87333u,[RES_IRON]=0xFF8090A0u,[RES_COAL]=0xFF303030u,[RES_SULFUR]=0xFFD8D040u,[RES_SALTPETER]=0xFFC8B090u,
+        [RES_GOLD]=0xFFFFD000u,[RES_PRECIOUS_METAL]=0xFF80E0E0u,[RES_PEARL]=0xFFF0E0E8u,
+        [RES_ARCANE_CRYSTAL]=0xFF8040C0u,[RES_CELESTIAL_IRON]=0xFFA0C0FFu,
         /* production */
-        0xFFC8B0C0u,0xFF386848u,0xFF902848u,                          /* cloth,naval,wine */
-        0xFF60C0C0u,0xFFE8E0F0u,0xFFF0E8D0u,                          /* precious ware,cloth,paper */
+        [RES_CLOTH]=0xFFC8B0C0u,[RES_NAVAL_SUPPLIES]=0xFF386848u,[RES_WINE]=0xFF902848u,[RES_BEER]=0xFFC08020u,
+        [RES_PRECIOUS_WARE]=0xFF60C0C0u,[RES_PRECIOUS_CLOTH]=0xFFE8E0F0u,[RES_PAPER]=0xFFF0E8D0u,
+        [RES_METAL]=0xFFA0A0B0u,[RES_TOOLS]=0xFFB08040u,[RES_ESSENCE]=0xFF40E0C0u,[RES_ENCHANTED_ARMS]=0xFFC0A0FFu,
+        [RES_ARMS]=0xFF707080u,[RES_GUNPOWDER]=0xFF505050u,[RES_REMEDE]=0xFF60B080u,
     };
     return (r>=0&&r<RES_COUNT)?C[(int)r]:0xFFFF00FFu;
 }
