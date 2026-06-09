@@ -2508,7 +2508,7 @@ static void gen_resources(World *w) {
         switch (B) {
             /* ── Plaines fertiles : le grenier ── */
             case BIO_FARMLAND:  ADD(RES_GRAIN,5.5f); ADD(RES_WOOL,1.0f); ADD(RES_COTTON,0.4f); if (warm) ADD(RES_INDIGO,1.5f); break;  /* indigo : culture de rente du bas-pays chaud (arbitre le grain ; socle vivrier préservé) */
-            case BIO_PLAINS:    ADD(RES_GRAIN,4.4f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_WOOL,1.2f); if (warm) ADD(RES_INDIGO,1.4f); break;
+            case BIO_PLAINS:    ADD(RES_GRAIN,4.4f); ADD(RES_LIVESTOCK,1.6f); ADD(RES_WOOL,1.2f); ADD(RES_IRON,0.10f); if (warm) ADD(RES_INDIGO,1.4f); break;  /* fer secondaire en plaine */
             case BIO_GRASSLAND: ADD(RES_GRAIN,3.0f); ADD(RES_LIVESTOCK,2.2f); ADD(RES_WOOL,2.0f); ADD(RES_MED_HERBS,0.5f); if (warm) ADD(RES_INDIGO,1.3f); break;
             /* ── Pastoral & sec ── */
             case BIO_STEPPE:
@@ -2526,9 +2526,9 @@ static void gen_resources(World *w) {
             case BIO_WOODS:     ADD(RES_WOOD,3.0f); ADD(RES_GRAIN,1.4f); ADD(RES_MED_HERBS,0.8f); break;
             case BIO_JUNGLE:    ADD(RES_WOOD,3.2f); ADD(RES_SUGAR,1.6f); ADD(RES_MED_HERBS,1.2f); break;
             /* ── Zones humides ── */
-            case BIO_MARSH:     ADD(RES_FISH,0.9f); ADD(RES_MED_HERBS,1.4f); ADD(RES_SALT,0.2f); break;
+            case BIO_MARSH:     ADD(RES_FISH,0.9f); ADD(RES_MED_HERBS,1.4f); ADD(RES_SALT,0.2f); ADD(RES_IRON,0.10f); break;  /* fer des marais (secondaire) */
             case BIO_BOG:
-                ADD(RES_MED_HERBS,2.6f); ADD(RES_COAL,0.4f);
+                ADD(RES_MED_HERBS,2.6f); ADD(RES_COAL,0.4f); ADD(RES_IRON,0.10f);   /* fer des tourbières (secondaire) */
                 if (cold) ADD(RES_FUR,1.5f);
                 break;
             /* ── Côtes & littoraux (poisson/sel dégonflés ; perle + bétail d'appoint) ── */

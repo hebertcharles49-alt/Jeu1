@@ -753,6 +753,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             float ratio = (want_labor>0.f)? clampf(avail/want_labor,0.f,1.f) : 0.f;
             float eff  = market_effort(re->price[r], BASE_PRICE[r]);   /* SURPLUS NATUREL : l'effort suit le prix */
             float out = re->raw_cap[r]*pop_intens*ratio*prod_mult*eff; /* √pop × terrain × outils × effort */
+            if (r==RES_WOOD || r==RES_IRON) out *= 2.0f;               /* apport BOIS & FER doublé (épine métal/outils + chauffe) */
             labor_used += want_labor*ratio*eff;                        /* le glut LIBÈRE des bras */
             re->stock[r] += out;
             supply[r]    += out;
