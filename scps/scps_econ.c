@@ -88,13 +88,13 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* JOAILLERIE : OR, ou PERLE en repli (2× la quantité par bijou — littoral).
      * Sortie TEMPÉRÉE (1.0→0.5) et intrant plus lourd (1.5→2.0) : l'orfèvrerie
      * surinondait (couv ×170) → on vise un surplus DOUX, pas un raz-de-marée. */
-    [BLD_JEWELER]   = { RES_GOLD,  2.0f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  0.5f, 1.2f, RES_PEARL, 4.0f },
+    [BLD_JEWELER]   = { RES_GOLD,  0.8f, RES_NONE,          0.f, RES_PRECIOUS_WARE,  0.5f, 1.2f, RES_PEARL, 1.6f },  /* SURCADENCE : l'or/perle est un FILIGRANE — une once rend assez de bijoux pour servir une cour + dégager un surplus à exporter (ratio 2× perle conservé) */
     /* ÉTOFFE PRÉCIEUSE — désormais GATÉE PAR LA TEINTURE (murex côtier, ou indigo du
      * bas-pays chaud en repli), comme l'orfèvrerie l'est par l'or. Recette 1:4 :
      * 1 teinture + 4 ÉTOFFES → 1 précieuse. Le précieux est ainsi PLAFONNÉ par la
      * teinture (rare), PAS par l'étoffe → quand la teinture manque, l'étoffe REFLUE
      * vers les tuniques (les journaliers servis). in1=teinture, in2=4 étoffes. */
-    [BLD_WEAVER_LUX]= { RES_MUREX, 0.25f, RES_CLOTH, 4.0f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f, RES_INDIGO, 0.25f },  /* teinture potente (0.25/précieuse) : place-gate (où murex/indigo existent) ; l'étoffe 1:4 borne le volume */
+    [BLD_WEAVER_LUX]= { RES_MUREX, 0.1f, RES_CLOTH, 4.0f, RES_PRECIOUS_CLOTH, 1.0f, 1.1f, RES_INDIGO, 0.1f },  /* SURCADENCE : un bain de teinture colore beaucoup → l'étoffe précieuse suit la cour ; la teinture PLACE-gate, l'étoffe 1:4 (surplus après tunique) borne le volume */
     /* TUNIQUE — la chaîne SÉPARÉE des journaliers : étoffe → tunique (1:1). Bien fini
      * propre au commun → plus de prix-exclusion par le luxe sur le même tissu. */
     [BLD_TUNIC]     = { RES_CLOTH, 1.0f, RES_NONE,          0.f, RES_TUNIQUE,       1.0f, 0.8f },
