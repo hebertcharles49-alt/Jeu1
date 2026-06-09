@@ -135,6 +135,7 @@ typedef struct {
     int   n_unlocked;
     bool  sync_unlocked[SYNC_COUNT];   /* §syncrétique : nœuds de diffusion loqués (permanents) */
     int   n_sync;
+    unsigned char arch_depth[ARCH_COUNT];  /* §13 cache : profondeur de contact ATTEINTE par archétype (lu par la membrane) */
     bool  has_ruins_access;   /* porte de l'arcane (Savoir faustien profond) */
     bool  crisis_triggered;   /* la crise de fin est-elle convoquée ? */
     float research_points;    /* points de recherche accumulés (économie de tech) */

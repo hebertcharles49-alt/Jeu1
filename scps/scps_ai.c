@@ -947,6 +947,7 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     ai_archetype_depth(w, econ, a->cid, adepth);                /* §4-6 : profondeur de contact par archétype */
     unsigned access=0;
     for (int r=0;r<RACE_COUNT;r++) if (adepth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);
+    for (int r=0;r<ARCH_COUNT;r++) ts->arch_depth[r]=adepth[r];  /* §13 : cache pour la membrane (cercle prévisionnel) */
     tech_sync_tick(ts, adepth);                                 /* §8 : diffusion par contact — auto-latch des nœuds peu profonds */
     TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
     if (pick!=TECH_COUNT){

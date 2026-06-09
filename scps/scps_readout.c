@@ -108,6 +108,30 @@ const char *label_acces(BandAcces b) {
     static const char *N[] = { "lointain","à portée","imminent","acquis" };
     return (b>=0 && b<=AC_ACQUIS) ? N[b] : "?";
 }
+/* §11/§12 — le cercle prévisionnel d'un nœud syncrétique, traduit en bandes + chemin
+ * diégétique. Lit le cache de profondeur (TechState.arch_depth) et le loquet (sync_unlocked) ;
+ * aucun flottant ne franchit la cloison (la chaîne renvoyée parle cultures/savoir-faire). */
+SyncReadout sync_node_readout(const TechState *ts, int i) {
+    SyncReadout r = { AC_LOINTAIN, PROF_OBSCURE, PROF_OBSCURE, "?", "" };
+    const SyncNode *sn = tech_sync_node(i);
+    if (!ts || !sn) return r;
+    r.nom = sn->name;
+    int req = (int)sn->prof_requise;                 /* 1=surface … 4=secret */
+    r.requise = band_profondeur(req);
+    if (ts->sync_unlocked[i]) {                       /* loqué : acquis pour toujours */
+        r.acces = AC_ACQUIS; r.atteinte = r.requise;
+        r.chemin = "acquis — diffusé par le contact, et gardé même si la source s'est fondue";
+        return r;
+    }
+    int reached = (sn->arch>=0 && sn->arch<ARCH_COUNT) ? (int)ts->arch_depth[sn->arch] : 0;
+    r.atteinte = band_profondeur(reached);
+    float prog = (req>0) ? (float)reached/(float)req : 0.f; if (prog>1.f) prog=1.f;
+    r.acces = band_acces(prog);
+    if      (reached <= 0)   r.chemin = "tradition jamais côtoyée — il faut entrer en contact avec ses porteurs";
+    else if (reached < req)  r.chemin = "savoir de surface : le comptoir ne transmet pas l'art profond — gouverne ou voisine cette culture, et légitime le sol";
+    else                     r.chemin = "à portée — il manque le socle (recherche le nœud parent du cercle)";
+    return r;
+}
 BandPresage band_presage(float charge) {
     if (charge < 1.0f) return PG_CALME;
     if (charge < 4.0f) return PG_FREMISSEMENT;

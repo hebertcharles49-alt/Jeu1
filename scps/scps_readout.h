@@ -183,6 +183,19 @@ BandAcces      band_acces(float progress_0_1);
 const char  *label_forge(BandForge b);
 const char  *label_profondeur(BandProfondeur b);
 const char  *label_acces(BandAcces b);
+
+/* §11/§12 — lecture PRÉVISIONNELLE d'un nœud syncrétique (le cercle). Bandes + chemin
+ * DIÉGÉTIQUE : où en est la diffusion, et ce qui l'ouvrirait. AC_ACQUIS = loqué (permanent,
+ * même si la source s'est fondue). Aucun flottant ne traverse ; les chaînes parlent
+ * cultures et savoir-faire, jamais races ni coordonnées. `sync_idx` = indice 0..SYNC_COUNT-1. */
+typedef struct {
+    BandAcces      acces;        /* lointain → acquis */
+    BandProfondeur atteinte;     /* profondeur de contact ATTEINTE pour la source */
+    BandProfondeur requise;      /* profondeur REQUISE par le nœud */
+    const char    *nom;          /* nom du nœud (mot de jeu) */
+    const char    *chemin;       /* l'acquis, ou ce qui manque (canal / profondeur / assimilation) */
+} SyncReadout;
+SyncReadout sync_node_readout(const TechState *ts, int sync_idx);
 BandPresage  band_presage(float charge_0_10);
 BandHumeur   band_humeur(float L_local);
 /* Lignée : horloge (cousinage) ET contenu (friction), + schisme religieux. */

@@ -186,6 +186,7 @@ void tech_state_init(TechState *s, bool has_ruins_access) {
     s->research_points=0.f;
     for (int i=0;i<SYNC_COUNT;i++) s->sync_unlocked[i]=false;
     s->n_sync=0;
+    for (int i=0;i<ARCH_COUNT;i++) s->arch_depth[i]=PROF_NONE;
     for (int i=0;i<TECH_COUNT;i++) if (NODES[i].tier==0){ s->unlocked[i]=true; s->n_unlocked++; }
 }
 
