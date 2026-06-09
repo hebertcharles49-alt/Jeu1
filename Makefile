@@ -284,6 +284,15 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
 chronicle: $(CHRONICLE_OBJS)
 	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
 
+# ---- Diagnostic mémoire : chronicle sous AddressSanitizer + UBSan ---------
+# Compile les sources d'un bloc AVEC les sanitizers (compile + link ensemble),
+# pour traquer double-free, use-after-free, hors-bornes et comportement indéfini :
+#   make asan && ./chronicle_asan 7 1 40 6 12
+CHRONICLE_SRCS := $(patsubst $(OBJDIR)/scps_%.o,scps/%.c,$(CHRONICLE_OBJS))
+asan: $(CHRONICLE_SRCS)
+	$(CC) -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
+	      -Wall -Wextra -std=c99 $(CHRONICLE_SRCS) -o chronicle_asan -lm
+
 # ---- Métriques de jeu (0-100), Influence, Diplomates & Révolte -----------
 # La membrane projette les coordonnées en nombres+mots ; le statecraft est SIM
 # (il lit des flottants), son API ne rend que des entiers de jeu.
@@ -398,9 +407,10 @@ social_demo: $(SOCIAL_DEMO_OBJS)
 clean:
 	rm -rf $(OBJDIR) scps_viewer scps_viewer.exe scps_dump scps_batch econ_demo \
 	       tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo core_demo readout_demo species_demo \
+	       chronicle chronicle_asan econ_scan \
 	       out_*.ppm montage.bmp
 
-.PHONY: all scps run_scps clean core_demo readout_demo species_demo scps_dump scps_batch \
+.PHONY: all scps run_scps clean core_demo readout_demo species_demo scps_dump scps_batch asan \
         econ_demo tech_demo culture_demo prosperity_demo agency_demo diplo_demo routes_demo ai_demo statecraft_demo events_demo
 
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur

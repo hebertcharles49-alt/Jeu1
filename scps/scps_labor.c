@@ -440,18 +440,31 @@ static long run_workshop(LaborEcon *e, int jobs){
 /* Croissance de la pop, GATÉE par la nourriture (§2). Elle s'applique au POOL
  * TOTAL : les pop engagées (jobs, armée) se reproduisent comme les autres — elles
  * ne disparaissent pas du pool. La famine STOPPE puis inverse la croissance. */
-#define GROWTH_PERMIL  20    /* +2 %/tick quand la nourriture suit */
+#define GROWTH_PERMIL    20         /* +2 %/tick quand la nourriture suit (sous le seuil log) */
+#define LABOR_LOG_THRESH 10000L     /* au-delà : la croissance devient LOGARITHMIQUE (rendements décroissants) */
+#define LABOR_POP_MAX    1000000000L/* garde-fou DUR : sans la dampe log + ce plafond, la croissance
+                                     * journalière (+2 %/labor_tick) emballait la pop jusqu'au DÉBORDEMENT
+                                     * de `long` (UBSan : pop·20 hors-bornes) — et la somme warhost avec. */
 static void pop_growth(LaborEcon *e){
     bool famine = (e->stock[LR_FOOD] <= 0);
     for (int i=0;i<e->n_prov;i++){
         LProvince *p=&e->prov[i];
         if (p->pop<=0) continue;
-        long delta = famine ? -(p->pop/100 + 1) : (p->pop*GROWTH_PERMIL)/1000;
+        /* CROISSANCE : +2 % sous 10k/province ; au-delà, LOGARITHMIQUE — la pop continue de
+         * monter mais de moins en moins vite (le delta croît en ln(pop), donc le TAUX s'effondre)
+         * → fin de l'emballement exponentiel, pop bornée, plus de débordement de `long`. */
+        long delta;
+        if (famine)                       delta = -(p->pop/100 + 1);
+        else if (p->pop <= LABOR_LOG_THRESH) delta = p->pop / (1000/GROWTH_PERMIL);   /* ≡ +2 %, overflow-safe (pop/50) */
+        else {
+            float over = logf((float)p->pop / (float)LABOR_LOG_THRESH);  /* 0 au seuil, croît lentement */
+            delta = (long)((float)(LABOR_LOG_THRESH/(1000/GROWTH_PERMIL)) * (1.0f + over));  /* continu au seuil (=200) */
+        }
         if (delta==0 && !famine) delta=1;
         /* LOGEMENT = capacité CONFORTABLE : au-delà, la pop croît encore (gatée par la
          * nourriture) mais MOINS VITE, et le surpeuplement monte l'agitation (§agitation). */
         if (!famine && p->house_cap>0 && p->pop >= p->house_cap) delta = (delta+1)/2;   /* surpeuplé : ralenti */
-        long np=p->pop+delta; if (np<0) np=0;
+        long np=p->pop+delta; if (np<0) np=0; if (np>LABOR_POP_MAX) np=LABOR_POP_MAX;   /* plancher 0, plafond dur */
         long d=np-p->pop; p->pop=np;
         p->pop_by_class[LAB_LABORER]+=d;                 /* la croissance gonfle la masse */
         if (p->pop_by_class[LAB_LABORER]<0) p->pop_by_class[LAB_LABORER]=0;

@@ -343,8 +343,10 @@ static int spawn_secession(World *w, WorldEconomy *econ, WorldLegitimacy *wl, Re
     }
     Country *nc=&w->country[nid]; memset(nc,0,sizeof *nc);
     nc->role=POLITY_ANTAGONIST;                 /* un nouvel empire libre */
-    nc->continent=(rb->region<w->n_regions)?w->region[rb->region].continent:0;
-    nc->capital_prov=(rb->region<w->n_regions)?w->region[rb->region].province_ids[0]:-1;
+    bool rb_reg_ok = (rb->region>=0 && rb->region<w->n_regions);   /* garde : index région valide (≥0 ET < n) */
+    nc->continent=rb_reg_ok ? w->region[rb->region].continent : 0;
+    nc->capital_prov=(rb_reg_ok && w->region[rb->region].n_provinces>0)
+                     ? w->region[rb->region].province_ids[0] : -1;
     nc->n_regions=1; nc->region_ids[0]=(int16_t)rb->region;
     nc->color=0xC08040u;
     snprintf(nc->name,sizeof nc->name,"%s libre", species_name(rb->race));
