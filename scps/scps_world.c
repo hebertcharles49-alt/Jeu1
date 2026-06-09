@@ -2532,10 +2532,10 @@ static void gen_resources(World *w) {
                 if (cold) ADD(RES_FUR,1.5f);
                 break;
             /* ── Côtes & littoraux (poisson/sel dégonflés ; perle + bétail d'appoint) ── */
-            case BIO_COAST:     ADD(RES_FISH,1.5f); ADD(RES_SALT,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.1f); break;
-            case BIO_MANGROVE:  ADD(RES_FISH,0.9f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.1f); break;
+            case BIO_COAST:     ADD(RES_FISH,1.5f); ADD(RES_SALT,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); break;
+            case BIO_MANGROVE:  ADD(RES_FISH,0.9f); ADD(RES_SUGAR,1.4f); ADD(RES_MED_HERBS,0.8f); ADD(RES_FUR,0.4f); ADD(RES_LIVESTOCK,0.4f); ADD(RES_PEARL,0.15f); break;
             case BIO_COASTAL_DESERT:
-                ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,0.6f); ADD(RES_PEARL,0.1f);
+                ADD(RES_SALT,0.9f); ADD(RES_SALTPETER,0.6f); ADD(RES_PEARL,0.15f);
                 if (warm) ADD(RES_SUGAR,2.0f);
                 break;
             /* ── Reliefs : la laine + les minéraux ── */
