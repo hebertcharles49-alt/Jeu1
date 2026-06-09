@@ -735,13 +735,69 @@ float ai_country_population(const World *w, const WorldEconomy *econ, int cid){
     }
     return pop;
 }
-unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
-    unsigned m = tech_race_bit(ai_capital_race(w,econ,cid));        /* sa propre race, toujours */
-    for (int r=0;r<econ->n_regions;r++) if (econ->region[r].owner==cid){
+/* §SYNCRÉTIQUE — la porte de tech n'est plus la RACE mais le PROFIL CULTUREL.
+ * Chaque race-signature des NODES[] définit un ARCHÉTYPE = le CENTROÏDE culturel de
+ * ses porteurs au monde (axes de contenu, pondéré pop). Un empire ATTEINT l'archétype
+ * — donc peut chercher ses techs-signatures — si une culture qu'il GOUVERNE (la sienne
+ * comprise) est à portée du centroïde (D∞ ≤ PORTEE). C'est l'accès par SOI OU par
+ * CONTACT de gouvernance (le seul canal qui atteint le secret). La race seule n'ouvre
+ * plus RIEN : un elfe assimilé au marchand perd l'accès arcane ; un non-elfe au profil
+ * arcane l'obtient. Le déverrouillage reste LOQUETÉ (tech unlocked[] permanent) → la
+ * tech survit à l'assimilation/disparition de la source. Topologie de l'arbre intacte. */
+#define ARCH_PORTEE_PROFIL 2.5f   /* D∞ max (axes [0..10]) pour « porter » l'archétype — surface d'équilibrage */
+
+/* D∞ sur les axes de CONTENU (valeurs/subsistance/parenté/religion), comme
+ * culture_content_distance — mais directement sur PopCulture (struct région). */
+static float pc_content_dist(const PopCulture *a, const PopCulture *b){
+    float dv=fabsf(a->valeurs-b->valeurs),   ds=fabsf(a->subsistance-b->subsistance),
+          dp=fabsf(a->parente-b->parente),   dr=fabsf(a->religion-b->religion);
+    float m=dv; if(ds>m)m=ds; if(dp>m)m=dp; if(dr>m)m=dr; return m;
+}
+/* Centroïde culturel (contenu) de chaque race-archétype au monde, pondéré population. */
+static void world_archetype_centroids(const WorldEconomy *econ, PopCulture cen[RACE_COUNT], bool present[RACE_COUNT]){
+    double sv[RACE_COUNT]={0}, ss[RACE_COUNT]={0}, sp[RACE_COUNT]={0}, sr[RACE_COUNT]={0}, wsum[RACE_COUNT]={0};
+    for (int r=0;r<econ->n_regions;r++){
         const RegionEconomy *re=&econ->region[r];
-        m |= tech_race_bit(re->culture.race);                      /* la culture dominante */
-        for (int g=0;g<re->pop.n_groups;g++)
-            m |= tech_race_bit(re->pop.groups[g].race);            /* groupes conquis/migrés → diffusion */
+        if (!re->active || !re->colonized) continue;
+        if (re->pop.n_groups>0){
+            for (int g=0;g<re->pop.n_groups;g++){
+                const PopGroup *pg=&re->pop.groups[g]; int rr=pg->race;
+                if (rr<0||rr>=RACE_COUNT || pg->count<=0) continue;
+                double wq=(double)pg->count; const PopCulture *c=&pg->culture;
+                sv[rr]+=wq*c->valeurs; ss[rr]+=wq*c->subsistance; sp[rr]+=wq*c->parente; sr[rr]+=wq*c->religion; wsum[rr]+=wq;
+            }
+        } else {
+            int rr=re->culture.race; if (rr<0||rr>=RACE_COUNT) continue;
+            const PopCulture *c=&re->culture;
+            sv[rr]+=c->valeurs; ss[rr]+=c->subsistance; sp[rr]+=c->parente; sr[rr]+=c->religion; wsum[rr]+=1.0;
+        }
+    }
+    for (int r=0;r<RACE_COUNT;r++){
+        present[r]=(wsum[r]>0.0);
+        if (present[r]){ cen[r].valeurs=(float)(sv[r]/wsum[r]); cen[r].subsistance=(float)(ss[r]/wsum[r]);
+                         cen[r].parente=(float)(sp[r]/wsum[r]); cen[r].religion=(float)(sr[r]/wsum[r]); }
+        else { cen[r].valeurs=cen[r].subsistance=cen[r].parente=cen[r].religion=0.f; }
+    }
+}
+/* Renvoie le masque des ARCHÉTYPES (bit par race-signature) que l'empire ATTEINT par
+ * sa propre culture ou celles qu'il gouverne. Conserve le nom/signature (le consommateur
+ * — tech_can_research — lit toujours « le bit de la race native ») : seul le SENS change,
+ * race-présente → culture-à-portée. */
+unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
+    (void)w;
+    PopCulture cen[RACE_COUNT]; bool present[RACE_COUNT];
+    world_archetype_centroids(econ, cen, present);
+    unsigned m=0;
+    for (int r=0;r<econ->n_regions;r++){
+        const RegionEconomy *re=&econ->region[r];
+        if (re->owner!=cid || !re->colonized) continue;
+        for (int ar=0; ar<RACE_COUNT; ar++){
+            unsigned bit=tech_race_bit((SpeciesArchetype)ar);
+            if (!present[ar] || (m&bit)) continue;
+            if (pc_content_dist(&re->culture, &cen[ar]) <= ARCH_PORTEE_PROFIL){ m|=bit; continue; }
+            for (int g=0;g<re->pop.n_groups;g++)
+                if (pc_content_dist(&re->pop.groups[g].culture, &cen[ar]) <= ARCH_PORTEE_PROFIL){ m|=bit; break; }
+        }
     }
     return m;
 }
