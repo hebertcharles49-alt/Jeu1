@@ -352,8 +352,12 @@ int main(int argc, char **argv){
     for (int k=0;k<nsims;k++){
         uint32_t seed = base + (uint32_t)k*101u;
         WorldParams p = worldparams_default(seed);
-        p.n_empires     = 2 + k;      /* sim 1 : 2 empires … sim 11 : 12 */
-        p.n_city_states = 5 + k;      /* sim 1 : 5 cités  … sim 11 : 15  */
+        /* La taille du monde CYCLE (2→11 empires, 5→14 cités) — identique aux 10
+         * premières sims, puis on REBOUCLE : un balayage de 100 sims reste faisable
+         * (sinon 2+k saturerait SCPS_MAX_COUNTRY=56 et chaque sim tardive ramperait).
+         * Graines toutes distinctes (base+k·101) → 100 mondes différents. */
+        p.n_empires     = 2 + (k % 10);
+        p.n_city_states = 5 + (k % 10);
         world_generate(w, &p);
         /* silence le bruit de génération : on a déjà tout imprimé par sim plus bas */
         sim_init(&s, w);
