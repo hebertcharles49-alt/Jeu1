@@ -142,17 +142,19 @@ const FusionRecipe *tech_fusion_table(void) { return FUSIONS; }
 /* savoir-faire ; le SECRET (gouvernance digérée) reste réservé aux         */
 /* signatures profondes de l'arbre de base (gate native, déjà en place).    */
 /* ====================================================================== */
+/* Chaque nœud PEND d'un nœud de base POSITIONNÉ (tier ≥ 1) : il n'apparaît dans le cercle
+ * qu'une fois ce parent acquis, et le clic sur le parent ouvre l'anneau de ses sous-techs. */
 static const SyncNode SYNCS[SYNC_COUNT] = {
-    { "Comptoir arcanique","Rudiments arcanes",    RACE_ELFE,    PROF_SURFACE, TECH_BIBLIOTHEQUE,        1.0f,0,0,   0,0 },
-    { "Maçonnerie runique","Pierre des montagnes", RACE_NAIN,    PROF_METIER,  TECH_ATELIER,            0,0.5f,0,   0.5f,0 },
-    { "École d'ingénierie","Mécanismes empruntés", RACE_GNOME,   PROF_METIER,  TECH_COLLECTE_BOIS,      0,0,0,      1.5f,0 },
-    { "Doctrine d'accueil","Creuset emprunté",     RACE_HUMAIN,  PROF_METIER,  TECH_CHANCELLERIE,       0,0.5f,1.0f,0,0 },
-    { "Hospice pastoral","Abondance partagée",     RACE_HALFELIN,PROF_SURFACE, TECH_COLLECTE_NOURRITURE,0,1.0f,0,   1.0f,0 },
-    { "Garde étrangère","Discipline d'emprunt",    RACE_ORQUE,   PROF_METIER,  TECH_CASERNE,            0,0,0,      0,1.5f },
+    { "Comptoir arcanique","Rudiments arcanes",    RACE_ELFE,    PROF_SURFACE, TECH_SAVOIR_GUERRE,    1.0f,0,0,   0,0 },
+    { "Maçonnerie runique","Pierre des montagnes", RACE_NAIN,    PROF_METIER,  TECH_QUALITE_MATERIAUX,0,0.5f,0,   0.5f,0 },
+    { "École d'ingénierie","Mécanismes empruntés", RACE_GNOME,   PROF_METIER,  TECH_FONDERIE,         0,0,0,      1.5f,0 },
+    { "Doctrine d'accueil","Creuset emprunté",     RACE_HUMAIN,  PROF_METIER,  TECH_CHANCELLERIE,     0,0.5f,1.0f,0,0 },
+    { "Hospice pastoral","Abondance partagée",     RACE_HALFELIN,PROF_SURFACE, TECH_IRRIGATION,       0,1.0f,0,   1.0f,0 },
+    { "Garde étrangère","Discipline d'emprunt",    RACE_ORQUE,   PROF_METIER,  TECH_CONSCRIPTION,     0,0,0,      0,1.5f },
     /* profils d'ÉTHOS (briefs Savoir/Société §5) : la bureaucratie diffuse le scriptorium
      * au coude-à-coude (métier), le marchand répand le comptoir/cothon par le négoce (surface). */
-    { "Scriptorium d'emprunt","Écriture administrative", ARCH_BUREAUCRATIQUE, PROF_METIER,  TECH_BIBLIOTHEQUE, 1.5f,0,0, 0,0 },
-    { "Cothon","Bassin marchand",                        ARCH_MERCANTILE,     PROF_SURFACE, TECH_COMMERCE,     0,0,0,    2.0f,0 },
+    { "Scriptorium d'emprunt","Écriture administrative", ARCH_BUREAUCRATIQUE, PROF_METIER,  TECH_WARDS,    1.5f,0,0, 0,0 },
+    { "Cothon","Bassin marchand",                        ARCH_MERCANTILE,     PROF_SURFACE, TECH_COMMERCE, 0,0,0,    2.0f,0 },
 };
 const SyncNode *tech_sync_node(int i){ return (i>=0&&i<SYNC_COUNT)?&SYNCS[i]:NULL; }
 

@@ -319,6 +319,12 @@ static void zone_add(SDL_Rect r, const char *def);   /* (défini plus bas — su
 /* survol : nom + EFFET de chaque nœud (mots de jeu) ; positions pour la capture. */
 static char g_tree_hov[TECH_COUNT][240];
 static int  g_tree_x[TECH_COUNT], g_tree_y[TECH_COUNT], g_tree_demo;
+static int  g_tree_open = -1;                 /* tech dont l'anneau de SOUS-TECHS est ouvert (clic) ; -1 = aucun */
+#define SYNC_HOV_SZ 200
+static char g_sync_hov[SYNC_COUNT][SYNC_HOV_SZ];   /* survol 2-colonnes des sous-techs */
+static int  sync_children(int techid, int *out){   /* indices des nœuds syncrétiques pendant de `techid` */
+    int n=0; for (int k=0;k<SYNC_COUNT;k++) if ((int)tech_sync_node(k)->parent==techid) out[n++]=k; return n;
+}
 static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
                            WorldEconomy *econ, TechState *ts, World *w, int cid){
     fill_rect(ren, 0,0, win_w, win_h, (SDL_Color){0x0a,0x0e,0x16,0xff});
@@ -375,19 +381,22 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
         fill_rect(ren,x-sz,y-sz,sz*2,sz*2,c);
         if (nd->faustian) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0xe0,0x44,0x30,0xff});
         else if (nd->orphan) draw_box(ren,x-sz-2,y-sz-2,sz*2+4,sz*2+4,(SDL_Color){0x80,0x80,0x80,0xff});
+        if (sync_children(i,(int[SYNC_COUNT]){0})>0)                      /* a des SOUS-TECHS : cliquable (anneau) */
+            draw_ring(ren, x, y, (float)(sz+5), COL_COPPER);
         if (g_font_small){                                               /* NOM compact sous la bulle ; le détail au survol */
             SDL_Color lc = (nd->state==TREE_DONE)?COL_PARCH
                          : (nd->state==TREE_OPEN)?COL_DIM : (SDL_Color){0x5b,0x56,0x4b,0xff};
             int lw=text_w(g_font_small,nd->name);
             draw_text(ren,g_font_small, x-lw/2, y+sz+1, lc, nd->name);
         }
-        /* SURVOL : le bâtiment + son UTILITÉ concrète, le coût et l'état */
-        snprintf(g_tree_hov[i],sizeof g_tree_hov[i], "%s%s%s — %s · coût %d pts (%s%s)",
+        /* SURVOL 2 COLONNES : titre = le bâtiment ; à GAUCHE le PRIX (+état), à DROITE l'EFFET. */
+        snprintf(g_tree_hov[i],sizeof g_tree_hov[i], "%s%s%s\x1f" "coût %d pts · %s%s\x1f%s",
                  nd->name,
                  strcmp(nd->name,nd->unlocks)? " · bâtit " : "",
                  strcmp(nd->name,nd->unlocks)? nd->unlocks : "",
-                 nd->effet, nd->cost, label_tree_state(nd->state),
-                 nd->orphan? ", orpheline : greffe par la population" : "");
+                 nd->cost, label_tree_state(nd->state),
+                 nd->orphan? " · orpheline" : "",
+                 nd->effet);
         zone_add((SDL_Rect){x-sz-3,y-sz-3,sz*2+6,sz*2+6}, g_tree_hov[i]);
         if (nd->faustian && (g_tree_demo<0 || nd->state==TREE_DONE)) g_tree_demo=i;  /* un faustien pour la démo */
     }
@@ -396,34 +405,43 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
         int lx=cx+(int)(cosf(a)*rl), ly=cy+(int)(sinf(a)*rl);
         draw_text(ren,g_font_big,lx-text_w(g_font_big,tr.theme[th])/2,ly-9,tcol[th],tr.theme[th]);
     }
-    /* ── CERCLE SYNCRÉTIQUE (§11/§12) — la diffusion par CONTACT, lue à la membrane :
-     *    par nœud, l'état d'accès (pastille colorée), la profondeur atteinte→requise, et
-     *    le CHEMIN diégétique au survol. La porte est CULTURELLE, plus raciale. ── */
-    { int pw=372, px=18, py=58, rowh=30, ph=30 + SYNC_COUNT*rowh + 6;
-      panel_bg(ren, px,py, pw,ph);
-      draw_text(ren,g_font, px+12, py+8, COL_COPPER, "Cercle syncrétique — diffusion par contact");
-      for (int i=0;i<SYNC_COUNT;i++){
-          SyncReadout sr = sync_node_readout(&ts[cid], i);
-          int ry = py+30 + i*rowh;
-          SDL_Color bc = band_good((int)sr.acces, 4, true);
-          fill_rect(ren, px+12, ry+4, 9,9, bc);                         /* pastille d'accès */
-          draw_text(ren,g_font_small, px+30, ry,
-                    (sr.acces==AC_ACQUIS)?COL_PARCH:COL_DIM, sr.nom);
-          char sub[180];
-          snprintf(sub,sizeof sub,"%s · %s → %s",
-                   label_acces(sr.acces), label_profondeur(sr.atteinte), label_profondeur(sr.requise));
-          if (g_font_small) draw_text(ren,g_font_small, px+30, ry+13, COL_DIM, sub);
-          zone_add((SDL_Rect){px+8, ry-2, pw-16, rowh}, sr.chemin);     /* survol : le chemin diégétique */
-      }
-      draw_text(ren,g_font_small, px+12, py+ph-2, COL_DIM,
-                "acquis = loqué (permanent) · survole une ligne pour le chemin");
+    /* ── ANNEAU SYNCRÉTIQUE (§11/§12) — au CLIC sur une tech, ses SOUS-TECHS (diffusion par
+     *    contact) s'ouvrent en anneau autour d'elle ; disponibles seulement si la parente est
+     *    ACQUISE. Pastille = état d'accès ; survol = hover 2-colonnes (profondeur · capacité). ── */
+    if (g_tree_open>=0 && g_tree_open<TECH_COUNT &&
+        (g_tree_x[g_tree_open] || g_tree_y[g_tree_open])){
+        int kids[SYNC_COUNT], nk = sync_children(g_tree_open, kids);
+        if (nk>0){
+            int ox=g_tree_x[g_tree_open], oy=g_tree_y[g_tree_open];
+            bool parent_done = ts[cid].unlocked[g_tree_open];
+            float rr = ring*0.66f;
+            draw_ring(ren, ox,oy, rr, COL_COPPER);                       /* l'anneau des sous-techs */
+            for (int j=0;j<nk;j++){
+                float a = TOP + (nk>1 ? (j-(nk-1)/2.f)*0.85f : 0.f);     /* en éventail au-dessus du parent */
+                int x=ox+(int)(cosf(a)*rr), y=oy+(int)(sinf(a)*rr);
+                SDL_RenderDrawLine(ren, ox,oy, x,y);                      /* trait parent → sous-tech */
+                SyncReadout sr = sync_node_readout(&ts[cid], kids[j]);
+                SDL_Color c = parent_done ? band_good((int)sr.acces,4,true) : (SDL_Color){0x44,0x40,0x38,0xff};
+                int sz=6; fill_rect(ren,x-sz,y-sz,sz*2,sz*2,c);
+                draw_box(ren,x-sz-1,y-sz-1,sz*2+2,sz*2+2,COL_PARCH);
+                if (g_font_small){ int lw=text_w(g_font_small,sr.nom);
+                    draw_text(ren,g_font_small,x-lw/2,y+sz+1,parent_done?COL_PARCH:COL_DIM,sr.nom); }
+                /* hover 2 colonnes : GAUCHE = accès · profondeur requise ; DROITE = la capacité diffusée. */
+                snprintf(g_sync_hov[kids[j]],SYNC_HOV_SZ,"%s\x1f%s · %s\x1f%s",
+                         sr.nom,
+                         parent_done? label_acces(sr.acces) : "parente requise",
+                         label_profondeur(sr.requise),
+                         tech_sync_node(kids[j])->unlocks);
+                zone_add((SDL_Rect){x-sz-3,y-sz-3,sz*2+6,sz*2+6}, g_sync_hov[kids[j]]);
+            }
+        }
     }
     char hdr[220];
-    snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   SURVOLE un nœud pour son effet & son coût",
+    snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   SURVOLE = effet & prix · CLIC = sous-techs",
              w->country[cid].name, tr.points);
     draw_text(ren,g_font_big,18,12,COL_COPPER,hdr);
     draw_text(ren,g_font,18,win_h-40,COL_DIM,
-      "centre = point (les 6 bases, au survol) · anneau = tier · 3 secteurs = thèmes · cadre rouge = faustien · cadre gris = orphelin");
+      "anneau = tier · 3 secteurs = thèmes · cadre rouge = faustien · cadre gris = orphelin · cercle cuivré = a des SOUS-TECHS (clic → anneau de diffusion)");
     draw_text(ren,g_font,18,win_h-22,COL_DIM,
       "Savoir (bleu) · Forge (cuivre) · Société (vert)  —  vif = acquis · clair = disponible · sombre = verrouillé");
 }
@@ -1323,10 +1341,38 @@ static void draw_mode_buttons(SDL_Renderer *ren, int win_h, ViewMode cur){
 static void draw_hover_footer(SDL_Renderer *ren, int win_w, int win_h, int mx, int my){
     const char *def = zone_hit(mx,my);
     if (!def) return;
-    int fh=22;
-    fill_rect(ren, 0, win_h-fh, win_w, fh, COL_PANEL2);
-    fill_rect(ren, 0, win_h-fh-1, win_w, 1, COL_COPPER);
-    draw_text(ren, g_font, 12, win_h-fh+3, COL_PARCH, def);
+    const char *s1 = strchr(def, '\x1f');
+    if (!s1){                                                   /* survol SIMPLE : bandeau en bas */
+        int fh=22;
+        fill_rect(ren, 0, win_h-fh, win_w, fh, COL_PANEL2);
+        fill_rect(ren, 0, win_h-fh-1, win_w, 1, COL_COPPER);
+        draw_text(ren, g_font, 12, win_h-fh+3, COL_PARCH, def);
+        return;
+    }
+    /* survol DEUX COLONNES : « titre \x1f gauche(prix) \x1f droite(effet) » → une boîte près
+     * du curseur (comme l'exemple : nom en titre, input/prix à gauche, effet à droite). */
+    char title[120]={0}, left[120]={0}, right[160]={0};
+    int n1=(int)(s1-def); if(n1>119)n1=119; memcpy(title,def,(size_t)n1);
+    const char *s2=strchr(s1+1,'\x1f');
+    if (s2){
+        int nl=(int)(s2-(s1+1)); if(nl>119)nl=119; memcpy(left,s1+1,(size_t)nl);
+        snprintf(right,sizeof right,"%s",s2+1);
+    } else {
+        snprintf(left,sizeof left,"%s",s1+1);
+    }
+    int wt=text_w(g_font_big,title), wl=text_w(g_font,left), wr=text_w(g_font,right);
+    int gap=46, inner=wl+gap+wr; if (wt>inner) inner=wt;
+    int bw=inner+24, bh=58, bx=mx+16, by=my+10;
+    if (bx+bw>win_w-4) bx=win_w-bw-4;
+    if (bx<4) bx=4;
+    if (by+bh>win_h-4) by=win_h-bh-4;
+    if (by<4) by=4;
+    panel_bg(ren, bx,by, bw,bh);
+    draw_text(ren, g_font_big, bx+12, by+6,  COL_COPPER, title);
+    fill_rect(ren, bx+10, by+27, bw-20, 1, COL_PANEL2);         /* la ligne de séparation */
+    draw_text(ren, g_font, bx+12, by+33, COL_PARCH, left);                    /* PRIX à gauche */
+    if (right[0]) draw_text(ren, g_font, bx+bw-12-wr, by+33,
+                            (SDL_Color){0x8c,0xd0,0x9c,0xff}, right);          /* EFFET à droite (vert doux) */
 }
 
 /* Le PEUPLE dominant d'un empire (via la membrane : groupe majoritaire de sa
@@ -1566,8 +1612,9 @@ int main(int argc, char **argv) {
         rp.cam_ox=cam.ox; rp.cam_oy=cam.oy; rp.cam_scale=cam.scale; rp.selected_prov=selected;
         SDL_RenderClear(ren);
         if (shot_tree && sim.ready && g_font) {
+            g_tree_open = TECH_CONSCRIPTION;                                  /* démo : un anneau de sous-techs ouvert (à gauche, loin du survol) */
             draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);   /* l'arbre concentrique du pays */
-            if (g_tree_demo>=0){                                              /* démo : un survol (nom + effet) */
+            if (g_tree_demo>=0){                                              /* démo : un survol (boîte 2 colonnes) */
                 draw_box(ren, g_tree_x[g_tree_demo]-9, g_tree_y[g_tree_demo]-9, 18,18, COL_PARCH);
                 draw_hover_footer(ren, win_w, win_h, g_tree_x[g_tree_demo], g_tree_y[g_tree_demo]);
             }
@@ -1640,6 +1687,18 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
+                    /* ARBRE OUVERT : un clic sur une tech ouvre/ferme l'anneau de ses
+                     * SOUS-TECHS (clic ailleurs = ferme). L'écran de l'arbre capte le clic. */
+                    if (show_tree) {
+                        int hit=-1;
+                        for (int i=0;i<TECH_COUNT;i++){
+                            if (!g_tree_x[i] && !g_tree_y[i]) continue;        /* nœud non positionné (base) */
+                            int dx=ev.button.x-g_tree_x[i], dy=ev.button.y-g_tree_y[i];
+                            if (dx*dx+dy*dy <= 11*11){ hit=i; break; }
+                        }
+                        g_tree_open = (hit>=0 && hit!=g_tree_open) ? hit : -1;  /* bascule / ferme */
+                        dirty=true; break;
+                    }
                     /* §1 : le bandeau est un SOMMAIRE — un clic sur une RESSOURCE ouvre
                      * son système. Le Savoir ouvre l'ARBRE DE TECH (qui existe) ; les
                      * autres écrans (finances, subsistance, chaînes, diplomatie) sont à
@@ -1650,7 +1709,7 @@ int main(int argc, char **argv) {
                             ev.button.y>=r->y && ev.button.y<r->y+r->h){ tb=i; break; } }
                     if (tb>=0){
                         switch (g_topbtns[tb].sys){
-                            case SYS_TECH: show_tree = !show_tree; break;
+                            case SYS_TECH: show_tree = !show_tree; g_tree_open = -1; break;
                             case SYS_FINANCES:    printf("\n[scps] Finances (revenus · commerce · taxation) — écran détaillé à venir.\n"); break;
                             case SYS_SUBSISTANCE: printf("\n[scps] Subsistance & démographie — écran détaillé à venir.\n"); break;
                             case SYS_CHAINES:     printf("\n[scps] Chaînes de production & marché — écran détaillé à venir.\n"); break;
@@ -1750,7 +1809,7 @@ int main(int argc, char **argv) {
                 /* --- Contrôle du TEMPS (§1) : Espace = pause ; +/- = vitesse --- */
                 case SDLK_SPACE:
                     speed = (speed==SPEED_PAUSE) ? SPEED_1 : SPEED_PAUSE; break;
-                case SDLK_a:     show_tree = !show_tree; break;   /* A = l'Arbre de tech concentrique */
+                case SDLK_a:     show_tree = !show_tree; g_tree_open = -1; break;   /* A = l'Arbre de tech concentrique */
                 case SDLK_PLUS: case SDLK_EQUALS: case SDLK_KP_PLUS:
                     if (speed<SPEED_5) speed++;
                     if (speed==SPEED_PAUSE) speed=SPEED_1;
