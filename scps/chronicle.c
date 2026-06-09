@@ -599,19 +599,20 @@ int main(int argc, char **argv){
         /* SYNCRÉTISME (§tech culturelle) : les nœuds à PORTE D'ARCHÉTYPE (ex-signatures de
          * race, désormais ouvertes par la CULTURE gouvernée — soi ou contact) — combien
          * acquis, et la DISPERSION entre empires : deux contacts différents → arbres différents. */
-        { int sync_total=0, nmax=0, nmin=999, nemp=0; int arch_reached[RACE_COUNT]={0};
+        { int sync_total=0, nmax=0, nmin=999, nemp=0, combo=0; int arch_reached[RACE_COUNT]={0};
           for (int c=0;c<w->n_countries;c++){
               if (!s.ai_on[c] || regions_of(s.econ,c)==0) continue;     /* vivant seulement */
               int n=0;
               for (int id=0; id<TECH_COUNT; id++)
                   if (s.ts[c].unlocked[id] && tech_node((TechId)id)->native!=RACE_COUNT){
                       n++; arch_reached[tech_node((TechId)id)->native]=1; }
+              if (s.ts[c].unlocked[TECH_FORGE_RUNES]) combo++;          /* §18.3 : armes enchantées = forge runique × arcane */
               sync_total+=n; if(n>nmax)nmax=n; if(n<nmin)nmin=n; nemp++;
           }
           int distinct=0; for (int r=0;r<RACE_COUNT;r++) distinct+=arch_reached[r];
           if (nemp>0){
-              printf("              syncrétisme : %d nœud(s) culturel(s) acquis · %d/%d archétype(s) diffusé(s) · dispersion %d–%d par empire (la diffusion DIVERGE)\n",
-                     sync_total, distinct, (int)RACE_COUNT, nmin, nmax);
+              printf("              syncrétisme : %d nœud(s) culturel(s) acquis · %d/%d archétype(s) diffusé(s) · dispersion %d–%d/empire · %d empire(s) ont la COMBINAISON forge runique × arcane (armes enchantées)\n",
+                     sync_total, distinct, (int)RACE_COUNT, nmin, nmax, combo);
               tot_sync += sync_total; tot_sync_distinct += distinct;
           }
         }

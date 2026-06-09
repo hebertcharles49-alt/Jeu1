@@ -183,13 +183,29 @@ bool tech_is_base(TechId id){ return (id>=0&&id<TECH_COUNT)&&NODES[id].tier==0; 
 
 unsigned tech_race_bit(SpeciesArchetype r){ return (r>=0&&r<RACE_COUNT)?(1u<<r):0u; }
 
+/* §SYNCRÉTIQUE — COMBINAISON (brief Forge §5/§8) : un nœud-pointe peut exiger DEUX
+ * archétypes culturels en contact, pas un seul. Emblème : les armes enchantées (Forge
+ * céleste) = FORGE RUNIQUE (nain) × ARCANE (elfe) — il faut porter/gouverner les DEUX
+ * cultures, le commerce seul ne suffit pas (la chaîne BLD_CELESTIAL_FORGE existe déjà :
+ * on gate l'UNLOCK, pas la production). UNIV = aucun second requis. La porte PRIMAIRE
+ * reste NODES[].native ; le masque `race_access` encode désormais l'ACCÈS D'ARCHÉTYPE. */
+static SpeciesArchetype tech_combo_native(TechId id){
+    switch (id){
+        case TECH_FORGE_RUNES: return RACE_ELFE;   /* runique (nain) ET arcane (elfe) */
+        default:               return UNIV;
+    }
+}
+
 bool tech_can_research(const TechState *s, TechId id, unsigned race_access) {
     if (id<0||id>=TECH_COUNT) return false;
     if (s->unlocked[id]) return false;
     const TechNode *n=&NODES[id];
-    /* ACCÈS DE RACE : une tech native d'une race est ORPHELINE ailleurs — il faut
-     * avoir cette race dans sa population (conquise/migrée) ou un pacte. */
+    /* PORTE D'ARCHÉTYPE : une tech-signature exige que l'empire ATTEIGNE l'archétype
+     * (par sa culture ou un contact de gouvernance — le masque est calculé ainsi côté IA). */
     if (n->native!=UNIV && !(race_access & tech_race_bit(n->native))) return false;
+    /* COMBINAISON : certains nœuds exigent un SECOND archétype (ET). */
+    { SpeciesArchetype combo=tech_combo_native(id);
+      if (combo!=UNIV && !(race_access & tech_race_bit(combo))) return false; }
     /* Porte arcane : les bouts faustiens du Savoir profond exigent une ruine. */
     if (n->needs_ruins && !s->has_ruins_access) return false;
     /* Prérequis : le nœud précédent du quartier doit être acquis. */
