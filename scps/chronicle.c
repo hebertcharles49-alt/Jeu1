@@ -228,6 +228,17 @@ static void print_building_census(const WorldEconomy *e){
     for (int b=0;b<BLD_TYPE_COUNT;b++) if (count[b]>0) printf(" %ld×%s", count[b], building_name((BuildingType)b));
     printf("\n");
 }
+/* Satisfaction par CLASSE (pop-pondérée, sur les régions vivantes) — la vraie mesure du
+ * bien-être, AVEC la distribution régionale active (≠ econ_scan, sans commerce). */
+static void world_class_sat(const WorldEconomy *e, double out[CLASS_COUNT]){
+    double sw[CLASS_COUNT]={0}, pw[CLASS_COUNT]={0};
+    for (int r=0;r<e->n_regions;r++){
+        const RegionEconomy *re=&e->region[r];
+        if (!re->active || !re->colonized) continue;
+        for (int c=0;c<CLASS_COUNT;c++){ double p=re->strata[c].pop; sw[c]+=re->strata[c].satisfaction*p; pw[c]+=p; }
+    }
+    for (int c=0;c<CLASS_COUNT;c++) out[c] = pw[c]>0 ? 100.0*sw[c]/pw[c] : 0.0;
+}
 /* Pays le plus étendu (par régions). */
 static int top_power(const World *w, const WorldEconomy *e, int *out_regions){
     int best=-1, bn=0;
@@ -382,6 +393,7 @@ int main(int argc, char **argv){
     long tot_wars=0, tot_absorbed=0, tot_emerged=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
     long tot_techs=0, tot_faustian=0, tot_campaign=0, tot_alliances=0;   /* §D : pactes actifs */
+    double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
@@ -512,6 +524,12 @@ int main(int argc, char **argv){
         /* EXPANSION : provinces colonisées (vierges peuplées) vs PRISES de force. */
         int n_alliances = active_alliances(w, s.econ, s.dp);
         printf("              diplomatie : %d pacte(s) d'alliance actif(s)\n", n_alliances);
+        { double csat[CLASS_COUNT]; world_class_sat(s.econ, csat);
+          double tradev = intertrade_imports_value(s.econ);
+          printf("              satisfaction (pop-pondérée, AVEC distribution) : Laborer %.0f%% · Bourgeois %.0f%% · Élite %.0f%% | commerce inter-pays/an %.0f\n",
+                 csat[CLASS_LABORER], csat[CLASS_BOURGEOIS], csat[CLASS_ELITE], tradev);
+          for (int c=0;c<CLASS_COUNT;c++) tot_sat[c]+=csat[c];
+          tot_trade += tradev; }
         print_building_census(s.econ);
         printf("              expansion : %d prov colonisées · %d prov PRISES de force · armée finale %.0f\n",
                colonized_provinces(w,s.econ), conq_prov, total_army(w,s.econ));
@@ -602,6 +620,8 @@ int main(int argc, char **argv){
     printf("   âges éveillés (total) ....... %ld   (moy. %.1f/sim)\n", tot_ages, (double)tot_ages/nsims);
     printf("   guerres déclenchées (total) . %ld   (moy. %.1f/sim)\n", tot_wars, (double)tot_wars/nsims);
     printf("   alliances actives (fin de sim) %ld   (moy. %.1f/sim ; la diplomatie respire)\n", tot_alliances, (double)tot_alliances/nsims);
+    printf("   satisfaction moy (AVEC distribution) : Laborer %.0f%% · Bourgeois %.0f%% · Élite %.0f%% | commerce/an moy %.0f\n",
+           tot_sat[CLASS_LABORER]/nsims, tot_sat[CLASS_BOURGEOIS]/nsims, tot_sat[CLASS_ELITE]/nsims, tot_trade/nsims);
     printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
     printf("   pays absorbés (morts) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
     printf("   pays émergés (sécession) .... %ld   (moy. %.1f/sim ; la carte politique respire)\n", tot_emerged, (double)tot_emerged/nsims);
