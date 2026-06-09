@@ -135,6 +135,38 @@ static const FusionRecipe FUSIONS[FUSION_COUNT] = {
 const FusionRecipe *tech_fusion_table(void) { return FUSIONS; }
 
 /* ====================================================================== */
+/* NŒUDS SYNCRÉTIQUES — diffusion d'une tradition par CONTACT (§4-8)        */
+/* Chacun pend d'un nœud de base et se loquette quand l'archétype-source    */
+/* est atteint à la profondeur requise. Diffusion BÉNÉFIQUE (jamais faust.).*/
+/* La SURFACE (comptoir) passe les rudiments ; le MÉTIER (frontière/foi) le  */
+/* savoir-faire ; le SECRET (gouvernance digérée) reste réservé aux         */
+/* signatures profondes de l'arbre de base (gate native, déjà en place).    */
+/* ====================================================================== */
+static const SyncNode SYNCS[SYNC_COUNT] = {
+    { "Comptoir arcanique","Rudiments arcanes",    RACE_ELFE,    PROF_SURFACE, TECH_BIBLIOTHEQUE,        1.0f,0,0,   0,0 },
+    { "Maçonnerie runique","Pierre des montagnes", RACE_NAIN,    PROF_METIER,  TECH_ATELIER,            0,0.5f,0,   0.5f,0 },
+    { "École d'ingénierie","Mécanismes empruntés", RACE_GNOME,   PROF_METIER,  TECH_COLLECTE_BOIS,      0,0,0,      1.5f,0 },
+    { "Doctrine d'accueil","Creuset emprunté",     RACE_HUMAIN,  PROF_METIER,  TECH_CHANCELLERIE,       0,0.5f,1.0f,0,0 },
+    { "Hospice pastoral","Abondance partagée",     RACE_HALFELIN,PROF_SURFACE, TECH_COLLECTE_NOURRITURE,0,1.0f,0,   1.0f,0 },
+    { "Garde étrangère","Discipline d'emprunt",    RACE_ORQUE,   PROF_METIER,  TECH_CASERNE,            0,0,0,      0,1.5f },
+};
+const SyncNode *tech_sync_node(int i){ return (i>=0&&i<SYNC_COUNT)?&SYNCS[i]:NULL; }
+
+int tech_sync_tick(TechState *s, const unsigned char depth[RACE_COUNT]){
+    int newl=0;
+    for (int i=0;i<SYNC_COUNT;i++){
+        if (s->sync_unlocked[i]) continue;
+        const SyncNode *sn=&SYNCS[i];
+        if (sn->parent!=NONE && !s->unlocked[sn->parent]) continue;     /* cercle visible une fois le parent acquis */
+        int a=(int)sn->arch; if (a<0||a>=RACE_COUNT) continue;
+        if (depth[a] < (unsigned char)sn->prof_requise) continue;        /* archétype pas atteint à la profondeur requise */
+        s->sync_unlocked[i]=true; s->n_sync++; newl++;
+        s->K+=sn->dK; s->L+=sn->dL; s->F+=sn->dF; s->eco+=sn->dEco; s->mil+=sn->dMil;  /* diffusion : LOQUET permanent */
+    }
+    return newl;
+}
+
+/* ====================================================================== */
 /* API                                                                    */
 /* ====================================================================== */
 void tech_state_init(TechState *s, bool has_ruins_access) {
@@ -148,6 +180,8 @@ void tech_state_init(TechState *s, bool has_ruins_access) {
     s->has_ruins_access=has_ruins_access;
     s->crisis_triggered=false;
     s->research_points=0.f;
+    for (int i=0;i<SYNC_COUNT;i++) s->sync_unlocked[i]=false;
+    s->n_sync=0;
     for (int i=0;i<TECH_COUNT;i++) if (NODES[i].tier==0){ s->unlocked[i]=true; s->n_unlocked++; }
 }
 

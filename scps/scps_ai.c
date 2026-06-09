@@ -815,26 +815,53 @@ static void world_archetype_centroids(const WorldEconomy *econ, PopCulture cen[R
         else { cen[r].valeurs=cen[r].subsistance=cen[r].parente=cen[r].religion=0.f; }
     }
 }
-/* Renvoie le masque des ARCHÉTYPES (bit par race-signature) que l'empire ATTEINT par
- * sa propre culture ou celles qu'il gouverne. Conserve le nom/signature (le consommateur
- * — tech_can_research — lit toujours « le bit de la race native ») : seul le SENS change,
- * race-présente → culture-à-portée. */
-unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
-    (void)w;
+/* PROFONDEUR de contact par archétype (§4-6) : le canal le PLUS PROFOND par lequel une
+ * culture portant l'archétype atteint l'empire — GOUVERNANCE (secret) > FRONTIÈRE/FOI
+ * (métier) > COMMERCE/diffusion lointaine (surface). C'est ce qui décide jusqu'où une
+ * tradition diffuse : le comptoir passe la surface, seule la gouvernance atteint le secret.
+ * depth[] indexé par race-signature (archétype ↔ race, 1:1). */
+static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid, unsigned char depth[RACE_COUNT]){
     PopCulture cen[RACE_COUNT]; bool present[RACE_COUNT];
     world_archetype_centroids(econ, cen, present);
-    unsigned m=0;
+    for (int r=0;r<RACE_COUNT;r++) depth[r]=PROF_NONE;
+    /* credo dominant (capitale) → canal RELIGION (la foi partagée ouvre le métier). */
+    Credo mycredo=(Credo)0; bool has_credo=false;
+    { int cp=(cid>=0&&cid<w->n_countries)?w->country[cid].capital_prov:-1;
+      int cr=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+      if (cr>=0&&cr<econ->n_regions){ mycredo=econ->region[cr].culture.credo; has_credo=true; } }
+    /* régions-FRONTIÈRE : possédées par un AUTRE, mais adjacentes à une région à moi. */
+    static bool border[SCPS_MAX_REG];
+    for (int r=0;r<econ->n_regions && r<SCPS_MAX_REG;r++){
+        border[r]=false;
+        const RegionEconomy *re=&econ->region[r];
+        if (re->owner==cid || !re->colonized) continue;
+        for (int k=0;k<econ->n_regions;k++) if (econ->adj[r][k] && econ->region[k].owner==cid){ border[r]=true; break; }
+    }
     for (int r=0;r<econ->n_regions;r++){
         const RegionEconomy *re=&econ->region[r];
-        if (re->owner!=cid || !re->colonized) continue;
+        if (!re->active || !re->colonized) continue;
+        Profondeur ch;
+        if (re->owner==cid)                                          ch=PROF_SECRET;   /* gouvernance */
+        else if (has_credo && re->culture.credo==mycredo)            ch=PROF_METIER;    /* co-religion */
+        else if (r<SCPS_MAX_REG && border[r])                        ch=PROF_METIER;    /* frontière */
+        else                                                         ch=PROF_SURFACE;   /* commerce / diffusion */
         for (int ar=0; ar<RACE_COUNT; ar++){
-            unsigned bit=tech_race_bit((SpeciesArchetype)ar);
-            if (!present[ar] || (m&bit)) continue;
-            if (pc_content_dist(&re->culture, &cen[ar]) <= ARCH_PORTEE_PROFIL){ m|=bit; continue; }
-            for (int g=0;g<re->pop.n_groups;g++)
-                if (pc_content_dist(&re->pop.groups[g].culture, &cen[ar]) <= ARCH_PORTEE_PROFIL){ m|=bit; break; }
+            if (!present[ar] || depth[ar]>=(unsigned char)ch) continue;
+            bool bears = pc_content_dist(&re->culture,&cen[ar])<=ARCH_PORTEE_PROFIL;
+            for (int g=0; g<re->pop.n_groups && !bears; g++)
+                if (pc_content_dist(&re->pop.groups[g].culture,&cen[ar])<=ARCH_PORTEE_PROFIL) bears=true;
+            if (bears) depth[ar]=(unsigned char)ch;
         }
     }
+}
+/* Masque des ARCHÉTYPES profonds (bit par race-signature) recherchables : une signature
+ * de l'arbre de base (nœud profond) exige l'archétype atteint au SECRET/PROFOND — donc
+ * par GOUVERNANCE ou par SOI. Le commerce/la frontière (surface/métier) n'ouvrent QUE
+ * les nœuds syncrétiques peu profonds (tech_sync_tick). La race seule n'ouvre rien. */
+unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
+    unsigned char depth[RACE_COUNT]; ai_archetype_depth(w, econ, cid, depth);
+    unsigned m=0;
+    for (int r=0;r<RACE_COUNT;r++) if (depth[r]>=(unsigned char)PROF_PROFOND) m|=tech_race_bit((SpeciesArchetype)r);
     return m;
 }
 
@@ -891,7 +918,11 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     float income = (AI_RESEARCH_RATE/365.f)*AI_RESEARCH_CADENCE
                  * tech_research_yield(ts) * (1.f + pop/AI_RESEARCH_POPREF);
     ts->research_points += income;
-    unsigned access = ai_race_access(w, econ, a->cid);
+    unsigned char adepth[RACE_COUNT];
+    ai_archetype_depth(w, econ, a->cid, adepth);                /* §4-6 : profondeur de contact par archétype */
+    unsigned access=0;
+    for (int r=0;r<RACE_COUNT;r++) if (adepth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);
+    tech_sync_tick(ts, adepth);                                 /* §8 : diffusion par contact — auto-latch des nœuds peu profonds */
     TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
     if (pick!=TECH_COUNT){
         float cost = tech_cost(pick, pop) * ai_tech_cost_mult(ai_capital_ethos(w,econ,a->cid), tech_node(pick));

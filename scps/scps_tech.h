@@ -89,6 +89,25 @@ typedef struct {
     bool  triggers_crisis;       /* tire soi-même la gâchette de la fin */
 } TechNode;
 
+/* ---- SYNCRÉTIQUE — profondeur de contact & nœuds de diffusion ---------- *
+ * (briefs §4-8) Une tradition étrangère DIFFUSE par CONTACT, à une PROFONDEUR qui
+ * dépend du canal : le comptoir transmet la SURFACE (la brasserie), la frontière/foi
+ * le MÉTIER, seule la GOUVERNANCE (digérée) atteint le SECRET. Un nœud syncrétique
+ * pend d'un nœud de base et se LOQUETTE (permanent) dès qu'on atteint l'archétype
+ * requis à la profondeur requise — AUTOMATIQUE (diffusion, pas recherche). */
+typedef enum { PROF_NONE=0, PROF_SURFACE, PROF_METIER, PROF_PROFOND, PROF_SECRET } Profondeur;
+
+typedef struct {
+    const char      *name;
+    const char      *unlocks;          /* la capacité diffusée (mot de jeu) */
+    SpeciesArchetype arch;             /* archétype-source requis (↔ race-signature, profil culturel) */
+    Profondeur       prof_requise;     /* profondeur de contact minimale (surface…secret) */
+    TechId           parent;           /* nœud de base dont le cercle s'ouvre (doit être acquis) */
+    float dK, dL, dF, dEco, dMil;      /* écriture SCPS — diffusion BÉNÉFIQUE (jamais faustien) */
+} SyncNode;
+
+#define SYNC_COUNT 6
+
 /* ---- État techno d'un empire (axes SCPS écrits par l'arbre) ----------- */
 typedef struct {
     /* Socle résilient */
@@ -105,6 +124,8 @@ typedef struct {
 
     bool  unlocked[TECH_COUNT];
     int   n_unlocked;
+    bool  sync_unlocked[SYNC_COUNT];   /* §syncrétique : nœuds de diffusion loqués (permanents) */
+    int   n_sync;
     bool  has_ruins_access;   /* porte de l'arcane (Savoir faustien profond) */
     bool  crisis_triggered;   /* la crise de fin est-elle convoquée ? */
     float research_points;    /* points de recherche accumulés (économie de tech) */
@@ -152,6 +173,14 @@ bool  tech_can_research(const TechState *s, TechId id, unsigned race_access);
 /* Applique les deltas SCPS, la charge et le flux ; marque comme acquis.
  * (Le PAIEMENT en points de recherche est géré par l'appelant via tech_cost.) */
 bool  tech_research(TechState *s, TechId id, unsigned race_access);
+
+/* §syncrétique — LATCH AUTOMATIQUE des nœuds de diffusion : pour chaque nœud dont le
+ * PARENT est acquis et dont l'archétype-source est atteint à la PROFONDEUR requise
+ * (depth[] indexé par race-signature : PROF_NONE..PROF_SECRET), loquette de façon
+ * PERMANENTE et écrit ses deltas SCPS. Renvoie le nb de nœuds nouvellement loqués.
+ * À appeler chaque pas — idempotent (un nœud loqué n'est jamais recalculé). */
+int  tech_sync_tick(TechState *s, const unsigned char depth[RACE_COUNT]);
+const SyncNode *tech_sync_node(int i);   /* lecture (UI/membrane/télémétrie) ; NULL hors borne */
 
 /* COÛT en points de recherche : BASE_COST[tier] × (1 + EXTENT_W·population/BASE).
  * Plus l'empire est ÉTENDU (∝ population), plus CHAQUE tech coûte → frein au
