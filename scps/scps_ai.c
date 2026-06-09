@@ -27,7 +27,14 @@
 #define AI_WIDEN_W        0.5f    /* friction : poids du coût d'élargissement (alliés de la cible) */
 #define AI_SURRENDER      55.f    /* score de guerre adverse au-delà duquel un défenseur sans espoir capitule */
 #define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on PROPOSE l'alliance */
-#define AI_ALLY_DISSOLVE  3.0f    /* §D1 : … et en dessous duquel on la ROMPT (hystérésis : < seuil) */
+#define AI_ALLY_DISSOLVE  3.0f    /* §D1 (ancien) : seuil de score — conservé pour mémoire, la
+                                   * dissolution lit désormais la MENACE (shared_rel), pas le score */
+/* §D-sat : le plafond de slots vit dans scps_diplo.h (DIPLO_ALLY_SLOTS) — partagé avec
+ * le statecraft pour que « 2 alliances max » soit un invariant GLOBAL. */
+#define AI_ALLY_SWAP_MARGIN 1.5f  /* slots pleins : on n'évince le plus faible que si le nouveau
+                                   * le dépasse de cette marge → l'alliance est une ressource arbitrée */
+#define ALLY_THREAT_KEEP  0.6f    /* §D1 : sous ce niveau de menace COMMUNE relative (shared_rel),
+                                   * l'alliance n'a plus de raison → elle lâche (le slot se libère) */
 #define AI_CONQUEROR_W    0.60f   /* appétit de conquête au-delà duquel on SAISIT une proie faible
                                    * AVANT de songer à s'allier (sinon, en monde calme §D2, le pacte
                                    * facile fige le conquérant — il ne prédate jamais) */
@@ -313,6 +320,30 @@ static bool country_at_war(const World *w, const DiploState *d, int c){
 }
 /* L'allié naturel le plus fort (score d'alliance au-delà du seuil) — la friction
  * préventive : on se lie aux complémentaires/parents/menacés-communs. */
+/* §D-sat : l'alliance CROISERAIT-elle une ligne de front ? On refuse de se lier à qui
+ * fait la guerre à l'un de nos alliés (ou réciproquement) — sinon on est lié des DEUX
+ * côtés d'un même conflit et la toile se forme au lieu de camps cohérents. */
+static bool crosses_existing(const World *w, const DiploState *d, int a, int cand){
+    for (int k=0;k<w->n_countries;k++){
+        if (k==a||k==cand) continue;
+        if (diplo_status(d,a,k)==DIPLO_ALLIED && diplo_status(d,cand,k)==DIPLO_WAR) return true; /* il frappe mon allié */
+        if (diplo_status(d,cand,k)==DIPLO_ALLIED && diplo_status(d,a,k)==DIPLO_WAR) return true; /* je frappe le sien */
+    }
+    return false;
+}
+/* §D-sat : l'allié actuel le plus FAIBLE (score d'alliance le plus bas) — candidat à
+ * l'éviction quand les slots sont pleins et qu'un meilleur se présente. */
+static int weakest_ally(const AiActor *a, const World *w, const WorldEconomy *econ,
+                        const WorldProsperity *wp, const DiploState *d, float *out_score){
+    int worst=-1; float wv=1e9f;
+    for (int b=0;b<w->n_countries;b++){
+        if (b==a->cid || diplo_status(d,a->cid,b)!=DIPLO_ALLIED) continue;
+        Relation rel=diplo_relation(w,econ,wp,d,a->cid,b);
+        if (rel.alliance<wv){ wv=rel.alliance; worst=b; }
+    }
+    if (out_score) *out_score = (worst>=0)? wv : 0.f;
+    return worst;
+}
 static int ai_pick_ally(const AiActor *a, const World *w, const WorldEconomy *econ,
                         const WorldProsperity *wp, const DiploState *d){
     int best=-1; float bestsc=AI_ALLY_SEUIL;
@@ -320,6 +351,8 @@ static int ai_pick_ally(const AiActor *a, const World *w, const WorldEconomy *ec
         if (b==a->cid || w->country[b].role==POLITY_UNCLAIMED) continue;
         if (diplo_status(d,a->cid,b)!=DIPLO_NEUTRAL) continue;     /* déjà allié ou en guerre */
         if (!countries_adjacent(econ,a->cid,b)) continue;
+        if (diplo_ally_count(d,b) >= DIPLO_ALLY_SLOTS) continue;           /* §D-sat : le candidat n'a plus de slot */
+        if (crosses_existing(w,d,a->cid,b)) continue;             /* §D-sat : pas d'alliance croisée */
         Relation rel=diplo_relation(w,econ,wp,d,a->cid,b);
         if (rel.alliance>bestsc){ bestsc=rel.alliance; best=b; }
     }
@@ -591,15 +624,18 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
     int heg = diplo_perceived_hegemon(w, econ, wp, diplo, a->cid);
 
     /* §D1 — L'ALLIANCE A UNE SORTIE : chaque tick, on rompt celles dont la raison
-     * s'efface. (a) DÉSUÉTUDE : le score tombe sous AI_ALLY_DISSOLVE (hystérésis :
-     * la menace commune a fondu). (b) TRAHISON : l'allié a snowballé au point d'être
-     * MON hégémon perçu → il EST la menace, on le lâche (il redevient cible possible).
-     * C'est ce qui empêche un bloc de se figer autour d'une puissance montante. */
+     * s'efface. La raison, c'est la MENACE COMMUNE (shared_rel), PAS le score global —
+     * lequel reste gonflé par le complément + la parenté, si bien qu'une alliance
+     * d'AFFINITÉ ne lâchait jamais et figeait tout. (a) DÉSUÉTUDE : la menace commune
+     * relative tombe sous ALLY_THREAT_KEEP → le lien lâche, complémentaires ou non.
+     * (b) TRAHISON : l'allié a snowballé au point d'être MON hégémon perçu (son threat,
+     * amplifié par le momentum, domine) → il EST la menace, on le lâche. */
     for (int b=0;b<w->n_countries;b++){
         if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_ALLIED) continue;
         Relation rel = diplo_relation(w,econ,wp,diplo,a->cid,b);
-        if (rel.alliance < AI_ALLY_DISSOLVE || b==heg)
-            diplo_make_peace(diplo, a->cid, b);          /* ALLIED→NEUTRAL : le lien lâche */
+        bool menace_evanouie = (rel.shared_rel < ALLY_THREAT_KEEP);   /* la menace commune a fondu */
+        if (menace_evanouie || b==heg)
+            diplo_make_peace(diplo, a->cid, b);          /* ALLIED→NEUTRAL : le slot se libère → réalignement */
     }
 
     /* (1) COALITION — se liguer contre l'HÉGÉMON perçu (anti-runaway, émergent des
@@ -633,13 +669,26 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         }
     }
 
-    /* (2) ALLIANCE EN ACTE — se lier à l'allié naturel le plus fort (friction
-     * préventive : la menace partagée et le complément écrasent la prédation mutuelle). */
+    /* (2) ALLIANCE EN ACTE — se lier à l'allié naturel le plus fort (friction préventive :
+     * la menace partagée et le complément écrasent la prédation mutuelle). MAIS au plus
+     * AI_ALLY_SLOTS pactes : l'alliance est une ressource RARE qu'on arbitre, pas un seuil
+     * que tout le monde franchit. Slots pleins → on n'élargit pas ; on n'ÉVINCE le plus
+     * faible que si le nouveau le dépasse NETTEMENT (marge) — sinon on garde ce qu'on a. */
     int ally = ai_pick_ally(a, w, econ, wp, diplo);
     if (ally>=0){
-        diplo_form_alliance(diplo, a->cid, ally);
-        a->credit_war = fmaxf(0.f, a->credit_war - 0.5f);    /* l'énergie passe à se lier */
-        return;
+        if (diplo_ally_count(diplo, a->cid) < DIPLO_ALLY_SLOTS){
+            diplo_form_alliance(diplo, a->cid, ally);
+            a->credit_war = fmaxf(0.f, a->credit_war - 0.5f);    /* l'énergie passe à se lier */
+            return;
+        }
+        float wv; int worst = weakest_ally(a, w, econ, wp, diplo, &wv);
+        Relation arel = diplo_relation(w,econ,wp,diplo,a->cid,ally);
+        if (worst>=0 && arel.alliance > wv + AI_ALLY_SWAP_MARGIN){
+            diplo_make_peace(diplo, a->cid, worst);          /* libère le slot le plus faible */
+            diplo_form_alliance(diplo, a->cid, ally);        /* … pour un allié nettement meilleur */
+            a->credit_war = fmaxf(0.f, a->credit_war - 0.5f);
+            return;
+        }
     }
 
     /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, AVEC un

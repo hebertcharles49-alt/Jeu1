@@ -79,6 +79,12 @@ const char *diplo_cb_name(CasusBelli cb){
                 default: return "aucun"; }
 }
 void diplo_form_alliance(DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_ALLIED); }
+/* §D-sat : nombre d'alliances ACTIVES d'une polité (plafond DIPLO_ALLY_SLOTS). */
+int diplo_ally_count(const DiploState *d, int a){
+    if (!d || a<0 || a>=SCPS_MAX_COUNTRY) return 0;
+    int n=0; for (int b=0;b<SCPS_MAX_COUNTRY;b++) if (b!=a && d->status[a][b]==DIPLO_ALLIED) n++;
+    return n;
+}
 void diplo_make_peace   (DiploState *d,int a,int b){
     set_sym(d,a,b,DIPLO_NEUTRAL);
     if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY){
@@ -210,6 +216,7 @@ Relation diplo_relation(const World *w, const WorldEconomy *econ,
      * monde, pas quand les chiffres ont simplement gonflé. Le seuil fixe redevient juste. */
     float amb = (d && d->ambient_threat>1e-4f)? d->ambient_threat : 1.f;
     float shared_rel = shared / amb;
+    r.shared_rel = shared_rel;                      /* §D1 : exposé → la dissolution relit la menace */
     float val_dist = (ca&&cb) ? absf(ca->valeurs-cb->valeurs) : 0.f;
     float fk = r.kinship*(10.f-r.kinship)/25.f;     /* cloche sur la parenté */
     r.alliance = K_SHARED*shared_rel + 2.0f*r.complement + 1.0f*fk - 0.3f*val_dist - 2.0f*r.schism;

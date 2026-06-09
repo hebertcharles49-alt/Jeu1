@@ -25,6 +25,9 @@ typedef struct {
     float kinship;      /* distance de sphère [0..7] (haut = étranger) */
     float schism;       /* ennemi naturel religieux [0..1] */
     float alliance;     /* score d'alliance (haut = allié naturel) */
+    float shared_rel;   /* §D1 : menace COMMUNE relative au monde — la RAISON de l'alliance.
+                         * La dissolution la relit pour LÂCHER quand la menace fond (sans
+                         * quoi complément + parenté maintiennent le lien à jamais). */
 } Relation;
 
 typedef enum { DIPLO_NEUTRAL = 0, DIPLO_ALLIED, DIPLO_WAR } DiploStatus;
@@ -86,6 +89,11 @@ const char *diplo_cb_name      (CasusBelli cb);
 void        diplo_form_alliance(DiploState *d, int a, int b);
 void        diplo_make_peace  (DiploState *d, int a, int b);
 DiploStatus diplo_status      (const DiploState *d, int a, int b);
+/* §D-sat : plafond d'alliances par polité (l'alliance est une ressource RARE) +
+ * compteur — partagés par l'IA (alliances naturelles) ET le statecraft (missions),
+ * pour que « 2 slots max » soit un invariant GLOBAL, sans fuite par une autre voie. */
+#define     DIPLO_ALLY_SLOTS  2
+int         diplo_ally_count  (const DiploState *d, int a);
 /* Peut-on déclarer la guerre ? false pendant la TRÊVE (espace l'enchaînement). */
 bool        diplo_can_declare (const DiploState *d, int a, int b);
 float       diplo_truce_days  (const DiploState *d, int a, int b);   /* lecture (UI/IA) */

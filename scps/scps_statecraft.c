@@ -172,7 +172,9 @@ static void mission_complete(Statecraft *sc, World *w, WorldEconomy *econ,
             break;
         case DIP_ALLIANCE:
             if (diplo && sc->opinion[cid][ag->target] >= 0.f &&
-                diplo_status(diplo,cid,ag->target)!=DIPLO_WAR){
+                diplo_status(diplo,cid,ag->target)!=DIPLO_WAR &&
+                diplo_ally_count(diplo,cid)        < DIPLO_ALLY_SLOTS &&   /* §D-sat : 2 slots, */
+                diplo_ally_count(diplo,ag->target) < DIPLO_ALLY_SLOTS){    /* invariant GLOBAL */
                 diplo_form_alliance(diplo, cid, ag->target);
                 statecraft_on_accord_kept(sc, cid);     /* un pacte tenu : prestige↑ */
             } else {
