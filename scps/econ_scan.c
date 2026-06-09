@@ -30,6 +30,7 @@ int main(int argc,char**argv){
     long n_reg=0;
     long bld_count[BLD_TYPE_COUNT]={0}; double bld_level[BLD_TYPE_COUNT]={0};
     double good_sup[RES_COUNT]={0}, good_dem[RES_COUNT]={0};
+    double emp_total=0, labtight=0;   /* emploi Σ + régions où la main-d'œuvre est tendue */
 
     for (int k=0;k<nsims;k++){
         uint32_t seed=base+(uint32_t)k*101u;
@@ -44,7 +45,8 @@ int main(int argc,char**argv){
             RegionEconomy *re=&e->region[r];
             if (!re->active || !re->colonized) continue;
             n_reg++;
-            for (int i=0;i<re->n_bld;i++){ bld_count[re->bld[i].type]++; bld_level[re->bld[i].type]+=re->bld[i].level; }
+            { double emp=0; for (int i=0;i<re->n_bld;i++){ bld_count[re->bld[i].type]++; bld_level[re->bld[i].type]+=re->bld[i].level; emp+=re->bld[i].workers; }
+              emp_total+=emp; if (re->strata[CLASS_LABORER].pop>0 && emp > 0.85*re->strata[CLASS_LABORER].pop) labtight++; }
             for (int g=0;g<RES_COUNT;g++){ good_sup[g]+=re->supply[g]; good_dem[g]+=re->demand[g]; }
             for (int c=0;c<CLASS_COUNT;c++){
                 double pop=re->strata[c].pop;
@@ -67,6 +69,8 @@ int main(int argc,char**argv){
         printf("  marché : grain %.2f · étoffe %.2f · orfèvrerie %.2f · vin %.2f · outils %.2f\n",
                pg/np, pc/np, pw/np, pv/np, pt/np);
     printf("══════════════════════════════════════════════════════════════════════\n");
+    printf(" MAIN-D'ŒUVRE : emploi Σ %.0f vs pop laborer Σ %.0f (%.1f%% employée) · régions main-d'œuvre TENDUE (>85%%) : %.0f/%ld\n",
+           emp_total, pop_w[CLASS_LABORER], pop_w[CLASS_LABORER]>0?100.0*emp_total/pop_w[CLASS_LABORER]:0.0, labtight, n_reg);
     printf(" AUDIT BÂTIMENTS — branchés ? inputs consommés ? (sur %ld rég colonisées)\n", n_reg);
     printf("  %-18s %6s %9s | %-14s %9s | %-12s %9s\n","bâtiment","count","levelΣ","sortie","supplyΣ","intrant","demandΣ");
     for (int b=0;b<BLD_TYPE_COUNT;b++){
