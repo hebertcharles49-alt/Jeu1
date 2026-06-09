@@ -889,6 +889,15 @@ unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
     for (int r=0;r<RACE_COUNT;r++) if (depth[r]>=(unsigned char)PROF_PROFOND) m|=tech_race_bit((SpeciesArchetype)r);
     return m;
 }
+/* §syncrétique — rafraîchit le cercle d'un empire : cache la profondeur de contact par
+ * archétype (lue par la membrane) et loquette les nœuds de diffusion atteints. */
+void ai_sync_refresh(const World *w, const WorldEconomy *econ, TechState *ts, int cid){
+    if (!ts) return;
+    unsigned char adepth[ARCH_COUNT];
+    ai_archetype_depth(w, econ, cid, adepth);
+    for (int r=0;r<ARCH_COUNT;r++) ts->arch_depth[r]=adepth[r];
+    tech_sync_tick(ts, adepth);                                 /* §8 : diffusion par contact (auto-latch) */
+}
 
 /* Le nœud à déverrouiller : score = BUTS (la fonction répond au besoin lu) +
  * PENCHANT de race (biais vers son thème + ses signatures) − FREIN (le faustien
@@ -943,12 +952,9 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     float income = (AI_RESEARCH_RATE/365.f)*AI_RESEARCH_CADENCE
                  * tech_research_yield(ts) * (1.f + pop/AI_RESEARCH_POPREF);
     ts->research_points += income;
-    unsigned char adepth[ARCH_COUNT];
-    ai_archetype_depth(w, econ, a->cid, adepth);                /* §4-6 : profondeur de contact par archétype */
+    ai_sync_refresh(w, econ, ts, a->cid);                       /* §4-13 : cache la profondeur + loquette la diffusion */
     unsigned access=0;
-    for (int r=0;r<RACE_COUNT;r++) if (adepth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);
-    for (int r=0;r<ARCH_COUNT;r++) ts->arch_depth[r]=adepth[r];  /* §13 : cache pour la membrane (cercle prévisionnel) */
-    tech_sync_tick(ts, adepth);                                 /* §8 : diffusion par contact — auto-latch des nœuds peu profonds */
+    for (int r=0;r<RACE_COUNT;r++) if (ts->arch_depth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);
     TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
     if (pick!=TECH_COUNT){
         float cost = tech_cost(pick, pop) * ai_tech_cost_mult(ai_capital_ethos(w,econ,a->cid), tech_node(pick));

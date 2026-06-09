@@ -137,6 +137,12 @@ void   ai_research_step(AiActor *a, TechState *ts, const World *w,
 /* Masque des races présentes dans la population de l'empire (sa propre race +
  * conquises/migrées) → l'accès aux techs orphelines. Exposé pour le banc d'essai. */
 unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid);
+
+/* §syncrétique — RAFRAÎCHIT le cercle d'un empire : recalcule la profondeur de contact
+ * par archétype, la met en cache (ts->arch_depth, lu par la membrane) et loquette les
+ * nœuds de diffusion atteints. Appelée par ai_research_step ET par le visualiseur (pour
+ * que le cercle du pays affiché soit à jour à l'image, hors cadence de recherche IA). */
+void ai_sync_refresh(const World *w, const WorldEconomy *econ, TechState *ts, int cid);
 /* Population totale de l'empire (assiette de recherche & d'échelle de coût). */
 float    ai_country_population(const World *w, const WorldEconomy *econ, int cid);
 

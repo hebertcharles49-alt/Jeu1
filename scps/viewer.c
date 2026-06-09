@@ -324,6 +324,7 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
     fill_rect(ren, 0,0, win_w, win_h, (SDL_Color){0x0a,0x0e,0x16,0xff});
     if (cid<0 || cid>=w->n_countries) return;
     TechTreeReadout tr;
+    ai_sync_refresh(w, econ, &ts[cid], cid);   /* §syncrétique : cercle à jour à l'image (hors cadence IA) */
     unsigned acc = ai_race_access(w, econ, cid);
     float    pop = ai_country_population(w, econ, cid);
     tech_tree_readout(&ts[cid], acc, pop, &tr);
@@ -394,6 +395,28 @@ static void draw_tech_tree(SDL_Renderer *ren, int win_w, int win_h,
         float a=(th*120.f+60.f)*D2R + TOP, rl=GAP+4.75f*ring;
         int lx=cx+(int)(cosf(a)*rl), ly=cy+(int)(sinf(a)*rl);
         draw_text(ren,g_font_big,lx-text_w(g_font_big,tr.theme[th])/2,ly-9,tcol[th],tr.theme[th]);
+    }
+    /* ── CERCLE SYNCRÉTIQUE (§11/§12) — la diffusion par CONTACT, lue à la membrane :
+     *    par nœud, l'état d'accès (pastille colorée), la profondeur atteinte→requise, et
+     *    le CHEMIN diégétique au survol. La porte est CULTURELLE, plus raciale. ── */
+    { int pw=372, px=18, py=58, rowh=30, ph=30 + SYNC_COUNT*rowh + 6;
+      panel_bg(ren, px,py, pw,ph);
+      draw_text(ren,g_font, px+12, py+8, COL_COPPER, "Cercle syncrétique — diffusion par contact");
+      for (int i=0;i<SYNC_COUNT;i++){
+          SyncReadout sr = sync_node_readout(&ts[cid], i);
+          int ry = py+30 + i*rowh;
+          SDL_Color bc = band_good((int)sr.acces, 4, true);
+          fill_rect(ren, px+12, ry+4, 9,9, bc);                         /* pastille d'accès */
+          draw_text(ren,g_font_small, px+30, ry,
+                    (sr.acces==AC_ACQUIS)?COL_PARCH:COL_DIM, sr.nom);
+          char sub[180];
+          snprintf(sub,sizeof sub,"%s · %s → %s",
+                   label_acces(sr.acces), label_profondeur(sr.atteinte), label_profondeur(sr.requise));
+          if (g_font_small) draw_text(ren,g_font_small, px+30, ry+13, COL_DIM, sub);
+          zone_add((SDL_Rect){px+8, ry-2, pw-16, rowh}, sr.chemin);     /* survol : le chemin diégétique */
+      }
+      draw_text(ren,g_font_small, px+12, py+ph-2, COL_DIM,
+                "acquis = loqué (permanent) · survole une ligne pour le chemin");
     }
     char hdr[220];
     snprintf(hdr,sizeof hdr,"ARBRE DE TECH — %s   ·   %d points de recherche   ·   SURVOLE un nœud pour son effet & son coût",
