@@ -11,6 +11,7 @@
 #include "scps_species.h"   /* species_name */
 #include "scps_culture.h"   /* ethos_name (via culture nom) */
 #include "scps_factions.h"  /* §5 : la tension de coup d'une faction forte aliénée */
+#include "scps_labor.h"     /* capitale_* : la capacité de service (logement/services) de la région */
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -42,6 +43,10 @@
 #define OVEREXT_FREE    6       /* régions « gratuites » : un empire compact tient bien */
 #define OVEREXT_PER_REG 0.035f  /* déficit ajouté PAR région au-delà du seuil */
 #define OVEREXT_CAP     0.45f   /* plafond du grief de surextension */
+
+/* CAPITALE sous-équipée : poids du grief de mal-logement/mal-service dans le déficit
+ * (surface d'équilibrage). Ne mord que les régions surpeuplées vs leur capacité bâtie. */
+#define K_CAP_UNREST    0.30f
 /* ---- Revanchisme : subir la conquête arme le séparatisme --------------- */
 #define REVANCHISM_DAYS  (10*365)  /* la blessure de la conquête (≈10 ans) */
 #define REVANCHISM_MOBIL  1.45f    /* la rage gonfle les rangs rebelles */
@@ -273,6 +278,22 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
             float overext = clampf((float)(owned[o]-OVEREXT_FREE)*OVEREXT_PER_REG, 0.f, OVEREXT_CAP);
             overext *= (0.30f + 0.70f*(1.f - clampf(min_integ,0.f,1.f)));   /* biais marches étrangères */
             worst = clampf(worst + overext, 0.f, 1.f);
+        }
+        /* CAPITALE SOUS-ÉQUIPÉE : la pop qui dépasse la capacité de SERVICE de la
+         * région (capitale tier·1000 + édifices civiques) gronde — mal-logés/mal-servis.
+         * Une région qui croît SANS bâtir ses institutions devient agitée. (C3 rétrécira
+         * la part capitale + K par (1−rot) : une élite capturée délivre moins.) */
+        {
+            long rpop = (long)(re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                             + re->strata[CLASS_ELITE].pop);
+            if (rpop>0){
+                int  ctier = capitale_max_tier(rpop);
+                long nob   = capitale_admin_pop(ctier); if (nob>rpop) nob=rpop;
+                float serv = (float)capitale_housing(ctier, nob)                       /* la capitale */
+                           + (re->build.K_inst + re->build.savoir + re->build.faith)*700.f; /* les autres bâtiments */
+                float unserved = (float)rpop - serv;
+                if (unserved>0.f) worst = clampf(worst + (unserved/(float)rpop)*K_CAP_UNREST, 0.f, 1.f);
+            }
         }
         /* le séparatisme post-conquête désespère la province « quoi qu'il arrive » */
         if (worst>=SCAN_DEFICIT || revanchism_factor(rs,r)>0.f) rs->desperation_days[r] += (float)days;

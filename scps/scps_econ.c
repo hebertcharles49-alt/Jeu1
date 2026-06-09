@@ -8,6 +8,7 @@
 #include "scps_econ.h"
 #include "scps_world.h"   /* resource_name(), subsistance_for_biome() */
 #include "scps_culture.h" /* culture_content_distance() pour la novelty diaspora */
+#include "scps_labor.h"   /* capitale_* : la productivité de la capitale booste la prod réelle */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -564,6 +565,15 @@ void econ_tick(WorldEconomy *e, float dt) {
         float tools_pc  = re->stock[RES_TOOLS] / (labor_avail*0.1f + 1.f);
         float prod_mult = 1.f + 0.30f*(1.f - 1.f/(1.f + tools_pc));
         re->stock[RES_TOOLS] *= 0.97f;   /* usure */
+        /* CAPITALE (scps_labor) : sa PRODUCTIVITÉ (+5 %/tier servi) booste la vraie
+         * production, au-delà des outils. Les emplois nobles (gatés par la pop) la
+         * délivrent — le palier que la région débloque. (C3 la frappera de (1−rot).) */
+        {
+            long rpop = (long)(labor_avail + re->strata[CLASS_BOURGEOIS].pop + re->strata[CLASS_ELITE].pop);
+            int  ctier = capitale_max_tier(rpop);
+            long nob   = capitale_admin_pop(ctier); if (nob>rpop) nob=rpop;
+            prod_mult *= capitale_prodmult(ctier, nob);
+        }
 
         /* ---- 1. EXTRACTION des matières premières ----------------------
          * Emploie des laborers ; chaque unité extraite demande 0.5 de

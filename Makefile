@@ -86,21 +86,21 @@ run_scps: scps
 
 # ---- Générateur d'images headless (sans SDL) -----------------------------
 SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
+                  $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                   $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_dump.o
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
 # ---- Captures de carte headless : N graines → PPM (vue terrain/politique) -
 MAPSHOT_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
+                $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                 $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_mapshot.o
 mapshot: $(MAPSHOT_OBJS)
 	$(CC) $(MAPSHOT_OBJS) -o $@ -lm
 
 # ---- Diagnostic éco headless : satisfaction par strate & prix (réglage TAX_RATE) -
 ECON_SCAN_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_scan.o
 econ_scan: $(ECON_SCAN_OBJS)
 	$(CC) $(ECON_SCAN_OBJS) -o $@ -lm
@@ -113,25 +113,25 @@ scps_batch: $(SCPS_BATCH_OBJS)
 
 # ---- Banc d'essai économie + commerce ------------------------------------
 ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_demo.o
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
 ECON_TAX_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_tax_demo.o
 econ_tax_demo: $(ECON_TAX_DEMO_OBJS)
 	$(CC) $(ECON_TAX_DEMO_OBJS) -o $@ -lm
 
 ECON_CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_culture_demo.o
 econ_culture_demo: $(ECON_CULTURE_DEMO_OBJS)
 	$(CC) $(ECON_CULTURE_DEMO_OBJS) -o $@ -lm
 
 ECON_ARCANE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                   $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                   $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -140,7 +140,7 @@ econ_arcane_demo: $(ECON_ARCANE_DEMO_OBJS)
 	$(CC) $(ECON_ARCANE_DEMO_OBJS) -o $@ -lm
 
 ECON_PRODUCTION_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                  $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_production_demo.o
 econ_production_demo: $(ECON_PRODUCTION_DEMO_OBJS)
 	$(CC) $(ECON_PRODUCTION_DEMO_OBJS) -o $@ -lm
@@ -157,7 +157,7 @@ culture_demo: $(CULTURE_DEMO_OBJS)
 
 # ---- Banc d'essai du générateur de prospérité PE/SI ----------------------
 PROSPERITY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                        $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                        $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                         $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                         $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                         $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_prosperity_demo.o
@@ -166,7 +166,7 @@ prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 
 # ---- Couche d'agency : actions, temps, bâtiments-leviers (§1-§2) ----------
 AGENCY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -177,7 +177,7 @@ agency_demo: $(AGENCY_DEMO_OBJS)
 
 # ---- Diplomatie & guerre (§5-§6) -----------------------------------------
 DIPLO_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -187,7 +187,7 @@ diplo_demo: $(DIPLO_DEMO_OBJS)
 	$(CC) $(DIPLO_DEMO_OBJS) -o $@ -lm
 
 FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -201,7 +201,7 @@ factions_demo: $(FACTIONS_DEMO_OBJS)
 	$(CC) $(FACTIONS_DEMO_OBJS) -o $@ -lm
 
 MISSIONS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -211,7 +211,7 @@ missions_demo: $(MISSIONS_DEMO_OBJS)
 	$(CC) $(MISSIONS_DEMO_OBJS) -o $@ -lm
 
 INTERTRADE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -248,7 +248,7 @@ campaign_demo: $(CAMPAIGN_DEMO_OBJS)
 
 # ---- Routes commerciales : la cloche f(D̄) faite action (§7) --------------
 ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_trade.o \
+                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
@@ -259,7 +259,7 @@ routes_demo: $(ROUTES_DEMO_OBJS)
 
 # ---- Boucle de décision IA : un lecteur de coordonnées qui choisit des leviers (§13.1)
 # Aucune dépendance membrane (l'IA lit les coordonnées du moteur, pas les mots).
-AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                 $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                 $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                 $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -287,7 +287,7 @@ chronicle: $(CHRONICLE_OBJS)
 # ---- Métriques de jeu (0-100), Influence, Diplomates & Révolte -----------
 # La membrane projette les coordonnées en nombres+mots ; le statecraft est SIM
 # (il lit des flottants), son API ne rend que des entiers de jeu.
-STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                         $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                         $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                         $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -300,7 +300,7 @@ statecraft_demo: $(STATECRAFT_DEMO_OBJS)
 # ---- Évènements, chocs géo & âges : la dynamique du monde -----------------
 # Chocs ancrés dans la géo (failles/rivières/pluie/routes), évènements par la
 # fiche, âges déclenchés par l'état du monde. Effets = coordonnées/métriques.
-EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -313,7 +313,7 @@ events_demo: $(EVENTS_DEMO_OBJS)
 
 # ---- Âges structurels : Lumières, Soulèvements, l'Ordre de Fer ------------
 # Ils poussent les ENTRÉES du moteur d'ordre ; le verdict §2.4 fait le reste.
-STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -385,7 +385,7 @@ revolt_demo: $(REVOLT_DEMO_OBJS)
 # ---- Le tissu social : brasserie + boisson culturelle + foi (Temple→L) -----
 # Première passe du catalogue SOCIAL : une chaîne (grain→bière), la variante
 # culturelle du palier moral (bière/vin), et la foi qui soutient la légitimité.
-SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
+SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
