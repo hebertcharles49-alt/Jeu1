@@ -54,6 +54,10 @@
 #define AI_TECH_PENCHANT    2.0f  /* biais vers le thème de SA race (penchant, pas « si ») */
 #define AI_TECH_SIGNATURE   1.5f  /* prime à une signature accessible (la sienne / greffée) */
 #define AI_TECH_FAUSTIAN    2.5f  /* tolérance faustienne = w_faustian − frein (sinon on évite) */
+#define AI_FOREUSE_HUNGER   5.0f  /* §4 : la FAMINE DE FER rend la foreuse arcanique irrésistible (surpasse le frein faustien) */
+#define AI_RELOC_SEED      300.f  /* §reloc : ensemencement type (~EXTRACT_POP_REF) — pousse la cible d'une bande d'intensité */
+#define AI_RELOC_FLOOR     100.f  /* pop minimale pour qualifier source/cible (jamais peupler le vide) */
+#define AI_RELOC_COOLDOWN  1300   /* ~3.5 ans entre deux ensemencements (ENSEMENCER, pas pomper) */
 #define AI_FAITH_FAUSTIAN   3.0f  /* §4 : l'orthodoxie INTERDIT le faustien, le culte le SACRALISE */
 
 /* ---- Utilitaires ------------------------------------------------------ */
@@ -157,6 +161,7 @@ void ai_actor_init(AiActor *a, const World *w, const WorldEconomy *econ,
     a->next_econ_day     = (int)(frand(&a->rng) * AI_ECON_CADENCE);
     a->next_strat_day    = (int)(frand(&a->rng) * AI_STRAT_CADENCE);
     a->next_research_day = (int)(frand(&a->rng) * AI_RESEARCH_CADENCE);
+    a->next_reloc_day    = (int)(frand(&a->rng) * AI_RELOC_COOLDOWN);   /* §reloc : décalé, puis cooldown */
 }
 
 /* ===================================================================== */
@@ -445,6 +450,61 @@ static EthosFaction ai_lever_for_edifice(Edifice e){
         case EDI_COMPTOIR: case EDI_BANQUE:                               return FAC_MARCHAND;
         default:                                                          return FAC_LEGISTE;  /* Tribunal/Académie/Bibliothèque… */
     }
+}
+
+/* §reloc — l'IA PEUPLE sa province-ressource SOUS-EXPLOITÉE pour combler une pénurie.
+ * Réveille l'actionneur econ_relocate_pop (jamais appelé) : on déplace du bras d'un RÉSERVOIR
+ * (la province la plus peuplée) vers une province qu'on POSSÈDE, qui porte un raw dont l'empire
+ * est COURT (demande > offre+stock) mais qu'il sous-extrait faute de bras (grande MARGE
+ * d'intensité). Ensemencement MESURÉ, pondéré par l'ÉTHOS (la coercition coûte du H, §5) : le
+ * martial déporte volontiers vers ses mines, le marchand/pacifiste répugne et reste court.
+ * Pour l'empire qui A la terre de fer mais ne la peuple pas, c'est l'issue ; le marché tient ensuite (§3). */
+static void ai_relocate_turn(AiActor *a, WorldEconomy *econ, const AiView *v, int day){
+    (void)v;
+    if (day < a->next_reloc_day) return;
+    /* VOLONTÉ ∝ éthos (via les poids effectifs) : conquête haute → déporte ; commerce haut → répugne. */
+    float w_reloc = 0.20f + 0.65f*a->w_expand - 0.45f*a->w_trade + 0.20f*a->w_build;
+    if (w_reloc < 0.15f) return;                          /* consentuel : reste court, commerce d'abord */
+    /* Agrégats par ressource sur les régions POSSÉDÉES (offre/demande/stock) + le RÉSERVOIR (la
+     * plus peuplée). NB : le bon signal n'est PAS chain_gap (= AUCUN raw du tout, donc rien à
+     * peupler) mais « j'ai la TERRE du raw mais le SOUS-EXTRAIS » : demande > offre+stock ALORS
+     * qu'une de mes provinces porte ce raw, sous-peuplée. C'est elle, la montagne de fer à moitié vide. */
+    static float agg_s[RES_COUNT], agg_d[RES_COUNT], agg_k[RES_COUNT];
+    for (int g=0;g<RES_COUNT;g++){ agg_s[g]=agg_d[g]=agg_k[g]=0.f; }
+    int src=-1; float src_pop=0.f;
+    for (int r=0;r<econ->n_regions;r++){
+        RegionEconomy *re=&econ->region[r];
+        if (re->owner!=a->cid || !re->colonized) continue;
+        for (int g=1;g<RES_COUNT;g++){ agg_s[g]+=re->supply[g]; agg_d[g]+=re->demand[g]; agg_k[g]+=re->stock[g]; }
+        float lab=re->strata[CLASS_LABORER].pop;
+        if (lab>src_pop){ src_pop=lab; src=r; }            /* réservoir = la plus peuplée */
+    }
+    if (src<0 || src_pop < 2.0f*AI_RELOC_FLOOR) return;   /* pas de réservoir → on ne vide pas un hameau */
+    /* CIBLE : province possédée portant un raw dont l'empire est COURT, la plus SOUS-PEUPLÉE
+     * (marge d'intensité), habitable. score = manque × marge × richesse du gisement. */
+    int tgt=-1; float best=0.f;
+    for (int r=0;r<econ->n_regions;r++){
+        RegionEconomy *re=&econ->region[r];
+        if (re->owner!=a->cid || !re->colonized || re->impassable || r==src) continue;
+        if (re->habitability < 0.20f) continue;            /* jamais l'infranchissable/quasi-mort */
+        float lab=re->strata[CLASS_LABORER].pop;
+        if (lab > 2.0f*AI_RELOC_SEED) continue;            /* déjà bien peuplée → pas de marge */
+        float margin = (AI_RELOC_SEED - lab)/AI_RELOC_SEED; if (margin<0.f) margin=0.f;
+        for (int g=1;g<RES_COUNT;g++){
+            if (re->raw_cap[g] <= 0.f) continue;
+            float shortfall = agg_d[g] - (agg_s[g]+agg_k[g]);
+            if (shortfall <= 0.5f) continue;               /* l'empire n'est pas court de ce raw */
+            float score = shortfall * (0.4f+margin) * re->raw_cap[g];
+            if (score > best){ best=score; tgt=r; }
+        }
+    }
+    if (tgt<0) return;                                     /* aucune province-ressource sous-exploitée à amorcer */
+    if (frand(&a->rng) > w_reloc) return;                  /* la volonté n'emporte pas ce tour-ci */
+    float seed = fminf(0.25f*src_pop, AI_RELOC_SEED);      /* ensemencement mesuré (≤ une bande) */
+    if (seed < AI_RELOC_FLOOR) return;
+    econ_relocate_pop(econ, src, tgt, seed);              /* monte la coercition à la source (§5) */
+    a->stats.relocations++;
+    a->next_reloc_day = day + AI_RELOC_COOLDOWN;          /* ensemencer, pas pomper (§3) */
 }
 
 /* Économie : commercer OU bâtir (le frein réoriente l'énergie vers le K). */
@@ -932,6 +992,8 @@ static TechId ai_pick_tech(const AiActor *a, const TechState *ts, const World *w
             float religious = (faith_stance - 0.5f)*2.f;   /* −1 orthodoxe (sacrilège) … +1 culte */
             score += AI_TECH_FAUSTIAN*(a->w_faustian - brake) - 0.3f*n->charge + AI_FAITH_FAUSTIAN*religious;
         }
+        if (id==TECH_FOREUSE && v.chain_gap==RES_IRON)      /* §4 COUPLAGE : l'empire affamé de fer COURT à la foreuse */
+            score += AI_FOREUSE_HUNGER;
         score -= 0.002f*cost;      /* à score égal : le plus proche (le moins cher) d'abord */
         if (score>bestscore){ bestscore=score; best=id; }
     }
@@ -956,6 +1018,12 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     unsigned access=0;
     for (int r=0;r<RACE_COUNT;r++) if (ts->arch_depth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);
     TechId pick = ai_pick_tech(a, ts, w, econ, wp, access, pop);
+    /* §4 COUPLAGE : une fois l'Industrie en poche, l'empire AFFAMÉ DE FER ÉPARGNE pour la
+     * foreuse (chère, faustienne) plutôt que d'éparpiller — l'issue tentante précipite sa Brèche. */
+    if (pick!=TECH_FOREUSE && tech_can_research(ts, TECH_FOREUSE, access)){
+        AiView vg = ai_observe(wp, w, econ, a->cid);
+        if (vg.chain_gap==RES_IRON) return;        /* on garde les points : la foreuse d'abord */
+    }
     if (pick!=TECH_COUNT){
         float cost = tech_cost(pick, pop) * ai_tech_cost_mult(ai_capital_ethos(w,econ,a->cid), tech_node(pick));
         if (ts->research_points >= cost && tech_research(ts, pick, access)){
@@ -985,6 +1053,7 @@ void ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
 
     if (econ_due){
         ai_econ_turn(a, econ, &v, ag, rn, brake);
+        ai_relocate_turn(a, econ, &v, day);   /* §reloc : peupler sa province-ressource pour combler une pénurie */
         a->next_econ_day = day + AI_ECON_CADENCE/2 + (int)(frand(&a->rng)*AI_ECON_CADENCE);
     }
     if (strat_due){

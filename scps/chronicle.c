@@ -402,6 +402,7 @@ int main(int argc, char **argv){
     long tot_techs=0, tot_faustian=0, tot_campaign=0, tot_alliances=0;   /* §D : pactes actifs */
     long tot_sync=0, tot_sync_distinct=0;   /* §syncrétique : nœuds à porte culturelle + dispersion */
     long tot_tree_pct=0; int tot_tree_sims=0;   /* §A : fraction d'arbre déverrouillée (le coût force les choix) */
+    long tot_reloc=0;   /* §reloc : ensemencements de pop pour combler une pénurie */
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -599,10 +600,10 @@ int main(int argc, char **argv){
         }
 
         /* RECHERCHE : l'arbre VIT — nœuds déverrouillés (dont des bouts faustiens). */
-        { int sim_techs=0, sim_faust=0;
-          for (int c=0;c<w->n_countries;c++) if (s.ai_on[c]){ sim_techs+=s.ai[c].stats.techs; sim_faust+=s.ai[c].stats.techs_faustian; }
-          printf("              recherche : %d nœuds déverrouillés (dont %d faustiens)\n", sim_techs, sim_faust);
-          tot_techs += sim_techs; tot_faustian += sim_faust; }
+        { int sim_techs=0, sim_faust=0, sim_reloc=0;
+          for (int c=0;c<w->n_countries;c++) if (s.ai_on[c]){ sim_techs+=s.ai[c].stats.techs; sim_faust+=s.ai[c].stats.techs_faustian; sim_reloc+=s.ai[c].stats.relocations; }
+          printf("              recherche : %d nœuds déverrouillés (dont %d faustiens) · %d relocalisation(s) pour combler une pénurie (peupler sa province-ressource)\n", sim_techs, sim_faust, sim_reloc);
+          tot_techs += sim_techs; tot_faustian += sim_faust; tot_reloc += sim_reloc; }
 
         /* ARBRE (§A) : fraction de l'arbre déverrouillée PAR EMPIRE (cible < 100 % → l'empire
          * doit CHOISIR) + thème DOMINANT (deux empires aux choix différents → divergence). */
@@ -679,6 +680,8 @@ int main(int argc, char **argv){
     printf("   nœuds de tech débloqués ..... %ld   (moy. %.1f/sim ; %ld faustiens)\n", tot_techs, (double)tot_techs/nsims, tot_faustian);
     printf("   arbre déverrouillé / empire . %ld%%   (le coût force les choix : cible < 100 %% → spécialisation)\n",
            tot_tree_sims>0? tot_tree_pct/tot_tree_sims : 0);
+    printf("   relocalisations (pénurie) ... %ld   (moy. %.1f/sim ; l'IA peuple ses provinces-ressource sous-exploitées)\n",
+           tot_reloc, (double)tot_reloc/nsims);
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);

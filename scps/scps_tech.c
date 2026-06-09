@@ -76,6 +76,10 @@ static const TechNode NODES[TECH_COUNT] = {
     0,0,0, 3.0f,0, 0, 1.0f, 0, 0.30f, 1.0f, false },
 [TECH_INDUSTRIE] = { "Industrie de masse","Complexe industriel", THM_FORGE,FN_PRODUCTION,4, TECH_MANUFACTURE, false,false,UNIV,
     0,0,0, 4.0f,2.0f, 0, 1.5f, 0, 1.00f, 3.0f, false },
+/* §B2 — FOREUSE ARCANIQUE (faustien) : transmute l'essence en FER en masse → l'issue à la
+ * famine de matière pour l'empire enclavé/affamé — mais forte CHARGE + flux vers la Brèche. */
+[TECH_FOREUSE] = { "Foreuse arcanique","Foreuse arcanique", THM_FORGE,FN_PRODUCTION,4, TECH_INDUSTRIE, true,false,UNIV,
+    0,0,0, 3.0f,0, 0, 0, 1.0f, 1.50f, 4.0f, false },
 /* ---- FORGE · ARMÉE (armes — faustien) -------------------------------- */
 [TECH_ARMURERIE] = { "Armurerie","Armurerie", THM_FORGE,FN_ARMEE,1, TECH_COLLECTE_BOIS, false,false,UNIV,
     0,0,0, 0,1.5f, 0, 0, 0, 0, 0.3f, false },

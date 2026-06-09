@@ -50,6 +50,7 @@ typedef enum {
     TECH_COLLECTE_BOIS,      /* ◎ base */
     TECH_COLLECTE_ARGILE,    /* ◎ base */
     TECH_FONDERIE, TECH_OUTILLAGE, TECH_MANUFACTURE, TECH_INDUSTRIE,
+    TECH_FOREUSE,            /* §B2 FAUSTIEN : foreuse arcanique (essence → fer en masse) */
     /* FORGE · Armée (armes — faustien) */
     TECH_ARMURERIE, TECH_POUDRIERE, TECH_FORGE_RUNES, TECH_OEUVRE_NOIRE,
     /* FORGE · Renforcement (durabilité / fortification) */

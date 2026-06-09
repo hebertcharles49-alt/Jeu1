@@ -67,6 +67,7 @@ typedef struct {
     int consolidations;  /* paix faites sous le frein (digestion) */
     int techs;           /* technologies recherchées (l'arbre vivant) */
     int techs_faustian;  /* dont des bouts FAUSTIENS (la pente arcanique) */
+    int relocations;     /* ensemencements de pop pour combler une pénurie (peupler sa province-ressource) */
 } AiStats;
 
 /* ---- L'ACTEUR : une personnalité (poids de la fiche) + un rythme ----------- */
@@ -93,6 +94,7 @@ typedef struct {
     int      next_econ_day;
     int      next_strat_day;
     int      next_research_day;  /* cadence de RECHERCHE (l'arbre de tech) */
+    int      next_reloc_day;     /* §reloc : prochaine relocalisation autorisée (ensemencer, pas pomper) */
     int      peace_lock_until;   /* après une consolidation : pas de guerre avant */
     bool     can_enslave;        /* §4c : l'Économie servile (TECH_ESCLAVAGE) débloquée ? */
 

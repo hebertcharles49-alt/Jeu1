@@ -70,6 +70,7 @@ typedef enum {
     BLD_APOTHECARY,    /* simples → remèdes (apothicaire) → santé/confort */
     BLD_TUNIC,         /* étoffe → TUNIQUE (1:1) — vêtement fini des journaliers (chaîne séparée du luxe) */
     BLD_CHARCOAL,      /* 2 bois → 1 charbon (charbonnière, tech de base) — libère la fonderie de la rareté du charbon minier */
+    BLD_FOREUSE,       /* §B2 FAUSTIEN : essence → GROS rendement de FER (foreuse arcanique) — l'issue à la famine de matière, payée en charge (tech) */
     BLD_TYPE_COUNT
 } BuildingType;
 
@@ -178,6 +179,7 @@ typedef struct {
     float      treasury;             /* taxe captée par les élites (cumul) */
     float      tech;                 /* recherche cumulée */
     float      tech_prod;            /* §B1 : multiplicateur de prod issu des techs de PRODUCTION du pays (1 = aucun) */
+    bool       tech_foreuse;         /* §B2 : le pays a-t-il débloqué la foreuse arcanique ? (gate de BLD_FOREUSE) */
     float      gdp;                  /* valeur produite au dernier tick */
     float      satisfaction;         /* satisfaction générale [0..1] */
     float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */

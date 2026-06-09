@@ -111,6 +111,9 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
      * avec le fer (gate de la fonderie) ; la charbonnière le PRODUIT du bois (abondant)
      * → la fonderie tourne partout où il y a du fer, et la chaîne métal/outils respire. */
     [BLD_CHARCOAL]  = { RES_WOOD,  2.0f, RES_NONE, 0.f, RES_COAL,  1.0f, 0.8f },
+    /* §B2 FOREUSE ARCANIQUE : transmute l'ESSENCE en FER en masse (0.5 essence → 8 fer).
+     * L'issue faustienne à la famine de fer ; gatée par la tech (charge) + l'essence (rare). */
+    [BLD_FOREUSE]   = { RES_ESSENCE, 0.5f, RES_NONE, 0.f, RES_IRON, 8.0f, 1.4f },
     /* Chaînes militaires de base + santé (compléter le roster de production). */
     [BLD_ARMORY]    = { RES_IRON,      1.2f, RES_NONE, 0.f, RES_ARMS,      1.0f, 1.0f },
     [BLD_POWDERMILL]= { RES_SALTPETER, 1.0f, RES_COAL, 0.8f, RES_GUNPOWDER, 1.0f, 1.0f },
@@ -294,7 +297,7 @@ const char *building_name(BuildingType b) {
         [BLD_WEAVER_LUX]="Atelier d'étoffe précieuse",[BLD_MAGE_WORKSHOP]="Atelier de mage",
         [BLD_CELESTIAL_FORGE]="Forge céleste",[BLD_FOUNDRY]="Haut-fourneau",[BLD_TOOLWORKS]="Atelier d'outillage",
         [BLD_ARMORY]="Armurerie",[BLD_POWDERMILL]="Poudrière",[BLD_APOTHECARY]="Apothicaire",
-        [BLD_TUNIC]="Atelier de tunique",[BLD_CHARCOAL]="Charbonnière",
+        [BLD_TUNIC]="Atelier de tunique",[BLD_CHARCOAL]="Charbonnière",[BLD_FOREUSE]="Foreuse arcanique",
     };
     return (b>=0&&b<BLD_TYPE_COUNT&&N[b])?N[b]:"?";
 }
@@ -680,6 +683,7 @@ static void econ_build_tick(WorldEconomy *e){
         for (int b=0;b<BLD_TYPE_COUNT;b++){
             const Recipe *rc=&RECIPE[b];
             if (rc->out<=RES_NONE || rc->out>=RES_COUNT || BASE_PRICE[rc->out]<=0.f) continue;
+            if (b==BLD_FOREUSE && !re->tech_foreuse) continue;                   /* §B2 : foreuse gatée par la tech faustienne */
             if (re->price[rc->out] < BASE_PRICE[rc->out]*NF_SHORTAGE) continue;   /* output pas en pénurie ICI */
             bool feed1 = (rc->in1==RES_NONE)
                       || avail[rc->in1] > NF_REALM_MIN || re->stock[rc->in1] >= NF_STOCK_MIN
@@ -704,6 +708,7 @@ void econ_apply_country_tech(WorldEconomy *e, const TechState *ts, int n_ts){
         re->tech_prod = (ts && o>=0 && o<n_ts)
                       ? 1.f + tech_prod_bonus(&ts[o]) + tech_eff_bonus(&ts[o])
                       : 1.f;
+        re->tech_foreuse = (ts && o>=0 && o<n_ts) ? ts[o].unlocked[TECH_FOREUSE] : false;  /* §B2 : gate de BLD_FOREUSE */
     }
 }
 
