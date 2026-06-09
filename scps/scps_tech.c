@@ -17,9 +17,15 @@
 #define CRISIS_SCALE    12.0f   /* échelle de la courbe proximité = f(charge) */
 #define SHOCK_MAGIE      0.50f   /* l'arcane gonfle l'ampleur du choc */
 #define DEREAL_P_COEF    0.10f   /* terme (P/10)·C */
-/* COÛT ∝ étendue ∝ population (§5) */
-#define EXTENT_W         0.6f    /* poids de l'étendue sur le coût (le seul levier) */
-#define EXTENT_POP_BASE  5000.f  /* population de référence (1 « cran » d'étendue) */
+/* COÛT ∝ POP TOTALE (§A — « le coût force les choix »). Le revenu de recherche monte
+ * DÉJÀ avec la pop (plus de monde = plus de chercheurs) ; en scalant le COÛT sur la pop
+ * AUSSI, le rapport revenu/coût devient ~indépendant de la TAILLE → l'arbitrage de branche
+ * est une affaire de STRATÉGIE, pas de volume (uniforme du nain au géant). COST_SCALE relève
+ * l'ensemble pour qu'un empire ne s'offre que ~40-60 % de l'arbre sur 200 ans → il se SPÉCIALISE
+ * (magie OU industrie OU négoce, pas tout). La spine Savoir·Production reste l'accélérateur. */
+#define COST_SCALE       4.8f    /* relève le coût : vise une fraction d'arbre < 100 % (surface d'équilibrage) */
+#define POP_REF          5000.f  /* pop de référence : coût = BASE × COST_SCALE × pop/POP_REF */
+#define COST_POP_FLOOR   0.5f    /* plancher pop : un tout petit empire paie au moins BASE×SCALE×0.5 (jamais ~gratuit) */
 static const float BASE_COST[6] = { 0.f, 40.f, 90.f, 160.f, 260.f, 400.f }; /* par tier (rayon) */
 
 /* ====================================================================== */
@@ -276,8 +282,9 @@ float tech_cost(TechId id, float population){
     const TechNode *n=tech_node(id);
     if (!n) return 0.f;
     int t=n->tier; if (t<0) t=0; if (t>5) t=5;
-    float extent = (population>0.f?population:0.f) / EXTENT_POP_BASE;   /* l'étendue ∝ pop */
-    return BASE_COST[t] * (1.f + EXTENT_W*extent);
+    float popf = (population>0.f?population:0.f)/POP_REF;   /* coût ∝ pop totale (size-neutral vs revenu) */
+    if (popf<COST_POP_FLOOR) popf=COST_POP_FLOOR;
+    return BASE_COST[t] * COST_SCALE * popf;
 }
 
 /* ---- La Brèche (verrou SCPS, inchangé) -------------------------------- */

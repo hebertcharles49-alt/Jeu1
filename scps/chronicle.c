@@ -400,6 +400,7 @@ int main(int argc, char **argv){
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
     long tot_techs=0, tot_faustian=0, tot_campaign=0, tot_alliances=0;   /* §D : pactes actifs */
     long tot_sync=0, tot_sync_distinct=0;   /* §syncrétique : nœuds à porte culturelle + dispersion */
+    long tot_tree_pct=0; int tot_tree_sims=0;   /* §A : fraction d'arbre déverrouillée (le coût force les choix) */
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -602,6 +603,26 @@ int main(int argc, char **argv){
           printf("              recherche : %d nœuds déverrouillés (dont %d faustiens)\n", sim_techs, sim_faust);
           tot_techs += sim_techs; tot_faustian += sim_faust; }
 
+        /* ARBRE (§A) : fraction de l'arbre déverrouillée PAR EMPIRE (cible < 100 % → l'empire
+         * doit CHOISIR) + thème DOMINANT (deux empires aux choix différents → divergence). */
+        { int nemp=0, fmin=999, fmax=0; long fsum=0; int dom[THM_COUNT]={0};
+          for (int c=0;c<w->n_countries;c++){
+              if (!s.ai_on[c] || regions_of(s.econ,c)==0) continue;
+              int pct=(TECH_COUNT>0)?100*s.ts[c].n_unlocked/TECH_COUNT:0;
+              fsum+=pct; if(pct<fmin)fmin=pct; if(pct>fmax)fmax=pct; nemp++;
+              int th_cnt[THM_COUNT]={0};
+              for (int id=0;id<TECH_COUNT;id++) if (s.ts[c].unlocked[id] && !tech_is_base((TechId)id)){
+                  TechTheme th=tech_node((TechId)id)->theme; if(th>=0&&th<THM_COUNT) th_cnt[th]++; }
+              int best=0; for (int t=1;t<THM_COUNT;t++) if (th_cnt[t]>th_cnt[best]) best=t;
+              dom[best]++;
+          }
+          if (nemp>0){
+              printf("              arbre : %ld%% déverrouillé/empire (min %d%% · max %d%%) · spécialisation — %d Savoir · %d Forge · %d Société\n",
+                     fsum/nemp, fmin, fmax, dom[THM_SAVOIR], dom[THM_FORGE], dom[THM_SOCIETE]);
+              tot_tree_pct += fsum/nemp; tot_tree_sims++;
+          }
+        }
+
         /* SYNCRÉTISME (§tech culturelle) : les nœuds à PORTE D'ARCHÉTYPE (ex-signatures de
          * race, désormais ouvertes par la CULTURE gouvernée — soi ou contact) — combien
          * acquis, et la DISPERSION entre empires : deux contacts différents → arbres différents. */
@@ -655,6 +676,8 @@ int main(int argc, char **argv){
     printf("   pays absorbés (morts) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
     printf("   pays émergés (sécession) .... %ld   (moy. %.1f/sim ; la carte politique respire)\n", tot_emerged, (double)tot_emerged/nsims);
     printf("   nœuds de tech débloqués ..... %ld   (moy. %.1f/sim ; %ld faustiens)\n", tot_techs, (double)tot_techs/nsims, tot_faustian);
+    printf("   arbre déverrouillé / empire . %ld%%   (le coût force les choix : cible < 100 %% → spécialisation)\n",
+           tot_tree_sims>0? tot_tree_pct/tot_tree_sims : 0);
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);
