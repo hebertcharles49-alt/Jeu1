@@ -110,9 +110,14 @@ int main(int argc, char **argv){
     econ_tick(e,1.f);
     prosperity_tick(wp,w,e,NULL,ts,wl);
     float dereal_burn = wp->country[cid].dereal;
-    /* État apaisé : on coupe le nœud (plus de cristal → plus de combustion). */
+    /* État apaisé : on coupe le nœud ET on VIDE le cristal DÉJÀ extrait — sinon
+     * l'atelier brûle les réserves accumulées aux sections 2-4 (arcane_charge se
+     * RECHARGE depuis le STOCK, pas seulement l'extraction du tick), la charge ne
+     * retombe pas et la déréalisation reste identique. Sans nœud NI stock, la
+     * combustion cesse vraiment → charge→0 → le flux faustien reflue. */
     e->region[rid].raw_cap[RES_ARCANE_CRYSTAL]=0.f;
-    for (int t=0;t<2;t++) econ_tick(e,1.f);   /* le stock de cristal s'épuise → charge=0 */
+    e->region[rid].stock[RES_ARCANE_CRYSTAL]=0.f;
+    for (int t=0;t<4;t++) econ_tick(e,1.f);   /* la charge retombe à 0 */
     prosperity_tick(wp,w,e,NULL,ts,wl);
     float dereal_quiet = wp->country[cid].dereal;
     printf("   déréalisation du pays : EN BRÛLANT %.2f vs APAISÉ %.2f\n", dereal_burn, dereal_quiet);

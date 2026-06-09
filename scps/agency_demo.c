@@ -176,7 +176,11 @@ int main(int argc, char **argv){
     printf("\n── §1. Coût des bâtiments : acheté au marché en or, ∝ tier ──\n");
     {
         RegionEconomy *re=&s.econ->region[s.cap_reg];
-        for (int r=0;r<RES_COUNT;r++) if (re->price[r] < 1.0f) re->price[r]=1.0f;  /* marché doté */
+        /* Marché de RÉFÉRENCE uniforme (prix=1 partout) : on teste ici que le coût
+         * suit le TIER (la recette : Grenier 25+18 unités vs Citadelle 100+30), PAS
+         * les oscillations du marché — sinon une conjoncture où le bois flambe et le
+         * métal s'effondre inverserait l'ordre des paliers (cf. §1 « coût = recette »). */
+        for (int r=0;r<RES_COUNT;r++) re->price[r]=1.0f;
         re->stock[RES_WOOD]=1000.f; re->stock[RES_METAL]=1000.f; re->treasury=100000.f;
         float gold_grenier   = agency_build_gold(s.econ, s.cap_reg, EDI_GRENIER);
         float gold_citadelle = agency_build_gold(s.econ, s.cap_reg, EDI_CITADELLE);
