@@ -113,7 +113,7 @@ static void sim_day(Sim *s, World *w) {
             /* un pays vient de naître : on donne vie (IA) à tout sécessionniste
              * vivant pas encore piloté (plusieurs peuvent éclore le même mois). */
             for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
-                if (c==s->player || s->ai_on[c]) continue;
+                if (s->ai_on[c]) continue;
                 if (w->country[c].role==POLITY_ANTAGONIST && w->country[c].capital_prov>=0
                     && regions_of(s->econ,c)>0){
                     s->ai_on[c]=true;
@@ -165,8 +165,13 @@ static void sim_init(Sim *s, World *w) {
     for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
     s->player = 0;
     for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){ s->player=c; break; }
+    /* PAS DE JOUEUR HUMAIN dans la chronique : TOUT pays habitable est piloté par
+     * l'IA — y compris l'ex-emplacement « joueur ». Sinon ce pays restait inerte
+     * (il ne bâtissait rien, ne se défendait pas) et FAUSSAIT le balayage (un trou
+     * mort sur la carte). Le LaborEcon reste calé sur s->player (modèle isolé : il
+     * ne nourrit pas l'éco partagée, les capitales agissent via capitale_* en direct). */
     for (int c=0;c<w->n_countries;c++){
-        s->ai_on[c] = (c!=s->player && w->country[c].role!=POLITY_UNCLAIMED
+        s->ai_on[c] = (w->country[c].role!=POLITY_UNCLAIMED
                        && w->country[c].capital_prov>=0);
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
@@ -193,6 +198,20 @@ static int living_countries(const World *w, const WorldEconomy *e){
     int n=0;
     for (int c=0;c<w->n_countries;c++)
         if (w->country[c].role!=POLITY_UNCLAIMED && regions_of(e,c)>0) n++;
+    return n;
+}
+/* Pactes d'ALLIANCE actifs : paires de pays vivants liés (DIPLO_ALLIED). §D1/D2 :
+ * les blocs se nouent (menace partagée RELATIVE) et se dénouent (désuétude/trahison) —
+ * ce compteur dit si la diplomatie RESPIRE ou se fige. */
+static int active_alliances(const World *w, const WorldEconomy *e, const DiploState *dp){
+    int n=0;
+    for (int a=0;a<w->n_countries;a++){
+        if (w->country[a].role==POLITY_UNCLAIMED || regions_of(e,a)==0) continue;
+        for (int b=a+1;b<w->n_countries;b++){
+            if (w->country[b].role==POLITY_UNCLAIMED || regions_of(e,b)==0) continue;
+            if (diplo_status(dp,a,b)==DIPLO_ALLIED) n++;
+        }
+    }
     return n;
 }
 /* Pays le plus étendu (par régions). */
@@ -348,7 +367,7 @@ int main(int argc, char **argv){
     /* Agrégats sur toutes les sims */
     long tot_wars=0, tot_absorbed=0, tot_emerged=0, tot_peakrev=0, tot_ages=0, tot_conq=0;
     long tot_ignited=0, tot_seceded=0, tot_coup=0, tot_concession=0, tot_crushed=0, tot_revdead=0;
-    long tot_techs=0, tot_faustian=0, tot_campaign=0;
+    long tot_techs=0, tot_faustian=0, tot_campaign=0, tot_alliances=0;   /* §D : pactes actifs */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
 
@@ -477,6 +496,8 @@ int main(int argc, char **argv){
             printf("\n");
         }
         /* EXPANSION : provinces colonisées (vierges peuplées) vs PRISES de force. */
+        int n_alliances = active_alliances(w, s.econ, s.dp);
+        printf("              diplomatie : %d pacte(s) d'alliance actif(s)\n", n_alliances);
         printf("              expansion : %d prov colonisées · %d prov PRISES de force · armée finale %.0f\n",
                colonized_provinces(w,s.econ), conq_prov, total_army(w,s.econ));
         /* TÉLÉMÉTRIE PAR ÂGE : le marché, l'or par empire et la tech à chaque avènement. */
@@ -552,6 +573,7 @@ int main(int argc, char **argv){
                  reduced, moving);
           tot_campaign += reduced; }
 
+        tot_alliances += n_alliances;
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_emerged += emerged; tot_peakrev += peak_rev; tot_ages += nages;
         tot_conq += conq_prov;
         tot_ignited += s.rs->n_ignited; tot_seceded += s.rs->n_seceded; tot_coup += s.rs->n_coup;
@@ -564,6 +586,7 @@ int main(int argc, char **argv){
     printf(" SYNTHÈSE (%d sims × %d ans)\n", nsims, years);
     printf("   âges éveillés (total) ....... %ld   (moy. %.1f/sim)\n", tot_ages, (double)tot_ages/nsims);
     printf("   guerres déclenchées (total) . %ld   (moy. %.1f/sim)\n", tot_wars, (double)tot_wars/nsims);
+    printf("   alliances actives (fin de sim) %ld   (moy. %.1f/sim ; la diplomatie respire)\n", tot_alliances, (double)tot_alliances/nsims);
     printf("   provinces prises de force ... %ld   (moy. %.1f/sim)\n", tot_conq, (double)tot_conq/nsims);
     printf("   pays absorbés (morts) ....... %ld   (moy. %.1f/sim)\n", tot_absorbed, (double)tot_absorbed/nsims);
     printf("   pays émergés (sécession) .... %ld   (moy. %.1f/sim ; la carte politique respire)\n", tot_emerged, (double)tot_emerged/nsims);
