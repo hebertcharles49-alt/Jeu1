@@ -43,6 +43,7 @@ army_demo
 demography_demo
 demography_integ_demo
 chronicle
+chronicle_asan
 econ_tax_demo
 econ_culture_demo
 econ_arcane_demo
