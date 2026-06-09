@@ -34,6 +34,11 @@ typedef enum { LG_USURPEE, LG_CONTESTEE, LG_TOLEREE, LG_RECONNUE, LG_SACREE }   
 typedef enum { CO_UNIE, CO_MURMURANTE, CO_FRACTUREE, CO_SECESSION }               BandConcorde;
 typedef enum { PR_MISERE, PR_DISETTE, PR_SUFFISANCE, PR_AISANCE, PR_OPULENCE }    BandProsp;
 typedef enum { SA_OBSCURITE, SA_LUEUR, SA_FOYER, SA_PHARE }                       BandSavoir;
+typedef enum { FORGE_RUDIMENTAIRE, FORGE_ARTISANALE, FORGE_MANUFACTURIERE, FORGE_INDUSTRIELLE } BandForge; /* arbre Forge §7 */
+/* SYNCRÉTIQUE (§12) — bandes membrane des cercles de contact. Le suffixe _B distingue
+ * ces bandes de l'enum moteur Profondeur (scps_tech) : la cloison reste inviolable. */
+typedef enum { PROF_OBSCURE, PROF_SURFACE_B, PROF_METIER_B, PROF_PROFOND_B, PROF_SECRET_B } BandProfondeur;
+typedef enum { AC_LOINTAIN, AC_PROCHE, AC_IMMINENT, AC_ACQUIS }                   BandAcces;
 typedef enum { PG_CALME, PG_FREMISSEMENT, PG_OMBRE, PG_SEUIL }                    BandPresage;
 /* Panneau de province */
 typedef enum { STA_DESERT, STA_HAMEAU, STA_BOURG, STA_CITE, STA_METROPOLE }       BandStature;
@@ -170,6 +175,14 @@ BandLegit    band_legit(float L);
 BandConcorde band_concorde(float fracture, bool secession_mode);
 BandProsp    band_prosp(float prosperity_0_10);
 BandSavoir   band_savoir(float lumiere_0_10);
+BandForge    band_forge(float forge_level_0_10);          /* profondeur de production matérielle (§7) */
+/* §syncrétique (§12) — classés sur des nus : profondeur (niveau 0..4) et progression d'accès
+ * (0..1). Aucun type/flottant moteur ne traverse l'en-tête ; les libellés parlent CULTURES. */
+BandProfondeur band_profondeur(int depth_level_0_4);
+BandAcces      band_acces(float progress_0_1);
+const char  *label_forge(BandForge b);
+const char  *label_profondeur(BandProfondeur b);
+const char  *label_acces(BandAcces b);
 BandPresage  band_presage(float charge_0_10);
 BandHumeur   band_humeur(float L_local);
 /* Lignée : horloge (cousinage) ET contenu (friction), + schisme religieux. */

@@ -70,6 +70,44 @@ BandSavoir band_savoir(float lum) {
     if (lum < 7.0f) return SA_FOYER;
     return SA_PHARE;
 }
+/* FORGE (§7) — profondeur de production matérielle, sur un niveau nu [0..10]. */
+BandForge band_forge(float l) {
+    if (l < 2.5f) return FORGE_RUDIMENTAIRE;
+    if (l < 5.0f) return FORGE_ARTISANALE;
+    if (l < 7.5f) return FORGE_MANUFACTURIERE;
+    return FORGE_INDUSTRIELLE;
+}
+/* SYNCRÉTIQUE (§12) — bandes des cercles de contact, classées sur des NUS (la cloison
+ * tient : aucun type moteur ici). Les libellés sont DIÉGÉTIQUES et parlent de cultures
+ * et de savoir-faire, jamais de races ni de coordonnées. */
+BandProfondeur band_profondeur(int d) {
+    switch (d) {
+        case 0:  return PROF_OBSCURE;
+        case 1:  return PROF_SURFACE_B;
+        case 2:  return PROF_METIER_B;
+        case 3:  return PROF_PROFOND_B;
+        default: return PROF_SECRET_B;
+    }
+}
+BandAcces band_acces(float p) {
+    if (p >= 1.0f)  return AC_ACQUIS;
+    if (p >= 0.75f) return AC_IMMINENT;
+    if (p >= 0.35f) return AC_PROCHE;
+    return AC_LOINTAIN;
+}
+const char *label_forge(BandForge b) {
+    static const char *N[] = { "Forge rudimentaire","Forge artisanale","Manufacture","Industrie" };
+    return (b>=0 && b<=FORGE_INDUSTRIELLE) ? N[b] : "?";
+}
+const char *label_profondeur(BandProfondeur b) {
+    static const char *N[] = { "hors de portée","savoir de surface","savoir-faire d'atelier",
+                               "art profond","secret jalousement gardé" };
+    return (b>=0 && b<=PROF_SECRET_B) ? N[b] : "?";
+}
+const char *label_acces(BandAcces b) {
+    static const char *N[] = { "lointain","à portée","imminent","acquis" };
+    return (b>=0 && b<=AC_ACQUIS) ? N[b] : "?";
+}
 BandPresage band_presage(float charge) {
     if (charge < 1.0f) return PG_CALME;
     if (charge < 4.0f) return PG_FREMISSEMENT;
