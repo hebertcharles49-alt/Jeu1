@@ -2554,6 +2554,10 @@ static void gen_resources(World *w) {
          * pointe ne meurent jamais — fer céleste (armes enchantées) & cristal arcanique
          * (essence). Voulus rares, mais jamais absents (≥ 3-4 nœuds / ~100 régions). */
         if (B!=BIO_PEAK && B!=BIO_GLACIER){ ADD(RES_CELESTIAL_IRON,0.05f); ADD(RES_ARCANE_CRYSTAL,0.05f); }
+        /* CHARBON / OR / FER : une pincée PARTOUT (0.05) — la base industrielle (épine
+         * métal/outils) et l'or (orfèvrerie) étaient trop localisés. Donne une province ou
+         * deux de plus de chacun là où le tirage est lâche, sans inonder la carte. */
+        if (B!=BIO_PEAK && B!=BIO_GLACIER){ ADD(RES_COAL,0.05f); ADD(RES_GOLD,0.05f); ADD(RES_IRON,0.05f); }
         #undef ADD
 
         /* Tirage pondéré — UNIQUEMENT parmi les ressources BRUTES.

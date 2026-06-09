@@ -107,6 +107,10 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
     /* Épine dorsale de production : fer + charbon → métal → (métal + bois) outils. */
     [BLD_FOUNDRY]   = { RES_IRON,  1.5f, RES_COAL, 1.0f, RES_METAL, 1.0f, 1.0f },
     [BLD_TOOLWORKS] = { RES_METAL, 1.0f, RES_WOOD, 1.0f, RES_TOOLS, 1.0f, 0.9f },
+    /* CHARBONNIÈRE : 2 bois → 1 charbon. Le charbon minier est rare et co-localisé
+     * avec le fer (gate de la fonderie) ; la charbonnière le PRODUIT du bois (abondant)
+     * → la fonderie tourne partout où il y a du fer, et la chaîne métal/outils respire. */
+    [BLD_CHARCOAL]  = { RES_WOOD,  2.0f, RES_NONE, 0.f, RES_COAL,  1.0f, 0.8f },
     /* Chaînes militaires de base + santé (compléter le roster de production). */
     [BLD_ARMORY]    = { RES_IRON,      1.2f, RES_NONE, 0.f, RES_ARMS,      1.0f, 1.0f },
     [BLD_POWDERMILL]= { RES_SALTPETER, 1.0f, RES_COAL, 0.8f, RES_GUNPOWDER, 1.0f, 1.0f },
@@ -186,6 +190,17 @@ static inline Resource preferred_luxe(const PopCulture *c){
 #define NF_POP_FLOOR  80.f   /* pop régionale minimale : sous ce seuil, on ne bâtit pas (le vide) */
 #define NF_STOCK_MIN  5.0f   /* stock d'intrant comptant comme « approvisionné » (extraction OU import) */
 #define NF_SEED_LEVEL 1.0f   /* niveau de NAISSANCE du bâtiment (puis l'expansion §1 le fait croître) */
+/* §gate — DEMANDE EFFECTIVE pour les biens DURABLES (orfèvrerie, outils). Ces biens
+ * ne se consomment pas comme le pain : sans frein leur manufacture tourne au PLANCHER
+ * du market_effort (0.42×) et GORGE le marché (prix planché 0.2×base — orfèvrerie 4.4,
+ * outils 1.7 — intrants rares gaspillés, et le prix figé tue le signal de §NF/IA). */
+#define GATE_DEMAND_BUFFER 1.25f   /* orfèvrerie : produire jusqu'à 1.25× la demande RÉELLE d'élite (marge croissance + surplus d'export) */
+/* OUTILS — INPUT PASSIF de la main-d'œuvre : l'outil est un CAPITAL que les journaliers
+ * USENT en travaillant (∝ leur nombre). Ce flux EST la demande effective (il tire le prix,
+ * donc le §NF qui bâtit l'atelier et la perception IA) ET draine le stock (usure par
+ * l'usage). L'outil n'entre PAS dans le panier : il ne touche QUE la productivité, JAMAIS
+ * la satisfaction. Fini le prix planché à demande nulle qui rendait l'outillage inerte. */
+#define TOOLS_PER_LABORER  0.15f   /* stock-outil VISÉ par journalier (palier d'équipement) → tools_pc ≈ 1.5 à plein, prod_mult ≈ +18 % ; la demande est le DÉFICIT vers ce palier (saturant), pas un flux pop-illimité */
 /* §collecte — INTENSIFICATION : la récolte d'une tuile suit les BRAS qui l'occupent, pas
  * le seul terrain. raw_cap = RICHESSE de référence ; l'intensité ∝ √(pop/réf) (rendements
  * DÉCROISSANTS, plafonnés). Une région peuplée tire plus de sa terre → la production SUIT
@@ -279,7 +294,7 @@ const char *building_name(BuildingType b) {
         [BLD_WEAVER_LUX]="Atelier d'étoffe précieuse",[BLD_MAGE_WORKSHOP]="Atelier de mage",
         [BLD_CELESTIAL_FORGE]="Forge céleste",[BLD_FOUNDRY]="Haut-fourneau",[BLD_TOOLWORKS]="Atelier d'outillage",
         [BLD_ARMORY]="Armurerie",[BLD_POWDERMILL]="Poudrière",[BLD_APOTHECARY]="Apothicaire",
-        [BLD_TUNIC]="Atelier de tunique",
+        [BLD_TUNIC]="Atelier de tunique",[BLD_CHARCOAL]="Charbonnière",
     };
     return (b>=0&&b<BLD_TYPE_COUNT&&N[b])?N[b]:"?";
 }
@@ -460,6 +475,7 @@ void econ_init(WorldEconomy *e, const World *w) {
         if (re->raw_cap[RES_WOOD] > 0.f) {
             region_ensure_building(re,BLD_SAWMILL);
             region_ensure_building(re,BLD_PAPERMILL);
+            region_ensure_building(re,BLD_CHARCOAL);   /* charbon DU BOIS : la fonderie n'est plus otage du charbon minier */
         }
         if (re->raw_cap[RES_SUGAR] > 0.f) region_ensure_building(re,BLD_WINERY);
         /* Brasserie : la bière naît du grain — boisson du commun, partout où l'on cultive. */
@@ -473,8 +489,10 @@ void econ_init(WorldEconomy *e, const World *w) {
          * (La rétroaction négative §NF en bâtira d'autres là où la teinture est importée.) */
         if (re->raw_cap[RES_MUREX] > 0.f || re->raw_cap[RES_INDIGO] > 0.f)
             region_ensure_building(re,BLD_WEAVER_LUX);
-        /* Épine dorsale : fonderie + atelier d'outillage là où fer ET charbon. */
-        if (re->raw_cap[RES_IRON] > 0.f && re->raw_cap[RES_COAL] > 0.f){
+        /* Épine dorsale : fonderie + atelier d'outillage là où il y a du FER et de quoi
+         * faire le feu — charbon minier OU bois (via la charbonnière). Le fer reste le
+         * gate géographique ; le charbon ne l'est plus (charbonnière du bois abondant). */
+        if (re->raw_cap[RES_IRON] > 0.f && (re->raw_cap[RES_COAL] > 0.f || re->raw_cap[RES_WOOD] > 0.f)){
             region_ensure_building(re,BLD_FOUNDRY);
             region_ensure_building(re,BLD_TOOLWORKS);
         }
@@ -634,6 +652,47 @@ float econ_tax_tolerance(Ethos e, SocialClass c){
 #define BASE_EXPANSION         0.20f   /* §1 : vitesse d'expansion d'une manufacture, ∝ pénurie */
 #define EXPANSION_PRESSION_CAP 5.0f    /* pénurie max prise en compte (prix/base − 1, plafonné) */
 
+/* §NF v2 — CONSTRUCTION DÉMANDE-MENÉE, DÉLIÉE DU GISEMENT. L'ancien §NF (dans econ_init,
+ * prix=0 → inerte) ne tournait JAMAIS : toute manufacture était clouée au gisement local
+ * par l'implantation géographique. Ici, CHAQUE TICK : une manufacture s'élève là où son
+ * OUTPUT manque (prix ≥ pénurie) et où il y a des BRAS, dès lors que son INTRANT existe
+ * QUELQUE PART dans le royaume (le commerce l'achemine) — PLUS sur le gisement local. Le
+ * bâtiment suit donc le MARCHÉ (demande + main-d'œuvre), pas l'extraction. region_ensure_
+ * building est idempotent → sûr à appeler chaque tick ; le prix qui retombe éteint le signal. */
+#define NF_REALM_MIN 0.5f   /* intrant « fournissable » s'il est extrait/produit ≥ ça quelque part dans le pays */
+static void econ_build_tick(WorldEconomy *e){
+    /* 1. disponibilité d'intrant À L'ÉCHELLE DU PAYS (extraction + offre, n'importe où). */
+    static float owner_avail[SCPS_MAX_COUNTRY][RES_COUNT];
+    for (int o=0;o<SCPS_MAX_COUNTRY;o++) for (int g=0;g<RES_COUNT;g++) owner_avail[o][g]=0.f;
+    for (int r=0;r<e->n_regions;r++){
+        RegionEconomy *re=&e->region[r];
+        if (!re->active || !re->colonized || re->owner<0 || re->owner>=SCPS_MAX_COUNTRY) continue;
+        for (int g=1; g<RES_COUNT; g++) owner_avail[re->owner][g] += re->raw_cap[g] + re->supply[g];
+    }
+    /* 2. par région PEUPLÉE : bâtir le producteur d'un bien LOCALEMENT en pénurie, si son
+     *    intrant existe dans le royaume (ou déjà importé en stock). Plus de gate raw LOCAL. */
+    for (int r=0;r<e->n_regions;r++){
+        RegionEconomy *re=&e->region[r];
+        if (!re->active || !re->colonized || re->owner<0 || re->owner>=SCPS_MAX_COUNTRY) continue;
+        float rpop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop + re->strata[CLASS_ELITE].pop;
+        if (rpop < NF_POP_FLOOR) continue;
+        const float *avail = owner_avail[re->owner];
+        for (int b=0;b<BLD_TYPE_COUNT;b++){
+            const Recipe *rc=&RECIPE[b];
+            if (rc->out<=RES_NONE || rc->out>=RES_COUNT || BASE_PRICE[rc->out]<=0.f) continue;
+            if (re->price[rc->out] < BASE_PRICE[rc->out]*NF_SHORTAGE) continue;   /* output pas en pénurie ICI */
+            bool feed1 = (rc->in1==RES_NONE)
+                      || avail[rc->in1] > NF_REALM_MIN || re->stock[rc->in1] >= NF_STOCK_MIN
+                      || (rc->alt1!=RES_NONE && (avail[rc->alt1] > NF_REALM_MIN || re->stock[rc->alt1] >= NF_STOCK_MIN));
+            bool feed2 = (rc->in2==RES_NONE)
+                      || avail[rc->in2] > NF_REALM_MIN || re->stock[rc->in2] >= NF_STOCK_MIN;
+            if (!feed1 || !feed2) continue;        /* le royaume ne sait pas le nourrir → on ne bâtit pas à vide */
+            int bi=region_ensure_building(re,(BuildingType)b);
+            if (bi>=0 && re->bld[bi].level < NF_SEED_LEVEL) re->bld[bi].level = NF_SEED_LEVEL;
+        }
+    }
+}
+
 void econ_tick(WorldEconomy *e, float dt) {
     if (dt<=0.f) dt=1.f;
     e->tick++;
@@ -654,8 +713,17 @@ void econ_tick(WorldEconomy *e, float dt) {
          * l'extraction ET la manufacture (rendements décroissants, +30% max). Les
          * outils s'USENT (décroissance) → il faut les entretenir (Atelier). */
         float tools_pc  = re->stock[RES_TOOLS] / (labor_avail*0.1f + 1.f);
-        float prod_mult = 1.f + 0.30f*(1.f - 1.f/(1.f + tools_pc));
-        re->stock[RES_TOOLS] *= 0.97f;   /* usure */
+        float prod_mult = 1.f + 0.30f*(1.f - 1.f/(1.f + tools_pc));   /* lit le stock AVANT usure */
+        /* OUTILS — INPUT PASSIF de la main-d'œuvre : les journaliers veulent être ÉQUIPÉS ∝
+         * leur nombre, mais SATURANT (on n'outille pas au-delà de l'utile). La demande
+         * effective est le COMBLEMENT du déficit d'outillage vers ce palier — elle tire le
+         * prix (donc le §NF qui bâtit l'atelier + la perception IA), se RÉOUVRE chaque tick
+         * par l'usure, et ne touche QUE prod_mult (ci-dessus), JAMAIS la satisfaction. */
+        {
+            float tools_target = labor_avail * TOOLS_PER_LABORER;            /* stock-outil VISÉ ∝ bras */
+            demand[RES_TOOLS] += fmaxf(0.f, tools_target - re->stock[RES_TOOLS]);  /* déficit à combler (saturant → pas de plafond/runaway) */
+        }
+        re->stock[RES_TOOLS] *= 0.97f;   /* usure : rouvre un déficit de remplacement chaque tick */
         /* §C3 : le « rot » de l'État (capture par concession) mine l'efficacité NOBLE —
          * une élite gorgée gouverne mal : moins de productivité de capitale, moins de
          * recherche. Lu à l'écran en Corruption. Source : faction_capture_total. */
@@ -721,6 +789,17 @@ void econ_tick(WorldEconomy *e, float dt) {
                 float spare   = fmaxf(0.f, re->stock[RES_GRAIN] - reserve);
                 float gq = (rc->in1==RES_GRAIN)?rc->q1:rc->q2;
                 lim = fminf(lim, spare/fmaxf(gq,EPS));
+            }
+            /* §gate — ORFÈVRERIE bornée à la DEMANDE EFFECTIVE : la joaillerie a une
+             * demande réelle (statut d'élite) mais surinonde (le market_effort la tient
+             * à son plancher) → prix planché, or/perle gaspillés. On borne sa SORTIE au
+             * comblement de la demande effective (conso élite du tick passé, déjà routée
+             * par préférence culturelle) au-delà du stock. lim est en « lots » → on
+             * convertit la sortie voulue par qout·prod_mult. (Les outils, eux, sont déjà
+             * régulés par leur demande passive ∝ main-d'œuvre — pas de gate explicite.) */
+            if (rc->out==RES_PRECIOUS_WARE){
+                float gap = re->demand[rc->out]*GATE_DEMAND_BUFFER - re->stock[rc->out];
+                lim = fminf(lim, fmaxf(0.f,gap)/fmaxf(rc->qout*prod_mult,EPS));
             }
             if (lim<=0.f){ b->workers=0.f; continue; }
             float want_labor=rc->labor*cap;
@@ -994,8 +1073,18 @@ void econ_tick(WorldEconomy *e, float dt) {
          * qui ralentit → pas de snowball (et la surextension→sécession reste l'anti-runaway
          * territorial, intacte). L'État y verse sa subvention (§2) via le pouvoir d'achat. */
         for (int i=0;i<re->n_bld;i++){
-            Resource out = RECIPE[re->bld[i].type].out;
+            const Recipe *rc=&RECIPE[re->bld[i].type];
+            Resource out = rc->out;
             if (out<=RES_NONE || out>=RES_COUNT || BASE_PRICE[out]<=0.f) continue;
+            /* §1b — n'étend QUE le maillon RÉELLEMENT saturé : on ne lit pas le prix de
+             * l'intrant (un goulet de QUANTITÉ ne fait pas monter son prix — le marché du
+             * métal solde au peu qu'on extrait), mais le TAUX D'UTILISATION effectif. Une
+             * manufacture qui tourne loin sous sa capacité est bornée en amont (intrant) ou
+             * en bras : l'étendre serait vain (cas outillage métal-borné → level runaway). */
+            float meff = market_effort(re->price[out], BASE_PRICE[out]);
+            float cap  = re->bld[i].level * meff;
+            float lim_est = (rc->labor>0.f)? re->bld[i].workers/rc->labor : cap;
+            if (cap > EPS && lim_est < 0.70f*cap) continue;   /* sous-utilisé → goulet en amont, pas ici */
             float pression = clampf(re->price[out]/BASE_PRICE[out] - 1.f, 0.f, EXPANSION_PRESSION_CAP);
             re->bld[i].level += BASE_EXPANSION * pression * dt;   /* ∝ pénurie, auto-amortie */
         }
@@ -1022,6 +1111,7 @@ void econ_tick(WorldEconomy *e, float dt) {
          * limité) : 15% s'évapore, évite l'accumulation infinie. */
         for (int r=0;r<RES_COUNT;r++) re->stock[r]*=0.85f;
     }
+    econ_build_tick(e);   /* §NF v2 — la construction suit le MARCHÉ (demande + bras), plus le gisement */
 }
 
 /* ====================================================================== */

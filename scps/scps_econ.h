@@ -68,6 +68,7 @@ typedef enum {
     BLD_POWDERMILL,    /* salpêtre + charbon → poudre (poudrière) → puissance militaire */
     BLD_APOTHECARY,    /* simples → remèdes (apothicaire) → santé/confort */
     BLD_TUNIC,         /* étoffe → TUNIQUE (1:1) — vêtement fini des journaliers (chaîne séparée du luxe) */
+    BLD_CHARCOAL,      /* 2 bois → 1 charbon (charbonnière, tech de base) — libère la fonderie de la rareté du charbon minier */
     BLD_TYPE_COUNT
 } BuildingType;
 
