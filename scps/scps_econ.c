@@ -121,7 +121,7 @@ static const Recipe RECIPE[BLD_TYPE_COUNT] = {
  * tend de +10 % via DEMAND_TENSION appliqué à `units` (demande tendue permanente). */
 static const float NEED[CLASS_COUNT][RES_COUNT] = {
     [CLASS_LABORER] = {
-        [RES_GRAIN]=1.00f, [RES_FISH]=0.20f, [RES_WOOD]=0.26f, [RES_TUNIQUE]=0.12f, /* §tissu : le commun s'habille de TUNIQUE, plus d'étoffe brute → fini la prix-exclusion par le luxe */
+        [RES_GRAIN]=1.00f, [RES_WINE]=0.35f, [RES_FISH]=0.30f, [RES_WOOD]=0.35f, [RES_TUNIQUE]=0.40f, /* §moral : la BIÈRE (palier moral du commun, via préférence) est le levier — brassée du SURPLUS de grain (réserve vivrière protégée) ; calée pour ~60 % de satisfaction journalière */
     },
     [CLASS_BOURGEOIS] = {
         [RES_GRAIN]=1.00f, [RES_CLOTH]=0.34f, [RES_PAPER]=0.25f, [RES_WINE]=0.30f,
@@ -131,8 +131,8 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
         /* §panier — rééquilibré vers les paliers PRODUCTIBLES (le statut écrasait à 73 %).
          * Conforts relevés (fourrure/papier/vin, que l'éco SAIT fournir), STATUT abaissé
          * (orfèvrerie 0.90→0.55, le maillon rare). Combiné au déblocage progressif. */
-        [RES_GRAIN]=1.00f, [RES_FUR]=0.35f, [RES_PAPER]=0.35f, [RES_WINE]=0.70f,
-        [RES_PRECIOUS_WARE]=0.45f,   /* palier STATUT : servi en orfèvrerie OU étoffe ; débloqué EN DERNIER */
+        [RES_GRAIN]=1.00f, [RES_FUR]=0.12f, [RES_PAPER]=0.12f, [RES_WINE]=0.28f,
+        [RES_PRECIOUS_WARE]=0.13f,   /* palier STATUT : servi en orfèvrerie OU étoffe ; débloqué EN DERNIER ; calé pour ~60 % */
         /* §panier — besoins confort/luxe encore allégés de 0.10 (le grain vital reste 1.0) :
          * l'élite se contente d'un peu moins → satisfaction relevée d'un cran de plus. */
     },
@@ -143,7 +143,7 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
  * le panier (statut compris). Ainsi le luxe se MÉRITE avec le développement — et l'élite
  * d'un bourg n'est pas punie de ne pas avoir d'orfèvrerie. Le palier STATUT vient DERNIER. */
 static const Resource NEED_ORDER[CLASS_COUNT][8] = {
-    [CLASS_LABORER]   = { RES_GRAIN, RES_FISH, RES_WOOD, RES_TUNIQUE, RES_NONE },
+    [CLASS_LABORER]   = { RES_GRAIN, RES_WINE, RES_FISH, RES_WOOD, RES_TUNIQUE, RES_NONE },  /* bière (RES_WINE→préférée) en palier moral PRÉCOCE : le commun veut sa chope */
     [CLASS_BOURGEOIS] = { RES_GRAIN, RES_SALT, RES_CLOTH, RES_REMEDE, RES_WINE, RES_PAPER, RES_NONE },
     [CLASS_ELITE]     = { RES_GRAIN, RES_FUR, RES_PAPER, RES_WINE, RES_PRECIOUS_WARE, RES_NONE },
 };
@@ -177,10 +177,8 @@ static inline Resource preferred_luxe(const PopCulture *c){
     return (c->subsistance < 5.f) ? RES_PRECIOUS_WARE : RES_PRECIOUS_CLOTH;
 }
 
-#define TAX_RATE     0.24f   /* part de la valeur produite captée par les élites (RENTE) —
-                              * 0.15→0.20→0.24 : comble en partie le déficit de financement
-                              * d'élite (audit §3 : ~−13 pts) → de quoi s'offrir le panier débloqué. */
-#define WAGE_SHARE   0.53f   /* part de la valeur → salaires (laborers ; 0.55→0.53 pour la rente) */
+#define TAX_RATE     0.38f   /* RENTE d'élite — visée : équilibre de satisfaction ~60 % (re-dotée) */
+#define WAGE_SHARE   0.42f   /* salaires (laborers) — abaissé pour la rente ; profit bourgeois = 0.20 */
 /* le reste (1 - TAX - WAGE) = profit bourgeois (résidu 0.25 — reste sain) */
 /* §NF — CONSTRUCTION PAR RÉTROACTION NÉGATIVE : un bien en pénurie appelle son
  * producteur, qu'on bâtit spontanément — mais JAMAIS dans le vide (pop + intrant). */
