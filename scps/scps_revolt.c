@@ -47,6 +47,10 @@
 /* CAPITALE sous-équipée : poids du grief de mal-logement/mal-service dans le déficit
  * (surface d'équilibrage). Ne mord que les régions surpeuplées vs leur capacité bâtie. */
 #define K_CAP_UNREST    0.30f
+
+/* §C3 — la concession CREUSE l'institution, SANS rebond (cumulatif). */
+#define C3_K_HOLLOW     0.20f   /* K_inst rongé par concession (l'ossature descend, reste basse) */
+#define C3_L_HOLLOW     0.30f   /* légitimité régionale qui ploie d'un cran par concession */
 /* ---- Revanchisme : subir la conquête arme le séparatisme --------------- */
 #define REVANCHISM_DAYS  (10*365)  /* la blessure de la conquête (≈10 ans) */
 #define REVANCHISM_MOBIL  1.45f    /* la rage gonfle les rangs rebelles */
@@ -289,8 +293,10 @@ void revolt_scan(RevoltState *rs, World *w, WorldEconomy *econ,
             if (rpop>0){
                 int  ctier = capitale_max_tier(rpop);
                 long nob   = capitale_admin_pop(ctier); if (nob>rpop) nob=rpop;
-                float serv = (float)capitale_housing(ctier, nob)                       /* la capitale */
-                           + (re->build.K_inst + re->build.savoir + re->build.faith)*700.f; /* les autres bâtiments */
+                float rot  = (o>=0 && o<SCPS_MAX_COUNTRY)? faction_capture_total(o) : 0.f;  /* §C3 */
+                float serv = ((float)capitale_housing(ctier, nob)                       /* la capitale */
+                            + (re->build.K_inst + re->build.savoir + re->build.faith)*700.f) /* les autres bâtiments */
+                           * (1.f - rot);          /* §C3 : une élite CAPTURÉE délivre moins de service → plus d'agitation */
                 float unserved = (float)rpop - serv;
                 if (unserved>0.f) worst = clampf(worst + (unserved/(float)rpop)*K_CAP_UNREST, 0.f, 1.f);
             }
@@ -439,6 +445,15 @@ void revolt_tick(RevoltState *rs, World *w, WorldEconomy *econ, ModifierStack *d
                     if (gi>=0){ re->pop.groups[gi].L=clampf(re->pop.groups[gi].L+2.f,0.f,10.f);
                                 re->pop.groups[gi].agit_base=clampf(re->pop.groups[gi].agit_base-25.f,0.f,100.f); }
                     demobilize(econ, rb, rb->mobilized);
+                    /* §C3 — la concession a un PRIX : la faction de l'extorqueur CAPTURE
+                     * l'État (rot↑ → malus noble), et l'OSSATURE ploie sans rebond
+                     * (K creusé + légitimité d'un cran) → l'empire concédant devient flasque. */
+                    { float lean[FAC_COUNT]; group_ethos_lean(&rb->culture, lean);
+                      int wf=0; for (int f=1;f<FAC_COUNT;f++) if (lean[f]>lean[wf]) wf=f;
+                      faction_concede(rb->owner, (EthosFaction)wf); }
+                    re->build.K_inst = fmaxf(0.f, re->build.K_inst - C3_K_HOLLOW);
+                    if (rb->region<SCPS_MAX_REG)
+                        wl->L[rb->region] = clampf(wl->L[rb->region]-C3_L_HOLLOW, 0.f, 10.f);
                     rs->n_concession++; rb->outcome=OUT_CONCESSION;
                     break; }
             }

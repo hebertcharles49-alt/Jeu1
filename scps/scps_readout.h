@@ -91,6 +91,7 @@ typedef struct {
      * Cohésion = l'inverse de la fracture (mot emprunté à Concorde). */
     MetricReadout m_stabilite, m_prosperite, m_legitimite, m_cohesion, m_savoir;
     int           influence;    /* 0-100 — réputation diplomatique (posée par le statecraft) */
+    int           corruption;   /* 0-100 — §C3 : capture de l'État par concession (le « rot ») */
 } CountryReadout;
 
 /* LA BALANCE DES FACTIONS-ÉTHOS (la politique interne) — six jauges (part 0-100, un

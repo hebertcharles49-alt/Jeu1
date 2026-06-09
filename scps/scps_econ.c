@@ -9,6 +9,7 @@
 #include "scps_world.h"   /* resource_name(), subsistance_for_biome() */
 #include "scps_culture.h" /* culture_content_distance() pour la novelty diaspora */
 #include "scps_labor.h"   /* capitale_* : la productivité de la capitale booste la prod réelle */
+#include "scps_factions.h"/* §C3 : faction_capture_total → le « rot » qui mine l'efficacité noble */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -565,14 +566,18 @@ void econ_tick(WorldEconomy *e, float dt) {
         float tools_pc  = re->stock[RES_TOOLS] / (labor_avail*0.1f + 1.f);
         float prod_mult = 1.f + 0.30f*(1.f - 1.f/(1.f + tools_pc));
         re->stock[RES_TOOLS] *= 0.97f;   /* usure */
+        /* §C3 : le « rot » de l'État (capture par concession) mine l'efficacité NOBLE —
+         * une élite gorgée gouverne mal : moins de productivité de capitale, moins de
+         * recherche. Lu à l'écran en Corruption. Source : faction_capture_total. */
+        float rot = (re->owner>=0)? faction_capture_total(re->owner) : 0.f;
         /* CAPITALE (scps_labor) : sa PRODUCTIVITÉ (+5 %/tier servi) booste la vraie
-         * production, au-delà des outils. Les emplois nobles (gatés par la pop) la
-         * délivrent — le palier que la région débloque. (C3 la frappera de (1−rot).) */
+         * production, au-delà des outils — mais le bonus est rongé par (1−rot). */
         {
             long rpop = (long)(labor_avail + re->strata[CLASS_BOURGEOIS].pop + re->strata[CLASS_ELITE].pop);
             int  ctier = capitale_max_tier(rpop);
             long nob   = capitale_admin_pop(ctier); if (nob>rpop) nob=rpop;
-            prod_mult *= capitale_prodmult(ctier, nob);
+            float cap_bonus = (capitale_prodmult(ctier, nob) - 1.f) * (1.f - rot);
+            prod_mult *= (1.f + cap_bonus);
         }
 
         /* ---- 1. EXTRACTION des matières premières ----------------------
@@ -855,7 +860,7 @@ void econ_tick(WorldEconomy *e, float dt) {
          * bibliothèque/le monastère BÂTI (densité de savoir) accélère la cadence. */
         PopStratum *el=&re->strata[CLASS_ELITE];
         float savoir_mult = 1.f + 0.25f*re->build.savoir;   /* +25 % de recherche / point bâti */
-        re->tech += el->wealth*TECH_RATE*el->satisfaction*savoir_mult*dt;
+        re->tech += el->wealth*TECH_RATE*el->satisfaction*savoir_mult*(1.f-rot)*dt;  /* §C3 : élite capturée recherche moins */
 
         /* Bourgeois réinvestissent une part du profit dans les manufactures
          * (croissance de capacité plafonnée par leur richesse). */

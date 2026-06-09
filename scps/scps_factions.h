@@ -110,6 +110,11 @@ void faction_lever_apply(int cid, EthosFaction advanced, float strength);  /* un
 void faction_levers_decay(float rate);                            /* la stance non tenue s'efface */
 void faction_levers_on_coup(int cid);                             /* un coup DÉCHARGE la rancœur du pays */
 float faction_grievance(int cid, EthosFaction f);                 /* 0-1 : la rancœur d'une faction (UI) */
+/* §C3 — la concession a un prix : capture de l'État, lue à l'écran en Corruption. */
+void         faction_concede(int cid, EthosFaction winner);       /* une concession gorge la faction gagnante */
+float        faction_capture_total(int cid);                      /* le « rot » 0..1 (malus noble, K creusé) */
+int          faction_corruption_0_100(int cid);                   /* l'indice de Corruption (écran) */
+EthosFaction faction_captor(int cid);                             /* la faction qui tient l'État (survol) */
 
 /* La distribution EFFECTIVE = base (groupes) + stance des leviers, normalisée. C'est
  * elle que le moteur lit (éthos effectif §3, tension de coup §5, UI §9). Dominante. */

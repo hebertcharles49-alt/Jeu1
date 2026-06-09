@@ -337,6 +337,7 @@ CountryReadout country_readout(const WorldProsperity *wp, const TechState *ts,
     r.m_cohesion   = mk_metric(metric_cohesion(cp->fracture),               label_concorde(r.concorde),hover_concorde());
     r.m_savoir     = mk_metric(metric_savoir(cp->Lumiere),                  label_savoir(r.savoir),    hover_savoir());
     r.influence    = 0;   /* posée par le statecraft */
+    r.corruption   = faction_corruption_0_100(cid);   /* §C3 : le rot, en clair (0-100) */
 
     switch (cp->mode) {
         case RD_SUBMERGE_SECESS: r.augure = "Les marges parlent de se gouverner seules."; break;

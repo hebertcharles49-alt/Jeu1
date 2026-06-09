@@ -175,9 +175,41 @@ float faction_coup_tension(const float w[FAC_COUNT], EthosFaction *out){
 static float g_lever_bias [SCPS_MAX_COUNTRY][FAC_COUNT];   /* le poids ajouté à la faction favorisée */
 static float g_lever_grief[SCPS_MAX_COUNTRY][FAC_COUNT];   /* la rancœur des factions aliénées */
 
+/* §C3 — CAPTURE DE L'ÉTAT : chaque concession gorge la faction gagnante. S'ACCUMULE,
+ * décroît très lentement, ne rebondit pas. La somme = le « rot » (0..1) : moins
+ * d'efficacité noble, K creusé. Lue à l'écran comme l'indice de Corruption (0-100). */
+static float g_capture[SCPS_MAX_COUNTRY][FAC_COUNT];
+#define CAPTURE_PER_CONCESSION 0.045f /* ce qu'une concession gorge à la faction gagnante */
+#define CAPTURE_LEVER          0.06f  /* … qui gagne aussi en POUVOIR (un vote tenu) */
+#define CAPTURE_MAX            0.85f  /* plafond du rot : un État jamais 100 % capturé */
+#define CAPTURE_DECAY_FRAC     0.04f  /* la capture décroît à 4 % du rythme du grief (lent) */
+
 void faction_levers_reset(void){
     memset(g_lever_bias, 0, sizeof g_lever_bias);
     memset(g_lever_grief,0, sizeof g_lever_grief);
+    memset(g_capture,    0, sizeof g_capture);
+}
+/* Une concession ACCORDÉE : la faction gagnante se gorge (capture↑) et gagne du
+ * pouvoir (un vote). Le calme acheté aujourd'hui est une dette de demain. */
+void faction_concede(int cid, EthosFaction winner){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY||winner<0||winner>=FAC_COUNT) return;
+    g_capture[cid][winner] += CAPTURE_PER_CONCESSION;          /* s'accumule, ne rebondit pas */
+    faction_lever_apply(cid, winner, CAPTURE_LEVER);           /* le captor monte en pouvoir */
+}
+/* Le « rot » 0..1 : part de l'État capturée (toutes factions), plafonnée. */
+float faction_capture_total(int cid){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY) return 0.f;
+    float s=0.f; for (int f=0;f<FAC_COUNT;f++) s+=g_capture[cid][f];
+    return s<0.f?0.f:(s>CAPTURE_MAX?CAPTURE_MAX:s);
+}
+/* La métrique CORRUPTION (0-100) — le visage chiffré de la capture (l'écran). */
+int faction_corruption_0_100(int cid){ return (int)(100.f*faction_capture_total(cid)+0.5f); }
+/* La faction qui TIENT l'État (capture la plus haute) — pour le survol. */
+EthosFaction faction_captor(int cid){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY) return FAC_COMMUNAUTAIRE;
+    int best=0; float bv=g_capture[cid][0];
+    for (int f=1;f<FAC_COUNT;f++) if (g_capture[cid][f]>bv){ bv=g_capture[cid][f]; best=f; }
+    return (EthosFaction)best;
 }
 void faction_lever_apply(int cid, EthosFaction advanced, float strength){
     if (cid<0||cid>=SCPS_MAX_COUNTRY||advanced<0||advanced>=FAC_COUNT||strength<=0.f) return;
@@ -190,9 +222,12 @@ void faction_lever_apply(int cid, EthosFaction advanced, float strength){
     }
 }
 void faction_levers_decay(float rate){
-    float k = 1.f - (rate<0.f?0.f:(rate>1.f?1.f:rate));         /* la stance non entretenue s'efface */
+    float r = rate<0.f?0.f:(rate>1.f?1.f:rate);
+    float k  = 1.f - r;                                         /* la stance non entretenue s'efface */
+    float kc = 1.f - r*CAPTURE_DECAY_FRAC;                      /* §C3 : la capture décroît TRÈS lentement */
     for (int c=0;c<SCPS_MAX_COUNTRY;c++) for (int f=0;f<FAC_COUNT;f++){
         g_lever_bias[c][f]*=k; g_lever_grief[c][f]*=k;
+        g_capture[c][f]*=kc;
     }
 }
 float faction_grievance(int cid, EthosFaction f){

@@ -448,10 +448,10 @@ int main(int argc, char **argv){
             for (int a=0;a<ne;a++){ int c=idx[a];
                 CountryReadout cr=country_readout(s.wp,s.ts,w,c);
                 int ctech = s.ai_on[c]? s.ai[c].stats.techs : 0;
-                printf("                · %-16s %3d rég · pop %5.0fk · Stab %3d Prosp %3d Légit %3d Cohés %3d Infl %3d · %2d tech%s\n",
+                printf("                · %-16s %3d rég · pop %5.0fk · Stab %3d Prosp %3d Légit %3d Cohés %3d Corr %3d · %2d tech%s\n",
                        w->country[c].name, regions_of(s.econ,c), ai_country_population(w,s.econ,c)/1000.0,
                        cr.m_stabilite.value, cr.m_prosperite.value, cr.m_legitimite.value, cr.m_cohesion.value,
-                       cr.influence, ctech, (c==tp)?" ★":"");
+                       cr.corruption, ctech, (c==tp)?" ★":"");
             }
         }
         /* VIVIER DE CITÉS-ÉTATS : combien du pool initial reste DISPONIBLE (vivant). */
