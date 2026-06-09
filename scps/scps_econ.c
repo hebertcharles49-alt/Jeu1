@@ -543,6 +543,16 @@ float econ_tax_tolerance(Ethos e, SocialClass c){
 }
 #define STATE_TAX_AMBITION 0.42f   /* le taux que l'État VISE (l'éthos décide ce qui rentre) */
 #define K_TAX_AGIT         0.85f   /* poids de la surtaxe sur la satisfaction (la grogne) */
+/* §B — DÉ-STÉRILISER LE TRÉSOR + FERMER LE CISEAU OFFRE/DEMANDE.
+ *  STATE_SPEND_RATE : part ANNUELLE du trésor que l'État REDÉPENSE (×dt/tick) — il ne
+ *  hoarde plus, il circule ; réglé pour un trésor à l'ÉQUILIBRE (≈ TAX/SPEND × richesse),
+ *  pas ×16. PAYROLL_FRACTION : part de la dépense versée en GAGES aux classes (le reste
+ *  subventionne l'expansion §1). EXPANSION_PRESSION_CAP : l'expansion d'une manufacture
+ *  suit le signal-prix de son bien (prix/base), plafonné — l'offre RÉAGIT à la pénurie. */
+#define STATE_SPEND_RATE       0.30f
+#define PAYROLL_FRACTION       0.60f
+#define BASE_EXPANSION         0.20f   /* §1 : vitesse d'expansion d'une manufacture, ∝ pénurie */
+#define EXPANSION_PRESSION_CAP 5.0f    /* pénurie max prise en compte (prix/base − 1, plafonné) */
 
 void econ_tick(WorldEconomy *e, float dt) {
     if (dt<=0.f) dt=1.f;
@@ -677,6 +687,7 @@ void econ_tick(WorldEconomy *e, float dt) {
          * Au-delà : ÉVASION (le net BAISSE) + grogne (la satisfaction chutera).
          * La boucle : un peuple CONTENT sous un éthos TOLÉRANT paie fort ;
          * surtaxer un peuple mécontent ne rapporte pas — contenter d'abord. */
+        float coll[CLASS_COUNT]={0}, coll_tot=0.f;     /* §B : ce que CHAQUE classe a versé (pour le rendre) */
         for (int c=0;c<CLASS_COUNT;c++){
             PopStratum *st=&re->strata[c];
             float sat   = clampf(st->satisfaction,0.f,1.f);
@@ -686,9 +697,27 @@ void econ_tick(WorldEconomy *e, float dt) {
             if (collected>st->wealth) collected=st->wealth;
             st->wealth   -= collected;
             re->treasury += collected;
+            coll[c]=collected; coll_tot+=collected;
             over_tax[c]   = (STATE_TAX_AMBITION>seuil)?(STATE_TAX_AMBITION-seuil):0.f;
         }
         re->over_tax = clampf(over_tax[CLASS_LABORER], 0.f, 1.f);   /* grief des laboureurs → révolte */
+
+        /* §B (TRÉSOR MORT) — l'État REDÉPENSE : il ne hoarde plus, il CIRCULE. Une masse
+         * salariale réabonde la richesse des classes AU PRORATA de l'impôt qu'elles ont
+         * versé (les hautes classes, les plus ponctionnées, récupèrent le plus → pouvoir
+         * d'achat restauré → satisfaction, et le drain C1 sur l'élite est réparé). Le
+         * solde subventionne l'expansion (§1). Sans cette sortie, le trésor ×16 asséchait
+         * les classes à richesse ~0 → 15 % de satisfaction même quand les biens existent. */
+        float depense = re->treasury * STATE_SPEND_RATE * dt;
+        if (depense > re->treasury) depense = re->treasury;
+        re->treasury -= depense;
+        float payroll = depense * PAYROLL_FRACTION;
+        if (coll_tot > 1e-6f)
+            for (int c=0;c<CLASS_COUNT;c++)
+                re->strata[c].wealth += payroll * (coll[c]/coll_tot);   /* on rend à chacun ∝ sa contribution */
+        /* le solde (depense − payroll) a quitté le trésor en DÉPENSE PUBLIQUE (armée,
+         * travaux) : il ne s'agit plus de hoarder. L'expansion (§1) est, elle, portée par
+         * le signal-prix — le pouvoir d'achat rendu ici en est le carburant indirect. */
 
         /* ---- 4. DEMANDE de consommation par strate ---------------------
          * §2 (CORRECTIF D'INTÉGRATION) : la demande des paliers VARIANTES suit la
@@ -862,13 +891,18 @@ void econ_tick(WorldEconomy *e, float dt) {
         float savoir_mult = 1.f + 0.25f*re->build.savoir;   /* +25 % de recherche / point bâti */
         re->tech += el->wealth*TECH_RATE*el->satisfaction*savoir_mult*(1.f-rot)*dt;  /* §C3 : élite capturée recherche moins */
 
-        /* Bourgeois réinvestissent une part du profit dans les manufactures
-         * (croissance de capacité plafonnée par leur richesse). */
-        float reinvest=re->strata[CLASS_BOURGEOIS].wealth*0.02f;
-        for (int i=0;i<re->n_bld && reinvest>0.f;i++) {
-            float add=fminf(reinvest, 0.5f);
-            re->bld[i].level += add*0.1f;
-            reinvest-=add;
+        /* §1 (CISEAU) — l'offre SUIT le signal-prix : chaque manufacture s'étend ∝ la
+         * PÉNURIE de son bien (prix AU-DESSUS de la base). À l'équilibre (prix=base) elle
+         * stagne ; en pénurie criante (prix→plafond) elle croît vite → l'offre rattrape la
+         * demande qui gonfle avec la population, au lieu de ramper à plat (+0.05 plafonné).
+         * Rétroaction NÉGATIVE intrinsèque : plus de capacité → prix qui retombe → expansion
+         * qui ralentit → pas de snowball (et la surextension→sécession reste l'anti-runaway
+         * territorial, intacte). L'État y verse sa subvention (§2) via le pouvoir d'achat. */
+        for (int i=0;i<re->n_bld;i++){
+            Resource out = RECIPE[re->bld[i].type].out;
+            if (out<=RES_NONE || out>=RES_COUNT || BASE_PRICE[out]<=0.f) continue;
+            float pression = clampf(re->price[out]/BASE_PRICE[out] - 1.f, 0.f, EXPANSION_PRESSION_CAP);
+            re->bld[i].level += BASE_EXPANSION * pression * dt;   /* ∝ pénurie, auto-amortie */
         }
 
         for (int r=0;r<RES_COUNT;r++){ re->supply[r]=supply[r]; re->demand[r]=demand[r]; }
