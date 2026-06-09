@@ -40,13 +40,19 @@ int main(int argc,char**argv){
     econ_init(econ,w); gen_population(w,econ); worldgen_seed_peoples(w,econ,RACE_HUMAIN);
     for(int t=0;t<8;t++) econ_tick(econ,1.f);     /* peuple les strates (pop par classe) */
 
-    /* trois pays qui possèdent des régions : ca & cb en guerre, cp en paix. */
-    int own[8], no=0;
+    /* trois pays qui possèdent des régions : ca & cb en guerre, cp en paix. On les
+     * TRIE par taille (régions) décroissante → le pays EN GUERRE (ca) est le PLUS grand,
+     * si bien que sa levée de guerre domine franchement la levée d'ENTRETIEN du pays en
+     * paix (cp), même avec une économie maigre. Sans ce tri, un grand pays PAISIBLE
+     * pouvait, en valeur absolue, lever plus qu'un petit pays EN GUERRE. */
+    int own[8], onr[8], no=0;
     for(int c=0;c<w->n_countries && no<8;c++){
         int nreg=0; for(int r=0;r<econ->n_regions;r++) if(econ->region[r].owner==c) nreg++;
-        if(nreg>0 && w->country[c].capital_prov>=0) own[no++]=c;
+        if(nreg>0 && w->country[c].capital_prov>=0){ own[no]=c; onr[no]=nreg; no++; }
     }
     if(no<2){ printf(" (monde trop vide)\n"); return 0; }
+    for(int i=0;i<no;i++) for(int j=i+1;j<no;j++) if(onr[j]>onr[i]){
+        int t=own[i];own[i]=own[j];own[j]=t; t=onr[i];onr[i]=onr[j];onr[j]=t; }
     int ca=own[0], cb=own[1], cp=(no>=3)?own[2]:-1;
 
     DiploState dp; diplo_init(&dp);
@@ -54,9 +60,12 @@ int main(int argc,char**argv){
 
     WarHost h; warhost_init(&h);
     float arms0=capital_arms(w,econ,ca);
-    for(int y=0;y<6;y++) warhost_tick(&h,w,econ,&dp,1.f);   /* 6 ans de mobilisation */
+    /* 3 ans : assez pour que le PIED DE GUERRE (WH_BATCH_WAR=7/an) lève son plafond,
+     * mais trop court pour que l'ENTRETIEN de paix (WH_BATCH_PEACE=1.5/an) le rattrape.
+     * (À 6 ans, les deux SATURENT leur capacité → l'écart guerre/paix s'efface.) */
+    for(int y=0;y<3;y++) warhost_tick(&h,w,econ,&dp,1.f);
     long ua=warhost_units(&h,ca), ub=warhost_units(&h,cb);
-    printf("   après 6 ans : pays en guerre %d → %ld paquets · pays en guerre %d → %ld · capitale arms %.0f→%.0f\n",
+    printf("   après 3 ans : pays en guerre %d → %ld paquets · pays en guerre %d → %ld · capitale arms %.0f→%.0f\n",
            ca, ua, cb, ub, arms0, capital_arms(w,econ,ca));
 
     ok("un pays EN GUERRE lève des troupes (unités > 0)", ua>0);
