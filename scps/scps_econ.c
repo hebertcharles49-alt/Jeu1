@@ -131,8 +131,10 @@ static const float NEED[CLASS_COUNT][RES_COUNT] = {
         /* §panier — rééquilibré vers les paliers PRODUCTIBLES (le statut écrasait à 73 %).
          * Conforts relevés (fourrure/papier/vin, que l'éco SAIT fournir), STATUT abaissé
          * (orfèvrerie 0.90→0.55, le maillon rare). Combiné au déblocage progressif. */
-        [RES_GRAIN]=1.00f, [RES_FUR]=0.45f, [RES_PAPER]=0.45f, [RES_WINE]=0.80f,
-        [RES_PRECIOUS_WARE]=0.55f,   /* palier STATUT : servi en orfèvrerie OU étoffe ; débloqué EN DERNIER */
+        [RES_GRAIN]=1.00f, [RES_FUR]=0.35f, [RES_PAPER]=0.35f, [RES_WINE]=0.70f,
+        [RES_PRECIOUS_WARE]=0.45f,   /* palier STATUT : servi en orfèvrerie OU étoffe ; débloqué EN DERNIER */
+        /* §panier — besoins confort/luxe encore allégés de 0.10 (le grain vital reste 1.0) :
+         * l'élite se contente d'un peu moins → satisfaction relevée d'un cran de plus. */
     },
 };
 /* §besoins progressifs — ORDRE de priorité par classe (subsistance → confort → STATUT).
