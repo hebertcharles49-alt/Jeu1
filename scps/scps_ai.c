@@ -26,7 +26,8 @@
 #define AI_ARMY_MARGIN    0.75f  /* n'attaque que si armée ≥ 0.75× la cible  */
 #define AI_WIDEN_W        0.5f    /* friction : poids du coût d'élargissement (alliés de la cible) */
 #define AI_SURRENDER      55.f    /* score de guerre adverse au-delà duquel un défenseur sans espoir capitule */
-#define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on propose l'alliance */
+#define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on PROPOSE l'alliance */
+#define AI_ALLY_DISSOLVE  3.0f    /* §D1 : … et en dessous duquel on la ROMPT (hystérésis : < seuil) */
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
@@ -584,10 +585,23 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
 
     /* En paix : ÉQUILIBRE avant prédation (rétroaction négative, jamais d'interdit). */
 
+    int heg = diplo_perceived_hegemon(w, econ, wp, diplo, a->cid);
+
+    /* §D1 — L'ALLIANCE A UNE SORTIE : chaque tick, on rompt celles dont la raison
+     * s'efface. (a) DÉSUÉTUDE : le score tombe sous AI_ALLY_DISSOLVE (hystérésis :
+     * la menace commune a fondu). (b) TRAHISON : l'allié a snowballé au point d'être
+     * MON hégémon perçu → il EST la menace, on le lâche (il redevient cible possible).
+     * C'est ce qui empêche un bloc de se figer autour d'une puissance montante. */
+    for (int b=0;b<w->n_countries;b++){
+        if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_ALLIED) continue;
+        Relation rel = diplo_relation(w,econ,wp,diplo,a->cid,b);
+        if (rel.alliance < AI_ALLY_DISSOLVE || b==heg)
+            diplo_make_peace(diplo, a->cid, b);          /* ALLIED→NEUTRAL : le lien lâche */
+    }
+
     /* (1) COALITION — se liguer contre l'HÉGÉMON perçu (anti-runaway, émergent des
      * menaces sommées). On se joint si l'hégémon GUERROIE déjà (pile-on) et que
      * notre camp (soi + alliés) pèse assez. Le frein gouverne : un fragile n'ose pas. */
-    int heg = diplo_perceived_hegemon(w, econ, wp, diplo, a->cid);
     if (heg>=0 && heg!=a->cid && diplo_status(diplo,a->cid,heg)==DIPLO_NEUTRAL
         && diplo_can_declare(diplo,a->cid,heg) && country_at_war(w,diplo,heg)){
         float my_side = v->armee + allied_power(w,econ,diplo,a->cid);

@@ -21,6 +21,12 @@ static inline float absf(float v){return v<0?-v:v;}
 #define MOMENTUM_PER_CONQ 1.0f         /* +1 fulgurance par région prise */
 #define MOMENTUM_DECAY   (1.2f/365.f)  /* la fulgurance s'oublie (~ -1.2/an) */
 #define MOMENTUM_W       0.7f          /* poids de la fulgurance sur la menace */
+/* §D2 — l'alliance lit la menace commune EN RAPPORT au monde du moment (comme la
+ * détection d'hégémon lit un ratio, pas une magnitude). Sinon la menace gonfle sans
+ * borne (~1 au début, ~100+ en fin) et le seuil fixe finit par être franchi par
+ * presque toute paire → la carte se pétrifie en blocs. */
+#define THREAT_FLOOR     0.5f          /* plancher d'ambiance : pas de spike en paix de début */
+#define K_SHARED         4.0f          /* poids du rapport de menace dans le score d'alliance */
 /* Hégémon = menace qui ÉCRASE le champ (domine NETTEMENT la 2e) — critère RELATIF,
  * indépendant de l'échelle (les menaces vont de ~1 au début à ~500 en fin de partie). */
 #define HEGEMON_RATIO    1.8f
@@ -199,9 +205,14 @@ Relation diplo_relation(const World *w, const WorldEconomy *econ,
         float t=threat_of(w,econ,wp,d,a,c), u=threat_of(w,econ,wp,d,b,c);
         float m=(t<u)?t:u; if (m>shared) shared=m;
     }
+    /* §D2 : la menace commune en RAPPORT au monde du moment (ne gonfle plus avec
+     * l'échelle) → une alliance se noue quand la menace est haute PAR RAPPORT au
+     * monde, pas quand les chiffres ont simplement gonflé. Le seuil fixe redevient juste. */
+    float amb = (d && d->ambient_threat>1e-4f)? d->ambient_threat : 1.f;
+    float shared_rel = shared / amb;
     float val_dist = (ca&&cb) ? absf(ca->valeurs-cb->valeurs) : 0.f;
     float fk = r.kinship*(10.f-r.kinship)/25.f;     /* cloche sur la parenté */
-    r.alliance = shared + 2.0f*r.complement + 1.0f*fk - 0.3f*val_dist - 2.0f*r.schism;
+    r.alliance = K_SHARED*shared_rel + 2.0f*r.complement + 1.0f*fk - 0.3f*val_dist - 2.0f*r.schism;
     return r;
 }
 
@@ -373,7 +384,14 @@ static void deplete_arms(WorldEconomy *econ, int cid, float frac){
 }
 void diplo_war_tick(DiploState *d, World *w, WorldEconomy *econ,
                     const WorldProsperity *wp, float dt){
-    (void)wp;
+    /* §D2 : menace AMBIANTE du monde (moyenne des paires) — la référence RELATIVE des
+     * alliances, recalculée ici (la passe qui a w/econ/wp sous la main, une fois/tick). */
+    { float sum=0.f; int n=0;
+      for (int a=0;a<w->n_countries;a++) for (int b=0;b<w->n_countries;b++)
+          if (a!=b && w->country[a].role!=POLITY_UNCLAIMED && w->country[b].role!=POLITY_UNCLAIMED){
+              sum += threat_of(w,econ,wp,d,a,b); n++; }
+      d->ambient_threat = (n>0)? fmaxf(sum/(float)n, THREAT_FLOOR) : THREAT_FLOOR;
+    }
     for (int a=0;a<w->n_countries;a++) for (int b=0;b<w->n_countries;b++){
         if (a==b || d->status[a][b]!=DIPLO_WAR) continue;
         if (d->cb[a][b]==CB_NONE) continue;             /* a est l'ATTAQUANT (il porte le CB) */

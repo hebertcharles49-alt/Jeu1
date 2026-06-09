@@ -44,6 +44,7 @@ typedef struct {
     float       war_years[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       truce[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* jours d'interdiction de guerre (fond) */
     float       momentum[SCPS_MAX_COUNTRY];                 /* conquêtes RÉCENTES (décroît) → fulgurance perçue */
+    float       ambient_threat;                             /* §D2 : menace MOYENNE du monde (réf. relative des alliances) */
     int8_t      cb[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];     /* casus belli ACTIF de a contre b (but de guerre) */
     /* SCORE DE GUERRE — le bras-de-fer (a = ATTAQUANT, celui qui a le CB) :
      * batailles (∝ avantage militaire, PLAFONNÉ +50) + occupation (provinces prises,
