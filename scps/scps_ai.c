@@ -28,6 +28,9 @@
 #define AI_SURRENDER      55.f    /* score de guerre adverse au-delà duquel un défenseur sans espoir capitule */
 #define AI_ALLY_SEUIL     6.0f    /* score d'alliance au-delà duquel on PROPOSE l'alliance */
 #define AI_ALLY_DISSOLVE  3.0f    /* §D1 : … et en dessous duquel on la ROMPT (hystérésis : < seuil) */
+#define AI_CONQUEROR_W    0.60f   /* appétit de conquête au-delà duquel on SAISIT une proie faible
+                                   * AVANT de songer à s'allier (sinon, en monde calme §D2, le pacte
+                                   * facile fige le conquérant — il ne prédate jamais) */
 #define AI_FOOD_FLOOR     1.5f   /* sous ce seuil de marge : grenier d'abord */
 #define AI_BRAKE_HARD     0.6f   /* frein dur : consolidation impérative     */
 #define AI_RANCOR_W       3.0f   /* §6 biais de RECONQUÊTE : on vise qui nous a pris nos terres */
@@ -608,6 +611,23 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         CasusBelli cb = diplo_casus_belli(w,econ,wp,diplo,a->cid,heg, ai_war_want(v));
         if (cb!=CB_NONE && my_side >= AI_ARMY_MARGIN*diplo_mil_power(w,econ,heg)){
             diplo_declare_war_cb(diplo, a->cid, heg, cb);   /* la ligue a une raison (souvent territoriale) */
+            a->credit_war -= 1.f; a->stats.wars++;
+            return;
+        }
+    }
+
+    /* (1-bis) PREMIÈRE FRAPPE DU CONQUÉRANT — un tempérament très agressif (w_expand ≥
+     * AI_CONQUEROR_W) face à une PROIE adjacente nettement plus faible la SAISIT plutôt
+     * que de se lier : sinon, en monde calme (menace ambiante basse §D2), l'alliance
+     * facile étoufferait toute conquête (le conquérant s'allie même à sa proie). Les
+     * tempéraments modérés, eux, préfèrent encore le pacte (étape 2). Le frein veille en
+     * amont (credit_war < 1 → on n'arrive jamais ici quand on est surétendu). */
+    if (a->w_expand >= AI_CONQUEROR_W){
+        Resource pwant = ai_war_want(v);
+        int prey = ai_pick_rival(a, w, econ, wp, diplo, v->armee, pwant);   /* déjà : adjacent, + faible, AVEC CB */
+        if (prey>=0){
+            CasusBelli cb = diplo_casus_belli(w,econ,wp,diplo,a->cid,prey,pwant);
+            diplo_declare_war_cb(diplo, a->cid, prey, cb);
             a->credit_war -= 1.f; a->stats.wars++;
             return;
         }

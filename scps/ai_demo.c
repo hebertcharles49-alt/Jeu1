@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <limits.h>
 
 static int g_pass=0, g_fail=0;
@@ -158,6 +159,25 @@ int main(int argc, char **argv){
             re->build.H_coerc=0.f;                               /* sans défense */
             nbarb++;
         }
+    }
+
+    /* SUBSTRAT ÉGAL — « la SEULE différence = la fiche ». La graine assigne au hasard
+     * des capitales inégales (une riche qui bâtit, une dépeuplée qui reste inerte),
+     * ce qui BROUILLE la lecture des archétypes. On dote donc les trois capitales à
+     * l'identique : trésor (acheter les chantiers), matériaux de construction (de quoi
+     * bâtir du K), et une garnison de base (de quoi PROJETER — sinon le Dominateur,
+     * sans armée, bâtit faute de pouvoir conquérir). Les proies plantées plus haut
+     * restent, elles, sans défense — seul le Dominateur a une cible facile. */
+    for (int i=0;i<3;i++){
+        int cc=(i==0)?cidD:(i==1)?cidM:cidB;
+        int cr=cap_region(s.w,cc);
+        if (cr<0) continue;
+        RegionEconomy *re=&s.econ->region[cr];
+        re->treasury = 30000.f;
+        re->stock[RES_WOOD]=900.f; re->stock[RES_METAL]=900.f;
+        re->stock[RES_TOOLS]=600.f; re->stock[RES_GRAIN]=900.f;
+        re->build.H_coerc = fmaxf(re->build.H_coerc, 2.0f);   /* garnison → projeter la force */
+        if (re->strata[CLASS_LABORER].pop<300.f) re->strata[CLASS_LABORER].pop=500.f;
     }
 
     /* On lie les acteurs APRÈS avoir posé les fiches (l'IA lit l'entrée). */
