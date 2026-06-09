@@ -828,6 +828,16 @@ static bool culture_bears_arch(const PopCulture *c, int ar, const PopCulture cen
     if (ar==ARCH_MERCANTILE)     return c->ethos==ETHOS_MERCANTILE;
     return false;
 }
+/* COHÉSION d'une région gouvernée [0..1] — l'assentiment du sol : intégration moyenne
+ * (pondérée pop) des groupes. Une province homogène (cœur) est pleinement digérée (1.0) ;
+ * une conquête fraîche, mal intégrée, est basse → elle ne transmet son art qu'à mi-voix. */
+static float region_cohesion(const RegionEconomy *re){
+    if (re->pop.n_groups<=0) return 1.0f;
+    double si=0.0, sw=0.0;
+    for (int g=0;g<re->pop.n_groups;g++){ double wq=(double)re->pop.groups[g].count; if(wq<=0)continue;
+        si+=wq*re->pop.groups[g].integration; sw+=wq; }
+    return (sw>0.0)?(float)(si/sw):1.0f;
+}
 static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid, unsigned char depth[ARCH_COUNT]){
     PopCulture cen[RACE_COUNT]; bool present[RACE_COUNT];
     world_archetype_centroids(econ, cen, present);
@@ -849,7 +859,14 @@ static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid
         const RegionEconomy *re=&econ->region[r];
         if (!re->active || !re->colonized) continue;
         Profondeur ch;
-        if (re->owner==cid)                                          ch=PROF_SECRET;   /* gouvernance */
+        if (re->owner==cid){
+            /* §6 — la GOUVERNANCE atteint le secret, mais GRADÉE par la COHÉSION : un sol
+             * mal digéré (conquête fraîche, faible intégration) ne transmet son art qu'à
+             * mi-voix (métier), pas jamais — il faut LÉGITIMER pour ouvrir le profond/secret.
+             * Course avec l'assimilation : digérer avant que la source ne se fonde (§2). */
+            float coh=region_cohesion(re);
+            ch = (coh>=0.66f)?PROF_SECRET : (coh>=0.33f)?PROF_PROFOND : PROF_METIER;
+        }
         else if (has_credo && re->culture.credo==mycredo)            ch=PROF_METIER;    /* co-religion */
         else if (r<SCPS_MAX_REG && border[r])                        ch=PROF_METIER;    /* frontière */
         else                                                         ch=PROF_SURFACE;   /* commerce / diffusion */
