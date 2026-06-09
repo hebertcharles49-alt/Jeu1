@@ -820,10 +820,18 @@ static void world_archetype_centroids(const WorldEconomy *econ, PopCulture cen[R
  * (métier) > COMMERCE/diffusion lointaine (surface). C'est ce qui décide jusqu'où une
  * tradition diffuse : le comptoir passe la surface, seule la gouvernance atteint le secret.
  * depth[] indexé par race-signature (archétype ↔ race, 1:1). */
-static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid, unsigned char depth[RACE_COUNT]){
+/* La culture porte-t-elle l'archétype ar ? — distance au centroïde (signatures de race,
+ * 0..RACE_COUNT-1) ou correspondance d'ÉTHOS (profils d'éthos au-delà : bureaucrate, marchand). */
+static bool culture_bears_arch(const PopCulture *c, int ar, const PopCulture cen[RACE_COUNT], const bool present[RACE_COUNT]){
+    if (ar>=0 && ar<RACE_COUNT) return present[ar] && pc_content_dist(c,&cen[ar])<=ARCH_PORTEE_PROFIL;
+    if (ar==ARCH_BUREAUCRATIQUE) return c->ethos==ETHOS_BUREAUCRATE;
+    if (ar==ARCH_MERCANTILE)     return c->ethos==ETHOS_MERCANTILE;
+    return false;
+}
+static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid, unsigned char depth[ARCH_COUNT]){
     PopCulture cen[RACE_COUNT]; bool present[RACE_COUNT];
     world_archetype_centroids(econ, cen, present);
-    for (int r=0;r<RACE_COUNT;r++) depth[r]=PROF_NONE;
+    for (int r=0;r<ARCH_COUNT;r++) depth[r]=PROF_NONE;
     /* credo dominant (capitale) → canal RELIGION (la foi partagée ouvre le métier). */
     Credo mycredo=(Credo)0; bool has_credo=false;
     { int cp=(cid>=0&&cid<w->n_countries)?w->country[cid].capital_prov:-1;
@@ -845,11 +853,11 @@ static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid
         else if (has_credo && re->culture.credo==mycredo)            ch=PROF_METIER;    /* co-religion */
         else if (r<SCPS_MAX_REG && border[r])                        ch=PROF_METIER;    /* frontière */
         else                                                         ch=PROF_SURFACE;   /* commerce / diffusion */
-        for (int ar=0; ar<RACE_COUNT; ar++){
-            if (!present[ar] || depth[ar]>=(unsigned char)ch) continue;
-            bool bears = pc_content_dist(&re->culture,&cen[ar])<=ARCH_PORTEE_PROFIL;
+        for (int ar=0; ar<ARCH_COUNT; ar++){
+            if (depth[ar]>=(unsigned char)ch) continue;
+            bool bears = culture_bears_arch(&re->culture, ar, cen, present);
             for (int g=0; g<re->pop.n_groups && !bears; g++)
-                if (pc_content_dist(&re->pop.groups[g].culture,&cen[ar])<=ARCH_PORTEE_PROFIL) bears=true;
+                bears = culture_bears_arch(&re->pop.groups[g].culture, ar, cen, present);
             if (bears) depth[ar]=(unsigned char)ch;
         }
     }
@@ -859,7 +867,7 @@ static void ai_archetype_depth(const World *w, const WorldEconomy *econ, int cid
  * par GOUVERNANCE ou par SOI. Le commerce/la frontière (surface/métier) n'ouvrent QUE
  * les nœuds syncrétiques peu profonds (tech_sync_tick). La race seule n'ouvre rien. */
 unsigned ai_race_access(const World *w, const WorldEconomy *econ, int cid){
-    unsigned char depth[RACE_COUNT]; ai_archetype_depth(w, econ, cid, depth);
+    unsigned char depth[ARCH_COUNT]; ai_archetype_depth(w, econ, cid, depth);
     unsigned m=0;
     for (int r=0;r<RACE_COUNT;r++) if (depth[r]>=(unsigned char)PROF_PROFOND) m|=tech_race_bit((SpeciesArchetype)r);
     return m;
@@ -918,7 +926,7 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
     float income = (AI_RESEARCH_RATE/365.f)*AI_RESEARCH_CADENCE
                  * tech_research_yield(ts) * (1.f + pop/AI_RESEARCH_POPREF);
     ts->research_points += income;
-    unsigned char adepth[RACE_COUNT];
+    unsigned char adepth[ARCH_COUNT];
     ai_archetype_depth(w, econ, a->cid, adepth);                /* §4-6 : profondeur de contact par archétype */
     unsigned access=0;
     for (int r=0;r<RACE_COUNT;r++) if (adepth[r]>=(unsigned char)PROF_PROFOND) access|=tech_race_bit((SpeciesArchetype)r);

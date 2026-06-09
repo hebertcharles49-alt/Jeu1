@@ -149,16 +149,20 @@ static const SyncNode SYNCS[SYNC_COUNT] = {
     { "Doctrine d'accueil","Creuset emprunté",     RACE_HUMAIN,  PROF_METIER,  TECH_CHANCELLERIE,       0,0.5f,1.0f,0,0 },
     { "Hospice pastoral","Abondance partagée",     RACE_HALFELIN,PROF_SURFACE, TECH_COLLECTE_NOURRITURE,0,1.0f,0,   1.0f,0 },
     { "Garde étrangère","Discipline d'emprunt",    RACE_ORQUE,   PROF_METIER,  TECH_CASERNE,            0,0,0,      0,1.5f },
+    /* profils d'ÉTHOS (briefs Savoir/Société §5) : la bureaucratie diffuse le scriptorium
+     * au coude-à-coude (métier), le marchand répand le comptoir/cothon par le négoce (surface). */
+    { "Scriptorium d'emprunt","Écriture administrative", ARCH_BUREAUCRATIQUE, PROF_METIER,  TECH_BIBLIOTHEQUE, 1.5f,0,0, 0,0 },
+    { "Cothon","Bassin marchand",                        ARCH_MERCANTILE,     PROF_SURFACE, TECH_COMMERCE,     0,0,0,    2.0f,0 },
 };
 const SyncNode *tech_sync_node(int i){ return (i>=0&&i<SYNC_COUNT)?&SYNCS[i]:NULL; }
 
-int tech_sync_tick(TechState *s, const unsigned char depth[RACE_COUNT]){
+int tech_sync_tick(TechState *s, const unsigned char depth[ARCH_COUNT]){
     int newl=0;
     for (int i=0;i<SYNC_COUNT;i++){
         if (s->sync_unlocked[i]) continue;
         const SyncNode *sn=&SYNCS[i];
         if (sn->parent!=NONE && !s->unlocked[sn->parent]) continue;     /* cercle visible une fois le parent acquis */
-        int a=(int)sn->arch; if (a<0||a>=RACE_COUNT) continue;
+        int a=sn->arch; if (a<0||a>=ARCH_COUNT) continue;
         if (depth[a] < (unsigned char)sn->prof_requise) continue;        /* archétype pas atteint à la profondeur requise */
         s->sync_unlocked[i]=true; s->n_sync++; newl++;
         s->K+=sn->dK; s->L+=sn->dL; s->F+=sn->dF; s->eco+=sn->dEco; s->mil+=sn->dMil;  /* diffusion : LOQUET permanent */

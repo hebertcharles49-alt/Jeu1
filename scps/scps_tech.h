@@ -97,16 +97,25 @@ typedef struct {
  * requis à la profondeur requise — AUTOMATIQUE (diffusion, pas recherche). */
 typedef enum { PROF_NONE=0, PROF_SURFACE, PROF_METIER, PROF_PROFOND, PROF_SECRET } Profondeur;
 
+/* ARCHÉTYPES (briefs §7) : un PROFIL culturel, pas une race. Les indices 0..RACE_COUNT-1
+ * sont les 6 signatures de race (centroïdes culturels — arcane=elfe, forge runique=nain,
+ * artificier=gnome, assimilationniste=humain, pastoral=halfelin, martial-servile=orque,
+ * MÊME ORDRE que SpeciesArchetype) ; au-delà, des profils d'ÉTHOS. depth[] est indexé
+ * sur ARCH_COUNT. Un archétype d'éthos est « porté » par toute culture de cet éthos. */
+#define ARCH_BUREAUCRATIQUE (RACE_COUNT)       /* éthos bureaucrate : scriptorium, cadastre */
+#define ARCH_MERCANTILE     (RACE_COUNT+1)     /* éthos mercantile : comptoir, cothon */
+#define ARCH_COUNT          (RACE_COUNT+2)
+
 typedef struct {
     const char      *name;
     const char      *unlocks;          /* la capacité diffusée (mot de jeu) */
-    SpeciesArchetype arch;             /* archétype-source requis (↔ race-signature, profil culturel) */
+    int              arch;             /* archétype-source requis (indice 0..ARCH_COUNT-1) */
     Profondeur       prof_requise;     /* profondeur de contact minimale (surface…secret) */
     TechId           parent;           /* nœud de base dont le cercle s'ouvre (doit être acquis) */
     float dK, dL, dF, dEco, dMil;      /* écriture SCPS — diffusion BÉNÉFIQUE (jamais faustien) */
 } SyncNode;
 
-#define SYNC_COUNT 6
+#define SYNC_COUNT 8
 
 /* ---- État techno d'un empire (axes SCPS écrits par l'arbre) ----------- */
 typedef struct {
@@ -179,7 +188,7 @@ bool  tech_research(TechState *s, TechId id, unsigned race_access);
  * (depth[] indexé par race-signature : PROF_NONE..PROF_SECRET), loquette de façon
  * PERMANENTE et écrit ses deltas SCPS. Renvoie le nb de nœuds nouvellement loqués.
  * À appeler chaque pas — idempotent (un nœud loqué n'est jamais recalculé). */
-int  tech_sync_tick(TechState *s, const unsigned char depth[RACE_COUNT]);
+int  tech_sync_tick(TechState *s, const unsigned char depth[ARCH_COUNT]);
 const SyncNode *tech_sync_node(int i);   /* lecture (UI/membrane/télémétrie) ; NULL hors borne */
 
 /* COÛT en points de recherche : BASE_COST[tier] × (1 + EXTENT_W·population/BASE).
