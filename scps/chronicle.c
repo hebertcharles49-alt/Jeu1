@@ -214,6 +214,20 @@ static int active_alliances(const World *w, const WorldEconomy *e, const DiploSt
     }
     return n;
 }
+/* Recensement des manufactures PAR TYPE (combien de joailleries, de scieries…) — lit
+ * si la construction par rétroaction négative peuple bien la carte (et où ça manque). */
+static void print_building_census(const WorldEconomy *e){
+    long count[BLD_TYPE_COUNT]; for (int b=0;b<BLD_TYPE_COUNT;b++) count[b]=0;
+    for (int r=0;r<e->n_regions;r++){
+        const RegionEconomy *re=&e->region[r];
+        if (!re->active || !re->colonized) continue;
+        for (int i=0;i<re->n_bld;i++)
+            if (re->bld[i].type>=0 && re->bld[i].type<BLD_TYPE_COUNT) count[re->bld[i].type]++;
+    }
+    printf("              manufactures :");
+    for (int b=0;b<BLD_TYPE_COUNT;b++) if (count[b]>0) printf(" %ld×%s", count[b], building_name((BuildingType)b));
+    printf("\n");
+}
 /* Pays le plus étendu (par régions). */
 static int top_power(const World *w, const WorldEconomy *e, int *out_regions){
     int best=-1, bn=0;
@@ -498,6 +512,7 @@ int main(int argc, char **argv){
         /* EXPANSION : provinces colonisées (vierges peuplées) vs PRISES de force. */
         int n_alliances = active_alliances(w, s.econ, s.dp);
         printf("              diplomatie : %d pacte(s) d'alliance actif(s)\n", n_alliances);
+        print_building_census(s.econ);
         printf("              expansion : %d prov colonisées · %d prov PRISES de force · armée finale %.0f\n",
                colonized_provinces(w,s.econ), conq_prov, total_army(w,s.econ));
         /* TÉLÉMÉTRIE PAR ÂGE : le marché, l'or par empire et la tech à chaque avènement. */

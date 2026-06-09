@@ -150,6 +150,12 @@ static inline Resource preferred_luxe(const PopCulture *c){
                               * montagnes) pour qu'elle s'offre son statut → moins de coups. */
 #define WAGE_SHARE   0.55f   /* part de la valeur → salaires (laborers) */
 /* le reste (1 - TAX - WAGE) = profit bourgeois (résidu 0.25 — reste sain) */
+/* §NF — CONSTRUCTION PAR RÉTROACTION NÉGATIVE : un bien en pénurie appelle son
+ * producteur, qu'on bâtit spontanément — mais JAMAIS dans le vide (pop + intrant). */
+#define NF_SHORTAGE   1.8f   /* prix ≥ 1.8× base = pénurie qui justifie de bâtir le producteur */
+#define NF_POP_FLOOR  80.f   /* pop régionale minimale : sous ce seuil, on ne bâtit pas (le vide) */
+#define NF_STOCK_MIN  5.0f   /* stock d'intrant comptant comme « approvisionné » (extraction OU import) */
+#define NF_SEED_LEVEL 1.0f   /* niveau de NAISSANCE du bâtiment (puis l'expansion §1 le fait croître) */
 #define TECH_RATE    0.010f  /* conversion richesse élite → tech */
 #define PRICE_INERTIA 0.65f  /* lissage du prix (0=instantané,1=figé) */
 #define EPS          1e-4f
@@ -438,6 +444,36 @@ void econ_init(WorldEconomy *e, const World *w) {
             region_ensure_building(re,BLD_POWDERMILL);
         /* Santé : apothicaire là où poussent les simples (herbes médicinales). */
         if (re->raw_cap[RES_MED_HERBS] > 0.f) region_ensure_building(re,BLD_APOTHECARY);
+
+        /* §NF — CONSTRUCTION PAR RÉTROACTION NÉGATIVE : au-delà de l'implantation
+         * géographique ci-dessus (au gisement), un bien PRODUCTIBLE en PÉNURIE
+         * (prix ≥ NF_SHORTAGE× base — le signal que « l'input baisse ») APPELLE son
+         * producteur dans CETTE région, même sans gisement local. On le bâtit
+         * spontanément — mais JAMAIS dans le vide : il faut (a) une POPULATION (des
+         * bras qui travaillent, des bouches qui consomment : pop ≥ NF_POP_FLOOR) et
+         * (b) de quoi le NOURRIR — l'intrant EXTRAIT sur place OU présent en STOCK
+         * (importé), repli (perle…) compris. Le surcroît de bien fait RETOMBER le
+         * prix → le signal s'éteint : rétroaction négative, auto-amortie. */
+        if (re->colonized){
+            float rpop = re->strata[CLASS_LABORER].pop + re->strata[CLASS_BOURGEOIS].pop
+                       + re->strata[CLASS_ELITE].pop;
+            if (rpop >= NF_POP_FLOOR){
+                for (int b=0;b<BLD_TYPE_COUNT;b++){
+                    const Recipe *rc=&RECIPE[b];
+                    if (rc->out<=RES_NONE || rc->out>=RES_COUNT) continue;
+                    if (re->price[rc->out] < BASE_PRICE[rc->out]*NF_SHORTAGE) continue;  /* pas en pénurie */
+                    bool feed1 = (rc->in1==RES_NONE)
+                              || re->raw_cap[rc->in1]>0.f || re->stock[rc->in1]>=NF_STOCK_MIN
+                              || (rc->alt1!=RES_NONE && (re->raw_cap[rc->alt1]>0.f
+                                                       || re->stock[rc->alt1]>=NF_STOCK_MIN));
+                    bool feed2 = (rc->in2==RES_NONE)
+                              || re->raw_cap[rc->in2]>0.f || re->stock[rc->in2]>=NF_STOCK_MIN;
+                    if (!feed1 || !feed2) continue;        /* rien pour le nourrir → bâtir dans le vide : refusé */
+                    int bi=region_ensure_building(re,(BuildingType)b);
+                    if (bi>=0 && re->bld[bi].level < NF_SEED_LEVEL) re->bld[bi].level = NF_SEED_LEVEL;
+                }
+            }
+        }
 
         /* Niveau initial des manufactures : dimensionné sur la capacité
          * d'accueil (l'infrastructure latente du site). */

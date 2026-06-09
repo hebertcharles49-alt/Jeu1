@@ -76,7 +76,11 @@ typedef struct {
     float        workers;   /* emploi effectif au dernier tick  */
 } Building;
 
-#define ECON_MAX_BLD 6      /* une manufacture de chaque type par région */
+#define ECON_MAX_BLD BLD_TYPE_COUNT  /* une manufacture de CHAQUE type par région — calé sur
+                                      * l'enum (était figé à 6 alors que les types ont grimpé à
+                                      * 14 : les bâtiments communs saturaient les slots et
+                                      * évinçaient les rares — joaillerie, fonderie, outillage —
+                                      * d'où leur pénurie. Désormais auto-calé : plus de désync). */
 
 /* ---- Profil culturel de la population d'une région --------------------- *
  * Distinct de la géographie : ce sont les gens qui ont une culture, pas la
