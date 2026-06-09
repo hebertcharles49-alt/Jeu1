@@ -1,0 +1,313 @@
+══════════════════════════════════════════════════════════════════════════════
+ SCPS — AUDIT DE L'ÉCONOMIE & DE LA BALANCE  (lecture seule, 0 modification)
+══════════════════════════════════════════════════════════════════════════════
+ Date : 2026-06-09 · Branche : claude/magical-gates-66oap4 · Périmètre : économie
+ régionale (scps_econ), commerce (scps_trade/intertrade/routes), prospérité
+ (scps_prosperity), tech (scps_tech), répartition des ressources (scps_world).
+
+ AUCUN fichier de jeu n'a été modifié. Seuls des binaires de MESURE (déjà prévus
+ par le Makefile et ignorés par .gitignore) ont été compilés et exécutés. Ce
+ document est un constat chiffré ; les pistes du §9 sont signalées, non appliquées.
+
+
+0. MÉTHODE
+──────────────────────────────────────────────────────────────────────────────
+ Mesure empirique (le moteur tourne, on lit les sorties) croisée avec lecture du
+ code (constantes, formules). Outils lancés :
+   • econ_scan <base> <n_mondes> <ans> — satisfaction pop-pondérée par classe +
+     prix moyens, agrégés sur toutes les régions colonisées.
+       Échantillons : bases 7, 42, 100, 310, 500 ; horizons 60 / 80 / 100 / 150 ans.
+   • econ_demo <graine> <n_ticks>      — sommaire monde + détail région/marché.
+       Trajectoire temporelle : graine 42 à 24 / 60 / 120 / 240 / 480 ticks.
+   • chronicle <graine> <n_sims> <ans> — LA validation macro (vrai moteur complet,
+     sans joueur). Lancé 20240607 × 8 sims × 150 ans.
+   • prosperity_demo, labor_demo, intertrade_demo — contrôles ciblés.
+
+ Les chiffres se sont révélés TRÈS stables d'une graine et d'un horizon à l'autre :
+ le système atteint un régime stationnaire net, ce qui rend le diagnostic fiable.
+
+
+1. VERDICT EN UNE PAGE
+──────────────────────────────────────────────────────────────────────────────
+ Les GARDE-FOUS tiennent (pas de famine, anti-snowball solide — plancher d'empires
+ toujours respecté, marché réactif). Mais la balance du BIEN-ÊTRE MATÉRIEL est cassée
+ par le HAUT : les deux classes supérieures vivent en pénurie permanente. (Attention :
+ la « Prospérité » macro de l'UI, elle, monte à 100 — elle est découplée de la
+ satisfaction réelle des pops ; voir §6.)
+
+   État stationnaire de la satisfaction (pop-pondérée, 6 graines × 60–150 ans) :
+        Laborer    ≈ 47–48 %     (acceptable)
+        Bourgeois  ≈ 13–16 %     ⚠  très bas
+        Élite      ≈ 15–19 %     ⚠  très bas
+
+ Trois moteurs se combinent pour produire cet effondrement :
+   (A) un CISEAU démographie/production : la demande croît avec la population
+       (exponentielle, doublement ~30 ans) ; l'offre manufacturée est plafonnée.
+   (B) une STÉRILISATION FISCALE : l'impôt (42 %/tick) aspire la richesse des
+       classes vers un trésor qui n'est presque jamais redépensé (×16 en 120 ans).
+   (C) des GOULOTS manufacturiers chroniques (étoffe, orfèvrerie, papier) que le
+       signal-prix ne peut PAS corriger (l'effort de production sature trop tôt).
+
+ Conséquence émergente : la satisfaction moyenne DÉCROÎT dans le temps à mesure que
+ la population gonfle (65 % → 45 % entre 24 et 480 ticks, graine 42).
+
+
+2. CE QUI EST SAIN — la balance qui tient
+──────────────────────────────────────────────────────────────────────────────
+ • ANTI-FAMINE : socle de grain garanti hors tirage (econ_init), réserve vivrière
+   1.20×pop avant toute transformation (scps_econ.c:619-629). Grain mesuré à
+   0.4–0.63× sa base partout → léger surplus, jamais de pénurie de vivres. Les
+   sites de départ ont food≥0.30 dans ~95 % des cas.
+ • ANTI-SNOWBALL : aucun empire ne fait boule de neige ; le plancher d'empires est
+   toujours tenu (les rares absorptions des configs denses sont compensées par des
+   émergences — cf §6) ; coût des techs ∝ étendue (scps_tech.c) ; dernière région
+   ×2 à prendre (coup de grâce diplo).
+ • MARCHÉ RÉACTIF : prix = base·clamp(demande/offre,0.2,6) lissé (inertie 0.65),
+   borné [0.15× ; 8×] (scps_econ.c:714-722) ; l'extraction/manufacture LIT le prix
+   (market_effort). Le système « respire » dans sa plage utile.
+ • COMMERCE FONCTIONNEL : routes terre/mer avec coûts différenciés (mar 0.12 /
+   terre 0.32, scps_trade.c:55-66), capacité ∝ pop, embargo en guerre, arbitrage
+   inter-pays qui verse 50 % en or à l'exportateur (intertrade_demo : 9/9 OK).
+ • Démographie stable, pas d'effondrement de population.
+
+
+3. LE THERMOMÈTRE — prix moyens mesurés vs prix de base
+──────────────────────────────────────────────────────────────────────────────
+ (moyenne sur econ_scan multi-graines + chronicle par âge ; ratio = prix/base)
+
+   BIEN          base   prix mesuré   ratio    LECTURE
+   Grain          1.0    0.41–0.63    ~0.6×    surplus sain (anti-famine OK)
+   Bois           1.0    0.7–1.1      ~0.9×    équilibre tendu
+   Vin            5.0    7.0–10.0     ~1.7×    tendu mais acceptable
+   Étoffe         4.5    18.0–22.4    ~4.3×    ⚠ PÉNURIE chronique (jamais résolue)
+   Orfèvrerie    22.0    65–99        ~4.0×    ⚠ PÉNURIE chronique (empire avec l'âge)
+   Papier         5.5    ~19          ~3.5×    ⚠ pénurie (bourgeois + élite)
+   Outils         8.5    1.70–1.86    ~0.20×   ⚠ GLUT au plancher (capital gaspillé)
+
+ Note clé sur le mécanisme d'auto-correction :
+   market_effort(P) = clamp(0.25 + 0.85·(P/base), 0.22, 1.5)   (scps_econ.c:191-194)
+   → l'effort de production SATURE à 1.5 dès que P ≥ 1.47× base.
+   Donc pour l'étoffe (4.3×) et l'orfèvrerie (4×), le prix a beau hurler la pénurie,
+   l'offre est BLOQUÉE au maximum (×1.5) : le marché ne peut plus se rééquilibrer
+   par le haut. La « respiration » n'existe que dans la bande P ∈ [0.15× ; 1.47×].
+
+
+4. SYMPTÔME CENTRAL — satisfaction par classe & effondrement temporel
+──────────────────────────────────────────────────────────────────────────────
+ a) ÉTAT STATIONNAIRE (econ_scan, pop-pondéré, robuste sur 6 graines) :
+        base 7   (150 ans) : Laborer 47.7 · Bourgeois 16.4 · Élite 16.9
+        base 42  ( 80 ans) : Laborer 48.5 · Bourgeois 13.4 · Élite 15.4
+        base 100 (100 ans) : Laborer 47.7 · Bourgeois 14.0 · Élite 16.5
+        base 500 (150 ans) : Laborer 47.1 · Bourgeois 15.5 · Élite 17.2
+    → Les classes hautes plafonnent à ~15 % quelle que soit la graine.
+
+ b) EFFONDREMENT DANS LE TEMPS (econ_demo, graine 42, un monde) :
+        ticks   pop      satisf. moyenne   PIB
+          24    48 991        65 %         1994
+          60    58 080        62 %         2386
+         120    71 394        59 %         3131
+         240    88 777        52 %         3979
+         480    97 933        45 %         4496
+    → La population double, la satisfaction chute de 20 points. L'offre ne suit pas.
+
+ c) CAS CONCRET (econ_demo 42, région pauvre, tick 480) :
+        Élite : richesse 0, satisfaction 0 %  |  Laborer : richesse 0, satisf 38 %
+        Bourgeois : richesse 697, satisf 64 %  |  Trésor régional : 77 859 (!)
+        Orfèvrerie absente (prix au plafond 109) PENDANT que l'étoffe précieuse
+        s'entasse invendue (stock 60, prix plancher 0.80).
+    → Tout l'argent est dans le trésor ; les classes sont à sec ; le mauvais luxe
+       est produit. Trois pathologies en une image (§5.3, §5.5, §5.6).
+
+
+5. LES CAUSES RACINES (chiffrées)
+──────────────────────────────────────────────────────────────────────────────
+
+ 5.1  CISEAU DÉMOGRAPHIE / PRODUCTION  — la cause structurelle n°1
+   • Demande = (pop/100)·DEMAND_TENSION·NEED[classe]  (scps_econ.c:702-712). Elle
+     croît avec la population, qui croît ~2,3 %/an (BIRTH 0.034 / DEATH 0.015,
+     scps_econ.c:157-162) → doublement en ~30 ans.
+   • Offre manufacturée = niveau·market_effort, plafonnée :
+       – niveau initial = 0.5 + cap_pop·0.15·0.01 (scps_econ.c:444-446), calé sur la
+         capacité d'accueil INITIALE du site ;
+       – croissance = réinvest bourgeois 2 %, mais bornée à +0.05/tick/bâtiment
+         (scps_econ.c:867-871) → linéaire et lente ;
+       – effort plafonné à 1.5× (§3).
+   • Les NEED des classes hautes sont quasi tous des biens MANUFACTURÉS
+     (bourgeois : étoffe, papier, vin, sel, remède ; élite : vin, papier, fourrure,
+     luxe) tandis que les laborers vivent surtout de BRUTES de subsistance (grain,
+     poisson, bois) dont la raw_cap, elle, SUIT la population (subsist×coef,
+     scps_econ.c:396-398). D'où l'écart 47 % (laborer) vs 15 % (haut).
+   ⇒ Demande exponentielle contre offre linéaire/plafonnée : la pénurie de produits
+     finis s'aggrave mécaniquement avec la croissance.
+
+ 5.2  L'EFFORT DE PRODUCTION SATURE TROP TÔT (1.47× la base)
+   Voir §3. Conséquence : les biens en pénurie profonde sont des « trous noirs » de
+   prix — le signal monte jusqu'au plafond (8×) sans jamais débloquer plus d'offre.
+
+ 5.3  STÉRILISATION FISCALE — la cause structurelle n°2
+   • L'État vise 42 % de la richesse par tick (STATE_TAX_AMBITION, scps_econ.c:675)
+     et crédite le trésor : treasury += collected (scps_econ.c:688).
+   • Côté SORTIES, dans econ_tick : AUCUNE. Le trésor ne se vide que via la
+     construction d'édifices (scps_agency.c:80), les indemnités de guerre
+     (scps_diplo.c:483/503, simples transferts) et de rares événements (−10 à −50,
+     scps_events.c). Tout cela est dérisoire face aux entrées.
+   • Mesure (chronicle, sim 1) : or Σ 150 173 (an 20) → 2 496 657 (an 140), soit
+     ×16, pendant que le PIB ne fait que ×2,5 et la population ×2. Un seul empire
+     finit avec >1 M d'or pour 17 régions.
+   ⇒ L'or est « mort » dans les coffres ; les classes, ponctionnées chaque tick,
+     tombent à richesse ~0 (cf §4c) et perdent tout pouvoir d'achat → satisfaction
+     basse même quand des biens existent. Il manque une dépense publique / une
+     redistribution qui réinjecte le trésor dans l'économie.
+
+ 5.4  LE DRAIN DU LUXE — pourquoi l'étoffe est en pénurie permanente
+   Chaîne laine → étoffe → étoffe précieuse :
+     TEXTILE     : laine 1.5 → étoffe 1.8           (scps_econ.c:78)
+     WEAVER_LUX  : étoffe 2.0 → étoffe précieuse 1.0 (scps_econ.c:89)
+   L'atelier de luxe CONSOMME l'étoffe commune. Tiré par un prix de statut élevé
+   (effort saturé à 1.5), il aspire le tissu destiné aux laborers (NEED 0.12) et
+   bourgeois (NEED 0.34) → étoffe bloquée à ~4,3× sa base. Déficit déjà noté dans
+   sim_eco_rebalance.txt (« étoffe ~66 % », drain de l'atelier de luxe), toujours là.
+
+ 5.5  MISMATCH DU LUXE CULTUREL — le mauvais bien au mauvais endroit
+   • Préférence de l'élite (scps_econ.c:144) : orfèvrerie si culture subsistance<5,
+     sinon étoffe précieuse — c'est une propriété de la CULTURE.
+   • Placement des ateliers (scps_econ.c:413-425) : joaillerie si or/perle présents,
+     atelier d'étoffe précieuse si laine présente — c'est une propriété de la
+     GÉOGRAPHIE. Les deux axes sont DÉCOUPLÉS.
+   ⇒ Une élite « martiale » (préfère l'orfèvrerie) installée sur un sol à laine sans
+     or reçoit de l'étoffe précieuse — valorisée à 50 % seulement (LUXE_OFFCULT 0.5)
+     — et n'a aucune joaillerie. D'où, simultanément : glut d'étoffe précieuse +
+     pénurie d'orfèvrerie (observé §4c). Le luxe produit ne correspond pas au luxe
+     désiré.
+
+ 5.6  GLUTS STRUCTURELS — du capital qui ne sert à rien
+   • OUTILS : prix au plancher (0.20× base) partout, en permanence. Les outils ne
+     sont dans le NEED d'aucune classe (ils ne servent qu'au prod_mult, +30 % max,
+     scps_econ.c:566-568) ; la chaîne fer→métal→outils les surproduit → invendus.
+   • ÉTOFFE PRÉCIEUSE là où la culture préfère l'orfèvrerie (cf §5.5) : produite,
+     jamais consommée, stock qui enfle au plancher.
+   ⇒ Travail et intrants engloutis dans des biens sans débouché.
+
+ 5.7  DISTRIBUTION : un surplus quelque part n'est pas une couverture partout
+   L'orfèvrerie n'existe que là où il y a de l'or (régions minières) ; les marchés
+   de consommation éloignés restent à sec malgré un surplus agrégé. Le commerce
+   inter-régional ne comble pas l'écart (capacité limitée, pertes de transport).
+   C'est pourquoi les bilans de COUVERTURE agrégée (cf §8) peuvent afficher
+   « 17000 % » d'orfèvrerie alors que le PRIX réel reste à 4× sa base : le bien est
+   abondant au mauvais endroit.
+
+
+6. VUE MACRO (chronicle 20240607 × 8 sims × 150 ans, sans joueur)
+──────────────────────────────────────────────────────────────────────────────
+ SYNTHÈSE OFFICIELLE (agrégat des 8 sims, sortie du chronicle) :
+   guerres ............. 43 (moy 5.4/sim)     provinces prises ... 97 (12.1/sim)
+   pays absorbés ....... 3  (moy 0.4/sim)     pays émergés ....... 6  (0.8/sim)
+   nœuds de tech ....... 2913 (364/sim ; 448 faustiens)
+   soulèvements ........ 230 allumés → 7 sécessions · 119 COUPS · 83 concessions · 20 écrasés
+   pic révolte moyen ... 5.8 pays simultanés  morts au combat ... 563 (70/sim)
+   corruption .......... 2/8 sims ≥1 polity capturée (pire-corr moy 28/100)
+   effondrement systém.. 0/8 sims (seuils « Soulèvements » 0/8 · « Ordre de Fer » 0/8)
+
+ LECTURE :
+ • ANTI-SNOWBALL solide : 3 absorptions seulement (0.4/sim, et uniquement dans les
+   configs denses ≥15 pays), COMPENSÉES par 6 émergences ; le plancher d'empires est
+   tenu dans les 8 sims. « La carte politique respire. » Population saine (25k→78k),
+   jamais de famine. Aucune sim n'atteint l'effondrement systémique (0/8).
+ • PROSPÉRITÉ MACRO ≠ SATISFACTION MICRO (point clé, à ne pas confondre) : à 150 ans,
+   les empires COHÉSIFS affichent Prospérité 100/100 et Stabilité ~80–100 (échelle
+   diégétique 0-100) ; seuls ceux EN RÉVOLUTION s'effondrent (Stab/Prosp ~0, ex.
+   sim 8 « Pays 37 » : Stab 3 Prosp 1 — ce n'est pas la taille qui tue, c'est la
+   révolte). Donc le moteur de prospérité abstrait (PE/SI → trésor, tech, croissance)
+   tourne BIEN ; mais il est DÉCOUPLÉ du marché des biens : un État « Prospérité 100 »
+   peut abriter des classes à 15 % de satisfaction matérielle (§4). La richesse macro
+   ne redescend pas dans les paniers de consommation. (Au rodage court — 20 ticks —
+   prosperity_demo montre un P_réalisé brut encore ≤ 1.78 : la prospérité monte
+   lentement puis sature ; ce n'est pas une atonie de fond, mais un démarrage lent.)
+ • COUPS DOMINANTS : 119 coups / 230 soulèvements (52 %) ; sécessions marginales (7).
+   Très variable selon la cohésion des départs (sim 2 : 13 soulèvements ; sim 4 : 98).
+   Or les coups relèvent du déclencheur FACTIONS (§7), pas de l'économie.
+ • TRÉSOR : explose dans TOUTES les sims (or Σ ×15–16 en 120 ans ; sim 8 :
+   521k → 7,85 M pour un PIB seulement ×1,7) — l'or croît 6-8× plus vite que le PIB
+   (cf §5.3).
+ • GOULOTS PERMANENTS : étoffe ~18–22, orfèvrerie ~65–92, outils ~1.70 d'un âge à
+   l'autre, dans les 8 sims — jamais résorbés par le temps (cf §3).
+
+
+7. DÉCOUPLAGE COUPS D'ÉTAT ↔ ÉCONOMIE  (point de design à connaître)
+──────────────────────────────────────────────────────────────────────────────
+ Un coup d'État tombe d'une faction-éthos forte ET aliénée (SYNTHESE_FACTIONS.txt
+ §5), pas d'un seuil de misère économique. Conséquence directe et déjà documentée :
+ AMÉLIORER L'ÉCONOMIE NE RÉDUIRA PAS le nombre de coups. La satisfaction éco nourrit
+ la démographie, la prospérité, la tech et la légitimité — mais le « déclencheur de
+ coup » est ailleurs. Si l'objectif est de calmer les coups, c'est le module
+ factions/revolt qu'il faut viser, pas la balance des biens.
+
+
+8. DIVERGENCES DOCUMENTAIRES RELEVÉES (pour info)
+──────────────────────────────────────────────────────────────────────────────
+ • « 2e ressource mineure ×0.4 » : sim_eco_rebalance.txt la dit NON implémentée ;
+   ressources_ideal.txt la dit IMPLÉMENTÉE. Le code tranche : elle EST en place
+   (tirage secondaire ×0.4 dans gen_resources, scps_world.c). → sim_eco_rebalance
+   est obsolète sur ce point.
+ • COUVERTURE vs SATISFACTION : ressources_ideal.txt annonce orfèvrerie « 17000 % »
+   et élite « 29,5 % » ; la mesure live (econ_scan) donne orfèvrerie à 4× sa base
+   (pénurie) et élite à 15–19 %. L'outil de couverture cumule le stock sans
+   décroissance (il SURESTIME massivement) ; la satisfaction/prix réels (avec
+   décroissance de stock 15 %/tick) sont l'indicateur fiable. Se fier au prix et à
+   la satisfaction, pas à la couverture brute.
+
+
+9. LEVIERS POSSIBLES — SIGNALÉS, NON IMPLÉMENTÉS (audit = 0 modification)
+──────────────────────────────────────────────────────────────────────────────
+ Donnés comme points d'entrée si une passe de rebalance est décidée plus tard :
+   L1 (ciseau §5.1)  : indexer le niveau/cap des manufactures sur la population
+                       SERVIE (pas seulement sur cap_pop initial), ou relever le
+                       plafond de market_effort pour les produits finis.
+   L2 (fiscal §5.3)  : donner une SORTIE au trésor (dépense publique, salaires de
+                       fonction, ou redistribution) pour qu'il ne stérilise pas l'or.
+   L3 (luxe §5.4)    : borner/gater WEAVER_LUX pour qu'il ne draine pas l'étoffe
+                       commune sous un certain seuil de couverture des classes.
+   L4 (mismatch §5.5): aligner le placement des ateliers de luxe sur la PRÉFÉRENCE
+                       culturelle locale, pas seulement sur la ressource brute.
+   L5 (glut §5.6)    : donner un débouché aux outils (NEED de bâti/entretien) ou
+                       lier leur production à la demande effective.
+   L6 (distrib §5.7) : renforcer la capacité de commerce des biens de statut, ou
+                       autoriser une production de luxe « de repli » hors gisement.
+ Chaque levier devra être re-validé au chronicle (invariant « 0 pays absorbé »).
+
+
+ANNEXE — CONSTANTES & FORMULES CLÉS RELEVÉES (file:line)
+──────────────────────────────────────────────────────────────────────────────
+ CLASSES & BESOINS
+   CLASS_SHARE 80 % / 15 % / 5 %                         scps_econ.c:126
+   richesse initiale/tête 0.5 / 2.0 / 6.0 (élite ×12)    scps_econ.c:258-262
+   NEED[classe][bien] (table de consommation)            scps_econ.c:111-123
+   DEMAND_TENSION 1.10 (+10 % de demande permanente)     scps_econ.c:184
+ PRIX & PRODUCTION
+   BASE_PRICE[] (grain 1 … fer céleste 20)               scps_econ.c:23-62
+   prix = base·clamp(dem/offre,0.2,6), inertie 0.65,
+        borné [0.15× ; 8×]                                scps_econ.c:714-722
+   market_effort = clamp(0.25+0.85·P/base, 0.22, 1.5)    scps_econ.c:191-194
+   prod_mult outils = 1+0.30·(1−1/(1+tools_pc))          scps_econ.c:566-568
+   recettes (TEXTILE, WEAVER_LUX, JEWELER…)              scps_econ.c:75-102
+   réserve vivrière 1.20×pop avant transformation        scps_econ.c:619-629
+   niveau manuf : init 0.5+cap_pop·0.15·0.01             scps_econ.c:444-446
+                  croissance +0.05/tick/bâtiment (max)    scps_econ.c:867-871
+   placement des ateliers (gating géographique)          scps_econ.c:413-425
+ REVENU & FISCALITÉ
+   WAGE_SHARE 0.55 / profit 0.25 / TAX_RATE 0.20         scps_econ.c:148-153
+   STATE_TAX_AMBITION 0.42 ; tolérance(éthos,classe)     scps_econ.c:531-543,675-691
+   treasury += collected (seule opération en econ_tick)  scps_econ.c:688
+   sorties du trésor (édifices / guerre / events)        scps_agency.c:80 ;
+                                                          scps_diplo.c:483,503 ; events
+ DÉMOGRAPHIE
+   BIRTH 0.034 / DEATH 0.015 / SOCIETY_BONUS 0.008       scps_econ.c:157-162
+   net clampé [−0.10 ; 0.06] ; pic famine si food<0.35   scps_econ.c:828-844
+ COMMERCE
+   coûts transport (mar 0.12 / terre 0.32 / fleuve −)    scps_trade.c:55-66
+   capacité = 4 + 0.002·pop                              scps_trade.c:71-73
+   intertrade : transport 0.06, export 0.25, or 0.50     scps_intertrade.c:12-15
+
+══════════════════════════════════════════════════════════════════════════════
+ FIN DE L'AUDIT — constat seul, aucune valeur du jeu n'a été touchée.
+══════════════════════════════════════════════════════════════════════════════
