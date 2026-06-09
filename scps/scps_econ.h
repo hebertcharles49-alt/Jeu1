@@ -36,6 +36,7 @@
 #include "scps_types.h"
 #include "scps_culture.h"   /* PopCulture embarque les traits dérivés (Ethos, …) */
 #include "scps_species.h"   /* couche biologique : race + traits (leviers) */
+#include "scps_tech.h"      /* TechState : §B1 abonde prod_mult par les techs de production */
 
 /* ---- Strates sociales ------------------------------------------------- */
 typedef enum {
@@ -176,6 +177,7 @@ typedef struct {
 
     float      treasury;             /* taxe captée par les élites (cumul) */
     float      tech;                 /* recherche cumulée */
+    float      tech_prod;            /* §B1 : multiplicateur de prod issu des techs de PRODUCTION du pays (1 = aucun) */
     float      gdp;                  /* valeur produite au dernier tick */
     float      satisfaction;         /* satisfaction générale [0..1] */
     float      food_sat;             /* satisfaction alimentaire [0..1] (grain+fish) */
@@ -230,6 +232,11 @@ void econ_init(WorldEconomy *e, const World *w);
  * les processus cumulatifs (croissance, tech, impôt→trésor) suivent dt, les flux
  * production/consommation s'équilibrent par tick (satisfaction préservée). */
 void econ_tick(WorldEconomy *e, float dt);
+
+/* §B1 — pousse le bonus de PRODUCTION (techs Forge/Société/Savoir·Production) du PAYS
+ * propriétaire vers chaque région (re->tech_prod), lu par econ_tick pour abonder prod_mult.
+ * À appeler par le harnais avant econ_tick (la recherche pays → la prod région). */
+void econ_apply_country_tech(WorldEconomy *e, const TechState *ts, int n_ts);
 
 /* Tolérance fiscale [0..1] par ÉTHOS × classe (§7) : le seuil (×satisfaction)
  * au-delà duquel on fuit l'impôt et l'on gronde. Exposé pour les bancs d'essai. */

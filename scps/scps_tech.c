@@ -207,6 +207,30 @@ float tech_research_yield(const TechState *s){
     return y;
 }
 
+/* §B1 — techs de PRODUCTION : multiplicateurs MODESTES (non faustiens, charge 0) dispatchés
+ * thématiquement. prod_pct abonde la production (prod_mult) ; eff_pct l'efficacité d'emploi.
+ * Tables par nœud (0 par défaut) — le pain quotidien de l'arbre, le gain sain de spécialisation. */
+static const float NODE_PROD_PCT[TECH_COUNT] = {
+    /* Forge·Production — « le multiplicateur de rendement » : extraction + manufacture. */
+    [TECH_FONDERIE]=0.08f, [TECH_OUTILLAGE]=0.10f, [TECH_MANUFACTURE]=0.12f, [TECH_INDUSTRIE]=0.15f,
+    /* Société·Production — rendement agricole / efficacité du commerce. */
+    [TECH_IRRIGATION]=0.06f, [TECH_COMMERCE]=0.08f, [TECH_CADASTRE]=0.08f, [TECH_ABONDANCE]=0.10f,
+};
+static const float NODE_EFF_PCT[TECH_COUNT] = {
+    /* Savoir·Production — le savoir-faire rend chaque bras meilleur (efficacité d'emploi). */
+    [TECH_SCRIPTORIUM]=0.05f, [TECH_ACADEMIE]=0.07f, [TECH_UNIVERSITE]=0.10f,
+};
+float tech_prod_bonus(const TechState *s){
+    float b=0.f; if(!s) return 0.f;
+    for (int i=0;i<TECH_COUNT;i++) if (s->unlocked[i]) b+=NODE_PROD_PCT[i];
+    return b;
+}
+float tech_eff_bonus(const TechState *s){
+    float b=0.f; if(!s) return 0.f;
+    for (int i=0;i<TECH_COUNT;i++) if (s->unlocked[i]) b+=NODE_EFF_PCT[i];
+    return b;
+}
+
 /* Le penchant d'une race = le thème de sa signature (lecture, pas de « si race »). */
 TechTheme tech_race_affinity(SpeciesArchetype r){
     for (int i=0;i<TECH_COUNT;i++)

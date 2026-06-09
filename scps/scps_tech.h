@@ -202,6 +202,12 @@ float tech_cost(TechId id, float population);
  * appelant : income = yield × f(pop)). La pop produit la recherche ET en renchérit
  * le coût → équilibre en un seul levier. */
 float tech_research_yield(const TechState *s);
+
+/* §B1 — bonus de PRODUCTION cumulés des nœuds déverrouillés (somme des prod_pct / eff_pct).
+ * L'éco les lit pour abonder prod_mult : +production et +efficacité d'emploi, modestes,
+ * dispatchés thématiquement (Forge/Société·Prod → prod ; Savoir·Prod → eff). */
+float tech_prod_bonus(const TechState *s);   /* Σ prod_pct (fraction, ex. 0.30 = +30 %) */
+float tech_eff_bonus(const TechState *s);    /* Σ eff_pct */
 /* Le PENCHANT d'une race : le thème vers lequel sa signature la porte (biais IA,
  * jamais un « si race==X » : c'est une lecture de la table). */
 TechTheme tech_race_affinity(SpeciesArchetype r);

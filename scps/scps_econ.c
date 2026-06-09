@@ -693,6 +693,20 @@ static void econ_build_tick(WorldEconomy *e){
     }
 }
 
+/* §B1 — pousse le bonus de PRODUCTION du pays propriétaire vers ses régions. prod_pct
+ * (production) et eff_pct (efficacité d'emploi) se cumulent dans un seul multiplicateur
+ * sur prod_mult — gain modeste, partout, NON faustien. Appelé avant econ_tick. */
+void econ_apply_country_tech(WorldEconomy *e, const TechState *ts, int n_ts){
+    if (!e) return;
+    for (int r=0;r<e->n_regions;r++){
+        RegionEconomy *re=&e->region[r];
+        int o=re->owner;
+        re->tech_prod = (ts && o>=0 && o<n_ts)
+                      ? 1.f + tech_prod_bonus(&ts[o]) + tech_eff_bonus(&ts[o])
+                      : 1.f;
+    }
+}
+
 void econ_tick(WorldEconomy *e, float dt) {
     if (dt<=0.f) dt=1.f;
     e->tick++;
@@ -737,6 +751,7 @@ void econ_tick(WorldEconomy *e, float dt) {
             float cap_bonus = (capitale_prodmult(ctier, nob) - 1.f) * (1.f - rot);
             prod_mult *= (1.f + cap_bonus);
         }
+        prod_mult *= (re->tech_prod>0.f ? re->tech_prod : 1.f);   /* §B1 : techs de PRODUCTION du pays (outils/capitale + SAVOIR-FAIRE) */
 
         /* ---- 1. EXTRACTION = COLLECTE PASSIVE (∝ JOURNALIERS × TERRAIN) -
          * La récolte suit les BRAS qui occupent la tuile, pas le seul terrain : plus de
