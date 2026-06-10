@@ -79,8 +79,9 @@ void intertrade_tick(WorldEconomy *e, const RouteNetwork *rn, const DiploState *
         if (ra<0||rb<0||ra>=e->n_regions||rb>=e->n_regions) continue;
         int ca=e->region[ra].owner, cb=e->region[rb].owner;
         if (ca<0||cb<0||ca==cb) continue;            /* intra-pays : déjà couvert par scps_trade */
-        if (!pair_at_peace(dp,ca,cb)) continue;      /* EMBARGO : guerre commerciale */
-        if (intertrade_embargoed(ca,cb)) continue;   /* EMBARGO DÉCRÉTÉ (décision joueur/IA) */
+        bool pact=diplo_trade_pact(dp,ca,cb);        /* cité marchande : route GARANTIE */
+        if (!pact && !pair_at_peace(dp,ca,cb)) continue;      /* EMBARGO : guerre commerciale */
+        if (!pact && intertrade_embargoed(ca,cb)) continue;   /* EMBARGO DÉCRÉTÉ (joueur/IA) */
         RegionEconomy *A=&e->region[ra], *B=&e->region[rb];
         float cap=rt->capacity>0.f?rt->capacity:1.f;
         for (int g=1; g<RES_COUNT; g++){
@@ -122,8 +123,10 @@ int intertrade_active_routes(const WorldEconomy *e, const RouteNetwork *rn,
         if (ra<0||rb<0||ra>=e->n_regions||rb>=e->n_regions) continue;
         int ca=e->region[ra].owner, cb=e->region[rb].owner;
         if (ca==cb || (ca!=cid && cb!=cid)) continue;
-        if (!pair_at_peace(dp,ca,cb)) continue;
-        if (intertrade_embargoed(ca,cb)) continue;   /* l'embargo décrété ferme aussi la route */
+        if (!diplo_trade_pact(dp,ca,cb)){
+            if (!pair_at_peace(dp,ca,cb)) continue;
+            if (intertrade_embargoed(ca,cb)) continue;   /* l'embargo décrété ferme aussi la route */
+        }
         n++;
     }
     return n;

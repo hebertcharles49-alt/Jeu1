@@ -80,7 +80,14 @@ static void sim_campaign_year(Sim *s, World *w) {
 }
 
 static void sim_day(Sim *s, World *w) {
-    agency_advance(s->ag, w, s->econ, s->wl, 1);
+    agency_advance(s->ag, w, s->econ, s->wl, s->drift, 1);
+    /* leviers intérieurs : draine les coûts SCPS différés (purge/mater) vers TechState */
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+        float ch,fr,hh;
+        if (agency_drain_levier_costs(c,&ch,&fr,&hh)){
+            s->ts[c].charge+=ch; s->ts[c].fracture+=fr; s->ts[c].H+=hh;
+        }
+    }
     routes_advance(s->rn, w, s->econ, 1);
     for (int c=0;c<w->n_countries;c++) if (s->ai_on[c]){
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
@@ -143,6 +150,7 @@ static void sim_day(Sim *s, World *w) {
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
+        diplo_suzerainty_tick(s->dp, w, s->econ);   /* suzeraineté : tributs, appels, défections, acceptations */
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales : rythme + récompense */
         faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface (~15 ans) */
@@ -410,6 +418,8 @@ int main(int argc, char **argv){
     long tot_sync=0, tot_sync_distinct=0;   /* §syncrétique : nœuds à porte culturelle + dispersion */
     long tot_tree_pct=0; int tot_tree_sims=0;   /* §A : fraction d'arbre déverrouillée (le coût force les choix) */
     long tot_reloc=0;   /* §reloc : ensemencements de pop pour combler une pénurie */
+    long tot_repress=0, tot_assim=0, tot_purge=0, tot_purge_dead=0;       /* leviers intérieurs */
+    long tot_serv=0, tot_prot=0, tot_conc=0, tot_cite=0, tot_defect=0;    /* suzeraineté */
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -612,6 +622,16 @@ int main(int argc, char **argv){
           printf("              recherche : %d nœuds déverrouillés (dont %d faustiens) · %d relocalisation(s) pour combler une pénurie (peupler sa province-ressource)\n", sim_techs, sim_faust, sim_reloc);
           tot_techs += sim_techs; tot_faustian += sim_faust; tot_reloc += sim_reloc; }
 
+        /* LEVIERS & SUZERAINETÉ (brief leviers) : l'usage par sim — sans ces lignes,
+         * on ne sait ni si l'IA s'en sert, ni si elle s'en sert TROP. */
+        { int rep,ass,pur; long dead; agency_levier_stats(&rep,&ass,&pur,&dead);
+          printf("              leviers : %d matage(s) · %d formation(s) · %d purge(s) (%ld morts) | suzeraineté : %d servage · %d protectorat · %d concordat · %d cité · %d défection(s)\n",
+                 rep, ass, pur, dead,
+                 s.dp->n_servage, s.dp->n_protectorat, s.dp->n_concordat, s.dp->n_cite, s.dp->n_defections);
+          tot_repress+=rep; tot_assim+=ass; tot_purge+=pur; tot_purge_dead+=dead;
+          tot_serv+=s.dp->n_servage; tot_prot+=s.dp->n_protectorat; tot_conc+=s.dp->n_concordat;
+          tot_cite+=s.dp->n_cite; tot_defect+=s.dp->n_defections; }
+
         /* ARBRE (§A) : fraction de l'arbre déverrouillée PAR EMPIRE (cible < 100 % → l'empire
          * doit CHOISIR) + thème DOMINANT (deux empires aux choix différents → divergence). */
         { int nemp=0, fmin=999, fmax=0; long fsum=0; int dom[THM_COUNT]={0};
@@ -689,6 +709,10 @@ int main(int argc, char **argv){
            tot_tree_sims>0? tot_tree_pct/tot_tree_sims : 0);
     printf("   relocalisations (pénurie) ... %ld   (moy. %.1f/sim ; l'IA peuple ses provinces-ressource sous-exploitées)\n",
            tot_reloc, (double)tot_reloc/nsims);
+    printf("   leviers intérieurs .......... %ld matage(s) · %ld formation(s) · %ld purge(s) (%ld morts — RARE attendu)\n",
+           tot_repress, tot_assim, tot_purge, tot_purge_dead);
+    printf("   suzeraineté ................. %ld servage · %ld protectorat · %ld concordat · %ld cité · %ld défection(s)\n",
+           tot_serv, tot_prot, tot_conc, tot_cite, tot_defect);
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);

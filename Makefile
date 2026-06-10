@@ -165,7 +165,7 @@ prosperity_demo: $(PROSPERITY_DEMO_OBJS)
 	$(CC) $(PROSPERITY_DEMO_OBJS) -o $@ -lm
 
 # ---- Couche d'agency : actions, temps, bâtiments-leviers (§1-§2) ----------
-AGENCY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+AGENCY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
@@ -259,7 +259,7 @@ routes_demo: $(ROUTES_DEMO_OBJS)
 
 # ---- Boucle de décision IA : un lecteur de coordonnées qui choisit des leviers (§13.1)
 # Aucune dépendance membrane (l'IA lit les coordonnées du moteur, pas les mots).
-AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
+AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                 $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                 $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                 $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -322,7 +322,7 @@ events_demo: $(EVENTS_DEMO_OBJS)
 
 # ---- Âges structurels : Lumières, Soulèvements, l'Ordre de Fer ------------
 # Ils poussent les ENTRÉES du moteur d'ordre ; le verdict §2.4 fait le reste.
-STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
+STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -394,7 +394,7 @@ revolt_demo: $(REVOLT_DEMO_OBJS)
 # ---- Le tissu social : brasserie + boisson culturelle + foi (Temple→L) -----
 # Première passe du catalogue SOCIAL : une chaîne (grain→bière), la variante
 # culturelle du palier moral (bière/vin), et la foi qui soutient la légitimité.
-SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
+SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \

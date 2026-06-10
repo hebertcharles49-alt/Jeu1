@@ -48,7 +48,7 @@ typedef struct {
 
 static void world_step(Sim *s, AiActor *act, int n_act, int day){
     econ_tick(s->econ, 1.f);
-    agency_advance(s->ag, s->w, s->econ, s->wl, STEP);
+    agency_advance(s->ag, s->w, s->econ, s->wl, NULL, STEP);
     routes_advance(s->rn, s->w, s->econ, STEP);
     for (int i=0;i<n_act;i++) ai_step(&act[i], s->w, s->econ, s->wp, s->wl,
                                       s->ag, s->rn, s->dp, day);

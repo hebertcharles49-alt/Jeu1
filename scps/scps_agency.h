@@ -17,6 +17,7 @@
 #include "scps_econ.h"        /* ProvBuild, WorldEconomy, Resource */
 #include "scps_world.h"       /* World (biome) */
 #include "scps_legitimacy.h"  /* WorldLegitimacy (défrichement ronge L) */
+#include "scps_demography.h"  /* leviers intérieurs : coercition (Kuran), groupes, ModifierStack */
 
 #define SCPS_DAYS_PER_YEAR 365
 #define SCPS_GAME_YEARS    250
@@ -60,7 +61,8 @@ const char       *edifice_name(Edifice e);
 float agency_build_gold(const WorldEconomy *econ, int region, Edifice e);
 
 /* Familles d'action de province (le motif s'étend). */
-typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT, AGY_RELOCATE } ActionKind;
+typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT, AGY_RELOCATE,
+               AGY_REPRESS, AGY_ASSIMILATE, AGY_PURGE } ActionKind;
 
 /* Une action en cours (file par pays/province). */
 typedef struct {
@@ -103,10 +105,35 @@ bool agency_order_relocate(AgencyState *a, int region, int dst_region);
  * publique) et un chantier non fini se révoque. */
 bool agency_cancel(AgencyState *a, int idx);
 
+/* ── LES TROIS LEVIERS INTÉRIEURS (brief leviers §2) — des ordres en jours, des
+ * coûts SCPS différés. Aucun n'est gratuit, aucun n'est instantané. ──────────── */
+/* MATER (30 j) : la botte — province_apply_coercion (Kuran : l'agitation se TAIT,
+ * le grief est MASQUÉ et ressortira amplifié à la levée). H s'écrit (différé). */
+bool agency_order_repress(AgencyState *a, int region);
+/* FORMER (1 an) : accélère l'assimilation du plus gros groupe minoritaire — écoles,
+ * missions, magistrats. `creuset` (tech Droit d'intégration) double l'efficacité.
+ * Coercition modérée ; le groupe en formation a l'humeur dégradée le temps de la
+ * conversion. NB : former une source de savoir, c'est TARIR son canal syncrétique. */
+bool agency_order_assimilate(AgencyState *a, int region, bool creuset);
+/* PURGER (4 ans, par TRANCHES annuelles visibles — arrêtable en cours au prix du
+ * gâchis) : les pops du plus gros groupe minoritaire MEURENT (fraction/an), la
+ * stabilité plonge (cicatrice + L au plancher + coercition totale), la fracture,
+ * H et la CHARGE faustienne s'écrivent (différé → la Brèche se rapproche). L'acte
+ * le plus faustien du panneau — il se nomme, sans euphémisme. */
+bool agency_order_purge(AgencyState *a, int region);
+#define AGY_PURGE_YEARS 4
+/* Coûts SCPS DIFFÉRÉS des leviers (charge/fracture/H par pays), à DRAINER par le
+ * harnais chaque jour vers TechState (agency ne connaît pas ts — séparation). */
+bool agency_drain_levier_costs(int cid, float *charge, float *fracture, float *H);
+/* Chronique des leviers (cumul sim, RAZ par agency_init) : matages, formations,
+ * purges achevées, morts de purge. */
+void agency_levier_stats(int *repress, int *assim, int *purges, long *purge_dead);
+
 /* Avance de `days` jours : progresse les chantiers ; à l'achèvement, applique
- * l'effet (déplace une coordonnée que le moteur LIT). */
+ * l'effet (déplace une coordonnée que le moteur LIT). `drift` (pile de dérive
+ * démographique) porte la falsification Kuran des leviers — nullable (démos). */
 void agency_advance(AgencyState *a, World *w, WorldEconomy *econ,
-                    WorldLegitimacy *wl, int days);
+                    WorldLegitimacy *wl, ModifierStack *drift, int days);
 /* Nombre de chantiers actifs sur une région (pour l'UI). */
 int  agency_active_in_region(const AgencyState *a, int region);
 int  agency_year(const AgencyState *a);

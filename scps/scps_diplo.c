@@ -54,7 +54,122 @@ static inline float absf(float v){return v<0?-v:v;}
 #define RANCOR_RALLY_W    0.6f          /* galvanisation max de la guerre de reconquête */
 #define RANCOR_RALLY_NORM 3.0f          /* échelle de saturation du ralliement */
 
-void diplo_init(DiploState *d){ memset(d,0,sizeof(*d)); }
+void diplo_init(DiploState *d){
+    memset(d,0,sizeof(*d));
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++) d->suzerain[c]=-1;   /* tous libres au départ */
+}
+
+/* ═══ SUZERAINETÉ (brief leviers §3) — quatre contrats, trois voies, la rupture ═══ */
+const char *diplo_contrat_name(SuzContrat c){
+    static const char *N[5]={ "libre","servage","protectorat","concordat","cité marchande" };
+    return (c>=0&&c<5)?N[c]:"?";
+}
+int diplo_suzerain(const DiploState *d, int cid){
+    return (d && cid>=0 && cid<SCPS_MAX_COUNTRY) ? d->suzerain[cid] : -1;
+}
+SuzContrat diplo_contrat(const DiploState *d, int cid){
+    return (d && cid>=0 && cid<SCPS_MAX_COUNTRY) ? (SuzContrat)d->contrat[cid] : CONTRAT_NONE;
+}
+int diplo_vassal_count(const DiploState *d, int cid){
+    int n=0; if(!d) return 0;
+    for (int v=0;v<SCPS_MAX_COUNTRY;v++) if (d->suzerain[v]==cid) n++;
+    return n;
+}
+bool diplo_trade_pact(const DiploState *d, int a, int b){
+    if (!d||a<0||b<0||a>=SCPS_MAX_COUNTRY||b>=SCPS_MAX_COUNTRY) return false;
+    return (d->suzerain[a]==b && d->contrat[a]==CONTRAT_CITE)
+        || (d->suzerain[b]==a && d->contrat[b]==CONTRAT_CITE);
+}
+void diplo_set_vassal(DiploState *d, int suz, int vas, SuzContrat c){
+    if (!d||suz<0||vas<0||suz==vas||suz>=SCPS_MAX_COUNTRY||vas>=SCPS_MAX_COUNTRY) return;
+    d->suzerain[vas]=(int16_t)suz; d->contrat[vas]=(int8_t)c;
+    d->status[suz][vas]=DIPLO_NEUTRAL; d->status[vas][suz]=DIPLO_NEUTRAL;   /* la guerre cesse */
+    d->war_years[suz][vas]=d->war_years[vas][suz]=0.f;
+    d->truce[suz][vas]=d->truce[vas][suz]=365.f*5.f;                        /* une trêve s'ouvre */
+    switch(c){ case CONTRAT_SERVAGE: d->n_servage++; break;
+               case CONTRAT_PROTECTORAT: d->n_protectorat++; break;
+               case CONTRAT_CONCORDAT: d->n_concordat++; break;
+               case CONTRAT_CITE: d->n_cite++; break; default: break; }
+}
+void diplo_break_vassal(DiploState *d, int vas, bool to_war){
+    if (!d||vas<0||vas>=SCPS_MAX_COUNTRY) return;
+    int suz=d->suzerain[vas];
+    d->suzerain[vas]=-1; d->contrat[vas]=CONTRAT_NONE;
+    d->n_defections++;
+    if (to_war && suz>=0){                       /* le serf part en guerre d'indépendance */
+        d->status[vas][suz]=DIPLO_WAR; d->status[suz][vas]=DIPLO_WAR;
+        d->cb[vas][suz]=CB_TERRITORIAL;
+    }
+}
+void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ){
+    if (!d||!w||!econ) return;
+    int capreg[SCPS_MAX_COUNTRY];                /* où coule le tribut */
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+        int cp=w->country[c].capital_prov;
+        capreg[c]=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+    }
+    for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
+        int s=d->suzerain[v];
+        if (s<0) continue;
+        if (s>=w->n_countries){ d->suzerain[v]=-1; continue; }
+        SuzContrat c=(SuzContrat)d->contrat[v];
+        /* TRIBUT : lourd pour le serf (8 %/an + coercition chez lui), léger pour le
+         * protégé (2 %). Concordat & cité : pas d'or (la foi / la route garantie). */
+        float frac=(c==CONTRAT_SERVAGE)?0.08f:(c==CONTRAT_PROTECTORAT)?0.02f:0.f;
+        if (frac>0.f && capreg[s]>=0 && capreg[s]<econ->n_regions){
+            float take=0.f;
+            for (int r=0;r<econ->n_regions;r++){
+                RegionEconomy *re=&econ->region[r];
+                if (re->owner!=v) continue;
+                float t=re->treasury*frac; re->treasury-=t; take+=t;
+            }
+            econ->region[capreg[s]].treasury += take;
+            if (c==CONTRAT_SERVAGE && capreg[v]>=0 && capreg[v]<econ->n_regions){
+                RegionEconomy *cv=&econ->region[capreg[v]];
+                cv->coercion = fminf(1.f, cv->coercion+0.04f);   /* le serf vit sous la botte */
+            }
+        }
+        /* APPEL DU PROTECTEUR : les guerres du protégé appellent le maître
+         * (protectorat & servage — on défend son bien). */
+        if (c==CONTRAT_PROTECTORAT||c==CONTRAT_SERVAGE){
+            for (int x=0;x<w->n_countries && x<SCPS_MAX_COUNTRY;x++){
+                if (x==s||x==v) continue;
+                if (d->status[x][v]==DIPLO_WAR && d->status[s][x]!=DIPLO_WAR){
+                    d->status[s][x]=DIPLO_WAR; d->status[x][s]=DIPLO_WAR;
+                    d->cb[s][x]=CB_TERRITORIAL;
+                }
+            }
+        }
+        /* DÉFECTION : le vassal teste son maître — le ratio s'effondre → il dénonce. */
+        float ms=diplo_mil_power(w,econ,s), mv=diplo_mil_power(w,econ,v);
+        if (ms < 1.15f*mv)
+            diplo_break_vassal(d, v, c==CONTRAT_SERVAGE);   /* le serf part en guerre */
+    }
+    /* ACCEPTATION PAR LA MENACE (la voie « menace ») : un petit SANS allié, sous un
+     * voisin écrasant (≥ 1.8, le repère hégémon) non hostile, accepte le PROTECTORAT. */
+    for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
+        if (d->suzerain[v]>=0) continue;
+        if (w->country[v].role==POLITY_UNCLAIMED || w->country[v].capital_prov<0) continue;
+        if (diplo_ally_count(d,v)>0) continue;            /* un allié le couvre : il refuse */
+        float mv=diplo_mil_power(w,econ,v); if (mv<=0.f) continue;
+        int big=-1; float best=0.f;
+        for (int s=0;s<w->n_countries && s<SCPS_MAX_COUNTRY;s++){
+            if (s==v || d->status[s][v]==DIPLO_WAR) continue;
+            if (w->country[s].role==POLITY_UNCLAIMED) continue;
+            if (diplo_vassal_count(d,s)>=4) continue;     /* un maître ne tient pas tout */
+            bool adj=false;                                /* voisin : une frontière commune */
+            for (int r=0;r<econ->n_regions && !adj;r++){
+                if (econ->region[r].owner!=v) continue;
+                for (int q=0;q<econ->n_regions;q++)
+                    if (econ->adj[r][q] && econ->region[q].owner==s){ adj=true; break; }
+            }
+            if (!adj) continue;
+            float ratio=diplo_mil_power(w,econ,s)/mv;
+            if (ratio>=1.8f && ratio>best){ best=ratio; big=s; }
+        }
+        if (big>=0) diplo_set_vassal(d, big, v, CONTRAT_PROTECTORAT);
+    }
+}
 
 DiploStatus diplo_status(const DiploState *d, int a, int b){
     if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return DIPLO_NEUTRAL;

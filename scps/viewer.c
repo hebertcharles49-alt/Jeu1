@@ -562,7 +562,14 @@ static void sim_campaign_year(Sim *s, World *w) {
 
 static void sim_day(Sim *s, World *w) {
     /* — quotidien — */
-    agency_advance(s->ag, w, s->econ, s->wl, 1);            /* les actions progressent */
+    agency_advance(s->ag, w, s->econ, s->wl, s->drift, 1);     /* les actions progressent */
+    /* leviers intérieurs : draine les coûts SCPS différés (purge/mater) vers TechState */
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+        float ch,fr,hh;
+        if (agency_drain_levier_costs(c,&ch,&fr,&hh)){
+            s->ts[c].charge+=ch; s->ts[c].fracture+=fr; s->ts[c].H+=hh;
+        }
+    }
     routes_advance(s->rn, w, s->econ, 1);
     for (int c=0;c<w->n_countries;c++) if (s->ai_on[c]){    /* les voisins VIVENT (cadence étalée) */
         ai_step(&s->ai[c], w, s->econ, s->wp, s->wl, s->ag, s->rn, s->dp, s->day);
@@ -622,6 +629,7 @@ static void sim_day(Sim *s, World *w) {
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
+        diplo_suzerainty_tick(s->dp, w, s->econ);   /* suzeraineté : tributs, appels, défections, acceptations */
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales */
         faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface */

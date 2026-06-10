@@ -6,6 +6,7 @@
  * des coordonnées (K/H/P…), jamais des bonus plats.
  */
 #include "scps_agency.h"
+#include <math.h>
 #include <string.h>
 
 static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
@@ -97,7 +98,18 @@ bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e){
 #define CLEAR_L_HIT       2.0f
 #define EXPLOIT_CAP_GAIN  3.0f
 
-void agency_init(AgencyState *a){ memset(a,0,sizeof(*a)); }
+/* coûts SCPS différés (drainés par le harnais vers TechState) + chronique */
+static float g_pend_charge[SCPS_MAX_COUNTRY], g_pend_fract[SCPS_MAX_COUNTRY], g_pend_H[SCPS_MAX_COUNTRY];
+static int   g_n_repress, g_n_assim, g_n_purge; static long g_purge_dead;
+
+void agency_init(AgencyState *a){
+    memset(a,0,sizeof(*a));
+    /* RAZ des coûts différés + de la chronique des leviers (statiques de module) */
+    memset(g_pend_charge,0,sizeof g_pend_charge);
+    memset(g_pend_fract, 0,sizeof g_pend_fract);
+    memset(g_pend_H,     0,sizeof g_pend_H);
+    g_n_repress=g_n_assim=g_n_purge=0; g_purge_dead=0;
+}
 
 static bool enqueue(AgencyState *a, ActionKind k, int region, int param, int days){
     if (a->n>=SCPS_MAX_BUILDS) return false;
@@ -122,6 +134,72 @@ bool agency_order_relocate(AgencyState *a, int region, int dst_region){
     if (region<0 || dst_region<0 || region==dst_region) return false;
     return enqueue(a, AGY_RELOCATE, region, dst_region, RELOC_DAYS);
 }
+
+/* ── LES TROIS LEVIERS INTÉRIEURS (§2) ─────────────────────────────────────── */
+#define REPRESS_DAYS    30
+#define ASSIM_DAYS      365
+#define PURGE_FRAC_AN   0.12f   /* fraction du groupe qui périt par tranche annuelle */
+
+bool agency_order_repress(AgencyState *a, int region){
+    return enqueue(a, AGY_REPRESS, region, 0, REPRESS_DAYS);
+}
+bool agency_order_assimilate(AgencyState *a, int region, bool creuset){
+    return enqueue(a, AGY_ASSIMILATE, region, creuset?1:0, ASSIM_DAYS);
+}
+bool agency_order_purge(AgencyState *a, int region){
+    return enqueue(a, AGY_PURGE, region, 0, AGY_PURGE_YEARS*365);
+}
+bool agency_drain_levier_costs(int cid, float *charge, float *fracture, float *H){
+    if (cid<0||cid>=SCPS_MAX_COUNTRY) return false;
+    if (g_pend_charge[cid]<=0.f && g_pend_fract[cid]<=0.f && g_pend_H[cid]<=0.f) return false;
+    if (charge)  *charge  =g_pend_charge[cid];
+    if (fracture)*fracture=g_pend_fract[cid];
+    if (H)       *H       =g_pend_H[cid];
+    g_pend_charge[cid]=g_pend_fract[cid]=g_pend_H[cid]=0.f;
+    return true;
+}
+void agency_levier_stats(int *r,int *as,int *p,long *dead){
+    if(r) *r=g_n_repress;
+    if(as) *as=g_n_assim;
+    if(p) *p=g_n_purge;
+    if(dead) *dead=g_purge_dead;
+}
+static void pend_costs(int owner, float ch, float fr, float h){
+    if (owner<0||owner>=SCPS_MAX_COUNTRY) return;
+    g_pend_charge[owner]+=ch; g_pend_fract[owner]+=fr; g_pend_H[owner]+=h;
+}
+/* le plus gros groupe MINORITAIRE d'une province (cible de former/purger) ; -1 si homogène */
+static int biggest_minority(const ProvincePop *pp){
+    if (!pp || pp->n_groups<2) return -1;
+    int dom=0; for (int g=1;g<pp->n_groups;g++) if (pp->groups[g].count>pp->groups[dom].count) dom=g;
+    int best=-1; long bc=0;
+    for (int g=0;g<pp->n_groups;g++){
+        if (g==dom) continue;
+        if (pp->groups[g].count>bc){ bc=pp->groups[g].count; best=g; }
+    }
+    return best;
+}
+/* une TRANCHE annuelle de purge : le groupe meurt par fraction, la province saigne. */
+static void purge_slice(WorldEconomy *econ, WorldLegitimacy *wl, int reg){
+    RegionEconomy *re=&econ->region[reg];
+    int gi=biggest_minority(&re->pop);
+    if (gi<0) return;                                  /* plus de minorité : la purge s'éteint */
+    PopGroup *pg=&re->pop.groups[gi];
+    long dead=(long)((float)pg->count*PURGE_FRAC_AN);
+    if (dead<1) dead=pg->count;
+    pg->count-=dead; if (pg->count<0) pg->count=0;
+    g_purge_dead+=dead;
+    /* la population régionale saigne d'autant (strates au prorata) */
+    float tot=0.f; for (int c=0;c<CLASS_COUNT;c++) tot+=re->strata[c].pop;
+    if (tot>1.f){
+        float k=1.f-(float)dead/tot; if (k<0.f) k=0.f;
+        for (int c=0;c<CLASS_COUNT;c++) re->strata[c].pop*=k;
+    }
+    re->coercion=1.f;                                   /* l'état d'exception */
+    re->revolt_scar=1.f;                                /* la stabilité plonge des années (décroît lentement) */
+    if (reg<SCPS_MAX_REG && wl) wl->L[reg]=fminf(wl->L[reg],1.0f);   /* la légitimité au plancher */
+    pend_costs(re->owner, 1.2f, 1.0f, 0.8f);            /* charge faustienne + fracture + H — la Brèche se rapproche */
+}
 bool agency_cancel(AgencyState *a, int idx){
     if (idx<0 || idx>=a->n || !a->order[idx].active) return false;
     a->order[idx]=a->order[--a->n];   /* révoqué : swap-remove (rien n'est appliqué) */
@@ -133,7 +211,8 @@ static void apply_delta(ProvBuild *b, const ProvBuild *d){
     b->PE_infra+= d->PE_infra; b->food_cap += d->food_cap;
 }
 
-static void apply_action(WorldEconomy *econ, WorldLegitimacy *wl, const BuildOrder *o){
+static void apply_action(WorldEconomy *econ, WorldLegitimacy *wl, ModifierStack *drift,
+                         const BuildOrder *o){
     int reg=o->region;
     if (reg<0 || reg>=econ->n_regions) return;
     RegionEconomy *re=&econ->region[reg];
@@ -159,19 +238,54 @@ static void apply_action(WorldEconomy *econ, WorldLegitimacy *wl, const BuildOrd
              * déjà câblée dans econ_relocate_pop — le coût annoncé AVANT l'ordre). */
             econ_relocate_pop(econ, o->region, o->param, (float)AGY_RELOC_POP);
             break;
+        case AGY_REPRESS:
+            /* MATER : la botte s'abat — Kuran (l'agitation se TAIT, le grief est
+             * MASQUÉ : il ressortira amplifié quand la botte se lèvera). H différé. */
+            province_apply_coercion(&re->pop, drift, 4.f + re->build.H_coerc);
+            re->coercion = fminf(1.f, re->coercion + 0.5f);
+            pend_costs(re->owner, 0.f, 0.f, 0.4f);
+            g_n_repress++;
+            break;
+        case AGY_ASSIMILATE: {
+            /* FORMER : écoles/missions/magistrats — l'assimilation du plus gros groupe
+             * minoritaire s'accélère (creuset = ×2). Frottement : coercition modérée,
+             * humeur du groupe dégradée le temps de la conversion. */
+            int gi=biggest_minority(&re->pop);
+            if (gi>=0){
+                PopGroup *pg=&re->pop.groups[gi];
+                pg->integration = fminf(1.f, pg->integration + (o->param? 0.50f : 0.25f));
+                pg->L = fmaxf(0.f, pg->L - 0.5f);
+                re->coercion = fminf(1.f, re->coercion + 0.10f);
+                g_n_assim++;
+            }
+        } break;
+        case AGY_PURGE:
+            /* la DERNIÈRE tranche (les précédentes tombent aux bornes annuelles
+             * dans agency_advance) ; la purge achevée se compte. */
+            purge_slice(econ, wl, reg);
+            g_n_purge++;
+            break;
     }
 }
 
 void agency_advance(AgencyState *a, World *w, WorldEconomy *econ,
-                    WorldLegitimacy *wl, int days){
+                    WorldLegitimacy *wl, ModifierStack *drift, int days){
     (void)w;
     a->day += days;
     for (int i=a->n-1; i>=0; i--){
         BuildOrder *o=&a->order[i];
         if (!o->active) continue;
+        int before=o->days_done;
         o->days_done += days;
+        /* PURGE : un PROCESSUS par tranches annuelles VISIBLES (arrêtable en cours
+         * au prix du gâchis) — une tranche tombe à chaque borne de 365 j franchie. */
+        if (o->kind==AGY_PURGE){
+            int y0=before/365, y1=o->days_done/365;
+            for (int y=y0; y<y1 && y<AGY_PURGE_YEARS-1; y++)
+                purge_slice(econ, wl, o->region);
+        }
         if (o->days_done >= o->days_total){
-            apply_action(econ, wl, o);
+            apply_action(econ, wl, drift, o);
             a->order[i]=a->order[--a->n];   /* achevé : swap-remove */
         }
     }

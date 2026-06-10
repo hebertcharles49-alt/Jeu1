@@ -64,7 +64,33 @@ typedef struct {
      * (synchronisé sur sa charge de tech). Une foi ORTHODOXE a une CHANCE de
      * croiser contre un empire qui développe le faustien (Gardiens vs Transgresseurs). */
     float       faustian   [SCPS_MAX_COUNTRY];
+    /* ── SUZERAINETÉ (brief leviers §3) — un statut ASYMÉTRIQUE, distinct d'ALLIED :
+     * le vassal garde son trône, sa culture, son IA (qui complote sa défection). Le
+     * lien vit par la FORCE ou l'INTÉRÊT — le ratio s'effondre, le vassal dénonce. */
+    int16_t     suzerain   [SCPS_MAX_COUNTRY];   /* -1 = libre */
+    int8_t      contrat    [SCPS_MAX_COUNTRY];   /* SuzContrat du lien (porté par le vassal) */
+    int n_servage, n_protectorat, n_concordat, n_cite, n_defections;   /* chronique (cumul sim) */
 } DiploState;
+
+/* Les QUATRE contrats de suzeraineté — quatre logiques (cf. brief §3). */
+typedef enum { CONTRAT_NONE=0, CONTRAT_SERVAGE, CONTRAT_PROTECTORAT,
+               CONTRAT_CONCORDAT, CONTRAT_CITE } SuzContrat;
+/* Pose un lien suzerain→vassal (met fin à leur guerre, ouvre une trêve) ; remplace l'ancien. */
+void        diplo_set_vassal  (DiploState *d, int suzerain, int vassal, SuzContrat c);
+/* Le vassal dénonce : libre — le SERF part en guerre d'indépendance (to_war). */
+void        diplo_break_vassal(DiploState *d, int vassal, bool to_war);
+int         diplo_suzerain    (const DiploState *d, int cid);   /* -1 = libre */
+SuzContrat  diplo_contrat     (const DiploState *d, int cid);
+int         diplo_vassal_count(const DiploState *d, int cid);
+const char *diplo_contrat_name(SuzContrat c);
+/* Route GARANTIE (cité-état commerciale) : ni guerre ni embargo ne coupent ce lien. */
+bool        diplo_trade_pact  (const DiploState *d, int a, int b);
+/* Tick ANNUEL : TRIBUTS (servage lourd 8 %/an + coercition chez le serf ; protectorat
+ * léger 2 %), APPEL du protecteur (les guerres du protégé l'appellent), DÉFECTION
+ * (ratio de force < ~1.15 → dénonciation ; le serf part en guerre), ACCEPTATION par
+ * la MENACE (un petit SANS allié sous un voisin écrasant ≥ 1.8 accepte le protectorat
+ * — la voie « menace » ; la voie « mission » D3 viendra par statecraft). */
+void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ);
 
 void diplo_init(DiploState *d);
 
