@@ -33,6 +33,13 @@ void intertrade_tick(WorldEconomy *e, const RouteNetwork *rn, const DiploState *
 
 /* Lecteurs (IA / UI) — sur le dernier tick. */
 float intertrade_imports_value(const WorldEconomy *e);   /* valeur totale échangée au dernier tick */
+/* COMMERCE ASYMÉTRIQUE : volumes du dernier tick par SENS (aval = le sens
+ * facile), et leur composition vrac (grain/bois/charbon/bétail) vs précieux
+ * (étoffe précieuse/orfèvrerie/remèdes/armes). */
+void intertrade_asym_stats(float *vdown, float *vup,
+                           float *bulk_down, float *bulk_up,
+                           float *prec_down, float *prec_up);
+int  intertrade_precious_upstream_events(void);   /* la niche du luxe : il REMONTE */
 int   intertrade_active_routes(const WorldEconomy *e, const RouteNetwork *rn,
                                const DiploState *dp, int cid);  /* routes marchandes vivantes d'un pays */
 

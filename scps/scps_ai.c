@@ -405,6 +405,10 @@ static int ai_pick_trade_partner(const WorldEconomy *econ, const RouteNetwork *r
                 if ((t->ra==home_region&&t->rb==r)||(t->ra==r&&t->rb==home_region)){ deja=true; break; } }
             if (deja) continue; }
         float gap = fabsf(content_dist(hc, &re->culture) - 5.f);
+        /* commerce asym. §5 : les positions d'AVAL valent plus (estuaires,
+         * terminus portuaires — là où le vrac converge et où tout s'achète). */
+        if (re->estuary)                      gap -= 0.6f;
+        else if (re->coastal && re->build.port>0.f) gap -= 0.3f;
         if (gap < bestgap){ bestgap=gap; best=r; }
     }
     return best;

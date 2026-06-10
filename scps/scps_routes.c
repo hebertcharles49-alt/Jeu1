@@ -48,7 +48,34 @@ bool routes_order(RouteNetwork *rn, const World *w, const WorldEconomy *econ,
     t->capacity=1.0f;
     t->days_total = maritime ? 120 : 90;   /* mer plus long (90-180 / 60-120) */
     t->days_done=0; t->open=false; t->yield=0.f;
-    t->sea_days=sea_days;
+    t->sea_days=sea_days; t->days_ab=0.f; t->days_ba=0.f;
+    t->fluvial=0; t->flow=0.f; t->pirate_press=0.f;
+    if (maritime && w){
+        int ax,ay,bx,by;
+        if (world_region_sea_anchor(w,ra,&ax,&ay) && world_region_sea_anchor(w,rb,&bx,&by)){
+            t->days_ab=world_sea_days(w,ax,ay,bx,by);
+            t->days_ba=world_sea_days(w,bx,by,ax,ay);
+        }
+    }
+    /* LA VOIE D'EAU INTÉRIEURE (commerce asym. §4) : si les deux régions vivent
+     * le long du MÊME fleuve, la route terrestre l'emprunte — le tracé ordonné
+     * (source → mer) donne le sens ; le débit, la capacité. */
+    if (!maritime && w){
+        for (int rv=0; rv<w->n_rivers && !t->fluvial; rv++){
+            const River *R=&w->river[rv];
+            int ia=-1, ib=-1;
+            for (int k=0;k<R->len;k++){
+                const Cell *c=scps_cellc(w, R->x[k], R->y[k]);
+                if (c->region==ra && ia<0) ia=k;
+                if (c->region==rb && ib<0) ib=k;
+                if (ia>=0 && ib>=0) break;
+            }
+            if (ia>=0 && ib>=0 && ia!=ib){
+                t->fluvial = (ia<ib) ? 1 : 2;              /* le plus proche de la SOURCE est l'amont */
+                t->flow    = (R->flow_max>1.f)?1.f:(R->flow_max<0.f?0.f:R->flow_max);
+            }
+        }
+    }
     return true;
 }
 

@@ -618,6 +618,7 @@ static void sim_day(Sim *s, World *w) {
         navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
         navy_course_tick(s->navy, w, s->econ, s->dp, s->rn, &s->camp_rng,
                          s->player, 30.f);   /* coques : la course (raids - saignee - blocus - verdicts) */
+        navy_interception_tick(s->navy, s->camp, w, s->econ, s->dp, &s->camp_rng);   /* les convois se chassent */
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){   /* IA navale frugale (mer §5) */
             if (!s->ai_on[c]) continue;
             int hr=s->ai[c].home_region;
@@ -1366,13 +1367,29 @@ static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s
                    nv->hull[HULL_WAR], nv->hull[HULL_TRANSPORT], nv->at_sea, nv->hull[HULL_MERCHANT], nv->hull[HULL_PIRATE]);
           draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=17;
           { float worst=0.f;   /* coques §7 : l'état des routes, en mots */
+            const TradeRoute *asym=NULL; bool asym_ab_down=true;
             for (int i=0;i<s->rn->n;i++){ const TradeRoute *t=&s->rn->route[i];
-                if (!t->open||!t->maritime) continue;
-                if (s->econ->region[t->ra].owner!=me && s->econ->region[t->rb].owner!=me) continue;
-                if (t->pirate_press>worst) worst=t->pirate_press; }
+                if (!t->open) continue;
+                bool mine=(s->econ->region[t->ra].owner==me || s->econ->region[t->rb].owner==me);
+                if (!mine) continue;
+                if (t->maritime && t->pirate_press>worst) worst=t->pirate_press;
+                /* commerce asym. §5 : la première route DIRECTIONNELLE se détaille en mots */
+                if (!asym && (t->fluvial || (t->maritime && t->days_ab>0.f && t->days_ba>0.f
+                                             && fabsf(t->days_ab-t->days_ba)>2.f))){
+                    asym=t;
+                    asym_ab_down = t->fluvial ? (t->fluvial==1) : (t->days_ab<t->days_ba);
+                } }
             if (worst>0.f){
                 snprintf(buf[nb],140,"routes : %s", worst>=90.f?"BLOQUÉES":worst>2.f?"infestées":"harcelées");
                 draw_text(ren,g_font_small,x+12,y,worst>2.f?COL_COPPER:COL_DIM,buf[nb]); nb++; y+=17;
+            }
+            if (asym){
+                int down_end = asym_ab_down ? asym->rb : asym->ra;
+                snprintf(buf[nb],140,"%s rég. %d : en aval — abondant · retour : maigre et précieux",
+                         asym->fluvial?"fleuve vers":"couloir vers", down_end);
+                draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++;
+                zone_add((SDL_Rect){x+8,y-2,w-16,15},"Le coût de transport a un SENS : le vrac (grain, bois, charbon) ne paie que la descente ; seul le précieux (étoffe, orfèvrerie, remèdes, armes) paie la remontée. Le volume suit la facilité — divisé à contre-courant, jamais nul.");
+                y+=17;
             } }
           if (nv->hull[HULL_MERCHANT]>0 || nv->hull[HULL_PIRATE]>0){
               bool top=(nv->hull[HULL_MERCHANT]>0);

@@ -213,6 +213,7 @@ typedef struct {
     bool       colonized;            /* effectivement peuplée/settlée */
     int16_t    owner;                /* pays qui contrôle la région (-1 = vierge) */
     bool       coastal;              /* une province au moins touche la mer (posé à econ_init) */
+    bool       estuary;              /* une EMBOUCHURE vit ici (mer ∩ gros fleuve) — l'entrepôt naturel */
     /* LA COURSE (coques §4) : balafre côtière et immunité au raid. */
     float      balafre_days;         /* > 0 : côte balafrée (production entaillée ~1 an) */
     float      raid_cd_days;         /* > 0 : immunisée (~5 ans — on ne trait pas la même vache) */

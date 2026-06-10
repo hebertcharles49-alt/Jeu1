@@ -459,6 +459,7 @@ void econ_init(WorldEconomy *e, const World *w) {
         re->raw_cap[RES_GRAIN] += subsist * (1.15f + 0.70f*reg_hab[rid]);
         re->raw_cap[RES_WOOD]  += subsist * 0.44f;   /* §6a : socle bois +10 % (intrant + chauffe) */
         re->coastal = coastal;                       /* lu par la marine (rade) et l'agency (gate du Port) */
+        re->estuary = false;                         /* posé au balayage des cellules ci-dessous */
         if (coastal) re->raw_cap[RES_FISH] += subsist * 0.10f;   /* socle côtier minime : le poisson vient surtout des biomes halieutiques (§2) */
 
         /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux
@@ -552,6 +553,16 @@ void econ_init(WorldEconomy *e, const World *w) {
             re->price[r]=BASE_PRICE[r];
             re->stock[r]=0.f;
         }
+    }
+
+    /* ---- ESTUAIRES (commerce asym. §4) : la charnière fleuve ⇄ mer — là où le
+     * vrac d'un bassin versant converge. Une cellule de CÔTE au débit notable
+     * fait de sa région un entrepôt naturel (la bande Carrefour y montera). */
+    for (int i=0;i<SCPS_N;i++){
+        const Cell *c=&w->cell[i];
+        if (!c->coast || c->river<40) continue;
+        int r=c->region;
+        if (r>=0 && r<e->n_regions) e->region[r].estuary=true;
     }
 
     /* ---- Adjacence de régions (terre, 4-connexe) pour la colonisation ---- *

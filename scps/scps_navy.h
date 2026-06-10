@@ -22,6 +22,14 @@
 
 typedef enum { HULL_WAR=0, HULL_TRANSPORT, HULL_MERCHANT, HULL_PIRATE, HULL_COUNT } HullType;
 
+/* L'ÉQUIPAGE (le warhost de la mer) : une coque se LÈVE sur la population du
+ * port — 50 journaliers par marchand/transport/pirate, 100 par navire de
+ * combat. Les marins quittent les bras de la région au chantier ; ils y
+ * REVIENNENT si la coque pourrit à quai ; ils SOMBRENT avec elle au combat. */
+#define NAVY_CREW_LIGHT 50
+#define NAVY_CREW_WAR   100
+int navy_hull_crew(HullType t);
+
 /* Mission des navires de combat (coques §3) — v1 : la flotte PORTE, le combat
  * naval détaillé vient avec la passe interception/blocus. */
 typedef enum { NAVY_RADE=0, NAVY_ESCORTE, NAVY_INTERCEPTION, NAVY_BLOCUS } NavyMission;
@@ -43,6 +51,9 @@ typedef struct {
     float supplies_eaten;     /* fournitures navales consommées (chantier + entretien) */
     int   raids_done, prises, navals, disarmed;   /* la course, mesurée */
     float loot_gold, blocus_days;
+    int   crew;                /* marins embarqués (levés sur la pop du port)  */
+    int   intercepts;          /* convois ennemis interceptés (coulés)         */
+    long  drowned;             /* paquets d'armée NOYÉS par l'interception     */
 } Navy;
 
 typedef struct NavyState { Navy n[SCPS_MAX_COUNTRY]; } NavyState;
@@ -94,5 +105,13 @@ struct DiploState;
 void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
                       struct DiploState *dp, RouteNetwork *rn, uint32_t *rng,
                       int player, float dt_days);
+
+/* L'INTERCEPTION (coques §3, le job FINI) : les navires de combat en mission
+ * INTERCEPTION forcent la bataille aux CONVOIS hostiles qui traversent — un
+ * transport sans escorte est une proie ; l'armée coulée SOMBRE (paquets noyés).
+ * À appeler au pas mensuel, après la course. */
+struct Campaign;
+void navy_interception_tick(NavyState *ns, struct Campaign *camp, const World *w,
+                            WorldEconomy *econ, struct DiploState *dp, uint32_t *rng);
 
 #endif /* SCPS_NAVY_H */

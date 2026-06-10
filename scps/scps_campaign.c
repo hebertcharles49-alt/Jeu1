@@ -165,6 +165,7 @@ bool campaign_order_sea(Campaign *c, const World *w, const WorldEconomy *econ,
     a->leg_days = 4.f + (float)packets/15.f;            /* charger 1 000 hommes prend des jours */
     a->days_left= a->leg_days;
     a->sail_days=days; a->sail_transports=need_tr;
+    a->intercept_done=false;
     a->land_at_port = (econ->region[target_region].build.port>0.f);
     navy->n[owner].at_sea += need_tr;                   /* la flotte est ENGAGÉE jusqu'au débarquement */
     c->n_sails++; c->sail_days_sum += days;

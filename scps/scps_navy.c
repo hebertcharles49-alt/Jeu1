@@ -29,6 +29,7 @@ static const HullCost HULLS[HULL_COUNT]={
     [HULL_MERCHANT] ={ 15.f, 25.f,  0.f, 200 },
     [HULL_PIRATE]   ={  6.f,  8.f,  0.f,  60 },   /* la CONVERSION coûte peu : c'est sa nature */
 };
+int navy_hull_crew(HullType t){ return (t==HULL_WAR)?NAVY_CREW_WAR:NAVY_CREW_LIGHT; }
 const char *navy_hull_name(HullType t){
     static const char *N[HULL_COUNT]={"navire de combat","transport","marchand","pirate"};
     return (t>=0&&t<HULL_COUNT)?N[t]:"?";
@@ -93,6 +94,7 @@ bool navy_order_build(NavyState *ns, const World *w, WorldEconomy *econ, int cid
     RegionEconomy *re=&econ->region[port];
     float gold=navy_build_gold(econ,port,t);
     if (gold>re->treasury) return false;
+    if (re->strata[CLASS_LABORER].pop < (float)navy_hull_crew(t)+200.f) return false;  /* pas les bras */
     const HullCost *h=&HULLS[t];
     re->treasury-=gold;
     re->stock[RES_NAVAL_SUPPLIES]-=h->supplies; if (re->stock[RES_NAVAL_SUPPLIES]<0.f) re->stock[RES_NAVAL_SUPPLIES]=0.f;
@@ -101,6 +103,11 @@ bool navy_order_build(NavyState *ns, const World *w, WorldEconomy *econ, int cid
     re->demand[RES_NAVAL_SUPPLIES]+=h->supplies;         /* le marché VOIT le chantier */
     re->demand[RES_WOOD]          +=h->wood;
     n->supplies_eaten+=h->supplies;
+    /* L'ÉQUIPAGE se lève sur la pop du port (le warhost de la mer) : 50 bras
+     * par coque légère, 100 par bordée — vérifié AVANT le paiement. */
+    { int crew=navy_hull_crew(t);
+      re->strata[CLASS_LABORER].pop -= (float)crew;
+      n->crew += crew; }
     n->build_hull=(int)t; n->build_days=(float)h->days; n->home_port=port;
     return true;
 }
@@ -169,7 +176,13 @@ void navy_tick(NavyState *ns, const World *w, WorldEconomy *econ, float dt_days)
         if (n->starve_days>NAVY_STARVE_YEAR){             /* la flotte pourrit à quai */
             int big=-1, bc=0;
             for (int t=0;t<HULL_COUNT;t++) if (n->hull[t]>bc){ bc=n->hull[t]; big=t; }
-            if (big>=0) n->hull[big]--;
+            if (big>=0){
+                n->hull[big]--;
+                int crew=navy_hull_crew((HullType)big);   /* les marins DÉBARQUENT et rentrent */
+                n->crew-=crew; if (n->crew<0) n->crew=0;
+                if (n->home_port>=0 && n->home_port<econ->n_regions)
+                    econ->region[n->home_port].strata[CLASS_LABORER].pop += (float)crew;
+            }
             n->starve_days-=365.f;
         }
     }
@@ -303,6 +316,12 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
             Ethos e=navy_ethos(w,econ,c);
             int port=navy_best_port(w,econ,c);
             if (port>=0){
+                if (e==ETHOS_HONNEUR && n->hull[HULL_WAR]>=1){   /* l'Honneur CHASSE en guerre */
+                    bool guerre=false;
+                    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY && !guerre;b++)
+                        if (b!=c && diplo_status(dp,c,b)==DIPLO_WAR) guerre=true;
+                    if (guerre && n->mission==NAVY_RADE) n->mission=NAVY_INTERCEPTION;
+                }
                 if ((e==ETHOS_HONNEUR || e==ETHOS_DOMINATEUR)){
                     /* la razzia : convertir tôt (Honneur) / armer contre le rival (Dominateur) */
                     int veut=(e==ETHOS_HONNEUR)?3:2; bool rival=(e==ETHOS_HONNEUR);
@@ -330,11 +349,15 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
                 if (e==ETHOS_DOMINATEUR || e==ETHOS_BUREAUCRATE){
                     if (n->build_hull<0 && n->hull[HULL_WAR]<2 && navy_ethos(w,econ,c)==ETHOS_BUREAUCRATE)
                         navy_order_build(ns,w,econ,c,HULL_WAR);
-                    int foe=-1;
-                    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY && foe<0;b++)
-                        if (b!=c && diplo_status(dp,c,b)==DIPLO_WAR && navy_best_port(w,econ,b)>=0) foe=b;
+                    int foe=-1, foe_any=-1;
+                    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++){
+                        if (b==c || diplo_status(dp,c,b)!=DIPLO_WAR) continue;
+                        if (foe_any<0) foe_any=b;
+                        if (foe<0 && navy_best_port(w,econ,b)>=0) foe=b;
+                    }
                     if (foe>=0 && n->hull[HULL_WAR]>=2){ n->mission=NAVY_BLOCUS; n->mission_target=foe; }
-                    else if (n->mission==NAVY_BLOCUS) { n->mission=NAVY_RADE; n->mission_target=-1; }
+                    else if (foe_any>=0 && n->hull[HULL_WAR]>=1){ n->mission=NAVY_INTERCEPTION; n->mission_target=foe_any; }
+                    else if (n->mission==NAVY_BLOCUS||n->mission==NAVY_INTERCEPTION){ n->mission=NAVY_RADE; n->mission_target=-1; }
                 }
             }
         }
@@ -391,11 +414,20 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
                         dot=(cc->cur_vx*0.7f+cc->cur_vy*0.3f)/100.f;   /* proxy : l'attaquant vient du large */
                     }
                     int lA,lB,pr;
-                    int v2=navy_battle(w,0,0,n->hull[HULL_PIRATE],defense,dot,rng,&lA,&lB,&pr);
-                    n->hull[HULL_PIRATE]-=lA; if (n->hull[HULL_PIRATE]<0) n->hull[HULL_PIRATE]=0;
-                    ns->n[victim].hull[HULL_WAR]-=lB; if (ns->n[victim].hull[HULL_WAR]<0) ns->n[victim].hull[HULL_WAR]=0;
+                    float effA=(float)n->hull[HULL_PIRATE]*(n->starve_days>0.f?0.7f:1.f);
+                    float effB=(float)defense*(ns->n[victim].starve_days>0.f?0.7f:1.f);
+                    int v2=navy_battle(w,0,0,(int)(effA+0.5f),(int)(effB+0.5f),dot,rng,&lA,&lB,&pr);
+                    if (lA>n->hull[HULL_PIRATE]) lA=n->hull[HULL_PIRATE];
+                    if (lB>ns->n[victim].hull[HULL_WAR]) lB=ns->n[victim].hull[HULL_WAR];
+                    n->hull[HULL_PIRATE]-=lA;
+                    ns->n[victim].hull[HULL_WAR]-=lB;
+                    n->crew-=lA*NAVY_CREW_LIGHT; if (n->crew<0) n->crew=0;             /* sombrés avec la coque */
+                    ns->n[victim].crew-=lB*NAVY_CREW_WAR; if (ns->n[victim].crew<0) ns->n[victim].crew=0;
                     n->navals++; ns->n[victim].navals++;
-                    if (v2>0){ if (pr && ns->n[victim].hull[HULL_MERCHANT]>0){ ns->n[victim].hull[HULL_MERCHANT]--; n->hull[HULL_PIRATE]++; n->prises++; } }
+                    if (v2>0){ if (pr && ns->n[victim].hull[HULL_MERCHANT]>0){
+                        ns->n[victim].hull[HULL_MERCHANT]--; n->hull[HULL_PIRATE]++; n->prises++;
+                        ns->n[victim].crew-=NAVY_CREW_LIGHT; if (ns->n[victim].crew<0) ns->n[victim].crew=0;
+                        n->crew+=NAVY_CREW_LIGHT;            /* l'équipage pris est ENRÔLÉ de force */ } }
                     else { success=false; identified=(crs_f(rng)<0.85f); }   /* capturé, il DÉSIGNE */
                 } else identified=(crs_f(rng)<0.35f);
                 if (success && n->hull[HULL_PIRATE]>0){
@@ -458,6 +490,66 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
                     rt->pirate_press=99.f;                              /* le lien est tenu fermé */
             }
             n->blocus_days+=dt_days;
+        }
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * L'INTERCEPTION (coques §3 — le job FINI) : les transports pleins sont des
+ * cibles stratégiques. Un convoi hostile en mer (FA_SAIL) croise les
+ * patrouilles d'INTERCEPTION : l'escorte du convoi (les bordées de son
+ * pays), c'est tout ce qui le sépare du fond — un transport sans escorte
+ * MEURT SEUL. La bataille réutilise les phases ; le convoi coulé NOIE ses
+ * paquets (le warhost embarqué sombre avec les coques).
+ * ════════════════════════════════════════════════════════════════════════ */
+#include "scps_campaign.h"
+
+void navy_interception_tick(NavyState *ns, struct Campaign *camp, const World *w,
+                            WorldEconomy *econ, struct DiploState *dp, uint32_t *rng){
+    (void)econ;
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){
+        FieldArmy *a=&camp->army[i];
+        if (!a->active || a->phase!=FA_SAIL || a->intercept_done) continue;
+        int owner=a->owner;
+        if (owner<0||owner>=SCPS_MAX_COUNTRY) continue;
+        for (int e=0;e<w->n_countries && e<SCPS_MAX_COUNTRY;e++){
+            if (e==owner) continue;
+            Navy *pat=&ns->n[e];
+            if (pat->mission!=NAVY_INTERCEPTION || pat->hull[HULL_WAR]<1) continue;
+            if (diplo_status(dp,e,owner)!=DIPLO_WAR) continue;
+            if (crs_f(rng)>0.45f) continue;                   /* la mer est grande : on ne trouve pas toujours */
+            a->intercept_done=true;                            /* une chasse par traversée */
+            Navy *esc=&ns->n[owner];
+            int escort=esc->hull[HULL_WAR];
+            int lA,lB,pr;
+            float effA=(float)pat->hull[HULL_WAR]*(pat->starve_days>0.f?0.7f:1.f);
+            float effB=(float)escort*(esc->starve_days>0.f?0.7f:1.f);
+            int v=(escort>0)
+                ? navy_battle(w,0,0,(int)(effA+0.5f),(int)(effB+0.5f),0.f,rng,&lA,&lB,&pr)
+                : (+1);                                        /* sans escorte : PROIE */
+            if (escort>0){
+                if (lA>pat->hull[HULL_WAR]) lA=pat->hull[HULL_WAR];
+                if (lB>esc->hull[HULL_WAR]) lB=esc->hull[HULL_WAR];
+                pat->hull[HULL_WAR]-=lA; pat->crew-=lA*NAVY_CREW_WAR; if (pat->crew<0) pat->crew=0;
+                esc->hull[HULL_WAR]-=lB; esc->crew-=lB*NAVY_CREW_WAR; if (esc->crew<0) esc->crew=0;
+                pat->navals++; esc->navals++;
+            }
+            if (v>0){                                          /* le convoi COULE */
+                long pk=0;
+                { ArmyComposition ac=campaign_composition(camp,owner); pk=ac.total; }
+                int tr=a->sail_transports;
+                esc->hull[HULL_TRANSPORT]-=tr; if (esc->hull[HULL_TRANSPORT]<0) esc->hull[HULL_TRANSPORT]=0;
+                esc->at_sea-=tr; if (esc->at_sea<0) esc->at_sea=0;
+                esc->crew-=tr*NAVY_CREW_LIGHT; if (esc->crew<0) esc->crew=0;
+                a->sail_transports=0;
+                a->active=false; a->phase=FA_IDLE; a->dest=-1; a->next=-1;
+                pat->intercepts++; pat->drowned+=pk;           /* les paquets SOMBRENT */
+                if (pr && esc->hull[HULL_TRANSPORT]>0){        /* la poursuite fait une PRISE */
+                    esc->hull[HULL_TRANSPORT]--; pat->hull[HULL_TRANSPORT]++;
+                    pat->crew+=NAVY_CREW_LIGHT; pat->prises++;
+                }
+            }
+            break;                                             /* une bataille par convoi et par mois */
         }
     }
 }

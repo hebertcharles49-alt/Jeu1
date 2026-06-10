@@ -57,6 +57,7 @@ typedef struct {
     int        sail_transports;  /* transports réservés (rendus au débarquement) */
     float      sail_days;        /* jours de mer du trajet ordonné (volta comprise) */
     bool       land_at_port;     /* débarque à un port (sinon : plus lent, petit malus) */
+    bool       intercept_done;   /* une CHASSE par traversée (coques §3) */
 } FieldArmy;
 
 /* ── LA BATAILLE DANS LE TEMPS (brief bataille) — un ÉTAT, plus un événement ──
@@ -77,7 +78,7 @@ typedef struct {
 } FieldBattle;
 #define CAMPAIGN_MAX_BATTLES 8
 
-typedef struct {
+typedef struct Campaign {
     FieldArmy army[SCPS_MAX_COUNTRY];   /* une force expéditionnaire par pays */
     int       n_regions;
     /* table de terrain par région (bâtie à l'init depuis le World) */
