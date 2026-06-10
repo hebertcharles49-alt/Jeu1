@@ -8,6 +8,7 @@
 #include "scps_diplo.h"
 #include "scps_species.h"
 #include "scps_culture.h"
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -54,9 +55,12 @@ static inline float absf(float v){return v<0?-v:v;}
 #define RANCOR_RALLY_W    0.6f          /* galvanisation max de la guerre de reconquête */
 #define RANCOR_RALLY_NORM 3.0f          /* échelle de saturation du ralliement */
 
+static int g_intim_cd[SCPS_MAX_COUNTRY];   /* l'intimidation n'est pas gratuite : ~5 ans entre deux démonstrations */
 void diplo_init(DiploState *d){
     memset(d,0,sizeof(*d));
+    memset(g_intim_cd,0,sizeof g_intim_cd);
     for (int c=0;c<SCPS_MAX_COUNTRY;c++) d->suzerain[c]=-1;   /* tous libres au départ */
+    d->fronde_suz=-1; d->fronde_lead=-1; d->fronde_rng=0x9E3779B9u;
 }
 
 /* ═══ SUZERAINETÉ (brief leviers §3) — quatre contrats, trois voies, la rupture ═══ */
@@ -101,20 +105,109 @@ void diplo_break_vassal(DiploState *d, int vas, bool to_war){
         d->cb[vas][suz]=CB_TERRITORIAL;
     }
 }
-void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ){
+float diplo_vassal_grief(const DiploState *d, int vassal){
+    return (d && vassal>=0 && vassal<SCPS_MAX_COUNTRY && d->suzerain[vassal]>=0)
+         ? d->v_grief[vassal] : 0.f;
+}
+/* puissance — LA MÊME échelle que la menace : éco + mil (pas de seconde échelle). */
+static float suz_power(const World *w, const WorldEconomy *econ, const WorldProsperity *wp, int c){
+    return diplo_eco_power(wp,c) + diplo_mil_power(w,econ,c);
+}
+static uint32_t fr_rng(DiploState *d){ uint32_t x=d->fronde_rng; x^=x<<13; x^=x>>17; x^=x<<5; return d->fronde_rng=x; }
+static Ethos suz_ethos(const World *w, const WorldEconomy *econ, int c){
+    int cp=(c>=0&&c<w->n_countries)?w->country[c].capital_prov:-1;
+    int cr=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+    return (cr>=0&&cr<econ->n_regions)?econ->region[cr].culture.ethos:ETHOS_ORDRE;
+}
+static Credo suz_credo(const World *w, const WorldEconomy *econ, int c){
+    int cp=(c>=0&&c<w->n_countries)?w->country[c].capital_prov:-1;
+    int cr=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+    return (cr>=0&&cr<econ->n_regions)?econ->region[cr].culture.credo:(Credo)0;
+}
+/* un cran PLUS DOUX (le renversement ne reproduit pas pire — pas tout de suite). */
+static SuzContrat contrat_adouci(SuzContrat c){
+    return (c==CONTRAT_SERVAGE)?CONTRAT_PROTECTORAT:(c==CONTRAT_PROTECTORAT)?CONTRAT_CONCORDAT:c;
+}
+#define FRONDE_RATIO     1.2f
+#define FRONDE_GRIEF_MIN 0.45f
+
+void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ,
+                           const WorldProsperity *wp){
     if (!d||!w||!econ) return;
     int capreg[SCPS_MAX_COUNTRY];                /* où coule le tribut */
     for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
         int cp=w->country[c].capital_prov;
         capreg[c]=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
     }
+    /* ── 0. RÉSOLUTION d\'une fronde en cours : la paix entre meneur et maître tranche. */
+    if (d->fronde_suz>=0){
+        int s0=d->fronde_suz, ld=d->fronde_lead;
+        if (ld>=0 && d->status[ld][s0]==DIPLO_WAR){
+            /* LA LIGUE PÈSE : le bras-de-fer par paire ignore les co-ligués — on y verse
+             * la PRESSION CUMULÉE (Σ puissance des membres vs le maître), chaque année. */
+            float pl=0.f;
+            for (int v=0;v<SCPS_MAX_COUNTRY;v++) if (d->v_ligue[v]) pl+=suz_power(w,econ,wp,v);
+            float ps=suz_power(w,econ,wp,s0);
+            d->battle_score[ld][s0] = clampf(d->battle_score[ld][s0]
+                                             + clampf((pl/(ps+1.f)-1.f)*8.f, -6.f, 10.f),
+                                             -100.f, 50.f);
+            d->fronde_score = d->battle_score[ld][s0];      /* capture AVANT la paix (elle solde) */
+        } else {
+            float sc=d->fronde_score;
+            if (sc>=15.f){                                   /* LA LIGUE GAGNE */
+                /* le MENEUR se ré-élit à la victoire : le plus fort des membres PRÉSENTS
+                 * porte la couronne de la fronde (les puissances ont bougé pendant la guerre). */
+                { float bp=suz_power(w,econ,wp,ld);
+                  for (int v=0;v<SCPS_MAX_COUNTRY;v++)
+                      if (d->v_ligue[v] && suz_power(w,econ,wp,v)>bp){ bp=suz_power(w,econ,wp,v); ld=v; } }
+                bool ambitieux=false;
+                { Ethos e=suz_ethos(w,econ,ld);
+                  float pl=suz_power(w,econ,wp,ld), ps=suz_power(w,econ,wp,s0);
+                  /* ambitieux : le tempérament (Dominateur/Honneur), OU la puissance qui
+                   * ÉCRASE le maître déchu — on ne s'incline plus devant plus faible que soi. */
+                  ambitieux=(e==ETHOS_DOMINATEUR||e==ETHOS_HONNEUR||pl>=1.3f*ps); }
+                if (ambitieux && ld>=0){                     /* LE RENVERSEMENT : la pyramide se retourne */
+                    for (int v=0;v<SCPS_MAX_COUNTRY;v++){
+                        if (!d->v_ligue[v]||v==ld) continue;
+                        SuzContrat oc=(SuzContrat)d->contrat[v];
+                        d->suzerain[v]=-1; d->contrat[v]=CONTRAT_NONE;
+                        diplo_set_vassal(d, ld, v, contrat_adouci(oc));
+                        d->v_grief[v]=0.15f;
+                    }
+                    d->suzerain[ld]=-1; d->contrat[ld]=CONTRAT_NONE;
+                    Ethos e=suz_ethos(w,econ,ld);
+                    diplo_set_vassal(d, ld, s0, (e==ETHOS_DOMINATEUR||e==ETHOS_HONNEUR)?CONTRAT_SERVAGE:CONTRAT_PROTECTORAT);
+                    d->v_grief[s0]=0.30f;
+                    d->n_renvers++;
+                } else {                                     /* L\'INDÉPENDANCE */
+                    for (int v=0;v<SCPS_MAX_COUNTRY;v++){
+                        if (!d->v_ligue[v]) continue;
+                        d->suzerain[v]=-1; d->contrat[v]=CONTRAT_NONE; d->v_grief[v]=0.f;
+                    }
+                    d->n_indep++;
+                }
+            } else {                                         /* LE SUZERAIN GAGNE : on durcit, ça couve */
+                for (int v=0;v<SCPS_MAX_COUNTRY;v++){
+                    if (!d->v_ligue[v]) continue;
+                    if (d->suzerain[v]==s0){
+                        d->contrat[v]=CONTRAT_SERVAGE;       /* les contrats se durcissent */
+                        d->v_grief[v]=0.35f;                  /* écrasé mais PAS éteint (Kuran : ça couve) */
+                        if (capreg[v]>=0&&capreg[v]<econ->n_regions)
+                            econ->region[capreg[v]].coercion=fminf(1.f,econ->region[capreg[v]].coercion+0.4f);
+                    }
+                }
+                d->n_ecrase++;
+            }
+            for (int v=0;v<SCPS_MAX_COUNTRY;v++) d->v_ligue[v]=0;
+            d->fronde_suz=-1; d->fronde_lead=-1; d->fronde_score=0.f;
+        }
+    }
+    /* ── 1. le lien vit : tribut, appel, GRIEF, défection ── */
     for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
         int s=d->suzerain[v];
         if (s<0) continue;
         if (s>=w->n_countries){ d->suzerain[v]=-1; continue; }
         SuzContrat c=(SuzContrat)d->contrat[v];
-        /* TRIBUT : lourd pour le serf (8 %/an + coercition chez lui), léger pour le
-         * protégé (2 %). Concordat & cité : pas d'or (la foi / la route garantie). */
         float frac=(c==CONTRAT_SERVAGE)?0.08f:(c==CONTRAT_PROTECTORAT)?0.02f:0.f;
         if (frac>0.f && capreg[s]>=0 && capreg[s]<econ->n_regions){
             float take=0.f;
@@ -126,11 +219,9 @@ void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ){
             econ->region[capreg[s]].treasury += take;
             if (c==CONTRAT_SERVAGE && capreg[v]>=0 && capreg[v]<econ->n_regions){
                 RegionEconomy *cv=&econ->region[capreg[v]];
-                cv->coercion = fminf(1.f, cv->coercion+0.04f);   /* le serf vit sous la botte */
+                cv->coercion = fminf(1.f, cv->coercion+0.04f);
             }
         }
-        /* APPEL DU PROTECTEUR : les guerres du protégé appellent le maître
-         * (protectorat & servage — on défend son bien). */
         if (c==CONTRAT_PROTECTORAT||c==CONTRAT_SERVAGE){
             for (int x=0;x<w->n_countries && x<SCPS_MAX_COUNTRY;x++){
                 if (x==s||x==v) continue;
@@ -140,24 +231,147 @@ void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ){
                 }
             }
         }
-        /* DÉFECTION : le vassal teste son maître — le ratio s'effondre → il dénonce. */
-        float ms=diplo_mil_power(w,econ,s), mv=diplo_mil_power(w,econ,v);
-        if (ms < 1.15f*mv)
-            diplo_break_vassal(d, v, c==CONTRAT_SERVAGE);   /* le serf part en guerre */
+        /* GRIEF — structurel (le contrat) + conjoncturel (éthos, credo, la botte du maître). */
+        { float g=d->v_grief[v];
+          g += (c==CONTRAT_SERVAGE)?0.10f:(c==CONTRAT_PROTECTORAT)?0.02f:(c==CONTRAT_CITE)?0.02f:0.005f;
+          Ethos ev=suz_ethos(w,econ,v);
+          if (ev==ETHOS_HONNEUR) g+=0.05f;                       /* l\'Honneur griefe d\'exister en vassal */
+          if (suz_credo(w,econ,v)!=suz_credo(w,econ,s)) g+=0.02f;
+          if (capreg[s]>=0&&capreg[s]<econ->n_regions&&econ->region[capreg[s]].coercion>0.5f) g+=0.03f;  /* le maître mate/purge : peur ET grief */
+          if (d->v_loyal[v]>0.f){ g-=0.04f; d->v_loyal[v]-=365.f; }   /* loyauté achetée : décline + bloque la ligue */
+          else g-=0.01f;
+          d->v_grief[v]=clampf(g,0.f,1.f);
+        }
+        /* DÉFECTION individuelle (§4) : trop seul pour se liguer → changer de maître. */
+        if (!d->v_ligue[v] && d->v_grief[v]>0.70f){
+            float ps=suz_power(w,econ,wp,s);
+            int big=-1; float best=ps;
+            for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++){
+                if (b==v||b==s||d->status[b][v]==DIPLO_WAR) continue;
+                if (w->country[b].role==POLITY_UNCLAIMED) continue;
+                if (diplo_vassal_count(d,b)>=4) continue;
+                float pb=suz_power(w,econ,wp,b);
+                if (pb>1.3f*ps && pb>best){ best=pb; big=b; }
+            }
+            if (big>=0){
+                SuzContrat nc=contrat_adouci(c);
+                bool paisible=(ps<0.9f*suz_power(w,econ,wp,big));
+                d->suzerain[v]=-1; d->contrat[v]=CONTRAT_NONE;
+                diplo_set_vassal(d, big, v, nc==CONTRAT_NONE?CONTRAT_PROTECTORAT:nc);
+                d->v_grief[v]=0.10f;
+                if (paisible) d->n_defect_paix++;
+                else { d->status[s][v]=DIPLO_WAR; d->status[v][s]=DIPLO_WAR;
+                       d->cb[s][v]=CB_TERRITORIAL; d->n_defect_guerre++; }   /* le CB de REPRISE */
+                continue;
+            }
+        }
+        /* l\'ancienne dénonciation simple (le ratio s\'effondre) reste — mais plus rare. */
+        { float ms=diplo_mil_power(w,econ,s), mv=diplo_mil_power(w,econ,v);
+          if (ms < 0.9f*mv && d->v_grief[v]>0.3f)
+              diplo_break_vassal(d, v, c==CONTRAT_SERVAGE); }
     }
-    /* ACCEPTATION PAR LA MENACE (la voie « menace ») : un petit SANS allié, sous un
-     * voisin écrasant (≥ 1.8, le repère hégémon) non hostile, accepte le PROTECTORAT. */
+    /* ── 2. par SUZERAIN : contre-leviers (selon l\'éthos), puis la LIGUE et la FENÊTRE. */
+    for (int s0=0;s0<w->n_countries && s0<SCPS_MAX_COUNTRY;s0++){
+        if (g_intim_cd[s0]>0) g_intim_cd[s0]--;
+        int   members[SCPS_MAX_COUNTRY], nm=0;
+        float psz=suz_power(w,econ,wp,s0), pligue=0.f, gsum=0.f; int nv=0;
+        for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
+            if (d->suzerain[v]!=s0) continue;
+            nv++; gsum+=d->v_grief[v];
+            /* seuil d\'entrée en ligue : par contrat (le serf fronde tôt, le protégé tard). */
+            float seuil=(d->contrat[v]==CONTRAT_SERVAGE)?0.50f:(d->contrat[v]==CONTRAT_CITE)?0.60f:
+                        (d->contrat[v]==CONTRAT_PROTECTORAT)?0.65f:0.80f;
+            if (suz_ethos(w,econ,v)==ETHOS_HONNEUR) seuil-=0.10f;   /* l\'Honneur fronde tôt */
+            bool ligue=(d->v_grief[v]>=seuil && d->v_loyal[v]<=0.f);
+            if (ligue && !d->v_ligue[v] && nm==0) d->n_ligues++;     /* une ligue se NOUE */
+            d->v_ligue[v]=ligue?1:0;
+            if (ligue){ members[nm++]=v; pligue+=suz_power(w,econ,wp,v); }
+        }
+        if (nv==0) continue;
+        float gmoy=gsum/(float)nv;
+        /* CONTRE-LEVIERS IA (le maître agit AVANT que la fenêtre ne s\'ouvre) : */
+        bool fronde_hesite=false;   /* l'intimidation fait HÉSITER (cette année), sans dissoudre */
+        if (d->fronde_suz<0 && pligue>0.9f*psz && gmoy>0.35f){
+            Ethos es=suz_ethos(w,econ,s0);
+            int worst=-1; float wg=0.f;
+            for (int k=0;k<nm;k++) if (d->v_grief[members[k]]>wg){ wg=d->v_grief[members[k]]; worst=members[k]; }
+            if (worst<0) for (int v=0;v<SCPS_MAX_COUNTRY;v++) if (d->suzerain[v]==s0 && d->v_grief[v]>wg){ wg=d->v_grief[v]; worst=v; }
+            if (worst>=0){
+                if (es==ETHOS_MERCANTILE && capreg[s0]>=0 && capreg[worst]>=0
+                    && econ->region[capreg[s0]].treasury>200.f){
+                    float don=econ->region[capreg[s0]].treasury*0.10f;       /* LE DON — il s\'use */
+                    econ->region[capreg[s0]].treasury-=don;
+                    econ->region[capreg[worst]].treasury+=don;
+                    d->v_grief[worst]=fmaxf(0.f, d->v_grief[worst]-0.25f/(1.f+(float)d->v_dons[worst]));
+                    if (d->v_dons[worst]<250) d->v_dons[worst]++;
+                    d->v_loyal[worst]=3.f*365.f; d->n_lev_don++;
+                } else if ((es==ETHOS_PACIFISTE||es==ETHOS_BUREAUCRATE) && d->contrat[worst]==CONTRAT_SERVAGE){
+                    d->contrat[worst]=CONTRAT_PROTECTORAT;                    /* ADOUCIR le contrat */
+                    d->v_grief[worst]=fmaxf(0.f,d->v_grief[worst]-0.30f);
+                    for (int v=0;v<SCPS_MAX_COUNTRY;v++)                      /* le précédent se voit */
+                        if (v!=worst && d->suzerain[v]==s0) d->v_grief[v]=fminf(1.f,d->v_grief[v]+0.04f);
+                    d->n_lev_allege++;
+                } else if (es==ETHOS_DOMINATEUR && nm>=2){
+                    int strong=members[0];                                    /* DIVISER : le privilège */
+                    for (int k=1;k<nm;k++) if (suz_power(w,econ,wp,members[k])>suz_power(w,econ,wp,strong)) strong=members[k];
+                    d->v_ligue[strong]=0; d->v_loyal[strong]=5.f*365.f;
+                    d->v_grief[strong]=fmaxf(0.f,d->v_grief[strong]-0.20f);
+                    for (int k=0;k<nm;k++) if (members[k]!=strong) d->v_grief[members[k]]=fminf(1.f,d->v_grief[members[k]]+0.05f);
+                    d->n_lev_divise++;
+                } else if ((es==ETHOS_DOMINATEUR||es==ETHOS_HONNEUR||es==ETHOS_ORDRE)
+                           && g_intim_cd[s0]==0){
+                    /* INTIMIDER : la peur monte, la ligue HÉSITE (cette année) — le grief
+                     * ne baisse PAS (Kuran : il se tait, il couve, il ressortira). */
+                    g_intim_cd[s0]=5;
+                    for (int k=0;k<nm;k++){
+                        int cv=capreg[members[k]];
+                        if (cv>=0&&cv<econ->n_regions)
+                            econ->region[cv].coercion=fminf(1.f,econ->region[cv].coercion+0.30f);
+                    }
+                    fronde_hesite=true;
+                    d->n_lev_intim++;
+                }
+            }
+        }
+        /* LA FENÊTRE : grief moyen ET ratio — une PROBABILITÉ qui monte, jamais un couperet. */
+        if (d->fronde_suz<0 && !fronde_hesite && nm>=2 && pligue > FRONDE_RATIO*psz && gmoy > FRONDE_GRIEF_MIN){
+            float p = clampf((pligue/(psz+1.f)-FRONDE_RATIO)*0.8f + (gmoy-FRONDE_GRIEF_MIN), 0.05f, 0.60f);
+            if ((float)(fr_rng(d)&0xFFFF)/65535.f < p){
+                /* LA FRONDE ÉCLATE : la ligue contre le maître — et les LOYAUX viennent POUR lui. */
+                int lead=members[0];
+                for (int k=1;k<nm;k++) if (suz_power(w,econ,wp,members[k])>suz_power(w,econ,wp,lead)) lead=members[k];
+                for (int k=0;k<nm;k++){
+                    int v=members[k];
+                    d->status[v][s0]=DIPLO_WAR; d->status[s0][v]=DIPLO_WAR;
+                }
+                d->cb[lead][s0]=CB_TERRITORIAL;
+                for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
+                    if (d->suzerain[v]!=s0 || d->v_ligue[v]) continue;
+                    if (d->v_grief[v]<0.25f)                                  /* le rendement de l\'entretien */
+                        for (int k=0;k<nm;k++){ d->status[v][members[k]]=DIPLO_WAR; d->status[members[k]][v]=DIPLO_WAR; }
+                }
+                d->fronde_suz=(int16_t)s0; d->fronde_lead=(int16_t)lead;
+                /* la force RÉUNIE pèse dès le premier jour : une paix expéditive du maître
+                 * ne peut pas effacer un rapport de force écrasant (ratio 1.5 → la ligue
+                 * part gagnante ; 1.25 → il faudra le gagner sur la durée). */
+                d->fronde_score = clampf((pligue/(psz+1.f)-FRONDE_RATIO)*50.f, 0.f, 30.f);
+                d->battle_score[lead][s0] = d->fronde_score;
+                d->n_frondes++;
+            }
+        }
+    }
+    /* ── 3. ACCEPTATION PAR LA MENACE (inchangé) ── */
     for (int v=0;v<w->n_countries && v<SCPS_MAX_COUNTRY;v++){
         if (d->suzerain[v]>=0) continue;
         if (w->country[v].role==POLITY_UNCLAIMED || w->country[v].capital_prov<0) continue;
-        if (diplo_ally_count(d,v)>0) continue;            /* un allié le couvre : il refuse */
+        if (diplo_ally_count(d,v)>0) continue;
         float mv=diplo_mil_power(w,econ,v); if (mv<=0.f) continue;
         int big=-1; float best=0.f;
         for (int s=0;s<w->n_countries && s<SCPS_MAX_COUNTRY;s++){
             if (s==v || d->status[s][v]==DIPLO_WAR) continue;
             if (w->country[s].role==POLITY_UNCLAIMED) continue;
-            if (diplo_vassal_count(d,s)>=4) continue;     /* un maître ne tient pas tout */
-            bool adj=false;                                /* voisin : une frontière commune */
+            if (diplo_vassal_count(d,s)>=4) continue;
+            bool adj=false;
             for (int r=0;r<econ->n_regions && !adj;r++){
                 if (econ->region[r].owner!=v) continue;
                 for (int q=0;q<econ->n_regions;q++)

@@ -150,7 +150,7 @@ static void sim_day(Sim *s, World *w) {
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
-        diplo_suzerainty_tick(s->dp, w, s->econ);   /* suzeraineté : tributs, appels, défections, acceptations */
+        diplo_suzerainty_tick(s->dp, w, s->econ, s->wp);   /* suzeraineté + FRONDE : tributs, ligues, défections */
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales : rythme + récompense */
         faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface (~15 ans) */
@@ -420,6 +420,7 @@ int main(int argc, char **argv){
     long tot_reloc=0;   /* §reloc : ensemencements de pop pour combler une pénurie */
     long tot_repress=0, tot_assim=0, tot_purge=0, tot_purge_dead=0;       /* leviers intérieurs */
     long tot_serv=0, tot_prot=0, tot_conc=0, tot_cite=0, tot_defect=0;    /* suzeraineté */
+    long tot_ligues=0, tot_frondes=0, tot_indep=0, tot_renvers=0, tot_ecrase=0;   /* fronde */
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -628,6 +629,12 @@ int main(int argc, char **argv){
           printf("              leviers : %d matage(s) · %d formation(s) · %d purge(s) (%ld morts) | suzeraineté : %d servage · %d protectorat · %d concordat · %d cité · %d défection(s)\n",
                  rep, ass, pur, dead,
                  s.dp->n_servage, s.dp->n_protectorat, s.dp->n_concordat, s.dp->n_cite, s.dp->n_defections);
+          printf("              fronde : %d ligue(s) · %d fronde(s) → %d indépendance(s) · %d RENVERSEMENT(s) · %d écrasée(s) | défections %d paisibles · %d par reprise | contre-leviers : %d don · %d allègement · %d division · %d intimidation\n",
+                 s.dp->n_ligues, s.dp->n_frondes, s.dp->n_indep, s.dp->n_renvers, s.dp->n_ecrase,
+                 s.dp->n_defect_paix, s.dp->n_defect_guerre,
+                 s.dp->n_lev_don, s.dp->n_lev_allege, s.dp->n_lev_divise, s.dp->n_lev_intim);
+          tot_ligues+=s.dp->n_ligues; tot_frondes+=s.dp->n_frondes; tot_indep+=s.dp->n_indep;
+          tot_renvers+=s.dp->n_renvers; tot_ecrase+=s.dp->n_ecrase;
           tot_repress+=rep; tot_assim+=ass; tot_purge+=pur; tot_purge_dead+=dead;
           tot_serv+=s.dp->n_servage; tot_prot+=s.dp->n_protectorat; tot_conc+=s.dp->n_concordat;
           tot_cite+=s.dp->n_cite; tot_defect+=s.dp->n_defections; }
@@ -713,6 +720,8 @@ int main(int argc, char **argv){
            tot_repress, tot_assim, tot_purge, tot_purge_dead);
     printf("   suzeraineté ................. %ld servage · %ld protectorat · %ld concordat · %ld cité · %ld défection(s)\n",
            tot_serv, tot_prot, tot_conc, tot_cite, tot_defect);
+    printf("   fronde vassale .............. %ld ligue(s) · %ld fronde(s) → %ld indép. · %ld renversement(s) · %ld écrasée(s)  (les TROIS fins doivent exister)\n",
+           tot_ligues, tot_frondes, tot_indep, tot_renvers, tot_ecrase);
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);

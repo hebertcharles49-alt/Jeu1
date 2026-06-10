@@ -629,7 +629,7 @@ static void sim_day(Sim *s, World *w) {
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
             diplo_set_faustian(s->dp, c, s->ts[c].charge);  /* souillure faustienne → croisades */
         diplo_tick(s->dp, 365.f);
-        diplo_suzerainty_tick(s->dp, w, s->econ);   /* suzeraineté : tributs, appels, défections, acceptations */
+        diplo_suzerainty_tick(s->dp, w, s->econ, s->wp);   /* suzeraineté + FRONDE : tributs, ligues, défections */
         diplo_war_tick(s->dp, w, s->econ, s->wp, 1.0f);
         missions_tick(s->missions, w, s->econ, s->ts, s->year);  /* missions décennales */
         faction_levers_decay(0.07f);   /* §4 : une stance non entretenue s'efface */

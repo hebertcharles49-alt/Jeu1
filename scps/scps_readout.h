@@ -42,6 +42,9 @@ typedef enum { AC_LOINTAIN, AC_PROCHE, AC_IMMINENT, AC_ACQUIS }                 
 /* MARCHÉ (sidebar §2/§4) : l'état d'un bien en mots — du marché MORT (ni offre ni
  * demande : la chaîne ne vit pas) à l'ENGORGÉ. La famine de fer devient lisible. */
 typedef enum { MARCHE_MORT, MARCHE_PENURIE, MARCHE_TENDU, MARCHE_SAIN, MARCHE_ENGORGE } BandMarche;
+/* FIDÉLITÉ d'un vassal (fronde §7) : le ratio ne s'affiche jamais — la fronde se
+ * PRESSENT. Classée sur le grief nu [0..1]. */
+typedef enum { FID_FIDELE, FID_TIEDE, FID_FRONDEUR, FID_LIGUEUR } BandFidelite;
 typedef enum { PG_CALME, PG_FREMISSEMENT, PG_OMBRE, PG_SEUIL }                    BandPresage;
 /* Panneau de province */
 typedef enum { STA_DESERT, STA_HAMEAU, STA_BOURG, STA_CITE, STA_METROPOLE }       BandStature;
@@ -189,6 +192,8 @@ const char  *label_acces(BandAcces b);
 /* Marché : classé sur demande vs disponible (flottants NUS — le ratio reste derrière). */
 BandMarche   band_marche(float demand, float avail);
 const char  *label_marche(BandMarche b);
+BandFidelite band_fidelite(float grief_0_1);
+const char  *label_fidelite(BandFidelite b);
 
 /* ---- LENTILLES de carte (sidebar Filtres §6) — par RÉGION, en TEINTES discrètes --
  * La carte se colore par BANDE (4-5 teintes), jamais par gradient continu : un

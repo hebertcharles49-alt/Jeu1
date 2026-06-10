@@ -117,6 +117,16 @@ BandMarche band_marche(float demand, float avail) {
     if (avail <  demand*0.80f)           return MARCHE_TENDU;
     return MARCHE_SAIN;
 }
+BandFidelite band_fidelite(float g) {
+    if (g < 0.25f) return FID_FIDELE;
+    if (g < 0.50f) return FID_TIEDE;
+    if (g < 0.70f) return FID_FRONDEUR;
+    return FID_LIGUEUR;
+}
+const char *label_fidelite(BandFidelite b) {
+    static const char *N[]={ "fidèle","tiède","frondeur","ligueur" };
+    return (b>=0&&b<=FID_LIGUEUR)?N[b]:"?";
+}
 const char *label_marche(BandMarche b) {
     static const char *N[] = { "marché mort","pénurie sévère","tendu","sain","engorgé" };
     return (b>=0 && b<=MARCHE_ENGORGE) ? N[b] : "?";

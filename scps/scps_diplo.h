@@ -70,6 +70,17 @@ typedef struct {
     int16_t     suzerain   [SCPS_MAX_COUNTRY];   /* -1 = libre */
     int8_t      contrat    [SCPS_MAX_COUNTRY];   /* SuzContrat du lien (porté par le vassal) */
     int n_servage, n_protectorat, n_concordat, n_cite, n_defections;   /* chronique (cumul sim) */
+    /* ── LA FRONDE VASSALE (brief fronde) — grief (combustible) × ratio (oxygène) ── */
+    float    v_grief [SCPS_MAX_COUNTRY];  /* grief du vassal envers son maître [0..1] */
+    float    v_loyal [SCPS_MAX_COUNTRY];  /* jours de LOYAUTÉ ACHETÉE (bloque l'entrée en ligue) */
+    uint8_t  v_ligue [SCPS_MAX_COUNTRY];  /* membre de la ligue contre son suzerain ? */
+    uint8_t  v_dons  [SCPS_MAX_COUNTRY];  /* usure du don (chaque don pèse moins) */
+    int16_t  fronde_suz, fronde_lead;     /* fronde ACTIVE contre ce suzerain (-1 = aucune) */
+    float    fronde_score;                /* bras-de-fer de la fronde, capturé AVANT la paix */
+    uint32_t fronde_rng;                  /* probabilité par tick (jamais un couperet) */
+    /* chronique fronde */
+    int n_ligues, n_frondes, n_indep, n_renvers, n_ecrase, n_defect_paix, n_defect_guerre;
+    int n_lev_don, n_lev_allege, n_lev_divise, n_lev_intim;
 } DiploState;
 
 /* Les QUATRE contrats de suzeraineté — quatre logiques (cf. brief §3). */
@@ -90,7 +101,11 @@ bool        diplo_trade_pact  (const DiploState *d, int a, int b);
  * (ratio de force < ~1.15 → dénonciation ; le serf part en guerre), ACCEPTATION par
  * la MENACE (un petit SANS allié sous un voisin écrasant ≥ 1.8 accepte le protectorat
  * — la voie « menace » ; la voie « mission » D3 viendra par statecraft). */
-void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ);
+void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ,
+                           const WorldProsperity *wp);
+/* Fidélité d'un vassal — pour la membrane (le ratio 1,2 ne s'affiche JAMAIS ;
+ * la fronde se PRESSENT en bandes et en signes, elle ne se calcule pas à l'écran). */
+float diplo_vassal_grief(const DiploState *d, int vassal);   /* [0..1] nu — à BANDER côté readout */
 
 void diplo_init(DiploState *d);
 
