@@ -654,6 +654,7 @@ static void sim_rebuild(Sim *s, World *w) {
     agency_init(s->ag);
     diplo_init(s->dp);
     routes_init(s->rn);
+    intertrade_reset();   /* embargos décrétés + flux : RAZ par partie */
     /* RAZ PLEINE PLAGE : n_countries grandit par sécession ; à la RÉGÉNÉRATION (touche R)
      * les slots hauts gardaient ai_on/TechState périmés d'un monde précédent (cf. chronicle). */
     for (int c=0;c<SCPS_MAX_COUNTRY;c++){ s->ai_on[c]=false; tech_state_init(&s->ts[c], false); }
@@ -901,6 +902,525 @@ static void ui_row(SDL_Renderer *ren, int x, int *y, int pw, const char *cat,
     draw_text(ren, g_font, x+104, *y, wc,       word);
     zone_add((SDL_Rect){x-2, *y-2, pw, 19}, def);
     *y += 20;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SIDEBAR GAUCHE (§sidebar) — l'interface d'EMPIRE + la couche de DÉCISION.
+ * Rail fixe (icônes-onglets) + tiroir glissant. Deux lois : (1) ne lit QUE la
+ * membrane (bandes + nombres de jeu) ; (2) toute décision passe par les
+ * ACTIONNEURS (agency / intertrade / warhost / campaign) — les MÊMES leviers
+ * que l'IA, en JOURS, jamais une écriture directe ni un effet instantané.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+#define SB_RAIL_W   46
+#define SB_DRAWER_W 380
+typedef enum { SBT_ECO=0, SBT_DEMO, SBT_STOCKS, SBT_ARMEE, SBT_FILTRES, SBT_COUNT } SbTab;
+typedef struct {
+    int     tab;                  /* -1 = replié */
+    int     eco_sub;              /* 0 Commerce · 1 Marché · 2 Import/Export */
+    int     scroll[SBT_COUNT];
+    float   anim;                 /* 0..1 — glissement du tiroir (~150 ms) */
+    int     reloc_src;            /* étape 1 de la relocalisation (-1 = pas choisie) */
+    MapLens lens;                 /* lentille readout (LENS_NONE = vues classiques) */
+} Sidebar;
+static Sidebar g_sb = { -1, 1, {0,0,0,0,0}, 0.f, -1, LENS_NONE };
+
+/* cibles cliquables du tiroir (reconstruites chaque frame, comme zone_add) */
+enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_RELOC_CLR,
+       SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
+       SBH_MARCH, SBH_MUSTER, SBH_CANCEL };
+typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
+static SbHit g_sbhits[120]; static int g_nsbhits;
+static void sbhit_reset(void){ g_nsbhits=0; }
+static void sbhit_add(SDL_Rect r, int kind, int a, int b){
+    if (g_nsbhits<120){ g_sbhits[g_nsbhits].r=r; g_sbhits[g_nsbhits].kind=kind;
+                        g_sbhits[g_nsbhits].a=a; g_sbhits[g_nsbhits].b=b; g_nsbhits++; }
+}
+
+/* Cache d'agrégats PAYS — recalculé au PAS DE JOUR (jamais par frame, §8). */
+typedef struct {
+    int   day;                    /* jour du dernier calcul (-1 = jamais) */
+    float dem[RES_COUNT], sup[RES_COUNT], stk[RES_COUNT], prix[RES_COUNT];
+    float prix_prev[RES_COUNT];   /* échantillon précédent (tendance ▲▼) */
+    float cls_pop[CLASS_COUNT], cls_sat[CLASS_COUNT];
+    long  pop_total; int n_reg;
+} SbCache;
+static SbCache g_sbc = { -1, {0},{0},{0},{0},{0},{0},{0}, 0, 0 };
+static void sb_cache_refresh(const Sim *s, int day){
+    if (g_sbc.day==day) return;
+    memcpy(g_sbc.prix_prev, g_sbc.prix, sizeof g_sbc.prix);
+    memset(g_sbc.dem,0,sizeof g_sbc.dem); memset(g_sbc.sup,0,sizeof g_sbc.sup);
+    memset(g_sbc.stk,0,sizeof g_sbc.stk); memset(g_sbc.prix,0,sizeof g_sbc.prix);
+    memset(g_sbc.cls_pop,0,sizeof g_sbc.cls_pop); memset(g_sbc.cls_sat,0,sizeof g_sbc.cls_sat);
+    g_sbc.pop_total=0; g_sbc.n_reg=0;
+    int me=s->player;
+    for (int r=0;r<s->econ->n_regions;r++){
+        const RegionEconomy *re=&s->econ->region[r];
+        if (re->owner!=me || !re->colonized) continue;
+        g_sbc.n_reg++;
+        for (int g=1;g<RES_COUNT;g++){
+            g_sbc.dem[g]+=re->demand[g]; g_sbc.sup[g]+=re->supply[g];
+            g_sbc.stk[g]+=re->stock[g];  g_sbc.prix[g]+=re->price[g];
+        }
+        for (int c=0;c<CLASS_COUNT;c++){
+            g_sbc.cls_pop[c]+=re->strata[c].pop;
+            g_sbc.cls_sat[c]+=re->strata[c].satisfaction*re->strata[c].pop;
+        }
+    }
+    for (int g=1;g<RES_COUNT;g++) if (g_sbc.n_reg>0) g_sbc.prix[g]/=(float)g_sbc.n_reg;
+    for (int c=0;c<CLASS_COUNT;c++){
+        g_sbc.pop_total+=(long)g_sbc.cls_pop[c];
+        g_sbc.cls_sat[c]=(g_sbc.cls_pop[c]>0.f)?g_sbc.cls_sat[c]/g_sbc.cls_pop[c]:0.f;
+    }
+    if (g_sbc.day<0) memcpy(g_sbc.prix_prev,g_sbc.prix,sizeof g_sbc.prix);
+    g_sbc.day=day;
+}
+
+/* petits pinceaux */
+static SDL_Color sb_marche_col(BandMarche m){
+    static const SDL_Color C[5]={ {0x60,0x60,0x60,0xff},{0xd0,0x50,0x40,0xff},{0xc8,0x90,0x40,0xff},
+                                  {0x7a,0xa8,0x78,0xff},{0x8a,0x9a,0xb8,0xff} };
+    return C[(m>=0&&m<=MARCHE_ENGORGE)?(int)m:0];
+}
+static int sb_chip(SDL_Renderer *ren, int x, int y, const char *txt, bool actif,
+                   int kind, int a, int b, const char *hov){
+    int w=text_w(g_font_small,txt)+14;
+    fill_rect(ren,x,y,w,17, actif?(SDL_Color){0x3a,0x2c,0x1a,0xff}:(SDL_Color){0x16,0x1e,0x2c,0xff});
+    draw_box (ren,x,y,w,17, actif?COL_COPPER:COL_PANEL2);
+    draw_text(ren,g_font_small,x+7,y+2, actif?COL_COPPER:COL_DIM, txt);
+    sbhit_add((SDL_Rect){x,y,w,17}, kind, a, b);
+    if (hov) zone_add((SDL_Rect){x,y,w,17}, hov);
+    return x+w+5;
+}
+static const char *sb_country_name(const World *w, int cid){
+    return (cid>=0 && cid<w->n_countries) ? w->country[cid].name : "—";
+}
+/* région-capitale du joueur (point de ralliement par défaut) */
+static int sb_capital_region(const Sim *s, const World *w){
+    int cp=(s->player>=0&&s->player<w->n_countries)?w->country[s->player].capital_prov:-1;
+    return (cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+}
+
+/* ── panneau ÉCONOMIE : Commerce · Marché · Import/Export ─────────────────── */
+static void sb_panel_eco(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, const World *world){
+    static char buf[64][120]; int nb=0;
+    int me=s->player;
+    int cx=x+10;
+    cx=sb_chip(ren,cx,y,"Commerce",   g_sb.eco_sub==0, SBH_ECOSUB,0,0,"Les routes marchandes vivantes — et l'EMBARGO, qui se décrète ici.");
+    cx=sb_chip(ren,cx,y,"Marché",     g_sb.eco_sub==1, SBH_ECOSUB,1,0,"La table des biens : prix en or, tendance, état du marché en mots.");
+    (void)sb_chip(ren,cx,y,"Imp/Exp", g_sb.eco_sub==2, SBH_ECOSUB,2,0,"Ce que le pays importe et exporte (volumes, partenaires, or encaissé).");
+    y+=24;
+    if (g_sb.eco_sub==0){
+        int routes=intertrade_active_routes(s->econ, s->rn, s->dp, me);
+        float gold=intertrade_export_gold(me);
+        snprintf(buf[nb],120,"%d route(s) vivante(s) · export %.0f or/an", routes, gold);
+        draw_text(ren,g_font_small,x+10,y,COL_PARCH,buf[nb]); nb++; y+=20;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"partenaires (clic = embargo / levée d'embargo) :"); y+=16;
+        int shown=0;
+        for (int c=0;c<world->n_countries && shown<10 && y<h-22;c++){
+            if (c==me) continue;
+            float v=intertrade_pair_value(me,c);
+            bool emb=intertrade_embargoed(me,c);
+            bool war=diplo_status(s->dp,me,c)==DIPLO_WAR;
+            if (v<=0.5f && !emb && !war) continue;
+            const char *etat = war?"GUERRE":emb?"EMBARGO":(v>200.f)?"florissant":"modeste";
+            snprintf(buf[nb],120,"%-18.18s %7.0f or/an  %s", sb_country_name(world,c), v, etat);
+            SDL_Color col= war?(SDL_Color){0xd0,0x50,0x40,0xff}: emb?(SDL_Color){0xc8,0x90,0x40,0xff}:COL_PARCH;
+            draw_text(ren,g_font_small,x+12,y,col,buf[nb]);
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,16}, SBH_EMBARGO, c, emb?0:1);
+            static char hv[64][140]; snprintf(hv[shown],140, emb?
+                "Lever l'embargo contre %s — le négoce (~%.0f or/an) pourra reprendre.":
+                "Décréter l'EMBARGO contre %s — coupe ~%.0f or/an de négoce (le coût, avant de signer).",
+                sb_country_name(world,c), v);
+            zone_add((SDL_Rect){x+8,y-2,w-16,16}, hv[shown]);
+            nb++; shown++; y+=16;
+        }
+        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucun négoce inter-pays cette année");
+    } else if (g_sb.eco_sub==1){
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            prix(or)  tend.  état"); y+=16;
+        int idx[RES_COUNT], n=0;
+        for (int g=1;g<RES_COUNT;g++) if (g_sbc.dem[g]>0.05f||g_sbc.sup[g]>0.05f) idx[n++]=g;
+        for (int i=1;i<n;i++){ int k=idx[i],j=i;        /* tri : tension d'abord */
+            while(j>0 && (int)band_marche(g_sbc.dem[idx[j-1]],g_sbc.sup[idx[j-1]]+g_sbc.stk[idx[j-1]])
+                       > (int)band_marche(g_sbc.dem[k],g_sbc.sup[k]+g_sbc.stk[k])){ idx[j]=idx[j-1]; j--; }
+            idx[j]=k; }
+        int off=g_sb.scroll[SBT_ECO]; if(off>n-1)off=n>0?n-1:0; if(off<0)off=0;
+        for (int i=off;i<n && y<h-20;i++){
+            int g=idx[i];
+            BandMarche m=band_marche(g_sbc.dem[g], g_sbc.sup[g]+g_sbc.stk[g]);
+            float d=g_sbc.prix[g]-g_sbc.prix_prev[g];
+            const char *tend=(d>0.02f)?"\xe2\x96\xb2":(d<-0.02f)?"\xe2\x96\xbc":"\xc2\xb7";
+            snprintf(buf[nb],120,"%-14.14s %7.2f   %s    %s",
+                     resource_name((Resource)g), g_sbc.prix[g], tend, label_marche(m));
+            draw_text(ren,g_font_small,x+12,y,sb_marche_col(m),buf[nb]); nb++; y+=15;
+        }
+    } else {
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            import (de)        export (vers)"); y+=16;
+        int shown=0, off=g_sb.scroll[SBT_ECO];
+        for (int g=1, seen=0; g<RES_COUNT && y<h-20; g++){
+            float iv=intertrade_import_vol(me,g), ev=intertrade_export_vol(me,g);
+            if (iv<0.05f && ev<0.05f) continue;
+            if (seen++ < off) continue;
+            int from=intertrade_import_from(me,g), to=intertrade_export_to(me,g);
+            snprintf(buf[nb],120,"%-12.12s %5.0f %-10.10s   %5.0f %-10.10s",
+                     resource_name((Resource)g),
+                     iv, iv>0.05f?sb_country_name(world,from):"—",
+                     ev, ev>0.05f?sb_country_name(world,to):"—");
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=15; shown++;
+        }
+        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucun flux inter-pays cette année");
+    }
+}
+
+/* ── panneau DÉMOGRAPHIE : classes, peuples, croissance + RELOCALISATION ───── */
+static void sb_panel_demo(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, const World *world){
+    static char buf[48][130]; int nb=0;
+    (void)world;
+    static const char *CN[CLASS_COUNT]={"Journaliers","Bourgeois","Nobles"};
+    snprintf(buf[nb],130,"population : %ldk  ·  %d région(s)", g_sbc.pop_total/1000, g_sbc.n_reg);
+    draw_text(ren,g_font,x+10,y,COL_PARCH,buf[nb]); nb++; y+=22;
+    for (int c=0;c<CLASS_COUNT;c++){
+        float part=(g_sbc.pop_total>0)?100.f*g_sbc.cls_pop[c]/(float)g_sbc.pop_total:0.f;
+        snprintf(buf[nb],130,"%-12s %6.0f  (%2.0f%%)   satisfaction %2.0f%%",
+                 CN[c], g_sbc.cls_pop[c], part, 100.f*g_sbc.cls_sat[c]);
+        draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=15;
+    }
+    y+=8;
+    draw_text(ren,g_font_small,x+10,y,COL_COPPER,"RELOCALISATION — peupler une province-ressource"); y+=16;
+    /* file d'ordres en cours (annulables) */
+    for (int i=0;i<s->ag->n && y<h-120;i++){
+        const BuildOrder *o=&s->ag->order[i];
+        if (!o->active || o->kind!=AGY_RELOCATE) continue;
+        if (o->region<0||o->region>=s->econ->n_regions) continue;
+        if (s->econ->region[o->region].owner!=s->player) continue;
+        snprintf(buf[nb],130,"convoi %d→%d · %d j restants   [annuler]",
+                 o->region, o->param, o->days_total-o->days_done);
+        draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++;
+        sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_CANCEL, i, 0);
+        zone_add((SDL_Rect){x+8,y-2,w-16,15},"Révoquer ce convoi (rien n'est appliqué tant qu'il n'est pas arrivé).");
+        y+=15;
+    }
+    if (g_sb.reloc_src<0){
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"1. choisis la SOURCE (réservoir de bras) :"); y+=15;
+        int picked[6], np=0;
+        for (int k=0;k<6;k++){ int best=-1; float bp=0.f;
+            for (int r=0;r<s->econ->n_regions;r++){
+                const RegionEconomy *re=&s->econ->region[r];
+                if (re->owner!=s->player||!re->colonized) continue;
+                bool used=false; for(int q=0;q<np;q++) if(picked[q]==r) used=true;
+                if (used) continue;
+                float lp=re->strata[CLASS_LABORER].pop;
+                if (lp>bp){ bp=lp; best=r; }
+            }
+            if (best<0) break;
+            picked[np++]=best;
+        }
+        for (int q=0;q<np && y<h-20;q++){
+            int r=picked[q];
+            snprintf(buf[nb],130,"région %-3d  ·  %5.0f journaliers", r, s->econ->region[r].strata[CLASS_LABORER].pop);
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_RELOC_SRC, r, 0);
+            zone_add((SDL_Rect){x+8,y-2,w-16,15},"Prendre les familles ICI — la coercition montera à la source (le coût du déplacement forcé).");
+            y+=15;
+        }
+    } else {
+        snprintf(buf[nb],130,"source : région %d   [changer]", g_sb.reloc_src);
+        draw_text(ren,g_font_small,x+10,y,COL_COPPER,buf[nb]); nb++;
+        sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_RELOC_CLR, 0,0); y+=16;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"2. choisis la CIBLE (terre-ressource sous-peuplée) :"); y+=15;
+        int shown=0;
+        for (int r=0;r<s->econ->n_regions && shown<6 && y<h-20;r++){
+            const RegionEconomy *re=&s->econ->region[r];
+            if (re->owner!=s->player||!re->colonized||r==g_sb.reloc_src) continue;
+            if (re->habitability<0.20f) continue;
+            if (re->strata[CLASS_LABORER].pop > 600.f) continue;     /* déjà peuplée */
+            int gbest=-1; float sbest=0.f;
+            for (int g=1;g<RES_COUNT;g++){
+                if (re->raw_cap[g]<=0.f) continue;
+                float shortfall=g_sbc.dem[g]-(g_sbc.sup[g]+g_sbc.stk[g]);
+                if (shortfall>sbest){ sbest=shortfall; gbest=g; }
+            }
+            if (gbest<0) continue;
+            snprintf(buf[nb],130,"région %-3d  ·  %-12.12s  ·  %4.0f bras",
+                     r, resource_name((Resource)gbest), re->strata[CLASS_LABORER].pop);
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_RELOC_DST, r, 0);
+            static char hv2[8][150];
+            snprintf(hv2[shown],150,"ORDONNER le convoi : ~%d familles, 90 jours de route — la coercition montera dans la région %d.",
+                     AGY_RELOC_POP, g_sb.reloc_src);
+            zone_add((SDL_Rect){x+8,y-2,w-16,15},hv2[shown]);
+            y+=15; shown++;
+        }
+        if (!shown){ draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucune terre-ressource en manque à peupler"); }
+    }
+}
+
+/* ── panneau STOCKS : tension d'abord, stratégiques épinglés + EXPLOITER ───── */
+static void sb_panel_stocks(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, const World *world){
+    static char buf[56][130]; int nb=0;
+    (void)world;
+    static const Resource STRAT[3]={RES_SALTPETER,RES_CELESTIAL_IRON,RES_ARCANE_CRYSTAL};
+    draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            stock   net/j   couv.   état"); y+=16;
+    int idx[RES_COUNT], n=0;
+    for (int k=0;k<3;k++) idx[n++]=(int)STRAT[k];                  /* stratégiques épinglés */
+    int base=n;
+    for (int g=1;g<RES_COUNT;g++){
+        bool strat=false; for(int k2=0;k2<3;k2++) if((int)STRAT[k2]==g) strat=true;
+        if (strat) continue;
+        if (g_sbc.dem[g]>0.05f||g_sbc.sup[g]>0.05f||g_sbc.stk[g]>0.5f) idx[n++]=g;
+    }
+    for (int i=base+1;i<n;i++){ int k=idx[i],j=i;                  /* le reste : tension d'abord */
+        while(j>base && (int)band_marche(g_sbc.dem[idx[j-1]],g_sbc.sup[idx[j-1]]+g_sbc.stk[idx[j-1]])
+                      > (int)band_marche(g_sbc.dem[k],g_sbc.sup[k]+g_sbc.stk[k])){ idx[j]=idx[j-1]; j--; }
+        idx[j]=k; }
+    int off=g_sb.scroll[SBT_STOCKS]; if(off<0)off=0; if(off>n-1&&n>0)off=n-1;
+    int worst=-1;
+    for (int i=off;i<n && y<h-86;i++){
+        int g=idx[i];
+        BandMarche m=band_marche(g_sbc.dem[g], g_sbc.sup[g]+g_sbc.stk[g]);
+        if (worst<0 && (m==MARCHE_PENURIE||m==MARCHE_TENDU)) worst=g;
+        float net=(g_sbc.sup[g]-g_sbc.dem[g])/30.f;                /* le tick éco est mensuel */
+        char couv[16]="—";
+        if (net<-0.01f) snprintf(couv,16,"%.0f j", g_sbc.stk[g]/(-net));
+        snprintf(buf[nb],130,"%s%-12.12s %6.0f  %+5.1f  %6s  %s",
+                 (i<base)?"\xe2\x98\x85 ":"  ", resource_name((Resource)g),
+                 g_sbc.stk[g], net, couv, label_marche(m));
+        draw_text(ren,g_font_small,x+8,y,sb_marche_col(m),buf[nb]); nb++; y+=15;
+    }
+    /* DÉCISION : exploiter sa propre terre pour la pire pénurie */
+    if (worst>=0){
+        y+=6;
+        snprintf(buf[nb],130,"EXPLOITER — %s en tension : tes terres qui le portent", resource_name((Resource)worst));
+        draw_text(ren,g_font_small,x+10,y,COL_COPPER,buf[nb]); nb++; y+=15;
+        int shown=0;
+        for (int r=0;r<s->econ->n_regions && shown<3 && y<h-18;r++){
+            const RegionEconomy *re=&s->econ->region[r];
+            if (re->owner!=s->player||!re->colonized||re->raw_cap[worst]<=0.f) continue;
+            snprintf(buf[nb],130,"région %-3d · gisement %.1f   [exploiter]", r, re->raw_cap[worst]);
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_EXPLOIT, r, worst);
+            zone_add((SDL_Rect){x+8,y-2,w-16,15},"Mettre l'aménagement en file (mine/carrière) — l'extraction montera à l'achèvement, en jours.");
+            y+=15; shown++;
+        }
+        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucune terre à toi ne le porte — importer ou conquérir");
+    }
+}
+
+/* ── panneau ARMÉE : jauge de levée + armée de campagne (posture, ordres) ──── */
+static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, const World *world, int selected){
+    static char buf[32][140]; int nb=0;
+    int me=s->player;
+    long units=warhost_units(s->host, me);
+    int lv=warhost_levy(s->host, me);
+    snprintf(buf[nb],140,"force mobilisée : %ld paquet(s) de 100", units);
+    draw_text(ren,g_font,x+10,y,COL_PARCH,buf[nb]); nb++; y+=22;
+    draw_text(ren,g_font_small,x+10,y,COL_DIM,"jauge de levée :"); y+=16;
+    { int cx=x+12;
+      static const char *HV[4]={
+        "Levée basse : on rend les bras à l'économie (mobilisation 0.4×).",
+        "Garde : l'entretien normal du temps de paix (1×).",
+        "Pied de guerre : la mobilisation presse (1.6×).",
+        "LEVÉE EN MASSE (2.6×) : on force la main des familles — la coercition montera à la capitale." };
+      for (int l=0;l<4;l++) cx=sb_chip(ren,cx,y,warhost_levy_name(l), lv==l, SBH_LEVY,l,0,HV[l]);
+    } y+=24;
+    if (campaign_active(s->camp, me)){
+        int loc=campaign_location(s->camp, me);
+        FieldPhase ph=campaign_phase(s->camp, me);
+        ArmyComposition comp=campaign_composition(s->camp, me);
+        snprintf(buf[nb],140,"armée de campagne — région %d · %s", loc, campaign_phase_name(ph));
+        draw_text(ren,g_font_small,x+10,y,COL_COPPER,buf[nb]); nb++; y+=15;
+        snprintf(buf[nb],140,"  inf %ld · arch %ld · cav %ld · mages %ld  (Σ %ld paquets)",
+                 comp.infanterie, comp.archers, comp.cavalerie, comp.mages, comp.total);
+        draw_text(ren,g_font_small,x+10,y,COL_PARCH,buf[nb]); nb++; y+=16;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"posture :"); y+=15;
+        { int cx=x+12; int po=campaign_posture(s->camp, me);
+          static const char *HV[3]={
+            "Prudente : marche et siège LENTS — on préserve la troupe.",
+            "Standard : l'allure du manuel.",
+            "Agressive : marche vive, siège tambour battant — on presse." };
+          for (int p=0;p<3;p++) cx=sb_chip(ren,cx,y,campaign_posture_name(p), po==p, SBH_POSTURE,p,0,HV[p]);
+        } y+=24;
+        if (campaign_can_refill(s->camp, s->econ, me)){
+            long men=0, mat=0; campaign_refill_cost(s->camp, me, &men, &mat);
+            snprintf(buf[nb],140,"[renforcer]  +1 paquet/type — %ld hommes · %ld matériaux", men, mat);
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_REFILL, 0,0);
+            zone_add((SDL_Rect){x+8,y-2,w-16,15},"Recompléter en territoire AMI : on lève des hommes et l'on fabrique les armes (payé sur l'économie).");
+            y+=17;
+        }
+        if (selected>=0 && selected<world->n_provinces){
+            int tr=world->province[selected].region;
+            if (tr>=0 && tr<s->econ->n_regions && tr!=loc){
+                snprintf(buf[nb],140,"[marcher] sur la province sélectionnée (région %d)", tr);
+                draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+                sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_MARCH, tr, 0);
+                zone_add((SDL_Rect){x+8,y-2,w-16,15},"ORDONNER la marche (itinéraire en jours, terrain décidant) ; une terre ennemie sera ASSIÉGÉE à l'arrivée.");
+                y+=17;
+            }
+        } else { draw_text(ren,g_font_small,x+12,y,COL_DIM,"(clique une province sur la carte pour ordonner une marche)"); y+=15; }
+    } else {
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"aucune armée de campagne déployée"); y+=16;
+        if (units>0){
+            int cr=sb_capital_region(s,world);
+            snprintf(buf[nb],140,"[lever l'ost] rassembler à la capitale (région %d)", cr);
+            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_MUSTER, cr, 0);
+            zone_add((SDL_Rect){x+8,y-2,w-16,15},"Déployer la force mobilisée en ARMÉE DE CAMPAGNE au camp de la capitale — elle marchera sur ordre.");
+        } else draw_text(ren,g_font_small,x+12,y,COL_DIM,"(monte la levée : il faut des paquets mobilisés)");
+    }
+    (void)h;
+}
+
+/* ── panneau FILTRES : chips → ViewMode existants + lentilles readout ──────── */
+static void sb_panel_filtres(SDL_Renderer *ren, int x, int y, int w, int h, ViewMode mode){
+    (void)w; (void)h;
+    struct { const char *grp; struct { const char *lbl; int mode; } it[7]; int n; } G[3]={
+        { "Souveraineté", { {"Politique",VIEW_POLITICAL},{"Pays",VIEW_COUNTRIES},{"Régions",VIEW_REGIONS},{"Continents",VIEW_CONTINENTS} }, 4 },
+        { "Peuples",      { {"Culture",VIEW_CULTURE},{"Foi",VIEW_FAITH} }, 2 },
+        { "Terre",        { {"Relief",VIEW_TERRAIN},{"Altitude",VIEW_HEIGHT},{"Fertilité",VIEW_FERTILITY},{"Humidité",VIEW_MOISTURE},{"Température",VIEW_TEMPERATURE},{"Ressources",VIEW_RESOURCES},{"Habitabilité",VIEW_HABITABILITY} }, 7 },
+    };
+    for (int g=0;g<3;g++){
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,G[g].grp); y+=15;
+        int cx=x+12;
+        for (int i=0;i<G[g].n;i++){
+            if (cx>x+SB_DRAWER_W-90){ cx=x+12; y+=21; }
+            bool actif=(g_sb.lens==LENS_NONE && mode==(ViewMode)G[g].it[i].mode);
+            cx=sb_chip(ren,cx,y,G[g].it[i].lbl,actif,SBH_CHIP_MODE,G[g].it[i].mode,0,VIEW_NAMES[G[g].it[i].mode]);
+        }
+        y+=24;
+    }
+    draw_text(ren,g_font_small,x+10,y,COL_DIM,"Empire (lentilles — par bande, 5 teintes)"); y+=15;
+    { int cx=x+12;
+      static const char *HV[3]={
+        "Chaque province colorée par sa bande de PROSPÉRITÉ (misère → opulence).",
+        "Où ça gronde : la bande d'HUMEUR locale (révoltée → dévouée).",
+        "Où sont les PÉNURIES : la pire tension du panier (grain/outils/fer/étoffe/vin)." };
+      cx=sb_chip(ren,cx,y,"Prospérité", g_sb.lens==LENS_PROSP,  SBH_CHIP_LENS, LENS_PROSP,0, HV[0]);
+      cx=sb_chip(ren,cx,y,"Humeur",     g_sb.lens==LENS_HUMEUR, SBH_CHIP_LENS, LENS_HUMEUR,0,HV[1]);
+      (void)sb_chip(ren,cx,y,"Marché",  g_sb.lens==LENS_MARCHE, SBH_CHIP_LENS, LENS_MARCHE,0,HV[2]);
+    }
+}
+
+/* ── le RAIL + le TIROIR ───────────────────────────────────────────────────── */
+static void draw_sidebar(SDL_Renderer *ren, int win_w, int win_h, Sim *s, World *world,
+                         ViewMode mode, int selected){
+    (void)win_w;
+    sbhit_reset();
+    if (s->ready) sb_cache_refresh(s, s->day);                /* agrégats : au pas de jour (§8) */
+    /* glissement (~150 ms, dt interne — l'overlay est redessiné chaque frame) */
+    { static Uint32 sb_last=0; Uint32 now=SDL_GetTicks();
+      float dtf = sb_last ? (float)(now-sb_last)/1000.f : 0.016f;
+      if (dtf>0.1f) dtf=0.1f;
+      sb_last=now;
+      float target=(g_sb.tab>=0)?1.f:0.f;
+      if (g_sb.anim<target) { g_sb.anim+=dtf/0.15f; if(g_sb.anim>1.f)g_sb.anim=1.f; }
+      if (g_sb.anim>target) { g_sb.anim-=dtf/0.15f; if(g_sb.anim<0.f)g_sb.anim=0.f; }
+    }
+    int dw=(int)(SB_DRAWER_W*g_sb.anim);
+    /* tiroir */
+    if (dw>2 && s->ready){
+        int dx=SB_RAIL_W, dy=44, dh=win_h-44-24;
+        panel_bg(ren,dx,dy,dw,dh);
+        if (g_sb.anim>0.95f){
+            static const char *TITRE[SBT_COUNT]={"ÉCONOMIE","DÉMOGRAPHIE","STOCKS","ARMÉE","FILTRES DE CARTE"};
+            if (g_sb.tab>=0&&g_sb.tab<SBT_COUNT)
+                draw_text(ren,g_font,dx+10,dy+8,COL_COPPER,TITRE[g_sb.tab]);
+            int py=dy+32, ph=dy+dh;
+            switch(g_sb.tab){
+                case SBT_ECO:     sb_panel_eco   (ren,dx,py,dw,ph,s,world); break;
+                case SBT_DEMO:    sb_panel_demo  (ren,dx,py,dw,ph,s,world); break;
+                case SBT_STOCKS:  sb_panel_stocks(ren,dx,py,dw,ph,s,world); break;
+                case SBT_ARMEE:   sb_panel_armee (ren,dx,py,dw,ph,s,world,selected); break;
+                case SBT_FILTRES: sb_panel_filtres(ren,dx,py,dw,ph,mode); break;
+                default: break;
+            }
+        }
+    }
+    /* rail (toujours visible, par-dessus) */
+    fill_rect(ren,0,0,SB_RAIL_W,win_h,(SDL_Color){0x0c,0x12,0x1d,0xfa});
+    fill_rect(ren,SB_RAIL_W-1,0,1,win_h,COL_PANEL2);
+    static const char *IC[SBT_COUNT] ={"E","D","S","A","F"};
+    static const char *NM[SBT_COUNT] ={"Économie (E) — commerce, marché, import/export",
+                                       "Démographie (D) — classes, peuples, relocalisation",
+                                       "Stocks (S) — tensions, couverture, exploiter",
+                                       "Armée (A) — levée, campagne, posture",
+                                       "Filtres (F) — vues de carte & lentilles d'empire"};
+    for (int t=0;t<SBT_COUNT;t++){
+        int by=52+t*44;
+        bool actif=(g_sb.tab==t);
+        if (actif) fill_rect(ren,0,by-6,SB_RAIL_W,32,(SDL_Color){0x2a,0x20,0x14,0xff});
+        draw_text(ren,g_font_big,14,by,actif?COL_COPPER:COL_DIM,IC[t]);
+        sbhit_add((SDL_Rect){0,by-6,SB_RAIL_W,32}, SBH_TAB, t, 0);
+        zone_add((SDL_Rect){0,by-6,SB_RAIL_W,32}, NM[t]);
+    }
+}
+
+/* clic dans la sidebar — exécute la DÉCISION par l'actionneur ; true si consommé */
+static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, bool *dirty){
+    int hit=-1;
+    for (int i=0;i<g_nsbhits;i++){ SDL_Rect *r=&g_sbhits[i].r;
+        if (mx>=r->x&&mx<r->x+r->w&&my>=r->y&&my<r->y+r->h){ hit=i; break; } }
+    if (hit<0){
+        int dw=(int)(SB_DRAWER_W*g_sb.anim);
+        return (mx < SB_RAIL_W + ((g_sb.tab>=0)?dw:0));   /* le tiroir absorbe le clic perdu */
+    }
+    SbHit *hh=&g_sbhits[hit]; *dirty=true;
+    switch(hh->kind){
+        case SBH_TAB:      g_sb.tab=(g_sb.tab==hh->a)?-1:hh->a; break;
+        case SBH_ECOSUB:   g_sb.eco_sub=hh->a; break;
+        case SBH_EMBARGO:
+            intertrade_order_embargo(s->player, hh->a, hh->b!=0);
+            printf("\n[scps] %s contre %s — le négoce %s.\n",
+                   hh->b? "EMBARGO décrété":"Embargo LEVÉ", sb_country_name(world,hh->a),
+                   hh->b? "se ferme":"peut reprendre");
+            break;
+        case SBH_RELOC_SRC: g_sb.reloc_src=hh->a; break;
+        case SBH_RELOC_CLR: g_sb.reloc_src=-1; break;
+        case SBH_RELOC_DST:
+            if (g_sb.reloc_src>=0 && agency_order_relocate(s->ag, g_sb.reloc_src, hh->a))
+                printf("\n[scps] Convoi ordonné : ~%d familles, région %d → %d (90 j) — la coercition montera à la source.\n",
+                       AGY_RELOC_POP, g_sb.reloc_src, hh->a);
+            g_sb.reloc_src=-1;
+            break;
+        case SBH_EXPLOIT:
+            if (agency_order_exploit(s->ag, hh->a, (Resource)hh->b))
+                printf("\n[scps] Exploitation en file : %s, région %d (en jours).\n",
+                       resource_name((Resource)hh->b), hh->a);
+            break;
+        case SBH_LEVY:
+            warhost_set_levy(s->host, s->player, hh->a);
+            printf("\n[scps] Levée : %s.\n", warhost_levy_name(hh->a));
+            break;
+        case SBH_POSTURE:  campaign_set_posture(s->camp, s->player, hh->a); break;
+        case SBH_REFILL: {
+            int got=campaign_refill(s->camp, s->player, s->labor);
+            printf("\n[scps] Renfort : %d paquet(s) levés en territoire ami.\n", got);
+        } break;
+        case SBH_MARCH: {
+            const FieldArmy *fa=&s->camp->army[s->player];
+            if (campaign_order(s->camp, s->econ, s->player, fa->loc, hh->a, &fa->force))
+                printf("\n[scps] L'armée marche sur la région %d (itinéraire en jours).\n", hh->a);
+        } break;
+        case SBH_MUSTER:
+            if (hh->a>=0 && campaign_order(s->camp, s->econ, s->player, hh->a, hh->a, &s->host->army[s->player]))
+                printf("\n[scps] L'ost se rassemble au camp de la capitale (région %d).\n", hh->a);
+            break;
+        case SBH_CANCEL:   agency_cancel(s->ag, hh->a); break;
+        case SBH_CHIP_MODE: *mode=(ViewMode)hh->a; g_sb.lens=LENS_NONE; break;
+        case SBH_CHIP_LENS: g_sb.lens=(g_sb.lens==(MapLens)hh->a)?LENS_NONE:(MapLens)hh->a; break;
+        default: break;
+    }
+    return true;
+}
+/* molette sur le tiroir → défilement du panneau (sinon : zoom carte) */
+static bool sidebar_wheel(int mx, int my, int wheel_y){
+    (void)my;
+    if (g_sb.tab<0) return false;
+    int dw=(int)(SB_DRAWER_W*g_sb.anim);
+    if (mx >= SB_RAIL_W+dw) return false;
+    int t=g_sb.tab; g_sb.scroll[t]-= wheel_y*3;
+    if (g_sb.scroll[t]<0) g_sb.scroll[t]=0;
+    if (g_sb.scroll[t]>RES_COUNT) g_sb.scroll[t]=RES_COUNT;
+    return true;
 }
 
 static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
@@ -1503,11 +2023,12 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
 /* ======================================================================= */
 
 int main(int argc, char **argv) {
-    bool shot = false, shot_tree = false, shot_war = false, shot_culture = false;
+    bool shot = false, shot_tree = false, shot_war = false, shot_culture = false, shot_sidebar = false;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
         else if (!strcmp(argv[i], "--tree")) { shot = true; shot_tree = true; }
+        else if (!strcmp(argv[i], "--sidebar")) { shot = true; shot_sidebar = true; }   /* tiroir Stocks + lentille Marché */
         else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
         else if (!strcmp(argv[i], "--culture")) { shot = true; shot_culture = true; }  /* §5 : vue culture */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
@@ -1601,14 +2122,14 @@ int main(int argc, char **argv) {
     printf("[scps] Génération (graine %u)…\n", seed);
     world_generate(world, &params);
     sim_rebuild(&sim, world);   /* peuple + simule 30 ans (bandeau + panneau) */
-    printf("[scps] Prêt. TAB/1-0=vues  A=arbre de tech  R=regénère  clic=territoire\n");
+    printf("[scps] Prêt. TAB/1-0=vues  T=arbre de tech  E/D/S/A/F=sidebar (éco·démo·stocks·armée·filtres)  Z=cadrer  R=regénère  clic=territoire\n");
     printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
     printf("       l=terres m=montagnes t=température h=humidité (Maj=baisse)\n");
 
     /* Mode capture (--shot) : une frame (carte + bandeau + panneau sur une
      * province peuplée), sérialisée en PPM, puis sortie — vérifie l'UI sans écran. */
     if (shot) {
-        if (shot_tree) for (int d=0; d<60*365; d++) sim_day(&sim, world);  /* laisse l'arbre POUSSER */
+        if (shot_tree || shot_sidebar) for (int d=0; d<60*365; d++) sim_day(&sim, world);  /* laisse le monde POUSSER */
         int cid = country_for_panel(world, -1);
         int pcap = (cid>=0 && cid<world->n_countries) ? world->country[cid].capital_prov : -1;
         selected = (pcap>=0) ? pcap : 0;
@@ -1627,7 +2148,12 @@ int main(int argc, char **argv) {
                     for (int d=0; d<365; d++) sim_day(&sim, world);
             ViewMode smode = shot_culture ? VIEW_CULTURE : VIEW_COUNTRIES;
             rp.region_tint = NULL;
-            if (smode==VIEW_CULTURE){
+            if (shot_sidebar){                       /* démo sidebar : tiroir Stocks + lentille Marché */
+                g_sb.tab=SBT_STOCKS; g_sb.anim=1.f; g_sb.lens=LENS_MARCHE;
+                static uint32_t lt[SCPS_MAX_REG];
+                map_lens_tints(sim.econ, sim.wl, g_sb.lens, lt);
+                rp.region_tint = lt; smode = VIEW_CULTURE;
+            } else if (smode==VIEW_CULTURE){
                 static uint32_t tnt[SCPS_MAX_REG];
                 for (int r=0;r<sim.econ->n_regions && r<SCPS_MAX_REG;r++)
                     tnt[r]=ethos_tint((int)sim.econ->region[r].culture.ethos);
@@ -1647,6 +2173,7 @@ int main(int argc, char **argv) {
                 draw_mode_buttons(ren, win_h, smode);                     /* §5 : modes de carte */
                 draw_minimap(ren, &mm_pb, win_w, win_h, &cam);            /* §5 : la minicarte */
                 draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
+                if (shot_sidebar) draw_sidebar(ren, win_w, win_h, &sim, world, smode, selected);
             }
         }
         SDL_RenderPresent(ren);
@@ -1677,6 +2204,7 @@ int main(int argc, char **argv) {
 
             case SDL_MOUSEWHEEL: {
                 int mx, my; SDL_GetMouseState(&mx, &my);
+                if (sidebar_wheel(mx, my, ev.wheel.y)) { dirty=true; break; }   /* le tiroir défile (hit-test d'abord) */
                 float factor = (ev.wheel.y > 0) ? 1.25f : 0.80f;
                 cam_zoom(&cam, factor, (float)mx, (float)my);
                 dirty = true;
@@ -1690,6 +2218,14 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
+                    /* SIDEBAR d'abord (rail + tiroir) : la décision capte le clic. */
+                    if (sim.ready && !show_tree) {
+                        bool sbd=false;
+                        if (sidebar_click(&sim, world, ev.button.x, ev.button.y, &mode, &sbd)){
+                            if (sbd) g_sbc.day=-1;           /* décision → recalcul des agrégats */
+                            dirty=true; break;
+                        }
+                    }
                     /* ARBRE OUVERT : un clic sur une tech ouvre/ferme l'anneau de ses
                      * SOUS-TECHS (clic ailleurs = ferme). L'écran de l'arbre capte le clic. */
                     if (show_tree) {
@@ -1711,12 +2247,13 @@ int main(int argc, char **argv) {
                         if (ev.button.x>=r->x && ev.button.x<r->x+r->w &&
                             ev.button.y>=r->y && ev.button.y<r->y+r->h){ tb=i; break; } }
                     if (tb>=0){
+                        /* le bandeau est un SOMMAIRE : chaque ressource ouvre SON panneau de la sidebar */
                         switch (g_topbtns[tb].sys){
-                            case SYS_TECH: show_tree = !show_tree; g_tree_open = -1; break;
-                            case SYS_FINANCES:    printf("\n[scps] Finances (revenus · commerce · taxation) — écran détaillé à venir.\n"); break;
-                            case SYS_SUBSISTANCE: printf("\n[scps] Subsistance & démographie — écran détaillé à venir.\n"); break;
-                            case SYS_CHAINES:     printf("\n[scps] Chaînes de production & marché — écran détaillé à venir.\n"); break;
-                            default:              printf("\n[scps] Diplomatie — écran détaillé à venir.\n"); break;
+                            case SYS_TECH:        show_tree = !show_tree; g_tree_open = -1; break;
+                            case SYS_FINANCES:    g_sb.tab=SBT_ECO;    g_sb.eco_sub=1; break;  /* Or → Marché */
+                            case SYS_SUBSISTANCE: g_sb.tab=SBT_DEMO;   break;                   /* Nourriture → Démographie */
+                            case SYS_CHAINES:     g_sb.tab=SBT_STOCKS; break;                   /* Matériaux → Stocks */
+                            default:              g_sb.tab=SBT_ECO;    g_sb.eco_sub=0; break;  /* Diplomatie → Commerce/embargo */
                         }
                         dirty=true; break;
                     }
@@ -1806,13 +2343,32 @@ int main(int argc, char **argv) {
                 break;
 
             case SDL_KEYDOWN:
+                /* réglage worldgen ±0.25 (Maj = baisser) — utilisé par g/l/m/h et Ctrl+e/t */
+                #define ADJ(field) { bool dn=(ev.key.keysym.mod&KMOD_SHIFT); \
+                    params.field += dn?-0.25f:0.25f; \
+                    if(params.field<-0.001f)params.field=1.f; \
+                    else if(params.field>1.001f)params.field=0.f; \
+                    regen=true; }
                 switch (ev.key.keysym.sym) {
                 case SDLK_ESCAPE:
+                    if (g_sb.tab>=0){ g_sb.tab=-1; dirty=true; break; }   /* replie le tiroir d'abord */
+                    running = false; break;
                 case SDLK_q:     running = false; break;
                 /* --- Contrôle du TEMPS (§1) : Espace = pause ; +/- = vitesse --- */
                 case SDLK_SPACE:
                     speed = (speed==SPEED_PAUSE) ? SPEED_1 : SPEED_PAUSE; break;
-                case SDLK_a:     show_tree = !show_tree; g_tree_open = -1; break;   /* A = l'Arbre de tech concentrique */
+                case SDLK_t:     /* T = l'Arbre de Tech (Ctrl+T = réglage température) */
+                    if (SDL_GetModState() & KMOD_CTRL) { ADJ(temperature) }
+                    else { show_tree = !show_tree; g_tree_open = -1; }
+                    break;
+                /* --- SIDEBAR (§sidebar) : E/D/S/A/F = onglets d'empire --- */
+                case SDLK_e:
+                    if (SDL_GetModState() & KMOD_CTRL) { ADJ(erosion) }
+                    else { g_sb.tab=(g_sb.tab==SBT_ECO)?-1:SBT_ECO; dirty=true; }
+                    break;
+                case SDLK_d:     g_sb.tab=(g_sb.tab==SBT_DEMO)?-1:SBT_DEMO;     dirty=true; break;
+                case SDLK_s:     g_sb.tab=(g_sb.tab==SBT_STOCKS)?-1:SBT_STOCKS; dirty=true; break;
+                case SDLK_a:     g_sb.tab=(g_sb.tab==SBT_ARMEE)?-1:SBT_ARMEE;   dirty=true; break;
                 case SDLK_PLUS: case SDLK_EQUALS: case SDLK_KP_PLUS:
                     if (speed<SPEED_5) speed++;
                     if (speed==SPEED_PAUSE) speed=SPEED_1;
@@ -1842,14 +2398,15 @@ int main(int argc, char **argv) {
                 case SDLK_9:     mode=VIEW_TEMPERATURE; dirty=true; break;
                 case SDLK_0:     mode=VIEW_RESOURCES;    dirty=true; break;
                 case SDLK_i:     mode=VIEW_HABITABILITY; dirty=true; break;
-                case SDLK_f:     cam_fit(&cam,win_w,win_h); dirty=true; break;
+                case SDLK_f:     g_sb.tab=(g_sb.tab==SBT_FILTRES)?-1:SBT_FILTRES; dirty=true; break;
+                case SDLK_z:     cam_fit(&cam,win_w,win_h); dirty=true; break;   /* Z = cadrer la carte */
                 case SDLK_r:
                     seed ^= (uint32_t)time(NULL) * 2654435761u;
                     params.seed = seed;
                     regen = true;
                     break;
 
-                /* --- Réglages de génération (Maj = diminuer) --- */
+                /* --- Réglages de génération (Maj = diminuer) — e/t passés sous Ctrl (sidebar/arbre) --- */
                 case SDLK_c: {  /* nombre de continents 1..6 */
                     bool dn = (ev.key.keysym.mod & KMOD_SHIFT);
                     params.n_continents += dn?-1:1;
@@ -1857,16 +2414,9 @@ int main(int argc, char **argv) {
                     if (params.n_continents>6) params.n_continents=1;
                     regen=true; break;
                 }
-                #define ADJ(field) { bool dn=(ev.key.keysym.mod&KMOD_SHIFT); \
-                    params.field += dn?-0.25f:0.25f; \
-                    if(params.field<-0.001f)params.field=1.f; \
-                    else if(params.field>1.001f)params.field=0.f; \
-                    regen=true; }
                 case SDLK_g:  ADJ(world_age)   break;  /* âge du monde   */
-                case SDLK_e:  ADJ(erosion)     break;  /* érosion        */
                 case SDLK_l:  ADJ(land_amount) break;  /* quantité terre */
                 case SDLK_m:  ADJ(mountains)   break;  /* relief         */
-                case SDLK_t:  ADJ(temperature) break;  /* température    */
                 case SDLK_h:  ADJ(humidity)    break;  /* humidité       */
                 #undef ADJ
                 default: break;
@@ -1902,7 +2452,15 @@ int main(int argc, char **argv) {
             rp.cam_ox = cam.ox; rp.cam_oy = cam.oy; rp.cam_scale = cam.scale;
             rp.selected_prov = selected;
             rp.region_tint = NULL;
-            if ((mode==VIEW_CULTURE || mode==VIEW_FAITH) && sim.ready) {
+            ViewMode rmode = mode;
+            if (g_sb.lens!=LENS_NONE && sim.ready) {
+                /* LENTILLE readout (§6) : la membrane calcule les teintes (bandes
+                 * discrètes) ; le viewer ne fait que les poser sur la carte. */
+                static uint32_t g_lens_tint[SCPS_MAX_REG];
+                map_lens_tints(sim.econ, sim.wl, g_sb.lens, g_lens_tint);
+                rp.region_tint = g_lens_tint;
+                rmode = VIEW_CULTURE;                       /* le chemin de rendu teinté par région */
+            } else if ((mode==VIEW_CULTURE || mode==VIEW_FAITH) && sim.ready) {
                 static uint32_t g_region_tint[SCPS_MAX_REG];
                 for (int r=0;r<sim.econ->n_regions && r<SCPS_MAX_REG;r++){
                     const PopCulture *cu=&sim.econ->region[r].culture;
@@ -1911,13 +2469,13 @@ int main(int argc, char **argv) {
                 }
                 rp.region_tint = g_region_tint;
             }
-            render_map(world, pb.pixels, pb.w, pb.h, &rp, mode);
+            render_map(world, pb.pixels, pb.w, pb.h, &rp, rmode);
             pixbuf_upload(&pb);
             /* §5 : la minicarte — le monde entier en petit (même mode + teinte). */
             if (mm_pb.pixels){
                 RenderParams mmp = rp; mmp.selected_prov = -1;
                 minimap_fit(&mmp.cam_scale, &mmp.cam_ox, &mmp.cam_oy);
-                render_map(world, mm_pb.pixels, mm_pb.w, mm_pb.h, &mmp, mode);
+                render_map(world, mm_pb.pixels, mm_pb.w, mm_pb.h, &mmp, rmode);
                 pixbuf_upload(&mm_pb);
             }
             dirty = false;
@@ -1941,6 +2499,7 @@ int main(int argc, char **argv) {
                 draw_minimap(ren, &mm_pb, win_w, win_h, &cam);            /* §5 : la minicarte */
                 if (selected >= 0)
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
+                draw_sidebar(ren, win_w, win_h, &sim, world, mode, selected);   /* §sidebar : rail + tiroir d'empire */
             }
             draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }

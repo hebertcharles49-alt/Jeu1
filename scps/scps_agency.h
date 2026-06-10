@@ -59,8 +59,8 @@ const char       *edifice_name(Edifice e);
  * nombre de jeu (affichable). Sert au garde de construction ET à l'UI. */
 float agency_build_gold(const WorldEconomy *econ, int region, Edifice e);
 
-/* Trois familles d'action de province (le motif s'étend). */
-typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT } ActionKind;
+/* Familles d'action de province (le motif s'étend). */
+typedef enum { AGY_BUILD = 0, AGY_CLEAR, AGY_EXPLOIT, AGY_RELOCATE } ActionKind;
 
 /* Une action en cours (file par pays/province). */
 typedef struct {
@@ -93,6 +93,15 @@ bool agency_order_clear  (AgencyState *a, int region);
 /* §3 Exploitation : un aménagement (mine/carrière…) monte l'extraction d'une
  * ressource (matériaux pour bâtir/armer, stratégiques pour la tech/valeur). */
 bool agency_order_exploit(AgencyState *a, int region, Resource res);
+/* §reloc (sidebar Démographie) : ORDONNE le déplacement d'un ensemencement de pop
+ * (RELOC_POP familles) de `region` (source) vers `dst_region` — en JOURS, comme tout
+ * ordre. À terme : econ_relocate_pop (la coercition monte à la source — le coût,
+ * affiché AVANT). Joueur et IA passent par le MÊME actionneur, jamais l'appel direct. */
+bool agency_order_relocate(AgencyState *a, int region, int dst_region);
+#define AGY_RELOC_POP 300   /* familles déplacées par ordre (l'ensemencement mesuré) */
+/* Annule un ordre encore en cours (index dans order[]) — la file est VISIBLE (struct
+ * publique) et un chantier non fini se révoque. */
+bool agency_cancel(AgencyState *a, int idx);
 
 /* Avance de `days` jours : progresse les chantiers ; à l'achèvement, applique
  * l'effet (déplace une coordonnée que le moteur LIT). */

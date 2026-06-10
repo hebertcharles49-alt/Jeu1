@@ -163,6 +163,7 @@ static void sim_init(Sim *s, World *w) {
     legitimacy_init(s->wl, w, s->econ); prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
     statecraft_init(s->sc, w); agency_init(s->ag); diplo_init(s->dp); routes_init(s->rn);
+    intertrade_reset();   /* embargos décrétés + flux inter-pays : RAZ par sim */
     /* RAZ PLEINE PLAGE (SCPS_MAX_COUNTRY, pas n_countries) : n_countries GRANDIT par
      * sécession en cours de sim — la sim suivante repart plus bas. Sans ça, les slots
      * hauts gardent ai_on=true + un acteur/TechState PÉRIMÉS d'un autre monde : un pays

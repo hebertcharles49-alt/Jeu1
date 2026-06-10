@@ -75,8 +75,13 @@ static float region_food_months(const WorldEconomy *e, int r){
 }
 
 /* ---- Init ------------------------------------------------------------- */
+/* §5 posture (déclarations — définies après campaign_order) */
+static float posture_march_mult(int p);
+static float posture_siege_mult(int p);
+
 void campaign_init(Campaign *c, const World *w, const WorldEconomy *econ){
     memset(c,0,sizeof(*c));
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++) c->army[i].posture=FA_STANDARD;   /* défaut : standard */
     c->n_regions = econ->n_regions;
     for (int r=0; r<econ->n_regions && r<SCPS_MAX_REG; r++){
         const Region *R=&w->region[r];
@@ -122,9 +127,28 @@ bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
         a->phase=FA_IDLE; a->next=-1; a->days_left=0.f; a->leg_days=0.f; return true;
     }
     a->next=hop; a->phase=FA_MARCH;
-    a->leg_days  = army_step_days(&a->force, c->reg_biome[hop], c->reg_height[hop], false, false);
+    a->leg_days  = army_step_days(&a->force, c->reg_biome[hop], c->reg_height[hop], false, false)
+                 * posture_march_mult(a->posture);
     a->days_left = a->leg_days;
     return true;
+}
+
+/* ---- POSTURE (§5 sidebar) : prudente marche/assiège LENTEMENT (préserve), -----
+ * l'agressive PRESSE (marche vive, siège mené tambour battant). Un palier, un mot. */
+static float posture_march_mult(int p){ return (p==FA_PRUDENTE)?1.15f : (p==FA_AGRESSIVE)?0.88f : 1.f; }
+static float posture_siege_mult(int p){ return (p==FA_PRUDENTE)?1.15f : (p==FA_AGRESSIVE)?0.85f : 1.f; }
+void campaign_set_posture(Campaign *c, int owner, int posture){
+    if (!c || owner<0 || owner>=SCPS_MAX_COUNTRY) return;
+    if (posture<FA_PRUDENTE) posture=FA_PRUDENTE;
+    if (posture>FA_AGRESSIVE) posture=FA_AGRESSIVE;
+    c->army[owner].posture=posture;
+}
+int campaign_posture(const Campaign *c, int owner){
+    return (c && owner>=0 && owner<SCPS_MAX_COUNTRY) ? c->army[owner].posture : FA_STANDARD;
+}
+const char *campaign_posture_name(int p){
+    static const char *N[3]={ "prudente","standard","agressive" };
+    return (p>=0&&p<3)?N[p]:"?";
 }
 
 /* ---- La bataille de rencontre (§2/§3 + terrain défensif) -------------- *
@@ -197,12 +221,14 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
                     a->phase=FA_SIEGE; a->next=-1;                /* l'ennemi : on assiège */
                     a->days_left = siege_days(region_defense(e,a->loc),
                                               region_food_months(e,a->loc),
-                                              terrain_defense_mult(c->reg_biome[a->loc], c->reg_height[a->loc]));
+                                              terrain_defense_mult(c->reg_biome[a->loc], c->reg_height[a->loc]))
+                                 * posture_siege_mult(a->posture);
                 } else {
                     int hop=next_hop(c,e,a->loc,a->dest);         /* étape suivante */
                     if (hop<0){ a->phase=FA_IDLE; a->dest=-1; a->next=-1; break; }
                     a->next=hop;
-                    a->leg_days  = army_step_days(&a->force, c->reg_biome[hop], c->reg_height[hop], false, false);
+                    a->leg_days  = army_step_days(&a->force, c->reg_biome[hop], c->reg_height[hop], false, false)
+                                 * posture_march_mult(a->posture);
                     a->days_left = a->leg_days;
                 }
             } else if (a->phase==FA_SIEGE){

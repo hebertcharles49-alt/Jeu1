@@ -35,4 +35,24 @@ float intertrade_imports_value(const WorldEconomy *e);   /* valeur totale échan
 int   intertrade_active_routes(const WorldEconomy *e, const RouteNetwork *rn,
                                const DiploState *dp, int cid);  /* routes marchandes vivantes d'un pays */
 
+/* ---- DÉTAIL par pays × bien (sidebar Import/Export) — nombres de jeu --------
+ * Accumulé par intertrade_tick (dernier tick = l'année écoulée) : volumes
+ * importés/exportés par bien, partenaire DOMINANT du flux, or encaissé à
+ * l'export, et la valeur échangée par PAIRE (le coût d'un embargo, lisible
+ * AVANT de le décréter). Tout est tangible : volume, or, identifiants. */
+float intertrade_import_vol (int cid, int good);
+float intertrade_export_vol (int cid, int good);
+int   intertrade_import_from(int cid, int good);   /* pays-source dominant (-1 si aucun) */
+int   intertrade_export_to  (int cid, int good);   /* pays-client dominant (-1 si aucun) */
+float intertrade_export_gold(int cid);             /* or encaissé à l'export (dernier tick) */
+float intertrade_pair_value (int cid, int other);  /* valeur échangée avec ce partenaire */
+
+/* ---- EMBARGO DÉCRÉTÉ (décision joueur/IA) -----------------------------------
+ * En sus de l'embargo de guerre (automatique) : un pays peut DÉCRÉTER l'embargo
+ * contre un autre — aucune route ne porte de goods entre eux tant qu'il tient.
+ * intertrade_reset() remet embargos & flux à zéro (init de chaque partie/sim). */
+void  intertrade_order_embargo(int cid, int target, bool on);
+bool  intertrade_embargoed    (int cid, int target);   /* l'un OU l'autre a décrété */
+void  intertrade_reset(void);
+
 #endif /* SCPS_INTERTRADE_H */

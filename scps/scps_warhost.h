@@ -26,7 +26,19 @@
 typedef struct {
     ArmyState  army[SCPS_MAX_COUNTRY];   /* l'armée levée de chaque pays (persiste) */
     LaborEcon *scratch;                   /* labor transitoire, re-semé par pays */
+    int        levy[SCPS_MAX_COUNTRY];   /* jauge de LEVÉE (sidebar §5) : 0 basse · 1 garde · 2 guerre · 3 masse */
 } WarHost;
+
+/* Jauge de levée (décision joueur/IA) : module la cadence de mobilisation. La LEVÉE
+ * EN MASSE (3) force la main des familles → coercition à la capitale (le coût,
+ * affiché AVANT). Tout est en mots/paliers — aucune coordonnée ne sort. */
+#define WH_LEVY_BASSE  0
+#define WH_LEVY_GARDE  1
+#define WH_LEVY_GUERRE 2
+#define WH_LEVY_MASSE  3
+void warhost_set_levy(WarHost *h, int cid, int levy);
+int  warhost_levy    (const WarHost *h, int cid);
+const char *warhost_levy_name(int levy);
 
 void warhost_init(WarHost *h);
 void warhost_free(WarHost *h);

@@ -108,6 +108,59 @@ const char *label_acces(BandAcces b) {
     static const char *N[] = { "lointain","à portée","imminent","acquis" };
     return (b>=0 && b<=AC_ACQUIS) ? N[b] : "?";
 }
+/* MARCHÉ — l'état d'un bien, classé sur demande vs disponible (nus). MORT = ni
+ * offre ni demande (la chaîne ne vit pas) ; le reste suit la couverture. */
+BandMarche band_marche(float demand, float avail) {
+    if (demand < 0.05f && avail < 0.05f) return MARCHE_MORT;
+    if (avail >= demand*3.0f)            return MARCHE_ENGORGE;
+    if (avail <  demand*0.35f)           return MARCHE_PENURIE;
+    if (avail <  demand*0.80f)           return MARCHE_TENDU;
+    return MARCHE_SAIN;
+}
+const char *label_marche(BandMarche b) {
+    static const char *N[] = { "marché mort","pénurie sévère","tendu","sain","engorgé" };
+    return (b>=0 && b<=MARCHE_ENGORGE) ? N[b] : "?";
+}
+
+/* ---- LENTILLES de carte (§6) — bandes → teintes DISCRÈTES, par région -------
+ * Tout le classement vit ici : le viewer reçoit des couleurs, jamais un float. */
+const char *map_lens_name(MapLens l) {
+    static const char *N[LENS_COUNT] = { "—", "Prospérité", "Humeur", "Marché" };
+    return (l>=0 && l<LENS_COUNT) ? N[l] : "?";
+}
+void map_lens_tints(const WorldEconomy *econ, const WorldLegitimacy *wl,
+                    MapLens lens, uint32_t out[SCPS_MAX_REG]) {
+    static const uint32_t T_PROSP[5]  = { 0xFF5a3d2e,0xFF8a6a3a,0xFFb0975a,0xFFd4b96a,0xFFf0d878 }; /* misère→opulence */
+    static const uint32_t T_HUMEUR[5] = { 0xFFb03030,0xFFc07040,0xFFb0a060,0xFF7aa060,0xFF4a9a6a }; /* révoltée→dévouée */
+    static const uint32_t T_MARCHE[5] = { 0xFF383838,0xFFc04038,0xFFc08040,0xFF6a9a70,0xFF8090a8 }; /* mort·pénurie·tendu·sain·engorgé */
+    static const Resource BASKET[5]   = { RES_GRAIN, RES_TOOLS, RES_IRON, RES_CLOTH, RES_WINE };    /* la tension qui compte */
+    for (int r=0; r<SCPS_MAX_REG; r++) out[r]=0xFF202020u;
+    if (!econ) return;
+    for (int r=0; r<econ->n_regions && r<SCPS_MAX_REG; r++) {
+        const RegionEconomy *re=&econ->region[r];
+        if (!re->active || !re->colonized) continue;
+        switch (lens) {
+            case LENS_PROSP: {
+                float p=re->prosperity; int b;        /* PIB/tête — seuils = surface d'équilibrage */
+                b = (p<0.2f)?0 : (p<0.5f)?1 : (p<1.0f)?2 : (p<2.0f)?3 : 4;
+                out[r]=T_PROSP[b];
+            } break;
+            case LENS_HUMEUR: {
+                BandHumeur h = band_humeur(wl ? wl->L[r] : 5.f);
+                out[r]=T_HUMEUR[(h>=0&&h<=HU_DEVOUEE)?(int)h:2];
+            } break;
+            case LENS_MARCHE: {
+                int worst=MARCHE_ENGORGE;             /* on ignore les marchés MORTS (pas une détresse) */
+                for (int k=0;k<5;k++){
+                    BandMarche m=band_marche(re->demand[BASKET[k]], re->supply[BASKET[k]]+re->stock[BASKET[k]]);
+                    if (m!=MARCHE_MORT && (int)m<worst) worst=(int)m;
+                }
+                out[r]=T_MARCHE[worst];
+            } break;
+            default: out[r]=0xFF404040u; break;
+        }
+    }
+}
 /* §11/§12 — le cercle prévisionnel d'un nœud syncrétique, traduit en bandes + chemin
  * diégétique. Lit le cache de profondeur (TechState.arch_depth) et le loquet (sync_unlocked) ;
  * aucun flottant ne franchit la cloison (la chaîne renvoyée parle cultures/savoir-faire). */

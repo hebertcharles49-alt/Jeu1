@@ -2,6 +2,7 @@
  * scps_warhost.c — la mobilisation par pays (voir scps_warhost.h)
  */
 #include "scps_warhost.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,8 +12,22 @@
 
 void warhost_init(WarHost *h){
     memset(h->army, 0, sizeof(h->army));
-    for (int c=0;c<SCPS_MAX_COUNTRY;c++) army_init(&h->army[c]);
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++){ army_init(&h->army[c]); h->levy[c]=WH_LEVY_GARDE; }
     h->scratch = (LaborEcon*)calloc(1, sizeof(LaborEcon));
+}
+/* Jauge de levée (sidebar §5) : un palier, pas un float. */
+void warhost_set_levy(WarHost *h, int cid, int levy){
+    if (!h || cid<0 || cid>=SCPS_MAX_COUNTRY) return;
+    if (levy<WH_LEVY_BASSE) levy=WH_LEVY_BASSE;
+    if (levy>WH_LEVY_MASSE) levy=WH_LEVY_MASSE;
+    h->levy[cid]=levy;
+}
+int warhost_levy(const WarHost *h, int cid){
+    return (h && cid>=0 && cid<SCPS_MAX_COUNTRY) ? h->levy[cid] : WH_LEVY_GARDE;
+}
+const char *warhost_levy_name(int levy){
+    static const char *N[4]={ "levée basse","garde","pied de guerre","levée en masse" };
+    return (levy>=0&&levy<4)?N[levy]:"?";
 }
 void warhost_free(WarHost *h){ if (h){ free(h->scratch); h->scratch=NULL; } }
 
@@ -47,8 +62,20 @@ void warhost_tick(WarHost *h, const World *w, WorldEconomy *econ,
         bool at_war=false;
         for (int b=0;b<w->n_countries;b++)
             if (b!=c && diplo_status(dp,c,b)==DIPLO_WAR){ at_war=true; break; }
-        float batchf = (at_war?WH_BATCH_WAR:WH_BATCH_PEACE)*dt;
+        /* la JAUGE DE LEVÉE module la cadence : basse 0.4× · garde 1× · guerre 1.6× ·
+         * masse 2.6× — et la levée en masse FORCE LA MAIN (coercition à la capitale). */
+        static const float LEVY_MULT[4]={0.4f,1.0f,1.6f,2.6f};
+        int lv=h->levy[c]; if(lv<0)lv=0; if(lv>3)lv=3;
+        float batchf = (at_war?WH_BATCH_WAR:WH_BATCH_PEACE)*LEVY_MULT[lv]*dt;
         long  batch  = (long)(batchf+0.5f);
+        if (lv==WH_LEVY_MASSE){
+            int cpm=w->country[c].capital_prov;
+            int crm=(cpm>=0&&cpm<w->n_provinces)?w->province[cpm].region:-1;
+            if (crm>=0 && crm<econ->n_regions){
+                RegionEconomy *cre=&econ->region[crm];
+                cre->coercion = fminf(1.f, cre->coercion + 0.08f*dt);   /* le prix de la masse */
+            }
+        }
         if (batch<=0) continue;
 
         long elite = seed_scratch(h->scratch, w, econ, c);

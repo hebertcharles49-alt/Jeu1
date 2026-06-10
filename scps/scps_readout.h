@@ -39,6 +39,9 @@ typedef enum { FORGE_RUDIMENTAIRE, FORGE_ARTISANALE, FORGE_MANUFACTURIERE, FORGE
  * ces bandes de l'enum moteur Profondeur (scps_tech) : la cloison reste inviolable. */
 typedef enum { PROF_OBSCURE, PROF_SURFACE_B, PROF_METIER_B, PROF_PROFOND_B, PROF_SECRET_B } BandProfondeur;
 typedef enum { AC_LOINTAIN, AC_PROCHE, AC_IMMINENT, AC_ACQUIS }                   BandAcces;
+/* MARCHÉ (sidebar §2/§4) : l'état d'un bien en mots — du marché MORT (ni offre ni
+ * demande : la chaîne ne vit pas) à l'ENGORGÉ. La famine de fer devient lisible. */
+typedef enum { MARCHE_MORT, MARCHE_PENURIE, MARCHE_TENDU, MARCHE_SAIN, MARCHE_ENGORGE } BandMarche;
 typedef enum { PG_CALME, PG_FREMISSEMENT, PG_OMBRE, PG_SEUIL }                    BandPresage;
 /* Panneau de province */
 typedef enum { STA_DESERT, STA_HAMEAU, STA_BOURG, STA_CITE, STA_METROPOLE }       BandStature;
@@ -183,6 +186,18 @@ BandAcces      band_acces(float progress_0_1);
 const char  *label_forge(BandForge b);
 const char  *label_profondeur(BandProfondeur b);
 const char  *label_acces(BandAcces b);
+/* Marché : classé sur demande vs disponible (flottants NUS — le ratio reste derrière). */
+BandMarche   band_marche(float demand, float avail);
+const char  *label_marche(BandMarche b);
+
+/* ---- LENTILLES de carte (sidebar Filtres §6) — par RÉGION, en TEINTES discrètes --
+ * La carte se colore par BANDE (4-5 teintes), jamais par gradient continu : un
+ * dégradé sur une coordonnée SCPS serait un float qui fuit par la couleur. Tout est
+ * calculé ICI (membrane) ; le viewer ne reçoit que des couleurs. */
+typedef enum { LENS_NONE=0, LENS_PROSP, LENS_HUMEUR, LENS_MARCHE, LENS_COUNT } MapLens;
+void map_lens_tints(const WorldEconomy *econ, const WorldLegitimacy *wl,
+                    MapLens lens, uint32_t out[SCPS_MAX_REG]);
+const char *map_lens_name(MapLens lens);
 
 /* §11/§12 — lecture PRÉVISIONNELLE d'un nœud syncrétique (le cercle). Bandes + chemin
  * DIÉGÉTIQUE : où en est la diffusion, et ce qui l'ouvrirait. AC_ACQUIS = loqué (permanent,

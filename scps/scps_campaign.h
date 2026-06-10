@@ -47,6 +47,7 @@ typedef struct {
     int        taken;       /* régions RÉDUITES (sièges menés à terme) */
     int        legs;        /* étapes de marche franchies */
     int        battles;     /* batailles livrées */
+    int        posture;     /* §5 sidebar : 0 prudente · 1 standard · 2 agressive (module marche/siège) */
 } FieldArmy;
 
 typedef struct {
@@ -80,6 +81,14 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *econ,
 /* ---- Lecteurs (membrane : tangibles) ---------------------------------- */
 bool        campaign_active       (const Campaign *c, int owner);
 int         campaign_location     (const Campaign *c, int owner);  /* région ou -1 */
+/* POSTURE (§5 sidebar) : prudente conserve (marche/siège lents), agressive presse.
+ * Un palier + un mot — module marche & siège côté campaign, rien ne fuit. */
+#define FA_PRUDENTE  0
+#define FA_STANDARD  1
+#define FA_AGRESSIVE 2
+void        campaign_set_posture  (Campaign *c, int owner, int posture);
+int         campaign_posture      (const Campaign *c, int owner);
+const char *campaign_posture_name (int posture);
 FieldPhase  campaign_phase        (const Campaign *c, int owner);
 long        campaign_units        (const Campaign *c, int owner);  /* paquets de 100 */
 int         campaign_taken        (const Campaign *c, int owner);  /* régions réduites */

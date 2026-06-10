@@ -117,6 +117,16 @@ bool agency_order_exploit(AgencyState *a, int region, Resource res){
     if (res<=RES_NONE||res>=RES_COUNT) return false;
     return enqueue(a, AGY_EXPLOIT, region, (int)res, EXPLOIT_DAYS);
 }
+#define RELOC_DAYS 90   /* un déplacement de familles prend une saison */
+bool agency_order_relocate(AgencyState *a, int region, int dst_region){
+    if (region<0 || dst_region<0 || region==dst_region) return false;
+    return enqueue(a, AGY_RELOCATE, region, dst_region, RELOC_DAYS);
+}
+bool agency_cancel(AgencyState *a, int idx){
+    if (idx<0 || idx>=a->n || !a->order[idx].active) return false;
+    a->order[idx]=a->order[--a->n];   /* révoqué : swap-remove (rien n'est appliqué) */
+    return true;
+}
 
 static void apply_delta(ProvBuild *b, const ProvBuild *d){
     b->K_inst  += d->K_inst;  b->H_coerc += d->H_coerc;  b->P_open += d->P_open;
@@ -143,6 +153,11 @@ static void apply_action(WorldEconomy *econ, WorldLegitimacy *wl, const BuildOrd
         case AGY_EXPLOIT:
             if (o->param>RES_NONE && o->param<RES_COUNT)
                 re->raw_cap[o->param] += EXPLOIT_CAP_GAIN;
+            break;
+        case AGY_RELOCATE:
+            /* le convoi arrive : les familles s'installent (coercition à la source,
+             * déjà câblée dans econ_relocate_pop — le coût annoncé AVANT l'ordre). */
+            econ_relocate_pop(econ, o->region, o->param, (float)AGY_RELOC_POP);
             break;
     }
 }
