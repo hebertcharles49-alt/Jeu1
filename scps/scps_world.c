@@ -1837,8 +1837,10 @@ static void gen_region_names(World *w) {
         name_elf  (rg->name_elf,  sizeof(rg->name_elf),  e);
         name_dwarf(rg->name_dwarf,sizeof(rg->name_dwarf),e);
         name_orc  (rg->name_orc,  sizeof(rg->name_orc),  e);
-        /* nom courant = variante humaine */
-        snprintf(rg->name,sizeof(rg->name),"%s",rg->name_hum);
+        /* nom courant = variante humaine (copie bornée entre deux membres du
+         * même struct → pas le snprintf %s qui fait crier -Wrestrict à -O0). */
+        strncpy(rg->name, rg->name_hum, sizeof(rg->name)-1);
+        rg->name[sizeof(rg->name)-1]='\0';
     }
 }
 

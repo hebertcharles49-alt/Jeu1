@@ -75,3 +75,5 @@ saves/
 chronicle_asan
 scps_ui.ppm
 audio_demo
+build_dev/
+scps_viewer_dev

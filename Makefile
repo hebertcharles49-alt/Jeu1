@@ -25,6 +25,14 @@ MINIZ_FLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS
 OMPFLAG := $(if $(OMP),-fopenmp,)
 CFLAGS  += $(OMPFLAG)
 
+# Overlay de dev (brief build §6) : DEV=1 active -DSCPS_DEV partout (les blocs
+# #ifdef SCPS_DEV du viewer s'allument) + débogage. Construit dans un OBJDIR
+# SÉPARÉ (build_dev) → ne contamine jamais les objets release. La cible `dev`
+# fait le sous-make ; le RELEASE n'embarque pas une once de Nuklear.
+ifdef DEV
+  CFLAGS += -DSCPS_DEV -O0 -g
+endif
+
 # Détection automatique : MSYS2/MinGW expose OS=Windows_NT.
 ifeq ($(OS),Windows_NT)
   WIN := 1
@@ -105,10 +113,26 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_crypt.o \
              $(OBJDIR)/scps_scps_audio.o $(OBJDIR)/tp_stbiw.o $(OBJDIR)/tp_miniaudio.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
+# Sous DEV : l'overlay Nuklear rejoint le lien, le binaire change de NOM (le
+# release garde scps_viewer, intact).
+ifdef DEV
+  SCPS_OBJS   += $(OBJDIR)/scps_dev_overlay.o
+  SCPS_TARGET := scps_viewer_dev$(EXE)
+endif
 
 scps: $(SCPS_TARGET)
 $(SCPS_TARGET): $(SCPS_OBJS)
 	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS) $(OMPFLAG) $(AUDIO_LIBS)
+
+# dev_overlay porte l'implémentation Nuklear (single-header) : compilé À PART,
+# sans -Wextra (la lib est vendorée), toujours -DSCPS_DEV.
+$(OBJDIR)/scps_dev_overlay.o: scps/dev_overlay.c | $(OBJDIR)
+	$(CC) -O0 -g -DSCPS_DEV -Ithird_party $(SDL_CFLAGS) -c $< -o $@
+
+# ---- make dev : le viewer + overlay F3 (-DSCPS_DEV), OBJDIR isolé ---------
+dev:
+	$(MAKE) DEV=1 OBJDIR=build_dev scps
+.PHONY: dev
 run_scps: scps
 	./$(SCPS_TARGET)
 

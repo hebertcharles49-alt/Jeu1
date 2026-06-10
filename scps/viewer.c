@@ -45,6 +45,10 @@
 #include "scps_lang.h"     /* la table de chaînes : tout mot face-joueur vient des tables */
 #include "stb_image_write.h"  /* F12 : capture d'écran PNG (vendoré) */
 #include "scps_audio.h"       /* la prise audio (miniaudio) — preuve de vie sur alerte */
+#ifdef SCPS_DEV
+#include "dev_overlay.h"      /* §6 : l'inspecteur de coordonnées brutes (F3) — JAMAIS en release */
+static bool g_dev_overlay = false;
+#endif
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 /* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
@@ -2906,6 +2910,9 @@ int main(int argc, char **argv) {
     /* La prise audio (§5) : ouvre un device si présent ; sinon MUET, sans erreur
      * (conteneur/serveur sans carte → le release tourne quand même). */
     if (!audio_init()) fprintf(stderr,"[scps] audio : aucun device — silence.\n");
+#ifdef SCPS_DEV
+    dev_overlay_init(win, ren);   /* §6 : l'overlay de dev (F3) — build -DSCPS_DEV seul */
+#endif
 
     /* Police diégétique (SDL_ttf) — DejaVu couvre les accents français. */
     if (TTF_Init() != 0) fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
@@ -3113,7 +3120,14 @@ int main(int argc, char **argv) {
 
     while (running) {
         SDL_Event ev;
+#ifdef SCPS_DEV
+        dev_overlay_input_begin();
+#endif
         while (SDL_PollEvent(&ev)) {
+#ifdef SCPS_DEV
+            if (g_dev_overlay && ev.key.keysym.sym!=SDLK_F3
+                && dev_overlay_handle_event(&ev)) continue;   /* Nuklear a la main (sauf le toggle F3) */
+#endif
             switch (ev.type) {
 
             case SDL_QUIT: g_quit_confirm=true; dirty=true; break;   /* la croix passe par la CONFIRMATION */
@@ -3411,6 +3425,9 @@ int main(int argc, char **argv) {
                     }
                     break;
                 case SDLK_F12:   viewer_screenshot(ren); break;   /* capture PNG horodatée */
+#ifdef SCPS_DEV
+                case SDLK_F3:    g_dev_overlay=!g_dev_overlay; break;   /* §6 : l'inspecteur brut */
+#endif
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
                 case SDLK_1:     mode=VIEW_TERRAIN;     dirty=true; break;
                 case SDLK_2:     mode=VIEW_POLITICAL;   dirty=true; break;
@@ -3449,6 +3466,9 @@ int main(int argc, char **argv) {
                 break;
             }
         }
+#ifdef SCPS_DEV
+        dev_overlay_input_end();
+#endif
 
         if (regen) {
             printf("\n[scps] Génération — graine %u · continents %d · âge %.2f"
@@ -3596,6 +3616,10 @@ int main(int argc, char **argv) {
                   } } }
             draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }
+#ifdef SCPS_DEV
+        if (g_dev_overlay)   /* §6 : l'inspecteur brut PAR-DESSUS le jeu (dev seul) */
+            dev_overlay_draw(world, sim.econ, sim.ts, sim.dp, country_for_panel(world, selected), selected);
+#endif
         SDL_RenderPresent(ren);
 
         /* Status console */
@@ -3618,6 +3642,9 @@ int main(int argc, char **argv) {
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);
     TTF_Quit();
+#ifdef SCPS_DEV
+    dev_overlay_shutdown();
+#endif
     audio_shutdown();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
