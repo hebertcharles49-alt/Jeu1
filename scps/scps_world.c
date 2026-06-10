@@ -635,6 +635,10 @@ static void volcanoes_mark(World *w, const float *height) {
  * jaillissent dans le dur. CAUSAL : la géologie sculpte la côte. */
 static float g_hardness[SCPS_N];
 static void compute_hardness(float seed_f) {
+    /* §4 OpenMP : g_hardness[i] = f(x,y, plaques RO) — par-tuile pure. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
@@ -655,6 +659,17 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
     float land_bias = (P->land_amount-0.5f)*0.5f;
     float mtn_amp   = 0.42f + P->mountains*0.55f;   /* amplitude RÉDUITE : moins de relief, plus de vallées */
 
+    /* §4 OpenMP : boucle PAR-TUILE pure — chaque cellule (x,y) écrit son SEUL
+     * height[i] depuis un bruit fonction de (x,y) (plates_init/continents_init
+     * faits AVANT, en lecture seule) ; aucun voisin lu, aucune réduction →
+     * bit-identique quel que soit l'ordre des threads. La plus chère du worldgen
+     * (3 FBM × 5-7 octaves/cellule). make determinism reste VERT.
+     * GAIN MESURÉ (avec architecture/mountains/hardness, 4 cœurs) : world_generate
+     * 963 ms → 595 ms (×1.62). Le reste (érosion D8, Dijkstra, advection, relaxation
+     * des courants) est séquentiel — non parallélisé (dépendances de voisinage). */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
@@ -684,6 +699,11 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
      * les crêtes courent le long de la suture, pas dans tous les sens.
      * Les contreforts (R2) sont warpés par R1 → branchent sur la dorsale.
      */
+    /* §4 OpenMP : crêtes tectoniques — chaque cellule fait `height[i] += bump`
+     * sur SON index (lecture des plaques en RO), pas de couplage inter-tuile. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float mask=continental_mask(x,y,seed_f);
         if (mask<0.30f) continue;   /* pas de montagnes près des côtes */
@@ -737,6 +757,11 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
  * r3 vis-à-vis de r2. On obtient un réseau arborescent, pas des boudins.
  * ====================================================================== */
 static void step_architecture(float *height, float seed_f) {
+    /* §4 OpenMP : chaque cellule LIT et ÉCRIT son seul height[i] (h=height[i] ;
+     * height[i] += …) — pas de voisin, bruits purs → bit-identique. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float h=height[scps_idx(x,y)];

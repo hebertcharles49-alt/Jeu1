@@ -19,6 +19,12 @@ OBJDIR  := build
 # surface minimale, et plus de #pragma message parasite.
 MINIZ_FLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS
 
+# OpenMP (brief build §4) : OPT-IN — `make OMP=1 …`. Les pragmas vivent sous
+# #ifdef _OPENMP, donc le build SANS OpenMP reste valide à l'identique. À ne
+# retenir qu'après `make OMP=1 chronicle && make determinism` VERT.
+OMPFLAG := $(if $(OMP),-fopenmp,)
+CFLAGS  += $(OMPFLAG)
+
 # Détection automatique : MSYS2/MinGW expose OS=Windows_NT.
 ifeq ($(OS),Windows_NT)
   WIN := 1
@@ -96,7 +102,7 @@ SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
 $(SCPS_TARGET): $(SCPS_OBJS)
-	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS)
+	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS) $(OMPFLAG)
 run_scps: scps
 	./$(SCPS_TARGET)
 
@@ -300,7 +306,7 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_navy.o $(OBJDIR)/tp_miniz.o \
                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
 chronicle: $(CHRONICLE_OBJS)
-	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
+	$(CC) $(CHRONICLE_OBJS) -o $@ -lm $(OMPFLAG)
 
 # ---- Banc save_io : compression de bloc + CRC32 round-trip (build §9.5) ---
 SAVE_IO_DEMO_OBJS := $(OBJDIR)/scps_scps_save_io.o $(OBJDIR)/tp_miniz.o $(OBJDIR)/scps_save_io_demo.o
