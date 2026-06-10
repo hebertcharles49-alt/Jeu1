@@ -85,21 +85,21 @@ run_scps: scps
 	./$(SCPS_TARGET)
 
 # ---- Générateur d'images headless (sans SDL) -----------------------------
-SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+SCPS_DUMP_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o \
                   $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_dump.o
 scps_dump: $(SCPS_DUMP_OBJS)
 	$(CC) $(SCPS_DUMP_OBJS) -o $@ -lm
 
 # ---- Captures de carte headless : N graines → PPM (vue terrain/politique) -
-MAPSHOT_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+MAPSHOT_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                 $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o \
                 $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_mapshot.o
 mapshot: $(MAPSHOT_OBJS)
 	$(CC) $(MAPSHOT_OBJS) -o $@ -lm
 
 # ---- Diagnostic éco headless : satisfaction par strate & prix (réglage TAX_RATE) -
-ECON_SCAN_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+ECON_SCAN_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_scan.o
 econ_scan: $(ECON_SCAN_OBJS)
@@ -112,19 +112,19 @@ scps_batch: $(SCPS_BATCH_OBJS)
 	$(CC) $(SCPS_BATCH_OBJS) -o $@ -lm
 
 # ---- Banc d'essai économie + commerce ------------------------------------
-ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+ECON_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_demo.o
 econ_demo: $(ECON_DEMO_OBJS)
 	$(CC) $(ECON_DEMO_OBJS) -o $@ -lm
 
-ECON_TAX_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+ECON_TAX_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_tax_demo.o
 econ_tax_demo: $(ECON_TAX_DEMO_OBJS)
 	$(CC) $(ECON_TAX_DEMO_OBJS) -o $@ -lm
 
-ECON_CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+ECON_CULTURE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_culture_demo.o
 econ_culture_demo: $(ECON_CULTURE_DEMO_OBJS)
@@ -139,7 +139,7 @@ ECON_ARCANE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.
 econ_arcane_demo: $(ECON_ARCANE_DEMO_OBJS)
 	$(CC) $(ECON_ARCANE_DEMO_OBJS) -o $@ -lm
 
-ECON_PRODUCTION_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
+ECON_PRODUCTION_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_render.o \
                   $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_trade.o \
                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_econ_production_demo.o
 econ_production_demo: $(ECON_PRODUCTION_DEMO_OBJS)
@@ -336,7 +336,7 @@ structural_demo: $(STRUCTURAL_DEMO_OBJS)
 
 # ---- L'économie des populations : main-d'œuvre, jobs, matériaux, marché ---
 # La prod scale sur les JOBS REMPLIS ; les sorties LISENT la géo du worldgen.
-LABOR_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
+LABOR_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_culture.o \
                    $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_species.o \
                    $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_labor_demo.o
 labor_demo: $(LABOR_DEMO_OBJS)

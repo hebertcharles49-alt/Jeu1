@@ -163,7 +163,13 @@ static void sim_init(Sim *s, World *w) {
     legitimacy_init(s->wl, w, s->econ); prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
     statecraft_init(s->sc, w); agency_init(s->ag); diplo_init(s->dp); routes_init(s->rn);
-    for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
+    /* RAZ PLEINE PLAGE (SCPS_MAX_COUNTRY, pas n_countries) : n_countries GRANDIT par
+     * sécession en cours de sim — la sim suivante repart plus bas. Sans ça, les slots
+     * hauts gardent ai_on=true + un acteur/TechState PÉRIMÉS d'un autre monde : un pays
+     * sécessionniste né à cet index sautait son init (« if (ai_on) continue ») → piloté
+     * par un fantôme (home_region d'un ancien monde, cadences mortes, arbre de tech
+     * hérité) et sa télémétrie polluait les totaux par sim. */
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++){ s->ai_on[c]=false; tech_state_init(&s->ts[c], false); }
     s->player = 0;
     for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){ s->player=c; break; }
     /* PAS DE JOUEUR HUMAIN dans la chronique : TOUT pays habitable est piloté par
@@ -639,7 +645,7 @@ int main(int argc, char **argv){
               diff_total += s.ts[c].n_sync;                             /* §8 : nœuds de diffusion (contact peu profond) loqués */
               sync_total+=n; if(n>nmax)nmax=n; if(n<nmin)nmin=n; nemp++;
           }
-          int distinct=0; for (int r=0;r<RACE_COUNT;r++) distinct+=arch_reached[r];
+          int distinct=0; for (int ar=0;ar<RACE_COUNT;ar++) distinct+=arch_reached[ar];   /* ar : ne pas masquer le r extérieur (-Wshadow) */
           if (nemp>0){
               printf("              syncrétisme : %d nœud(s) profond(s) (gouvernance) · %d diffusion(s) (commerce/frontière/foi) · %d/%d archétype(s) · dispersion %d–%d/empire · %d ont la COMBINAISON forge runique × arcane\n",
                      sync_total, diff_total, distinct, (int)RACE_COUNT, nmin, nmax, combo);

@@ -336,6 +336,9 @@ static int free_country_slot(const World *w, const WorldEconomy *econ, int avoid
 }
 /* SÉCESSION : un pays naît, prend la région, s'installe sur le groupe rebelle. */
 static int spawn_secession(World *w, WorldEconomy *econ, WorldLegitimacy *wl, Rebellion *rb){
+    /* GARDE AMONT : sans région valide, le spawn n'a aucun sens — et la suite ÉCRIT
+     * dans econ->region[rb->region] (hors-bornes si négatif). On refuse net. */
+    if (rb->region<0 || rb->region>=w->n_regions || rb->region>=econ->n_regions) return -1;
     int nid = free_country_slot(w, econ, rb->owner);      /* d'abord un slot vierge */
     if (nid<0){                                            /* sinon on agrandit la table */
         if (w->n_countries>=SCPS_MAX_COUNTRY) return -1;

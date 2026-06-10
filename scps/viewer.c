@@ -654,7 +654,9 @@ static void sim_rebuild(Sim *s, World *w) {
     agency_init(s->ag);
     diplo_init(s->dp);
     routes_init(s->rn);
-    for (int c=0;c<w->n_countries;c++) tech_state_init(&s->ts[c], false);
+    /* RAZ PLEINE PLAGE : n_countries grandit par sécession ; à la RÉGÉNÉRATION (touche R)
+     * les slots hauts gardaient ai_on/TechState périmés d'un monde précédent (cf. chronicle). */
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++){ s->ai_on[c]=false; tech_state_init(&s->ts[c], false); }
     s->player = 0;
     for (int c=0;c<w->n_countries;c++) if (w->country[c].role==POLITY_PLAYER){ s->player=c; break; }
     /* Chaque voisin (non-vierge, non-joueur) reçoit un acteur IA — sa personnalité

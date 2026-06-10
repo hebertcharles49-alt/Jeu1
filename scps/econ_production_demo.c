@@ -29,6 +29,8 @@ static void ok(const char *what, bool cond){
 static void rig(WorldEconomy *e, int r, float tools){
     RegionEconomy *re=&e->region[r];
     re->active=true; re->colonized=true; re->culture.settled=true;
+    re->owner=-1;   /* ISOLATION : hors domaine §NF (sinon la construction demande-menée
+                     * bâtirait un atelier qui CONSOMME le métal que le test veut accumuler) */
     for (int k=0;k<RES_COUNT;k++){ re->raw_cap[k]=0.f; re->stock[k]=0.f; }
     re->raw_cap[RES_IRON]=4.f; re->raw_cap[RES_COAL]=4.f;
     re->raw_cap[RES_WOOD]=4.f; re->raw_cap[RES_GRAIN]=8.f;
