@@ -1105,7 +1105,7 @@ static void gen_climate(World *w, float *height, float *moisture,
         float cont_heat = odist[i]*(1.f-lat)*0.12f;  /* déserts continentaux brûlants */
         float cont_cold = odist[i]*lat*0.20f;          /* gel polaire intérieur (Sibérie) */
         /* Calotte polaire : refroidissement fort >60° lat */
-        float polar_cap = clampf((lat-0.60f)/0.25f,0.f,1.f)*0.50f;
+        float polar_cap = clampf((lat-0.64f)/0.25f,0.f,1.f)*0.42f;   /* calotte ADOUCIE : trop de glaciers (départ 0.60→0.64, poids 0.50→0.42) */
         temperature[i]=clampf(1.f-lat-alt_cold+cont_heat-cont_cold-polar_cap
                               +t_cont+t_reg+t_loc+t_bias,0.f,1.f);
     }
@@ -2725,6 +2725,118 @@ WorldParams worldparams_default(uint32_t seed) {
     return p;
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+ * LA MER (brief mer §2) — les COURANTS DE SURFACE, champ dérivé du vent.
+ * Modèle réel imité : vent zonal organisé par la rotation (Coriolis) et
+ * bloqué par les continents → UN GYRE PAR BASSIN (horaire au nord, anti-
+ * horaire au sud), EAUX MORTES aux centres et sur l'équateur (pots-au-noir),
+ * INTENSIFICATION OUEST (Gulf Stream : le bord ouest du bassin concentre).
+ * Une PASSE de worldgen — l'advection d'humidité LIT le même vent, on n'y
+ * touche pas. Sortie : (cur_vx, cur_vy, sea) par cellule marine.
+ * ════════════════════════════════════════════════════════════════════════ */
+static float wind_force(float lat){            /* |lat| 0..1 — les bandes */
+    float a=fabsf(lat);
+    if (a<0.06f) return 0.10f;                 /* pot-au-noir équatorial */
+    if (a<0.28f) return 1.00f;                 /* alizés */
+    if (a<0.36f) return 0.18f;                 /* calmes des chevaux (~30°) */
+    if (a<0.62f) return 1.00f;                 /* vents d'ouest */
+    if (a<0.78f) return 0.45f;
+    return 0.25f;                              /* polaires */
+}
+static void compute_sea_currents(World *w){
+    static float vx[SCPS_N], vy[SCPS_N];
+    static uint8_t seam[SCPS_N];               /* 1 = cellule marine */
+    /* 0. masque + vecteur de base (vent zonal × force) + CORIOLIS (∝|lat|,
+     *    à droite au nord / à gauche au sud — en coords écran, y vers le bas). */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++){
+        int i=scps_idx(x,y);
+        Biome b=w->cell[i].biome;
+        bool sea=(b==BIO_DEEP_OCEAN||b==BIO_OCEAN||b==BIO_SHALLOW);
+        seam[i]=sea?1:0;
+        if (!sea){ vx[i]=vy[i]=0.f; continue; }
+        float ny=(float)y/SCPS_H, lats=(ny-0.5f)*2.f;     /* signé : <0 = nord */
+        float lat=fabsf(lats);
+        float f=wind_force(lat);
+        float ux=(float)wind_dir_x(lat)*f, uy=0.f;
+        float a=0.55f*lat;                                  /* l'angle de déviation */
+        float ca=cosf(a), sa=sinf(a);
+        if (lats<0.f){ /* NORD : déviation à droite (écran : horaire) */
+            vx[i]= ux*ca + uy*sa;  vy[i]= -ux*sa + uy*ca;
+        } else {       /* SUD : à gauche (antihoraire) */
+            vx[i]= ux*ca - uy*sa;  vy[i]=  ux*sa + uy*ca;
+        }
+    }
+    /* 1. RELAXATION côtière : un vecteur qui pointe vers la terre GLISSE le long
+     *    du trait (projection sur la tangente), puis lissage avec les voisins
+     *    marins — les boucles de bassin se ferment d'elles-mêmes. */
+    for (int it=0; it<36; it++){
+        for (int y=1;y<SCPS_H-1;y++) for (int x=1;x<SCPS_W-1;x++){
+            int i=scps_idx(x,y);
+            if (!seam[i]) continue;
+            /* normale vers la terre = Σ directions des voisins terrestres */
+            float nx=0.f,nyv=0.f; int nsea=0; float ax=0.f, ay=0.f;
+            static const int DX[4]={1,-1,0,0}, DY[4]={0,0,1,-1};
+            for (int k=0;k<4;k++){
+                int j=scps_idx(x+DX[k],y+DY[k]);
+                if (seam[j]){ ax+=vx[j]; ay+=vy[j]; nsea++; }
+                else { nx+=(float)DX[k]; nyv+=(float)DY[k]; }
+            }
+            float vx2=vx[i], vy2=vy[i];
+            if (nsea>0){ vx2=0.62f*vx2+0.38f*(ax/nsea); vy2=0.62f*vy2+0.38f*(ay/nsea); }
+            float nl=sqrtf(nx*nx+nyv*nyv);
+            if (nl>0.01f){                                   /* côte : projeter sur la tangente */
+                nx/=nl; nyv/=nl;
+                float dot=vx2*nx+vy2*nyv;
+                if (dot>0.f){ vx2-=dot*nx; vy2-=dot*nyv; }
+            }
+            vx[i]=vx2; vy[i]=vy2;
+        }
+    }
+    /* 2. INTENSIFICATION OUEST : la terre proche en balayant vers l'OUEST (−x)
+     *    = bord ouest du bassin → courant étroit et rapide (Gulf Stream). */
+    for (int y=0;y<SCPS_H;y++){
+        int dist=999;
+        for (int x=0;x<SCPS_W;x++){                          /* balaye ouest→est */
+            int i=scps_idx(x,y);
+            if (!seam[i]){ dist=0; continue; }
+            dist++;
+            float boost=1.f+1.1f*expf(-(float)dist/7.f);
+            vx[i]*=boost; vy[i]*=boost;
+        }
+    }
+    /* 3. CLASSES + quantification. La CÔTE (cellule marine adjacente à la terre)
+     *    est CABOTAGE quel que soit le courant : lent mais sûr, la voie du pauvre. */
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++){
+        int i=scps_idx(x,y);
+        Cell *c=&w->cell[i];
+        if (!seam[i]){ c->cur_vx=0; c->cur_vy=0; c->sea=SEA_NONE; continue; }
+        bool littoral=false;
+        for (int dy=-1;dy<=1 && !littoral;dy++) for (int dx=-1;dx<=1;dx++){
+            int X=x+dx, Y=y+dy;
+            if (X<0||Y<0||X>=SCPS_W||Y>=SCPS_H) continue;
+            if (!seam[scps_idx(X,Y)]){ littoral=true; break; }
+        }
+        float m=sqrtf(vx[i]*vx[i]+vy[i]*vy[i]);
+        float q=clampf(m,0.f,1.6f)/1.6f;
+        c->cur_vx=(int8_t)clampf(vx[i]*62.f,-100.f,100.f);
+        c->cur_vy=(int8_t)clampf(vy[i]*62.f,-100.f,100.f);
+        if      (littoral) c->sea=SEA_CABOTAGE;
+        else if (q<0.10f)  c->sea=SEA_MORTE;       /* centres de gyres + équateur */
+        else if (q<0.34f)  c->sea=SEA_VIVE;
+        else               c->sea=SEA_COURANT;     /* le couloir */
+    }
+    /* santé du champ (et du climat) : la répartition se LIT à la gen */
+    { long nm=0,nv=0,nc2=0,ncab=0,ngl=0,nsea=0;
+      for (int i=0;i<SCPS_N;i++){
+          switch(w->cell[i].sea){ case SEA_MORTE:nm++;break; case SEA_VIVE:nv++;break;
+              case SEA_COURANT:nc2++;break; case SEA_CABOTAGE:ncab++;break; default:break; }
+          if (w->cell[i].sea) nsea++;
+          if (w->cell[i].biome==BIO_GLACIER) ngl++;
+      }
+      if (nsea>0) printf("(couloirs %ld%% · vives %ld%% · mortes %ld%% · cabotage %ld%% ; glaciers %ld cell.) ",
+                         nc2*100/nsea, nv*100/nsea, nm*100/nsea, ncab*100/nsea, ngl); }
+}
+
 void world_generate(World *w, const WorldParams *P) {
     WorldParams def;
     if (!P){ def=worldparams_default((uint32_t)0); P=&def; }
@@ -2868,6 +2980,9 @@ void world_generate(World *w, const WorldParams *P) {
 
     printf("[scps] flags rendu...  "); fflush(stdout);
     compute_render_flags(w,height);       printf("ok\n");
+
+    printf("[scps] courants...     "); fflush(stdout);
+    compute_sea_currents(w);              printf("ok\n");
 
     printf("[scps] noms prov...    "); fflush(stdout);
     gen_province_names(w);                printf("ok\n");

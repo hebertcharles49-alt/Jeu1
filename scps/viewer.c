@@ -933,15 +933,17 @@ typedef struct {
     int     scroll[SBT_COUNT];
     float   anim;                 /* 0..1 — glissement du tiroir (~150 ms) */
     int     reloc_src;            /* étape 1 de la relocalisation (-1 = pas choisie) */
+    bool    show_currents;        /* filtre COURANTS : le champ marin (physique → continu légitime) */
     MapLens lens;                 /* lentille readout (LENS_NONE = vues classiques) */
     bool    purge_arm;            /* purge : 1er clic ARME, 2e confirme (acte irréversible) */
 } Sidebar;
-static Sidebar g_sb = { -1, 1, {0,0,0,0,0}, 0.f, -1, LENS_NONE, false };
+static Sidebar g_sb = { -1, 1, {0,0,0,0,0}, 0.f, -1, false, LENS_NONE, false };
 
 /* cibles cliquables du tiroir (reconstruites chaque frame, comme zone_add) */
 enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_RELOC_CLR,
        SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
        SBH_MARCH, SBH_MUSTER, SBH_CANCEL,
+       SBH_CHIP_CUR,
        SBH_LEV_REPRESS, SBH_LEV_ASSIM, SBH_LEV_PURGE, SBH_LEV_EMBARGO,
        SBH_LEV_CONTRAT /* a=SuzContrat, b=pays cible */ };
 typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
@@ -1307,6 +1309,10 @@ static void sb_panel_filtres(SDL_Renderer *ren, int x, int y, int w, int h, View
         }
         y+=24;
     }
+    { int cx=x+12;
+      (void)sb_chip(ren,cx,y,"Courants", g_sb.show_currents, SBH_CHIP_CUR,0,0,
+          "Le champ des COURANTS marins (physique du monde — flux continus) : couloirs, eaux vives ; les eaux MORTES se lisent en creux.");
+    } y+=24;
     draw_text(ren,g_font_small,x+10,y,COL_DIM,"Empire (lentilles — par bande, 5 teintes)"); y+=15;
     { int cx=x+12;
       static const char *HV[3]={
@@ -1537,6 +1543,7 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
             break;
         case SBH_CHIP_MODE: *mode=(ViewMode)hh->a; g_sb.lens=LENS_NONE; break;
         case SBH_CHIP_LENS: g_sb.lens=(g_sb.lens==(MapLens)hh->a)?LENS_NONE:(MapLens)hh->a; break;
+        case SBH_CHIP_CUR:  g_sb.show_currents=!g_sb.show_currents; break;
         default: break;
     }
     return true;
@@ -2292,7 +2299,7 @@ static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv
  * qui ne matche pas = refus poli (« sauvegarde d'une ère antérieure »).
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define SAVE_MAGIC   0x53504353u   /* "SCPS" */
-#define SAVE_VERSION 2u            /* v2 : payload CHIFFRÉ (ChaCha20) + empreinte du clair */
+#define SAVE_VERSION 3u            /* v3 : courants marins dans World (v2 chiffrée, v1 claire → « ère antérieure ») */
 #define SAVE_F_CRYPT 1u
 typedef struct {
     uint32_t magic, version;
@@ -2611,6 +2618,7 @@ int main(int argc, char **argv) {
     bool shot = false, shot_tree = false, shot_war = false, shot_culture = false, shot_sidebar = false;
     int  shot_shell = 0;
     bool savetest = false;
+    bool shot_cur = false;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
@@ -2618,6 +2626,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--sidebar")) { shot = true; shot_sidebar = true; }   /* tiroir Stocks + lentille Marché */
         else if (!strcmp(argv[i], "--shellshot") && i+1<argc) { shot=true; shot_shell=1+atoi(argv[++i]); }  /* 1=menu 2=setup 3=ouverture */
         else if (!strcmp(argv[i], "--savetest")) savetest=true;   /* vérif sauvegarde : sauver-recharger = continuation identique */
+        else if (!strcmp(argv[i], "--curshot")) { shot=true; shot_cur=true; }   /* carte + champ des courants */
         else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
         else if (!strcmp(argv[i], "--culture")) { shot = true; shot_culture = true; }  /* §5 : vue culture */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
@@ -2766,7 +2775,23 @@ int main(int argc, char **argv) {
         selected = (pcap>=0) ? pcap : 0;
         rp.cam_ox=cam.ox; rp.cam_oy=cam.oy; rp.cam_scale=cam.scale; rp.selected_prov=selected;
         SDL_RenderClear(ren);
-        if (shot_shell && sim.ready && g_font) {
+        if (shot_cur) {
+            rp.region_tint=NULL;
+            render_map(world, pb.pixels, pb.w, pb.h, &rp, VIEW_TERRAIN); pixbuf_upload(&pb);
+            if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
+            for (int sy=8; sy<win_h-8; sy+=12) for (int sx=8; sx<win_w-8; sx+=12){
+                int cx2=(int)(sx/cam.scale+cam.ox), cy2=(int)(sy/cam.scale+cam.oy);
+                if (cx2<0||cy2<0||cx2>=SCPS_W||cy2>=SCPS_H) continue;
+                const Cell *cc=scps_cellc(world,cx2,cy2);
+                if (cc->sea<=SEA_CABOTAGE) continue;
+                float vx2=cc->cur_vx/100.f, vy2=cc->cur_vy/100.f;
+                float m=sqrtf(vx2*vx2+vy2*vy2); if (m<0.10f) continue;
+                float l=(cc->sea==SEA_COURANT)?9.f:5.f;
+                SDL_Color cl=(cc->sea==SEA_COURANT)?COL_COPPER:(SDL_Color){0x6a,0x8a,0xb0,0xff};
+                SDL_SetRenderDrawColor(ren,cl.r,cl.g,cl.b,(cc->sea==SEA_COURANT)?0xE0:0x90);
+                SDL_RenderDrawLine(ren,sx,sy,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
+            }
+        } else if (shot_shell && sim.ready && g_font) {
             ViewMode smode0=VIEW_TERRAIN; rp.region_tint=NULL;
             render_map(world, pb.pixels, pb.w, pb.h, &rp, smode0); pixbuf_upload(&pb);
             if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
@@ -3222,6 +3247,23 @@ int main(int argc, char **argv) {
 
         SDL_RenderClear(ren);
         if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
+        /* ── filtre COURANTS : lignes de flux sur la mer (les MORTES = le creux) ── */
+        if (g_sb.show_currents && g_gs==GS_PLAYING){
+            for (int sy=8; sy<win_h-8; sy+=14) for (int sx=8; sx<win_w-8; sx+=14){
+                int cx2=(int)(sx/cam.scale+cam.ox), cy2=(int)(sy/cam.scale+cam.oy);
+                if (cx2<0||cy2<0||cx2>=SCPS_W||cy2>=SCPS_H) continue;
+                const Cell *cc=scps_cellc(world,cx2,cy2);
+                if (cc->sea<=SEA_CABOTAGE) continue;          /* terre/côte : rien ; MORTE : creux */
+                float vx2=cc->cur_vx/100.f, vy2=cc->cur_vy/100.f;
+                float m=sqrtf(vx2*vx2+vy2*vy2);
+                if (m<0.10f) continue;
+                float l=(cc->sea==SEA_COURANT)?9.f:5.f;
+                SDL_Color cl=(cc->sea==SEA_COURANT)?COL_COPPER:(SDL_Color){0x6a,0x8a,0xb0,0xff};
+                SDL_SetRenderDrawColor(ren,cl.r,cl.g,cl.b,(cc->sea==SEA_COURANT)?0xE0:0x90);
+                SDL_RenderDrawLine(ren,sx,sy,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
+                SDL_RenderDrawPoint(ren,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
+            }
+        }
         /* Overlay diégétique : bandeau royaume + panneau de province, via la
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
@@ -3249,6 +3291,22 @@ int main(int argc, char **argv) {
                 draw_sidebar(ren, win_w, win_h, &sim, world, mode, selected);   /* §sidebar : rail + tiroir d'empire */
             }
             shell_draw(ren,win_w,win_h,world,&sim,&g_stage);     /* surcouches : pause · tuto · confirmation */
+            /* mer au survol : le MOT (repli de plus basse priorité — ajouté en dernier) */
+            { int cx3=(int)(mx2/cam.scale+cam.ox), cy3=(int)(my2/cam.scale+cam.oy);
+              if (cx3>=0&&cy3>=0&&cx3<SCPS_W&&cy3<SCPS_H){
+                  const Cell *cc=scps_cellc(world,cx3,cy3);
+                  if (cc->sea!=SEA_NONE){
+                      static char seahov[96];
+                      if (cc->sea==SEA_CABOTAGE) snprintf(seahov,sizeof seahov,"Cabotage — lent mais sûr, de port en port.");
+                      else if (cc->sea==SEA_MORTE) snprintf(seahov,sizeof seahov,"Eaux mortes — rien ne pousse un navire ici : on contourne.");
+                      else {
+                          const char *d = (abs(cc->cur_vx)>=abs(cc->cur_vy))
+                                        ? (cc->cur_vx>0?"l'est":"l'ouest") : (cc->cur_vy>0?"le sud":"le nord");
+                          snprintf(seahov,sizeof seahov,"%s — courant favorable vers %s.",
+                                   cc->sea==SEA_COURANT?"Couloir":"Eaux vives", d);
+                      }
+                      zone_add((SDL_Rect){0,0,win_w,win_h}, seahov);
+                  } } }
             draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }
         SDL_RenderPresent(ren);

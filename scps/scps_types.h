@@ -115,7 +115,16 @@ typedef struct {
     bool     border_country;   /* frontière de pays */
     bool     border_continent; /* trait de côte du continent */
     float    shade;            /* hillshading [0..1] */
+
+    /* ── LA MER (brief mer) : courants de surface DÉRIVÉS du vent — un CHAMP de
+     * worldgen (pas une simulation). Vecteur quantifié [-100..100] ; classe : la
+     * géographie de l'océan (couloirs · eaux vives · eaux mortes · cabotage). */
+    int8_t   cur_vx, cur_vy;   /* (0,0) à terre */
+    uint8_t  sea;              /* SeaClass — 0 = terre */
 } Cell;
+
+/* Les trois espaces marins (+ la côte) — le design de l'océan. */
+typedef enum { SEA_NONE=0, SEA_CABOTAGE, SEA_MORTE, SEA_VIVE, SEA_COURANT } SeaClass;
 
 /* ---- Ressources / biens commerciaux ----------------------------------
  * Deux familles :
