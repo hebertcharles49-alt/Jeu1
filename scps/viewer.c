@@ -44,6 +44,7 @@
 #include "scps_navy.h"     /* la flotte (mer §5) : coques, chantier, entretien, outre-mer */
 #include "scps_lang.h"     /* la table de chaînes : tout mot face-joueur vient des tables */
 #include "stb_image_write.h"  /* F12 : capture d'écran PNG (vendoré) */
+#include "scps_audio.h"       /* la prise audio (miniaudio) — preuve de vie sur alerte */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 /* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
@@ -594,6 +595,10 @@ static void sim_campaign_year(Sim *s, World *w) {
     campaign_release_transports(s->camp, s->navy);   /* les transports rentrent à la rade */
 }
 
+/* État de l'écran (déclaré tôt : sim_day gate l'alerte audio sur GS_PLAYING). */
+typedef enum { GS_MENU=0, GS_SETUP, GS_OPENING, GS_PLAYING } GameState;
+static GameState g_gs = GS_MENU;
+
 static void sim_day(Sim *s, World *w) {
     /* — quotidien — */
     agency_advance(s->ag, w, s->econ, s->wl, s->drift, 1);     /* les actions progressent */
@@ -707,6 +712,7 @@ static void sim_day(Sim *s, World *w) {
                 if (nr>0) faction_age_engage(w, s->econ, c, age);
             }
             s->prev_dawned = s->ev->ages.last_dawned;
+            if (g_gs==GS_PLAYING) audio_alert();    /* §5 preuve de vie : un âge se lève → l'alerte discrète */
         }
     }
     if (++s->day % 365 == 0) s->year++;
@@ -2344,8 +2350,6 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
  * (quitter = bouton + confirmation, seul chemin). Sauvegarde : chantier suivant
  * (le menu vit avec « Charger » grisé — l'ordre du brief lui-même).
  * ═══════════════════════════════════════════════════════════════════════════ */
-typedef enum { GS_MENU=0, GS_SETUP, GS_OPENING, GS_PLAYING } GameState;
-static GameState g_gs = GS_MENU;
 static bool g_pause_menu=false, g_quit_confirm=false, g_show_tuto=false;
 static int  g_tuto_page=0;
 static int  g_setup_ethos=5, g_setup_race=(int)RACE_HUMAIN, g_setup_terre=5;  /* défauts : Pacifiste? non → voir tables */
@@ -2898,6 +2902,10 @@ int main(int argc, char **argv) {
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!win || !ren) { fprintf(stderr,"SDL: %s\n",SDL_GetError()); return 1; }
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+    /* La prise audio (§5) : ouvre un device si présent ; sinon MUET, sans erreur
+     * (conteneur/serveur sans carte → le release tourne quand même). */
+    if (!audio_init()) fprintf(stderr,"[scps] audio : aucun device — silence.\n");
 
     /* Police diégétique (SDL_ttf) — DejaVu couvre les accents français. */
     if (TTF_Init() != 0) fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
@@ -3610,6 +3618,7 @@ int main(int argc, char **argv) {
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);
     TTF_Quit();
+    audio_shutdown();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

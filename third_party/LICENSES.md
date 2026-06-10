@@ -10,14 +10,17 @@ le `chronicle` release n'a que libc/libm ; le viewer, ses dépendances SDL).
 |---|---|---|---|---|
 | `miniz.c` / `miniz.h` | miniz (richgel999) | 3.0.2 | MIT | `mz_crc32` (harnais de déterminisme), `mz_compress`/`mz_uncompress` (blocs de sauvegarde). Compilé `-DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS` (crc32 + deflate seuls). |
 | `stb_image_write.h` + `stb_image_write_impl.c` | stb_image_write (Sean Barrett) | 1.16 | domaine public / MIT | PNG : `montage.png` (planche-contact) et captures F12 du viewer. L'`_impl.c` est l'unique unité portant `STB_IMAGE_WRITE_IMPLEMENTATION`. |
+| `miniaudio.h` + `miniaudio_impl.c` | miniaudio (David Reid) | 0.11.x | domaine public / MIT-0 | La prise audio (viewer seul) : device de lecture + mixeur de voix procédurales. Compilé `MA_NO_DECODING/ENCODING/GENERATION/RESOURCE_MANAGER/NODE_GRAPH` (lecture device seule) ; dlopen ses backends → aucun lien dynamique NOUVEAU (vérifié objdump : NEEDED inchangé). |
 
-> À venir (leurs étapes) : `miniaudio.h` (la prise audio, §5), `nuklear.h`
-> (l'overlay de dev sous `-DSCPS_DEV`, §6) — vendorés au moment où ils sont câblés.
+> À venir (son étape) : `nuklear.h` (l'overlay de dev sous `-DSCPS_DEV`, §6) —
+> vendoré au moment où il est câblé.
 
 ## Termes (résumé)
 
 - **miniz** — MIT. Copyright Rich Geldreich et al. — voir l'en-tête de `miniz.h`.
 - **stb_image_write** — double licence MIT / domaine public (Unlicense), au
   choix de l'utilisateur — voir le pied de `stb_image_write.h`.
+- **miniaudio** — double licence : domaine public (Unlicense) OU MIT-0 — voir
+  le pied de `miniaudio.h`.
 
 Tous compatibles avec un dépôt sans restriction de redistribution.

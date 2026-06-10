@@ -60,6 +60,12 @@ $(OBJDIR)/tp_miniz.o: third_party/miniz.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(MINIZ_FLAGS) -c $< -o $@
 $(OBJDIR)/tp_stbiw.o: third_party/stb_image_write_impl.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+# miniaudio : gros single-header — compilé À PART (sans -Wextra ni -std strict),
+# surface réduite à la lecture de device. Sur Linux il dlopen ses backends →
+# -ldl/-lpthread au lien (déjà tirés par SDL pour le viewer).
+$(OBJDIR)/tp_miniaudio.o: third_party/miniaudio_impl.c | $(OBJDIR)
+	$(CC) -O2 -Ithird_party -c $< -o $@
+AUDIO_LIBS := $(if $(WIN),-lole32 -lwinmm,-lpthread -lm -ldl)
 
 # ---- Moteur SCPS headless (§2 + annexe) — colonne vertébrale VÉRIFIÉE -----
 # Banc d'essai auto-vérifiant (35 contrôles, sortie ≠ 0 si échec).
@@ -97,12 +103,12 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_campaign.o \
              $(OBJDIR)/scps_scps_navy.o \
              $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_crypt.o \
-             $(OBJDIR)/tp_stbiw.o $(OBJDIR)/scps_viewer.o
+             $(OBJDIR)/scps_scps_audio.o $(OBJDIR)/tp_stbiw.o $(OBJDIR)/tp_miniaudio.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
 $(SCPS_TARGET): $(SCPS_OBJS)
-	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS) $(OMPFLAG)
+	$(CC) $(SCPS_OBJS) -o $@ $(SDL_LIBS) -lSDL2_ttf -lm $(WINLIBS) $(OMPFLAG) $(AUDIO_LIBS)
 run_scps: scps
 	./$(SCPS_TARGET)
 
@@ -307,6 +313,11 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
 chronicle: $(CHRONICLE_OBJS)
 	$(CC) $(CHRONICLE_OBJS) -o $@ -lm $(OMPFLAG)
+
+# ---- Banc audio : le mixeur procédural sort du son (build §9.6) -----------
+AUDIO_DEMO_OBJS := $(OBJDIR)/scps_scps_audio.o $(OBJDIR)/tp_miniaudio.o $(OBJDIR)/scps_audio_demo.o
+audio_demo: $(AUDIO_DEMO_OBJS)
+	$(CC) $(AUDIO_DEMO_OBJS) -o $@ $(AUDIO_LIBS)
 
 # ---- Banc save_io : compression de bloc + CRC32 round-trip (build §9.5) ---
 SAVE_IO_DEMO_OBJS := $(OBJDIR)/scps_scps_save_io.o $(OBJDIR)/tp_miniz.o $(OBJDIR)/scps_save_io_demo.o
