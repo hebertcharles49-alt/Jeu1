@@ -421,6 +421,7 @@ int main(int argc, char **argv){
     long tot_repress=0, tot_assim=0, tot_purge=0, tot_purge_dead=0;       /* leviers intérieurs */
     long tot_serv=0, tot_prot=0, tot_conc=0, tot_cite=0, tot_defect=0;    /* suzeraineté */
     long tot_ligues=0, tot_frondes=0, tot_indep=0, tot_renvers=0, tot_ecrase=0;   /* fronde */
+    long tot_bt=0, tot_btj=0, tot_routs=0, tot_mchoc=0, tot_mpour=0, tot_deseng=0, tot_renf=0, tot_nul=0;   /* batailles */
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
@@ -635,6 +636,16 @@ int main(int argc, char **argv){
                  s.dp->n_lev_don, s.dp->n_lev_allege, s.dp->n_lev_divise, s.dp->n_lev_intim);
           tot_ligues+=s.dp->n_ligues; tot_frondes+=s.dp->n_frondes; tot_indep+=s.dp->n_indep;
           tot_renvers+=s.dp->n_renvers; tot_ecrase+=s.dp->n_ecrase;
+
+        /* BATAILLES DANS LE TEMPS (§8) : durées, déroutes, et LA vérif — la poursuite
+         * doit dominer le choc, sinon on a juste ralenti l'ancien modèle. */
+        printf("              batailles : %d livrée(s) · %.0f j en moy. · %d déroute(s) · %d décrochage(s) · %d renfort(s) · %d nul(s) | morts : %ld au CHOC vs %ld en POURSUITE\n",
+               s.camp->n_battles, s.camp->n_battles? (double)s.camp->battle_days/s.camp->n_battles:0.0,
+               s.camp->n_routs, s.camp->n_disengage, s.camp->n_reinforce, s.camp->n_stalemate,
+               s.camp->dead_choc, s.camp->dead_pursuit);
+        tot_bt+=s.camp->n_battles; tot_btj+=s.camp->battle_days; tot_routs+=s.camp->n_routs;
+        tot_mchoc+=s.camp->dead_choc; tot_mpour+=s.camp->dead_pursuit;
+        tot_deseng+=s.camp->n_disengage; tot_renf+=s.camp->n_reinforce; tot_nul+=s.camp->n_stalemate;
           tot_repress+=rep; tot_assim+=ass; tot_purge+=pur; tot_purge_dead+=dead;
           tot_serv+=s.dp->n_servage; tot_prot+=s.dp->n_protectorat; tot_conc+=s.dp->n_concordat;
           tot_cite+=s.dp->n_cite; tot_defect+=s.dp->n_defections; }
@@ -722,6 +733,9 @@ int main(int argc, char **argv){
            tot_serv, tot_prot, tot_conc, tot_cite, tot_defect);
     printf("   fronde vassale .............. %ld ligue(s) · %ld fronde(s) → %ld indép. · %ld renversement(s) · %ld écrasée(s)  (les TROIS fins doivent exister)\n",
            tot_ligues, tot_frondes, tot_indep, tot_renvers, tot_ecrase);
+    printf("   batailles dans le temps ..... %ld livrées · %.0f j/bataille · %ld déroutes · %ld décrochages · %ld renforts · %ld nuls | morts choc %ld vs POURSUITE %ld (ratio %.1fx — la poursuite doit dominer)\n",
+           tot_bt, tot_bt? (double)tot_btj/tot_bt:0.0, tot_routs, tot_deseng, tot_renf, tot_nul,
+           tot_mchoc, tot_mpour, tot_mchoc? (double)tot_mpour/tot_mchoc:0.0);
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);

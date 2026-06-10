@@ -30,7 +30,7 @@
 #include "scps_diplo.h"
 
 /* Phase d'une armée de campagne. */
-typedef enum { FA_IDLE = 0, FA_MARCH, FA_SIEGE, FA_PHASE_COUNT } FieldPhase;
+typedef enum { FA_IDLE = 0, FA_MARCH, FA_SIEGE, FA_BATTLE, FA_PHASE_COUNT } FieldPhase;
 
 /* Une armée expéditionnaire posée sur la carte. */
 typedef struct {
@@ -48,7 +48,26 @@ typedef struct {
     int        legs;        /* étapes de marche franchies */
     int        battles;     /* batailles livrées */
     int        posture;     /* §5 sidebar : 0 prudente · 1 standard · 2 agressive (module marche/siège) */
+    int        broken_days; /* armée BRISÉE (déroute) : inapte au combat tant que > 0 (se reconstitue) */
 } FieldArmy;
+
+/* ── LA BATAILLE DANS LE TEMPS (brief bataille) — un ÉTAT, plus un événement ──
+ * Deux armées hostiles qui se croisent S'ACCROCHENT (FA_BATTLE, épinglées) : des
+ * CHOCS de 3 jours (jets, pertes, le moral s'use) alternent avec des ACCALMIES de
+ * 2 jours (le moral se stabilise — moins qu'un choc ne coûte) jusqu'à la RUPTURE
+ * d'une réserve → la DÉROUTE, puis la POURSUITE — où tombe l'essentiel des morts. */
+typedef struct {
+    bool  active;
+    int   a, b;            /* les deux camps (indices pays) ; helpers = marche au canon */
+    int   helpA, helpB;    /* un renfort par camp (-1) — allié/suzerain/vassal adjacent */
+    int   loc;             /* la région du champ */
+    int   cycle;           /* jour dans le cycle 0..4 (0-2 choc · 3-4 accalmie) */
+    int   days, chocs;     /* durée totale · jours de choc livrés */
+    float resA, resB;      /* RÉSERVES de moral (Σ paquets·moral·moral_mul) — ce qui se joue */
+    float resA0, resB0;    /* réserves d'ouverture (le seuil de rupture s'y réfère) */
+    float lossA, lossB;    /* report fractionnaire des pertes de CHOC (paquets) */
+} FieldBattle;
+#define CAMPAIGN_MAX_BATTLES 8
 
 typedef struct {
     FieldArmy army[SCPS_MAX_COUNTRY];   /* une force expéditionnaire par pays */
@@ -57,6 +76,11 @@ typedef struct {
     Biome     reg_biome [SCPS_MAX_REG];
     float     reg_height[SCPS_MAX_REG];
     bool      reg_river [SCPS_MAX_REG];   /* un cours d'eau notable à franchir (pénalité de choc) */
+    FieldBattle battle[CAMPAIGN_MAX_BATTLES];   /* les champs où l'on s'accroche */
+    /* télémétrie (chronicle §8) — cumul sim */
+    int   n_battles, n_routs, n_disengage, n_reinforce, n_stalemate;
+    long  dead_choc, dead_pursuit;        /* LA vérif : la poursuite doit DOMINER */
+    long  battle_days;                    /* Σ durées (jours) */
 } Campaign;
 
 /* Bâtit la table de terrain par région et remet les armées à zéro. */
@@ -76,7 +100,7 @@ bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
  * la propriété des régions reste la vérité de la conquête abstraite. `rng` =
  * graine xorshift avancée en place. */
 void campaign_tick(Campaign *c, const World *w, const WorldEconomy *econ,
-                   const DiploState *dp, uint32_t *rng, float dt_days);
+                   DiploState *dp, uint32_t *rng, float dt_days);   /* dp MUTABLE : les batailles nourrissent le bras-de-fer (§6) */
 
 /* ---- Lecteurs (membrane : tangibles) ---------------------------------- */
 bool        campaign_active       (const Campaign *c, int owner);

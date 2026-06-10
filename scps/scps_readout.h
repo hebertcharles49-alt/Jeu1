@@ -45,6 +45,9 @@ typedef enum { MARCHE_MORT, MARCHE_PENURIE, MARCHE_TENDU, MARCHE_SAIN, MARCHE_EN
 /* FIDÉLITÉ d'un vassal (fronde §7) : le ratio ne s'affiche jamais — la fronde se
  * PRESSENT. Classée sur le grief nu [0..1]. */
 typedef enum { FID_FIDELE, FID_TIEDE, FID_FRONDEUR, FID_LIGUEUR } BandFidelite;
+/* MORAL d'une armée en bataille (brief bataille §7) : la réserve ne sort JAMAIS en
+ * float — en bande. FERME → ROMPU. */
+typedef enum { MO_FERME, MO_EPROUVE, MO_VACILLANT, MO_ROMPU } BandMoral;
 typedef enum { PG_CALME, PG_FREMISSEMENT, PG_OMBRE, PG_SEUIL }                    BandPresage;
 /* Panneau de province */
 typedef enum { STA_DESERT, STA_HAMEAU, STA_BOURG, STA_CITE, STA_METROPOLE }       BandStature;
@@ -194,6 +197,8 @@ BandMarche   band_marche(float demand, float avail);
 const char  *label_marche(BandMarche b);
 BandFidelite band_fidelite(float grief_0_1);
 const char  *label_fidelite(BandFidelite b);
+BandMoral    band_moral(float reserve_frac_0_1);
+const char  *label_moral(BandMoral b);
 
 /* ---- LENTILLES de carte (sidebar Filtres §6) — par RÉGION, en TEINTES discrètes --
  * La carte se colore par BANDE (4-5 teintes), jamais par gradient continu : un

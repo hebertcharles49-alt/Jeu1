@@ -123,6 +123,16 @@ BandFidelite band_fidelite(float g) {
     if (g < 0.70f) return FID_FRONDEUR;
     return FID_LIGUEUR;
 }
+BandMoral band_moral(float f) {
+    if (f >= 0.70f) return MO_FERME;
+    if (f >= 0.45f) return MO_EPROUVE;
+    if (f >  0.25f) return MO_VACILLANT;
+    return MO_ROMPU;
+}
+const char *label_moral(BandMoral b) {
+    static const char *N[]={ "ferme","éprouvé","vacillant","rompu" };
+    return (b>=0&&b<=MO_ROMPU)?N[b]:"?";
+}
 const char *label_fidelite(BandFidelite b) {
     static const char *N[]={ "fidèle","tiède","frondeur","ligueur" };
     return (b>=0&&b<=FID_LIGUEUR)?N[b]:"?";

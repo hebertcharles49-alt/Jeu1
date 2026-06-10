@@ -9,6 +9,7 @@
  */
 #include "scps_campaign.h"
 #include "scps_labor.h"   /* capitale_defense / capitale_max_tier : la défense passive de la capitale */
+#include <math.h>
 #include <string.h>
 
 /* ---- Calibrage : ce que l'éco régionale dit au siège ------------------ */
@@ -156,37 +157,217 @@ const char *campaign_posture_name(int p){
  * d'une rivière non pontée. EST défenseur : celui qui RELÈVE le siège (l'autre
  * assiège), sinon le propriétaire de la région (garnison). Forts uniquement — une
  * province sans défense ne donne aucun bonus.                                  */
-static void field_battle(const Campaign *c, const WorldEconomy *e, int loc,
-                         FieldArmy *A, FieldArmy *B, uint32_t *rng){
-    float terrainA = 1.f;                                /* neutre par défaut */
-    if (region_defense(e, loc) > 0.f){                   /* FORT (pas une province nue) */
-        int defender = 0;                                /* -1 = A défend, +1 = B défend, 0 = personne */
-        if      (A->phase==FA_SIEGE && B->phase!=FA_SIEGE) defender=+1;  /* A assiège → B relève → B défend */
-        else if (B->phase==FA_SIEGE && A->phase!=FA_SIEGE) defender=-1;  /* B assiège → A défend (on relève) */
-        else if (e->region[loc].owner==A->owner)           defender=-1;  /* garnison de A sur sa terre */
-        else if (e->region[loc].owner==B->owner)           defender=+1;  /* garnison de B */
+/* ═══ LA BATAILLE DANS LE TEMPS (brief bataille) — choc · accalmie · déroute · poursuite ═══
+ * resolve_battle (l'instantané) est REMPLACÉ par un état qui dure : le moral est la
+ * vraie réserve, la poursuite fait l'essentiel des morts, le bras-de-fer est nourri. */
+#define BT_CHOC_J      3      /* jours de choc par cycle */
+#define BT_ACCALMIE_J  2      /* jours d'accalmie */
+#define BT_RUPTURE     0.25f  /* la réserve rompt sous 25 % de l'ouverture */
+#define BT_RECUP       0.015f /* l'accalmie rend 1.5 %/j de l'ouverture (+0.7 % chez soi) */
+#define BT_DMG_K       0.050f /* étalonnage du dégât de moral par jour de choc */
+#define BT_CHOC_MORTS  0.002f /* pertes du CHOC : ~0.4 %/j des paquets (des dizaines) */
+#define BT_MAX_JOURS   120    /* au-delà : les deux camps se délitent (nul sanglant) */
+#define BT_BRISEE_J    45     /* une armée en déroute est INAPTE ce temps */
+
+static float xs01(uint32_t *st){            /* xorshift32 → [0..1) */
+    uint32_t x=*st?*st:0xA341B2C7u; x^=x<<13; x^=x>>17; x^=x<<5; *st=x;
+    return (float)(x>>8)/16777216.f;
+}
+
+static float side_reserve(const ArmyState *f){
+    float r=0.f;
+    for (int u=0;u<f->n_units;u++){
+        const UnitDef *d=unit_def(f->units[u].type);
+        if (d) r += (float)f->units[u].count * d->moral;
+    }
+    return r * (f->doctrine.moral_mul>0.f?f->doctrine.moral_mul:1.f);
+}
+static float side_power(const ArmyState *f){
+    float p=0.f;
+    for (int u=0;u<f->n_units;u++){
+        const UnitDef *d=unit_def(f->units[u].type);
+        if (d) p += (float)f->units[u].count * (1.f + d->discipline);
+    }
+    p *= (f->doctrine.weapon_power>0.f?f->doctrine.weapon_power:1.f);
+    return powf(p, 0.85f);            /* la MASSE aide, à rendements décroissants */
+}
+static long kill_packets(ArmyState *f, long packets){
+    long tot=force_units(f); if (tot<=0||packets<=0) return 0;
+    if (packets>tot) packets=tot;
+    long left=packets;
+    for (int u=0;u<f->n_units && left>0;u++){
+        long share=(f->units[u].count*packets)/tot;
+        if (share>f->units[u].count) share=f->units[u].count;
+        f->units[u].count-=share; left-=share;
+    }
+    for (int u=0;u<f->n_units && left>0;u++){
+        long take=(f->units[u].count<left)?f->units[u].count:left;
+        f->units[u].count-=take; left-=take;
+    }
+    return packets-left;
+}
+static float bt_terrainA(const Campaign *c, const WorldEconomy *e, int loc, int ownA, int ownB){
+    float terrainA=1.f;
+    if (region_defense(e,loc)>0.f){
+        int defender=0;
+        if      (e->region[loc].owner==ownA) defender=-1;
+        else if (e->region[loc].owner==ownB) defender=+1;
         if (defender!=0){
-            float adv = terrain_combat_bonus(c->reg_biome[loc]);         /* coline +5 %, montagne +20 %… */
-            bool bridged = e->region[loc].route_pe > 0.f;                /* une route = un pont */
-            if (c->reg_river[loc] && !bridged) adv *= RIVER_COMBAT_EDGE; /* franchir sous le feu */
-            terrainA = (defender<0) ? adv : (1.f/adv);                   /* le défenseur profite du sol */
+            float adv=terrain_combat_bonus(c->reg_biome[loc]);
+            bool bridged=e->region[loc].route_pe>0.f;
+            if (c->reg_river[loc] && !bridged) adv*=RIVER_COMBAT_EDGE;
+            terrainA=(defender<0)?adv:(1.f/adv);
         }
     }
-    BattleResult r = resolve_battle(&A->force, &B->force, terrainA, rng);
-    A->battles++; B->battles++;
-    FieldArmy *loser = (r.winner<0) ? B : (r.winner>0 ? A : NULL);
-    if (!loser) return;                                  /* nul : nul ne cède */
-    if (force_units(&loser->force) <= 0){                /* anéantie : elle se dissout */
-        loser->active=false; loser->phase=FA_IDLE; loser->dest=-1; loser->next=-1;
-    } else {                                             /* battue : elle stoppe, lèche ses plaies */
-        loser->phase=FA_IDLE; loser->dest=-1; loser->next=-1;
+    return terrainA;
+}
+/* le SCORE de guerre encaisse (orientation : l'attaquant porte le cb). */
+static void bt_score(DiploState *dp, int win, int lose, float pts){
+    if (!dp) return;
+    if (diplo_war_goal(dp,win,lose)!=CB_NONE)
+        dp->battle_score[win][lose] = fminf(50.f, dp->battle_score[win][lose]+pts);
+    else if (diplo_war_goal(dp,lose,win)!=CB_NONE)
+        dp->battle_score[lose][win] = fmaxf(-100.f, dp->battle_score[lose][win]-pts);
+}
+static void bt_end(Campaign *c, FieldBattle *bt){
+    int ids[4]={bt->a,bt->b,bt->helpA,bt->helpB};
+    for (int k=0;k<4;k++){
+        if (ids[k]<0) continue;
+        FieldArmy *A=&c->army[ids[k]];
+        if (A->phase==FA_BATTLE) A->phase=FA_IDLE;
+    }
+    bt->active=false;
+}
+/* la DÉROUTE : la poursuite fauche (posture, moral restant, terrain de fuite) ; le
+ * vaincu fuit BRISÉ vers sa capitale ; le score encaisse le grand swing. */
+static void bt_rout(Campaign *c, const World *w, const WorldEconomy *e, DiploState *dp,
+                    FieldBattle *bt, int loser_side /* 0=A 1=B */){
+    int ia=bt->a, ib=bt->b;
+    FieldArmy *L=&c->army[loser_side?ib:ia], *V=&c->army[loser_side?ia:ib];
+    float vfrac=(loser_side? bt->resA/(bt->resA0+1.f) : bt->resB/(bt->resB0+1.f));
+    float P=0.18f + ((V->posture==FA_AGRESSIVE)?0.12f:(V->posture==FA_PRUDENTE)?-0.08f:0.f)
+          + 0.10f*vfrac;
+    if (terrain_combat_bonus(c->reg_biome[bt->loc])>1.10f) P-=0.10f;   /* la montagne couvre la fuite */
+    P=fminf(0.45f,fmaxf(0.05f,P));
+    long lp=force_units(&L->force);
+    long pursued=kill_packets(&L->force,(long)((float)lp*P+0.5f));
+    c->dead_pursuit += pursued*100;                                    /* la curée : l'essentiel des morts */
+    c->n_routs++;
+    bt_score(dp, V->owner, L->owner, 6.f+fminf(12.f,(float)pursued*0.6f));
+    L->broken_days=BT_BRISEE_J;
+    L->phase=FA_IDLE; L->dest=-1; L->next=-1;
+    { int cp=(L->owner>=0&&L->owner<w->n_countries)?w->country[L->owner].capital_prov:-1;
+      int cr=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+      if (cr>=0 && cr!=L->loc){
+          int hop=next_hop(c,e,L->loc,cr);
+          if (hop>=0){ L->dest=cr; L->next=hop; L->phase=FA_MARCH;
+                       L->leg_days=army_step_days(&L->force,c->reg_biome[hop],c->reg_height[hop],false,false)*0.8f;
+                       L->days_left=L->leg_days; }
+      } }
+    if (force_units(&L->force)<=0){ L->active=false; L->phase=FA_IDLE; }
+    V->phase=FA_IDLE;                                  /* le vainqueur reprend sa route */
+    if (V->dest>=0 && V->dest!=V->loc){
+        int hop=next_hop(c,e,V->loc,V->dest);
+        if (hop>=0){ V->next=hop; V->phase=FA_MARCH;
+                     V->leg_days=army_step_days(&V->force,c->reg_biome[hop],c->reg_height[hop],false,false);
+                     V->days_left=V->leg_days; }
+    }
+}
+/* MARCHE AU CANON : un allié/suzerain/vassal ADJACENT et dispo rejoint le camp. */
+static void bt_reinforce(Campaign *c, const WorldEconomy *e, const DiploState *dp, FieldBattle *bt){
+    for (int side=0; side<2; side++){
+        int *slot = side? &bt->helpB : &bt->helpA;
+        if (*slot>=0) continue;
+        int own = side? c->army[bt->b].owner : c->army[bt->a].owner;
+        for (int k=0;k<SCPS_MAX_COUNTRY;k++){
+            FieldArmy *H=&c->army[k];
+            if (!H->active || H->broken_days>0 || H->phase==FA_BATTLE) continue;
+            if (H->owner==own) continue;
+            bool lie = (diplo_status(dp,H->owner,own)==DIPLO_ALLIED)
+                    || (diplo_suzerain(dp,H->owner)==own) || (diplo_suzerain(dp,own)==H->owner);
+            if (!lie) continue;
+            if (H->loc!=bt->loc && !(H->loc>=0 && bt->loc>=0 && e->adj[H->loc][bt->loc])) continue;
+            float add=side_reserve(&H->force);            /* ses paquets s'ajoutent au jour d'arrivée */
+            if (side){ bt->resB+=add; bt->resB0+=add; } else { bt->resA+=add; bt->resA0+=add; }
+            *slot=k; H->phase=FA_BATTLE; H->loc=bt->loc; H->dest=-1; H->next=-1;
+            c->n_reinforce++;
+            break;
+        }
+    }
+}
+/* UN JOUR de bataille : choc (jets, pertes, moral) ou accalmie (récup, décrochage). */
+static void bt_day(Campaign *c, const World *w, const WorldEconomy *e, DiploState *dp,
+                   FieldBattle *bt, uint32_t *rng){
+    FieldArmy *A=&c->army[bt->a], *B=&c->army[bt->b];
+    if (!A->active||!B->active){ bt_end(c,bt); return; }
+    if (diplo_status(dp,A->owner,B->owner)!=DIPLO_WAR){ bt_end(c,bt); return; }   /* la paix a éclaté */
+    bt->days++; c->battle_days++;
+    int ph=bt->cycle % (BT_CHOC_J+BT_ACCALMIE_J);
+    if (ph<BT_CHOC_J){
+        bt->chocs++;
+        float tA=bt_terrainA(c,e,bt->loc,A->owner,B->owner);
+        float pA=side_power(&A->force)*tA *((A->posture==FA_AGRESSIVE)?1.10f:(A->posture==FA_PRUDENTE)?0.92f:1.f);
+        float pB=side_power(&B->force)/tA *((B->posture==FA_AGRESSIVE)?1.10f:(B->posture==FA_PRUDENTE)?0.92f:1.f);
+        pA*=0.85f+0.30f*xs01(rng); pB*=0.85f+0.30f*xs01(rng);
+        float tot=pA+pB+1e-3f;
+        bt->resB -= bt->resB0*BT_DMG_K*(2.f*pA/tot);
+        bt->resA -= bt->resA0*BT_DMG_K*(2.f*pB/tot);
+        bt->lossB += (float)force_units(&B->force)*BT_CHOC_MORTS*(2.f*pA/tot);
+        bt->lossA += (float)force_units(&A->force)*BT_CHOC_MORTS*(2.f*pB/tot);
+        long mB=0,mA=0;
+        if (bt->lossB>=1.f){ mB=kill_packets(&B->force,(long)bt->lossB); bt->lossB-=(float)mB; }
+        if (bt->lossA>=1.f){ mA=kill_packets(&A->force,(long)bt->lossA); bt->lossA-=(float)mA; }
+        c->dead_choc += (mA+mB)*100;
+        bt_score(dp,(pA>=pB)?A->owner:B->owner,(pA>=pB)?B->owner:A->owner,0.35f);  /* le jour gagné pèse un peu */
+        if (bt->resA<=BT_RUPTURE*bt->resA0){ bt_rout(c,w,e,dp,bt,0); bt_end(c,bt); return; }
+        if (bt->resB<=BT_RUPTURE*bt->resB0){ bt_rout(c,w,e,dp,bt,1); bt_end(c,bt); return; }
+    } else {
+        float rA=BT_RECUP + ((e->region[bt->loc].owner==A->owner)?0.007f:0.f);
+        float rB=BT_RECUP + ((e->region[bt->loc].owner==B->owner)?0.007f:0.f);
+        bt->resA=fminf(bt->resA0, bt->resA+bt->resA0*rA);
+        bt->resB=fminf(bt->resB0, bt->resB+bt->resB0*rB);
+        if (ph==BT_CHOC_J){                            /* DÉCROCHER : en ordre, poursuite réduite */
+            float fA=bt->resA/(bt->resA0+1.f), fB=bt->resB/(bt->resB0+1.f);
+            float sA=(A->posture==FA_PRUDENTE)?0.50f:0.38f, sB=(B->posture==FA_PRUDENTE)?0.50f:0.38f;
+            int who=(fA<sA && fA<fB-0.08f)?0:(fB<sB && fB<fA-0.08f)?1:-1;
+            if (who>=0){
+                FieldArmy *L=&c->army[who?bt->b:bt->a], *V=&c->army[who?bt->a:bt->b];
+                long lp=force_units(&L->force);
+                long pursued=kill_packets(&L->force,(long)((float)lp*0.08f+0.5f));
+                c->dead_pursuit+=pursued*100; c->n_disengage++;
+                bt_score(dp,V->owner,L->owner,2.f);
+                L->phase=FA_IDLE; L->dest=-1; L->next=-1; L->broken_days=10;
+                bt_end(c,bt); return;
+            }
+        }
+    }
+    if (bt->days>=BT_MAX_JOURS){                       /* le délitement : nul sanglant */
+        c->n_stalemate++;
+        int up=(bt->resA/(bt->resA0+1.f)>=bt->resB/(bt->resB0+1.f))?1:0;
+        bt_score(dp, up?A->owner:B->owner, up?B->owner:A->owner, 2.f);
+        A->broken_days=15; B->broken_days=15;
+        bt_end(c,bt); return;
+    }
+    bt->cycle++;
+}
+static void bt_engage(Campaign *c, int i, int j, int loc){
+    for (int k=0;k<CAMPAIGN_MAX_BATTLES;k++){
+        FieldBattle *bt=&c->battle[k];
+        if (bt->active) continue;
+        memset(bt,0,sizeof *bt);
+        bt->active=true; bt->a=i; bt->b=j; bt->helpA=-1; bt->helpB=-1; bt->loc=loc;
+        bt->resA=bt->resA0=side_reserve(&c->army[i].force);
+        bt->resB=bt->resB0=side_reserve(&c->army[j].force);
+        c->army[i].phase=FA_BATTLE; c->army[j].phase=FA_BATTLE;
+        c->army[i].battles++; c->army[j].battles++;
+        c->n_battles++;
+        return;
     }
 }
 
 /* ---- Le tick ---------------------------------------------------------- */
 void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
-                   const DiploState *dp, uint32_t *rng, float dt_days){
-    (void)w;
+                   DiploState *dp, uint32_t *rng, float dt_days){
     if (dt_days<=0.f) return;
 
     /* 1. batailles : paires hostiles (en guerre) partageant une région. */
@@ -197,14 +378,27 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
             if (c->army[i].loc != c->army[j].loc) continue;
             if (c->army[i].owner == c->army[j].owner) continue;
             if (diplo_status(dp, c->army[i].owner, c->army[j].owner)!=DIPLO_WAR) continue;
-            field_battle(c, e, c->army[i].loc, &c->army[i], &c->army[j], rng);
+            if (c->army[i].phase==FA_BATTLE || c->army[j].phase==FA_BATTLE) continue;   /* déjà accrochées */
+            if (c->army[i].broken_days>0 || c->army[j].broken_days>0) continue;          /* une brisée FUIT, ne s'accroche pas */
+            bt_engage(c, i, j, c->army[i].loc);
         }
+    }
+    /* 1b. les BATAILLES vivent leurs jours : choc · accalmie · déroute · poursuite —
+     * et le renfort allié adjacent MARCHE AU CANON. */
+    { int nd=(int)dt_days; if (nd<1) nd=1;
+      for (int d0=0; d0<nd; d0++){
+          for (int k=0;k<CAMPAIGN_MAX_BATTLES;k++)
+              if (c->battle[k].active){ bt_reinforce(c,e,dp,&c->battle[k]); bt_day(c,w,e,dp,&c->battle[k],rng); }
+      }
+      for (int i=0;i<SCPS_MAX_COUNTRY;i++)
+          if (c->army[i].broken_days>0){ c->army[i].broken_days-= nd; if (c->army[i].broken_days<0) c->army[i].broken_days=0; }
     }
 
     /* 2. avancement : on consomme dt_days à travers les étapes ET le siège. */
     for (int i=0;i<SCPS_MAX_COUNTRY;i++){
         FieldArmy *a=&c->army[i];
         if (!a->active) continue;
+        if (a->phase==FA_BATTLE) continue;            /* ÉPINGLÉE : le champ la tient */
         float t=dt_days; int guard=0;
         while (t>0.f && a->active && ++guard<100000){
             if (a->phase==FA_MARCH){
@@ -264,6 +458,7 @@ const char *campaign_phase_name(FieldPhase ph){
         case FA_IDLE:  return "Au repos";
         case FA_MARCH: return "En marche";
         case FA_SIEGE: return "En siège";
+        case FA_BATTLE:return "En mêlée";
         default:       return "?";
     }
 }
