@@ -42,6 +42,7 @@
 #include "scps_campaign.h"  /* … et MARCHENT : campagne sur la carte (marche/siège/bataille) */
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
 #include "scps_navy.h"     /* la flotte (mer §5) : coques, chantier, entretien, outre-mer */
+#include "scps_lang.h"     /* la table de chaînes : tout mot face-joueur vient des tables */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 /* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
@@ -2364,18 +2365,6 @@ static void shhit_reset(void){ g_nshhits=0; }
 static void shhit_add(SDL_Rect r,int k,int a){ if(g_nshhits<80){ g_shhits[g_nshhits].r=r; g_shhits[g_nshhits].kind=k; g_shhits[g_nshhits].a=a; g_nshhits++; } }
 
 /* ── LE TUTORIEL — texte embarqué tel quel (brief §7), pages courtes ── */
-static const char *TUTO_TITLES[7]={
-    "1 · Ce monde se lit.","2 · Le temps coule en jours.","3 · Ton empire.",
-    "4 · Décider coûte.","5 · Les autres.","6 · Le savoir voyage.","7 · La Brèche." };
-static const char *TUTO_PAGES[7]={
-    "Ici, pas de pourcentages cachés : l'état des choses se dit en MOTS.\nUne province est Unie ou Fracturée, un peuple Loyal ou Frondeur,\nun marché Sain ou En pénurie. Survole : tout se définit en bas d'écran.",
-    "En haut à droite : la date, l'âge du monde, la vitesse.\nESPACE met en pause — et en pause, tu peux tout consulter,\ntout ordonner. Rien ne presse jamais que toi.",
-    "En haut : ton or, tes vivres, tes matériaux, et la santé de ta couronne —\nStabilité, Légitimité, Cohésion, Prospérité. Clique une province pour la voir\nde près ; ouvre la BARRE DE GAUCHE pour l'empire entier :\nÉconomie, Démographie, Stocks, Armée, Filtres.",
-    "Tout ordre — bâtir, exploiter, déplacer, lever — entre dans une FILE\net prend des JOURS. Le prix s'affiche AVANT. Certains leviers rapportent\nvite et coûtent longtemps : mater une révolte tait la rue, pas la colère.",
-    "Tes voisins vivent : ils commercent, s'allient, jalousent.\nOn peut les lier — l'allié, le protégé, le serf, la cité marchande —\net chaque lien a son prix. Un embargo est une arme ; une guerre se gagne\nsur le champ, au MORAL, pas au nombre.",
-    "Ton arbre a un cœur et un cercle : le cœur se recherche,\nle CERCLE se gagne par le contact — commerce, frontières, peuples gouvernés.\nUne culture qu'on assimile est un savoir qu'on tarit.\nChoisis ce que tu fonds et ce que tu gardes distinct.",
-    "Certaines voies sont plus que puissantes — elles sont AVIDES.\nChaque pacte sombre, chaque forge interdite, chaque culte imposé CHARGE le monde.\nLa Brèche n'interdit rien : elle attend. Ton empire tombera — ils tombent tous.\nLa seule question est COMMENT, et ce que tu laisseras debout." };
-
 static const char *SH_ETHOS_N[6]={"Dominateur","Honneur","Mercantile","Bureaucrate","Ordre","Pacifiste"};
 static const char *SH_ETHOS_L[6]={
     "la conquête est un droit","la parole vaut le sang","tout s'achète, surtout la paix",
@@ -2703,18 +2692,20 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
     if (g_gs==GS_MENU){
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x07,0x0b,0x12,0xb8});   /* le monde respire derrière */
         draw_text(ren,g_font_big,win_w/2-44,win_h/4,COL_COPPER,"S C P S");
-        draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,"un monde qui ne vous attend pas — et qui se lit");
+        draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,tr(STR_MENU_SOUS_TITRE));
         int bx=win_w/2-90, by=win_h/4+70;
-        sh_button(ren,bx,by,180,"Jouer",false,false,SH_MENU_ITEM,0); by+=34;
+        sh_button(ren,bx,by,180,tr(STR_MENU_JOUER),false,false,SH_MENU_ITEM,0); by+=34;
         { SaveHeader hh; bool any=false;
           for (int sl=1;sl<=3 && !any;sl++) any=save_slot_info(sl,&hh);
-          sh_button(ren,bx,by,180,"Charger",false,!any,SH_MENU_ITEM,1); by+=34; }
-        sh_button(ren,bx,by,180,"Tutoriel",false,false,SH_MENU_ITEM,2); by+=34;
-        sh_button(ren,bx,by,180,"Quitter",false,false,SH_MENU_ITEM,3);
+          sh_button(ren,bx,by,180,tr(STR_MENU_CHARGER),false,!any,SH_MENU_ITEM,1); by+=34; }
+        sh_button(ren,bx,by,180,tr(STR_MENU_TUTORIEL),false,false,SH_MENU_ITEM,2); by+=34;
+        sh_button(ren,bx,by,180,tr(STR_MENU_QUITTER),false,false,SH_MENU_ITEM,3); by+=34;
+        { char lng[48]; tr_fmt(lng,sizeof lng,STR_MENU_LANGUE,lang_name(lang_get()));
+          sh_button(ren,bx,by,180,lng,false,false,SH_MENU_ITEM,4); }   /* Options : FR/EN à chaud */
     }
     else if (g_gs==GS_SETUP){
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x0a,0x0e,0x16,0xf2});
-        draw_text(ren,g_font_big,40,24,COL_COPPER,"FORGER UN MONDE");
+        draw_text(ren,g_font_big,40,24,COL_COPPER,tr(STR_SETUP_TITRE));
         /* colonne MONDE */
         int x=60,y=70; char v[24];
         draw_text(ren,g_font,x,y,COL_COPPER,"Le monde"); y+=24;
@@ -2794,24 +2785,25 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
         int bx=win_w/2-100, by=win_h/2-80;
         panel_bg(ren,bx-20,by-20,240,228);
-        draw_text(ren,g_font_big,bx,by-6,COL_COPPER,"PAUSE"); by+=30;
-        sh_button(ren,bx,by,200,"Reprendre",false,false,SH_PM_ITEM,0); by+=32;
-        sh_button(ren,bx,by,200,"Sauver",false,false,SH_PM_ITEM,4); by+=32;
-        sh_button(ren,bx,by,200,"Tutoriel",false,false,SH_PM_ITEM,1); by+=32;
-        sh_button(ren,bx,by,200,"Menu principal",false,false,SH_PM_ITEM,2); by+=32;
-        sh_button(ren,bx,by,200,"Quitter",false,false,SH_PM_ITEM,3);
+        draw_text(ren,g_font_big,bx,by-6,COL_COPPER,tr(STR_PAUSE_TITRE)); by+=30;
+        sh_button(ren,bx,by,200,tr(STR_PM_REPRENDRE),false,false,SH_PM_ITEM,0); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_SAUVER),false,false,SH_PM_ITEM,4); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_TUTORIEL),false,false,SH_PM_ITEM,1); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_MENU),false,false,SH_PM_ITEM,2); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_QUITTER),false,false,SH_PM_ITEM,3);
     }
     if (g_save_pick||g_load_pick){
         int pw=460, px=(win_w-pw)/2, py=win_h/2-90;
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
         panel_bg(ren,px,py,pw,180);
-        draw_text(ren,g_font_big,px+20,py+12,COL_COPPER, g_save_pick?"SAUVER — choisir un slot":"CHARGER — choisir un slot");
+        draw_text(ren,g_font_big,px+20,py+12,COL_COPPER, g_save_pick?tr(STR_PICK_SAUVER):tr(STR_PICK_CHARGER));
         for (int sl=1;sl<=3;sl++){
             SaveHeader hh; bool has=save_slot_info(sl,&hh);
             char lab[140];
-            if (has && hh.version==SAVE_VERSION) snprintf(lab,sizeof lab,"Slot %d — %s",sl,hh.line);
-            else if (has)                        snprintf(lab,sizeof lab,"Slot %d — sauvegarde d'une ère antérieure",sl);
-            else                                 snprintf(lab,sizeof lab,"Slot %d — vide",sl);
+            { char num[16]; snprintf(num,sizeof num,"%d",sl);
+              if (has && hh.version==SAVE_VERSION) tr_fmt(lab,sizeof lab,STR_SLOT_LINE,num,hh.line);
+              else if (has)                        tr_fmt(lab,sizeof lab,STR_SLOT_ANCIEN,num);
+              else                                 tr_fmt(lab,sizeof lab,STR_SLOT_VIDE,num); }
             bool grise = g_load_pick && (!has || hh.version!=SAVE_VERSION);
             sh_button(ren,px+20,py+46+(sl-1)*34,pw-40,lab,false,grise,
                       g_save_pick?SH_SLOT_SAVE:SH_SLOT_LOAD, sl);
@@ -2830,16 +2822,17 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
         int pw=620, ph=240, px=(win_w-pw)/2, py=(win_h-ph)/2;
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x88});
         panel_bg(ren,px,py,pw,ph);
-        draw_text(ren,g_font_big,px+20,py+14,COL_COPPER,TUTO_TITLES[g_tuto_page]);
-        { const char *t=TUTO_PAGES[g_tuto_page]; int ly=py+48; char line[200]; int li=0;
+        draw_text(ren,g_font_big,px+20,py+14,COL_COPPER,tr_band(STR_TUTO_TITLE_0,g_tuto_page,7));
+        { const char *t=tr_band(STR_TUTO_PAGE_0,g_tuto_page,7); int ly=py+48; char line[200]; int li=0;
           for (const char *c2=t;;c2++){
               if (*c2=='\n'||*c2==0){ line[li]=0; draw_text(ren,g_font,px+20,ly,COL_PARCH,line); ly+=20; li=0; if(!*c2)break; }
               else if (li<198) line[li++]=*c2;
           } }
-        char pg[24]; snprintf(pg,24,"%d / 7",g_tuto_page+1);
+        char pg[24]; { char num[16]; snprintf(num,sizeof num,"%d",g_tuto_page+1);
+                       tr_fmt(pg,sizeof pg,STR_TUTO_PAGEFMT,num); }
         draw_text(ren,g_font_small,px+pw/2-12,py+ph-26,COL_DIM,pg);
-        if (g_tuto_page>0) sh_button(ren,px+16,py+ph-34,90,"◀ préc.",false,false,SH_TUTO_PREV,0);
-        if (g_tuto_page<6) sh_button(ren,px+pw-106,py+ph-34,90,"suiv. ▶",false,false,SH_TUTO_NEXT,0);
+        if (g_tuto_page>0) sh_button(ren,px+16,py+ph-34,90,tr(STR_TUTO_PREC),false,false,SH_TUTO_PREV,0);
+        if (g_tuto_page<6) sh_button(ren,px+pw-106,py+ph-34,90,tr(STR_TUTO_SUIV),false,false,SH_TUTO_NEXT,0);
         draw_text(ren,g_font_small,px+16,py+ph-12,COL_DIM,"ESC ferme");
     }
     if (g_quit_confirm){
@@ -3166,6 +3159,7 @@ int main(int argc, char **argv) {
                                     else if (sh2->a==1){ g_load_pick=1; }
                                     else if (sh2->a==2){ g_show_tuto=true; g_tuto_page=0; }
                                     else if (sh2->a==3) g_quit_confirm=true;
+                                    else if (sh2->a==4) lang_set(lang_get()==LANG_FR?LANG_EN:LANG_FR);
                                     break;
                                 case SH_SLIDER_DN: sh_apply_slider(&g_stage,sh2->a,-1); break;
                                 case SH_SLIDER_UP: sh_apply_slider(&g_stage,sh2->a,+1); break;

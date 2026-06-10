@@ -49,7 +49,7 @@ core_demo: $(CORE_DEMO_OBJS)
 
 # ---- Membrane diégétique (flottants SCPS → mots) — banc d'essai headless --
 # Prouve le test décisif « Tenue · Contrainte » et la couverture du lexique.
-READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o \
+READOUT_DEMO_OBJS := $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                      $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_culture.o \
                      $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                      $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_readout_demo.o
@@ -68,7 +68,7 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_econ.o \
              $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_tech.o \
              $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-             $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+             $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
              $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_diplo.o \
              $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_statecraft.o \
              $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_scps_events.o \
@@ -171,7 +171,7 @@ AGENCY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demography.o
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_agency.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_agency.o \
                     $(OBJDIR)/scps_agency_demo.o
 agency_demo: $(AGENCY_DEMO_OBJS)
 	$(CC) $(AGENCY_DEMO_OBJS) -o $@ -lm
@@ -182,7 +182,7 @@ DIPLO_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_diplo_demo.o
 diplo_demo: $(DIPLO_DEMO_OBJS)
 	$(CC) $(DIPLO_DEMO_OBJS) -o $@ -lm
@@ -192,7 +192,7 @@ FAITH_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_faith.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_faith.o \
                    $(OBJDIR)/scps_faith_demo.o
 faith_demo: $(FAITH_DEMO_OBJS)
 	$(CC) $(FAITH_DEMO_OBJS) -o $@ -lm
@@ -216,7 +216,7 @@ INTERTRADE_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                    $(OBJDIR)/scps_intertrade_demo.o
 intertrade_demo: $(INTERTRADE_DEMO_OBJS)
@@ -227,7 +227,7 @@ WARHOST_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_labor.o \
                    $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_warhost_demo.o
 warhost_demo: $(WARHOST_DEMO_OBJS)
@@ -241,7 +241,7 @@ CAMPAIGN_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                    $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                    $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_diplo.o \
+                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_diplo.o \
                    $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_labor.o \
                    $(OBJDIR)/scps_scps_campaign.o $(OBJDIR)/scps_campaign_demo.o
 campaign_demo: $(CAMPAIGN_DEMO_OBJS)
@@ -253,14 +253,14 @@ ROUTES_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
                     $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_species.o \
-                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_routes.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_routes.o \
                     $(OBJDIR)/scps_routes_demo.o
 routes_demo: $(ROUTES_DEMO_OBJS)
 	$(CC) $(ROUTES_DEMO_OBJS) -o $@ -lm
 
 # ---- Boucle de décision IA : un lecteur de coordonnées qui choisit des leviers (§13.1)
 # Aucune dépendance membrane (l'IA lit les coordonnées du moteur, pas les mots).
-AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
+AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_econ.o $(OBJDIR)/scps_scps_labor.o \
                 $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                 $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                 $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
@@ -274,7 +274,7 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                   $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                   $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                  $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_species.o \
+                  $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_species.o \
                   $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                   $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
                   $(OBJDIR)/scps_scps_events.o $(OBJDIR)/scps_scps_demography.o \
@@ -302,7 +302,7 @@ STATECRAFT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $
                         $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                         $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                         $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                        $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
+                        $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                         $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                         $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_statecraft_demo.o
 statecraft_demo: $(STATECRAFT_DEMO_OBJS)
@@ -315,7 +315,7 @@ EVENTS_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o $(OBJ
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                     $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_events.o \
                     $(OBJDIR)/scps_events_demo.o
@@ -328,7 +328,7 @@ STRUCTURAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demograp
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_intertrade.o \
                     $(OBJDIR)/scps_scps_statecraft.o $(OBJDIR)/scps_scps_agency.o \
                     $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_events.o \
@@ -363,7 +363,7 @@ DEMOGRAPHY_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o \
                     $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                     $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
-                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_modifier.o \
+                    $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o $(OBJDIR)/scps_scps_modifier.o \
                     $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_demography_demo.o
 demography_demo: $(DEMOGRAPHY_DEMO_OBJS)
 	$(CC) $(DEMOGRAPHY_DEMO_OBJS) -o $@ -lm
@@ -373,7 +373,7 @@ DEMOGRAPHY_INTEG_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o 
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                     $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o \
                     $(OBJDIR)/scps_demography_integ_demo.o
 demography_integ_demo: $(DEMOGRAPHY_INTEG_OBJS)
@@ -386,7 +386,7 @@ REVOLT_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_modifier.o \
                     $(OBJDIR)/scps_scps_demography.o $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_factions.o \
                     $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_revolt_demo.o
@@ -400,7 +400,7 @@ SOCIAL_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_demography.o
                     $(OBJDIR)/scps_scps_trade.o $(OBJDIR)/scps_scps_culture.o \
                     $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_tech.o \
                     $(OBJDIR)/scps_scps_core.o $(OBJDIR)/scps_scps_legitimacy.o \
-                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o \
+                    $(OBJDIR)/scps_scps_prosperity.o $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_readout.o $(OBJDIR)/scps_scps_lang.o \
                     $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_modifier.o \
                     $(OBJDIR)/scps_scps_agency.o $(OBJDIR)/scps_social_demo.o
 social_demo: $(SOCIAL_DEMO_OBJS)
@@ -418,3 +418,19 @@ clean:
 # Inclusion des fichiers de dépendances générés (-MMD). Le tiret ignore leur
 # absence au premier build.
 -include $(wildcard $(OBJDIR)/*.d)
+
+# ---- lang-check : le CLIQUET de localisation (CLAUDE.md §langue) ----------
+# Compte les littéraux face-joueur passés aux primitives d'affichage ; échoue
+# si le compte MONTE au-dessus de la base (toute chaîne nouvelle naît en
+# STR_*). Le reflux est le bienvenu : abaisser scps/lang_baseline.txt.
+LANG_FACE := scps/viewer.c scps/scps_readout.c
+lang-check:
+	@n=$$(grep -hoE '(draw_text|sh_button|sh_slider|zone_add)\([^;]*"[A-Za-z]' $(LANG_FACE) | wc -l); \
+	b=$$(cat scps/lang_baseline.txt); \
+	if [ $$n -gt $$b ]; then \
+	  echo "lang-check ÉCHEC : $$n littéraux face-joueur (base $$b) — toute chaîne NOUVELLE doit naître en STR_* (cf. CLAUDE.md)"; exit 1; \
+	else \
+	  echo "lang-check OK : $$n littéraux face-joueur (base $$b)"; \
+	  if [ $$n -lt $$b ]; then echo "  (reflux : abaisser scps/lang_baseline.txt à $$n)"; fi; \
+	fi
+.PHONY: lang-check
