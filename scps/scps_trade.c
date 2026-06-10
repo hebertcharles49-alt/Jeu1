@@ -189,6 +189,7 @@ void trade_tick(WorldEconomy *e, TradeNetwork *net) {
     for (int li=0; li<net->n_links; li++) {
         TradeLink *lk=&net->link[li];
         int ra=lk->ra, rb=lk->rb;
+        if (ra<0 || ra>=e->n_regions || rb<0 || rb>=e->n_regions) continue;  /* lien corrompu : on saute */
         RegionEconomy *ea=&e->region[ra];
         RegionEconomy *eb=&e->region[rb];
 

@@ -182,7 +182,7 @@ static void mission_complete(Statecraft *sc, World *w, WorldEconomy *econ,
             }
             break;
         case DIP_ROUTE:
-            if (rn) routes_order(rn, econ, ag->home_region, ag->target, false);
+            if (rn) routes_order(rn, NULL, econ, ag->home_region, ag->target, false);
             break;
         case DIP_INTEGRATE:
             /* Accélère la montée de Légitimité : l'intégration fait un bond

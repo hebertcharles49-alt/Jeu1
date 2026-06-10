@@ -29,8 +29,12 @@
 #include "scps_army.h"
 #include "scps_diplo.h"
 
-/* Phase d'une armée de campagne. */
-typedef enum { FA_IDLE = 0, FA_MARCH, FA_SIEGE, FA_BATTLE, FA_PHASE_COUNT } FieldPhase;
+/* Phase d'une armée de campagne. L'EMBARQUEMENT (mer §6) : une armée à un port
+ * + capacité de flotte → embarque (jours), navigue (jours ∝ coût directionnel
+ * du trajet — en mer elle est intouchable ET aveugle), débarque (plus lent et
+ * exposé hors port). */
+typedef enum { FA_IDLE = 0, FA_MARCH, FA_SIEGE, FA_BATTLE,
+               FA_EMBARK, FA_SAIL, FA_LAND, FA_PHASE_COUNT } FieldPhase;
 
 /* Une armée expéditionnaire posée sur la carte. */
 typedef struct {
@@ -49,6 +53,11 @@ typedef struct {
     int        battles;     /* batailles livrées */
     int        posture;     /* §5 sidebar : 0 prudente · 1 standard · 2 agressive (module marche/siège) */
     int        broken_days; /* armée BRISÉE (déroute) : inapte au combat tant que > 0 (se reconstitue) */
+    /* LA TRAVERSÉE (mer §6) */
+    int        sail_transports;  /* transports réservés (rendus au débarquement) */
+    float      sail_days;        /* jours de mer du trajet ordonné (volta comprise) */
+    bool       land_at_port;     /* débarque à un port (sinon : plus lent, petit malus) */
+    bool       intercept_done;   /* une CHASSE par traversée (coques §3) */
 } FieldArmy;
 
 /* ── LA BATAILLE DANS LE TEMPS (brief bataille) — un ÉTAT, plus un événement ──
@@ -69,7 +78,7 @@ typedef struct {
 } FieldBattle;
 #define CAMPAIGN_MAX_BATTLES 8
 
-typedef struct {
+typedef struct Campaign {
     FieldArmy army[SCPS_MAX_COUNTRY];   /* une force expéditionnaire par pays */
     int       n_regions;
     /* table de terrain par région (bâtie à l'init depuis le World) */
@@ -81,6 +90,8 @@ typedef struct {
     int   n_battles, n_routs, n_disengage, n_reinforce, n_stalemate;
     long  dead_choc, dead_pursuit;        /* LA vérif : la poursuite doit DOMINER */
     long  battle_days;                    /* Σ durées (jours) */
+    int   n_sails;                        /* mer §10 : traversées ordonnées */
+    float sail_days_sum;                  /* Σ jours de mer des traversées */
 } Campaign;
 
 /* Bâtit la table de terrain par région et remet les armées à zéro. */
@@ -94,6 +105,16 @@ void campaign_init(Campaign *c, const World *w, const WorldEconomy *econ);
 bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
                     int from_region, int target_region, const ArmyState *src_force);
 
+/* L'EMBARQUEMENT (mer §6) : ordonne la traversée depuis `from_region` (un port
+ * RÉEL du pays) vers `target_region` (région CÔTIÈRE). Exige assez de capacité
+ * d'emport libre (10 paquets/transport) ; les transports sont RÉSERVÉS jusqu'au
+ * débarquement. `navy` mutable (réservation). false si pas de port / pas de
+ * flotte / mer infranchissable / force vide. */
+struct NavyState;
+bool campaign_order_sea(Campaign *c, const World *w, const WorldEconomy *econ,
+                        struct NavyState *navy, int owner,
+                        int from_region, int target_region, const ArmyState *src_force);
+
 /* Avance toutes les armées de `dt_days` jours : la marche (§1) étape par étape,
  * le siège à l'arrivée, la bataille (§2/§3) quand deux forces hostiles (en
  * guerre, lu de `dp`) partagent une région. NE MODIFIE PAS econ (lecture seule) :
@@ -101,6 +122,9 @@ bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
  * graine xorshift avancée en place. */
 void campaign_tick(Campaign *c, const World *w, const WorldEconomy *econ,
                    DiploState *dp, uint32_t *rng, float dt_days);   /* dp MUTABLE : les batailles nourrissent le bras-de-fer (§6) */
+/* Rend les transports d'une armée débarquée/morte à la flotte (appelé par le
+ * harnais APRÈS campaign_tick : campaign ne LIE pas la marine — il marque). */
+void campaign_release_transports(Campaign *c, struct NavyState *navy);
 
 /* ---- Lecteurs (membrane : tangibles) ---------------------------------- */
 bool        campaign_active       (const Campaign *c, int owner);

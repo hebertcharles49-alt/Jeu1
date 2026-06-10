@@ -41,8 +41,25 @@
 #include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
 #include "scps_campaign.h"  /* … et MARCHENT : campagne sur la carte (marche/siège/bataille) */
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
+#include "scps_navy.h"     /* la flotte (mer §5) : coques, chantier, entretien, outre-mer */
+#include "scps_lang.h"     /* la table de chaînes : tout mot face-joueur vient des tables */
+#include "stb_image_write.h"  /* F12 : capture d'écran PNG (vendoré) */
+#include "scps_audio.h"       /* la prise audio (miniaudio) — preuve de vie sur alerte */
+#ifdef SCPS_DEV
+#include "dev_overlay.h"      /* §6 : l'inspecteur de coordonnées brutes (F3) — JAMAIS en release */
+static bool g_dev_overlay = false;
+#endif
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
+/* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
+ * échouait sous Windows : cmd.exe ne connaît pas `mkdir -p`). */
+#ifdef _WIN32
+# include <direct.h>
+# define scps_mkdir(p) _mkdir(p)
+#else
+# include <sys/stat.h>
+# define scps_mkdir(p) mkdir((p), 0755)
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -526,6 +543,7 @@ typedef struct {
     Campaign        *camp;     /* armées de campagne : marche/siège/bataille sur la carte (non-invasif) */
     uint32_t         camp_rng;
     MissionsState   *missions; /* missions décennales (rythme + injection de ressources) */
+    NavyState       *navy;     /* la flotte (mer §5) : coques, chantier, entretien */
     int              prev_dawned; /* dernier âge avéné traité (engagement d'âge §7) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
@@ -558,11 +576,32 @@ static void sim_campaign_year(Sim *s, World *w) {
                 frontier=r; target=sn; break;
             }
         }
-        if (frontier>=0)
+        if (frontier>=0){
             campaign_order(s->camp, s->econ, c, frontier, target, &s->host->army[c]);
+        } else if (c!=s->player){
+            /* pas de frontière TERRESTRE : la guerre passe la mer si un port, des
+             * transports et un chemin existent (mer §6 — contraint par le champ). */
+            int port=navy_best_port(w,s->econ,c);
+            if (port>=0 && navy_transport_packets_free(s->navy,c)>0){
+                int tgt=-1;
+                for (int r2=0;r2<s->econ->n_regions && tgt<0;r2++){
+                    int ob=s->econ->region[r2].owner;
+                    if (ob<0||ob==c||diplo_status(s->dp,c,ob)!=DIPLO_WAR) continue;
+                    if (!s->econ->region[r2].coastal) continue;
+                    tgt=r2;
+                }
+                if (tgt>=0)
+                    campaign_order_sea(s->camp, w, s->econ, s->navy, c, port, tgt, &s->host->army[c]);
+            }
+        }
     }
     campaign_tick(s->camp, w, s->econ, s->dp, &s->camp_rng, 365.f);
+    campaign_release_transports(s->camp, s->navy);   /* les transports rentrent à la rade */
 }
+
+/* État de l'écran (déclaré tôt : sim_day gate l'alerte audio sur GS_PLAYING). */
+typedef enum { GS_MENU=0, GS_SETUP, GS_OPENING, GS_PLAYING } GameState;
+static GameState g_gs = GS_MENU;
 
 static void sim_day(Sim *s, World *w) {
     /* — quotidien — */
@@ -581,11 +620,43 @@ static void sim_day(Sim *s, World *w) {
     }
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
+    navy_tick(s->navy, w, s->econ, 1.f);   /* chantier + entretien : la chaîne navale TIRE */
     /* — mensuel : ÉCONOMIE + réputation diplomatique (O(n²)) + démographie, tous
      * au pas dt=1/12 → même rythme annuel, mais plus fluide qu'un saut yearly — */
     if (s->day % 30 == 29) {
         econ_apply_country_tech(s->econ, s->ts, SCPS_MAX_COUNTRY);  /* §B1 : techs de prod du pays → prod_mult région */
         econ_tick(s->econ, 1.f/12.f);
+        navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
+        navy_course_tick(s->navy, w, s->econ, s->dp, s->rn, &s->camp_rng,
+                         s->player, 30.f);   /* coques : la course (raids - saignee - blocus - verdicts) */
+        navy_interception_tick(s->navy, s->camp, w, s->econ, s->dp, &s->camp_rng);   /* les convois se chassent */
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){   /* IA navale frugale (mer §5) */
+            if (!s->ai_on[c]) continue;
+            int hr=s->ai[c].home_region;
+            if (hr<0||hr>=s->econ->n_regions) continue;
+            RegionEconomy *re=&s->econ->region[hr];
+            if (re->owner!=c) continue;
+            if (re->coastal && re->build.port<=0.f && re->treasury>400.f){
+                agency_build(s->ag, s->econ, hr, EDI_PORT);
+            } else if (navy_best_port(w,s->econ,c)>=0 && s->navy->n[c].build_hull<0){
+                if (s->navy->n[c].hull[HULL_TRANSPORT]<2 && re->treasury>500.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_TRANSPORT);
+                else if (s->navy->n[c].hull[HULL_MERCHANT]<1 && re->treasury>700.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_MERCHANT);
+            }
+            if (s->day%180==29 && navy_region_is_port(w,s->econ,hr)){
+                int mine=0;
+                for (int i=0;i<s->rn->n;i++){
+                    const TradeRoute *t=&s->rn->route[i];
+                    if (t->maritime && (t->ra==hr||t->rb==hr)) mine++;
+                }
+                for (int r2=0;r2<s->econ->n_regions && mine<3;r2++){
+                    if (s->econ->region[r2].owner==c||s->econ->region[r2].owner<0) continue;
+                    if (!navy_region_is_port(w,s->econ,r2)) continue;
+                    if (routes_order(s->rn, w, s->econ, hr, r2, true)){ mine++; break; }
+                }
+            }
+        }
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
         /* — conquête du mois : un peuple passé sous une couronne ÉTRANGÈRE devient
@@ -645,6 +716,7 @@ static void sim_day(Sim *s, World *w) {
                 if (nr>0) faction_age_engage(w, s->econ, c, age);
             }
             s->prev_dawned = s->ev->ages.last_dawned;
+            if (g_gs==GS_PLAYING) audio_alert();    /* §5 preuve de vie : un âge se lève → l'alerte discrète */
         }
     }
     if (++s->day % 365 == 0) s->year++;
@@ -655,7 +727,7 @@ static void sim_day(Sim *s, World *w) {
  * la partie avance par sim_day (plus de snapshot figé). */
 static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
-        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp) return;
+        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp || !s->navy) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, g_player_race);   /* la race CHOISIE ancre le gradient */
@@ -665,6 +737,7 @@ static void sim_rebuild(Sim *s, World *w) {
     statecraft_init(s->sc, w);
     agency_init(s->ag);
     diplo_init(s->dp);
+    diplo_seed_rng(s->dp, w->seed);   /* la fronde tire sa graine du MONDE (sinon même séquence à chaque partie) */
     routes_init(s->rn);
     intertrade_reset();   /* embargos décrétés + flux : RAZ par partie */
     /* RAZ PLEINE PLAGE : n_countries grandit par sécession ; à la RÉGÉNÉRATION (touche R)
@@ -680,6 +753,7 @@ static void sim_rebuild(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);             /* 1 groupe substrat/région (non-régression) */
+    demography_dyn_id_rebase(s->econ);                   /* compteur de drift_id au-dessus de l'existant */
     events_init(s->ev, w, w->seed);
     labor_init(s->labor, w);
     labor_seed_from_world(s->labor, w, s->econ, s->player);
@@ -688,6 +762,7 @@ static void sim_rebuild(Sim *s, World *w) {
     campaign_init(s->camp, w, s->econ);                  /* … qui marcheront sur la carte (terrain + RAZ) */
     s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne propre à la partie */
     missions_init(s->missions);                          /* missions décennales */
+    navy_init(s->navy);                                  /* la flotte : chantiers vides, rades à trouver */
     faction_levers_reset();                              /* §4 : stances de factions à zéro */
     s->prev_dawned=-1;                                   /* §7 : aucun âge encore traité */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
@@ -944,6 +1019,7 @@ enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_REL
        SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
        SBH_MARCH, SBH_MUSTER, SBH_CANCEL,
        SBH_CHIP_CUR,
+       SBH_NAVY_BUILD /* a=HullType */, SBH_SAIL /* a=région-cible */, SBH_NAVY_CONV /* a=1 vers pirate */,
        SBH_LEV_REPRESS, SBH_LEV_ASSIM, SBH_LEV_PURGE, SBH_LEV_EMBARGO,
        SBH_LEV_CONTRAT /* a=SuzContrat, b=pays cible */ };
 typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
@@ -1288,6 +1364,95 @@ static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s
             zone_add((SDL_Rect){x+8,y-2,w-16,15},"Déployer la force mobilisée en ARMÉE DE CAMPAGNE au camp de la capitale — elle marchera sur ordre.");
         }
     }
+    /* ── LA FLOTTE (mer §5) : coques · chantier · rade — et l'embarquement ── */
+    y+=8;
+    { const Navy *nv=&s->navy->n[me];
+      int port=navy_best_port(world, s->econ, me);
+      draw_text(ren,g_font_small,x+10,y,COL_DIM,"Flotte"); y+=15;
+      if (port<0){
+          draw_text(ren,g_font_small,x+12,y,COL_DIM,
+                    s->econ->region[sb_capital_region(s,world)].coastal
+                    ? "aucune rade — bâtir un Port (panneau Bâtir)"
+                    : "pays sans côte — la mer est ailleurs"); y+=17;
+      } else {
+          snprintf(buf[nb],140,"%d combat · %d transport(s) (%d en mer) · %d marchand(s) · %d pirate(s)",
+                   nv->hull[HULL_WAR], nv->hull[HULL_TRANSPORT], nv->at_sea, nv->hull[HULL_MERCHANT], nv->hull[HULL_PIRATE]);
+          draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=17;
+          { float worst=0.f;   /* coques §7 : l'état des routes, en mots */
+            const TradeRoute *asym=NULL; bool asym_ab_down=true;
+            for (int i=0;i<s->rn->n;i++){ const TradeRoute *t=&s->rn->route[i];
+                if (!t->open) continue;
+                bool mine=(s->econ->region[t->ra].owner==me || s->econ->region[t->rb].owner==me);
+                if (!mine) continue;
+                if (t->maritime && t->pirate_press>worst) worst=t->pirate_press;
+                /* commerce asym. §5 : la première route DIRECTIONNELLE se détaille en mots */
+                if (!asym && (t->fluvial || (t->maritime && t->days_ab>0.f && t->days_ba>0.f
+                                             && fabsf(t->days_ab-t->days_ba)>2.f))){
+                    asym=t;
+                    asym_ab_down = t->fluvial ? (t->fluvial==1) : (t->days_ab<t->days_ba);
+                } }
+            if (worst>0.f){
+                snprintf(buf[nb],140,"routes : %s", worst>=90.f?"BLOQUÉES":worst>2.f?"infestées":"harcelées");
+                draw_text(ren,g_font_small,x+12,y,worst>2.f?COL_COPPER:COL_DIM,buf[nb]); nb++; y+=17;
+            }
+            if (asym){
+                int down_end = asym_ab_down ? asym->rb : asym->ra;
+                snprintf(buf[nb],140,"%s rég. %d : en aval — abondant · retour : maigre et précieux",
+                         asym->fluvial?"fleuve vers":"couloir vers", down_end);
+                draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++;
+                zone_add((SDL_Rect){x+8,y-2,w-16,15},"Le coût de transport a un SENS : le vrac (grain, bois, charbon) ne paie que la descente ; seul le précieux (étoffe, orfèvrerie, remèdes, armes) paie la remontée. Le volume suit la facilité — divisé à contre-courant, jamais nul.");
+                y+=17;
+            } }
+          if (nv->hull[HULL_MERCHANT]>0 || nv->hull[HULL_PIRATE]>0){
+              bool top=(nv->hull[HULL_MERCHANT]>0);
+              snprintf(buf[nb],140,"[convertir : %s]  la course %s",
+                       top?"marchand → pirate":"pirate → marchand",
+                       top?"(revenu déniable — la rancune s'armera)":"(désarmer apaise)");
+              draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+              sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_NAVY_CONV, top?1:0, 0);
+              zone_add((SDL_Rect){x+8,y-2,w-16,15},"Conversion AU CHANTIER, peu coûteuse, réversible : c'est sa nature. Le pirate niche en eaux mortes, pille les côtes (1/10), saigne les routes — et désigne son commanditaire s'il est pris.");
+              y+=17;
+          }
+          if (nv->build_hull>=0){
+              snprintf(buf[nb],140,"chantier : %s — %d j", navy_hull_name((HullType)nv->build_hull),(int)nv->build_days);
+              draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++; y+=17;
+          } else {
+              static const HullType BB[3]={HULL_TRANSPORT,HULL_MERCHANT,HULL_WAR};
+              for (int k=0;k<3;k++){
+                  snprintf(buf[nb],140,"[chantier : %s]  %.0f or — fournitures navales + bois%s",
+                           navy_hull_name(BB[k]), navy_build_gold(s->econ,port,BB[k]),
+                           BB[k]==HULL_WAR?" + métal":"");
+                  draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+                  sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_NAVY_BUILD, (int)BB[k], 0);
+                  zone_add((SDL_Rect){x+8,y-2,w-16,15},"Commander une coque au chantier de la rade : la recette s'achète AU MARCHÉ (la Scierie navale a un débouché).");
+                  y+=17;
+              }
+          }
+          /* l'embarquement : armée au port + capacité + province visée côtière */
+          const FieldArmy *fa2=&s->camp->army[me];
+          if (fa2->active && fa2->phase==FA_IDLE && fa2->loc==port
+              && selected>=0 && selected<world->n_provinces){
+              int tr=world->province[selected].region;
+              if (tr>=0 && tr<s->econ->n_regions && tr!=port && s->econ->region[tr].coastal){
+                  float aller=navy_sea_days_regions(world,port,tr);
+                  float retour=navy_sea_days_regions(world,tr,port);
+                  long pk=campaign_units(s->camp,me);
+                  int need=(int)((pk+9)/10);
+                  if (aller>=0.f && navy_transport_packets_free(s->navy,me)>=(int)pk){
+                      snprintf(buf[nb],140,"[embarquer] vers la région %d — %.0f j (retour %.0f j) · %d transport(s)",
+                               tr, aller, retour, need);
+                      draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+                      sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_SAIL, tr, 0);
+                      zone_add((SDL_Rect){x+8,y-2,w-16,15},"Embarquer l'armée : charger (jours), traverser (l'ALLER ne vaut pas le RETOUR — la volta), débarquer (hors port : plus lent, exposé).");
+                      y+=17;
+                  } else if (aller>=0.f){
+                      snprintf(buf[nb],140,"traversée %.0f j — transports insuffisants (%d requis)", aller, need);
+                      draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++; y+=17;
+                  }
+              }
+          }
+      }
+    }
     (void)h;
 }
 
@@ -1509,7 +1674,22 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
             const FieldArmy *fa=&s->camp->army[s->player];
             if (campaign_order(s->camp, s->econ, s->player, fa->loc, hh->a, &fa->force))
                 printf("\n[scps] L'armée marche sur la région %d (itinéraire en jours).\n", hh->a);
+            else if (campaign_order_sea(s->camp, world, s->econ, s->navy, s->player, fa->loc, hh->a, &fa->force))
+                printf("\n[scps] La terre ne mène pas là : l'armée EMBARQUE pour la région %d.\n", hh->a);
         } break;
+        case SBH_SAIL: {
+            const FieldArmy *fa=&s->camp->army[s->player];
+            if (campaign_order_sea(s->camp, world, s->econ, s->navy, s->player, fa->loc, hh->a, &fa->force))
+                printf("\n[scps] L'armée embarque pour la région %d (la volta décidera des jours).\n", hh->a);
+        } break;
+        case SBH_NAVY_BUILD:
+            if (navy_order_build(s->navy, world, s->econ, s->player, (HullType)hh->a))
+                printf("\n[scps] Chantier naval : %s en construction.\n", navy_hull_name((HullType)hh->a));
+            break;
+        case SBH_NAVY_CONV:
+            if (navy_convert(s->navy, world, s->econ, s->player, hh->a!=0))
+                printf("\n[scps] Chantier : %s.\n", hh->a?"un marchand passe à la COURSE":"un pirate rentre dans le rang");
+            break;
         case SBH_MUSTER:
             if (hh->a>=0 && campaign_order(s->camp, s->econ, s->player, hh->a, hh->a, &s->host->army[s->player]))
                 printf("\n[scps] L'ost se rassemble au camp de la capitale (région %d).\n", hh->a);
@@ -1599,6 +1779,15 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     snprintf(line,sizeof line, "%ld habitants", p.ames);
     draw_text(ren, g_font, x, y, COL_PARCH, line);
     zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 22;
+    { int breg=(pid>=0&&pid<w->n_provinces)?w->province[pid].region:-1;   /* coques §7 : la balafre SE VOIT */
+      if (breg>=0 && breg<econ->n_regions && econ->region[breg].balafre_days>0.f){
+          char bal[64];
+          snprintf(bal,sizeof bal,"côte balafrée — pillée il y a %d mois",
+                   (int)((365.f-econ->region[breg].balafre_days)/30.f));
+          draw_text(ren, g_font_small, x, y, COL_COPPER, bal);
+          zone_add((SDL_Rect){x-2,y-2,rw,17}, "Des pirates ont pillé cette côte (1/10 des stocks) : production entaillée ~1 an ; la province est immunisée ~5 ans (la course ne trait pas deux fois la même vache).");
+          y += 18;
+      } }
 
     /* CAMEMBERTS — Culture + Religion côte à côte (la race SUIT la culture :
      * pas de 3ᵉ disque). Surface sobre ; le détail vit dans le survol. */
@@ -2165,8 +2354,6 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
  * (quitter = bouton + confirmation, seul chemin). Sauvegarde : chantier suivant
  * (le menu vit avec « Charger » grisé — l'ordre du brief lui-même).
  * ═══════════════════════════════════════════════════════════════════════════ */
-typedef enum { GS_MENU=0, GS_SETUP, GS_OPENING, GS_PLAYING } GameState;
-static GameState g_gs = GS_MENU;
 static bool g_pause_menu=false, g_quit_confirm=false, g_show_tuto=false;
 static int  g_tuto_page=0;
 static int  g_setup_ethos=5, g_setup_race=(int)RACE_HUMAIN, g_setup_terre=5;  /* défauts : Pacifiste? non → voir tables */
@@ -2187,18 +2374,6 @@ static void shhit_reset(void){ g_nshhits=0; }
 static void shhit_add(SDL_Rect r,int k,int a){ if(g_nshhits<80){ g_shhits[g_nshhits].r=r; g_shhits[g_nshhits].kind=k; g_shhits[g_nshhits].a=a; g_nshhits++; } }
 
 /* ── LE TUTORIEL — texte embarqué tel quel (brief §7), pages courtes ── */
-static const char *TUTO_TITLES[7]={
-    "1 · Ce monde se lit.","2 · Le temps coule en jours.","3 · Ton empire.",
-    "4 · Décider coûte.","5 · Les autres.","6 · Le savoir voyage.","7 · La Brèche." };
-static const char *TUTO_PAGES[7]={
-    "Ici, pas de pourcentages cachés : l'état des choses se dit en MOTS.\nUne province est Unie ou Fracturée, un peuple Loyal ou Frondeur,\nun marché Sain ou En pénurie. Survole : tout se définit en bas d'écran.",
-    "En haut à droite : la date, l'âge du monde, la vitesse.\nESPACE met en pause — et en pause, tu peux tout consulter,\ntout ordonner. Rien ne presse jamais que toi.",
-    "En haut : ton or, tes vivres, tes matériaux, et la santé de ta couronne —\nStabilité, Légitimité, Cohésion, Prospérité. Clique une province pour la voir\nde près ; ouvre la BARRE DE GAUCHE pour l'empire entier :\nÉconomie, Démographie, Stocks, Armée, Filtres.",
-    "Tout ordre — bâtir, exploiter, déplacer, lever — entre dans une FILE\net prend des JOURS. Le prix s'affiche AVANT. Certains leviers rapportent\nvite et coûtent longtemps : mater une révolte tait la rue, pas la colère.",
-    "Tes voisins vivent : ils commercent, s'allient, jalousent.\nOn peut les lier — l'allié, le protégé, le serf, la cité marchande —\net chaque lien a son prix. Un embargo est une arme ; une guerre se gagne\nsur le champ, au MORAL, pas au nombre.",
-    "Ton arbre a un cœur et un cercle : le cœur se recherche,\nle CERCLE se gagne par le contact — commerce, frontières, peuples gouvernés.\nUne culture qu'on assimile est un savoir qu'on tarit.\nChoisis ce que tu fonds et ce que tu gardes distinct.",
-    "Certaines voies sont plus que puissantes — elles sont AVIDES.\nChaque pacte sombre, chaque forge interdite, chaque culte imposé CHARGE le monde.\nLa Brèche n'interdit rien : elle attend. Ton empire tombera — ils tombent tous.\nLa seule question est COMMENT, et ce que tu laisseras debout." };
-
 static const char *SH_ETHOS_N[6]={"Dominateur","Honneur","Mercantile","Bureaucrate","Ordre","Pacifiste"};
 static const char *SH_ETHOS_L[6]={
     "la conquête est un droit","la parole vaut le sang","tout s'achète, surtout la paix",
@@ -2299,7 +2474,7 @@ static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv
  * qui ne matche pas = refus poli (« sauvegarde d'une ère antérieure »).
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define SAVE_MAGIC   0x53504353u   /* "SCPS" */
-#define SAVE_VERSION 3u            /* v3 : courants marins dans World (v2 chiffrée, v1 claire → « ère antérieure ») */
+#define SAVE_VERSION 4u            /* v4 : LA MER — flotte (NAVY), port réel (ProvBuild.port), routes en jours de mer (v3 courants) */
 #define SAVE_F_CRYPT 1u
 typedef struct {
     uint32_t magic, version;
@@ -2337,7 +2512,8 @@ static bool sv_r(FILE *f, uint32_t tag, void *p, size_t sz){
 }
 /* sauve la partie ENTIÈRE dans un slot ; renvoie false si l'écriture échoue. */
 static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
-    { int rc_=system("mkdir -p saves"); (void)rc_; }
+    if (slot<1 || slot>3) return false;
+    scps_mkdir("saves");                         /* EEXIST inoffensif ; l'échec réel tombe au fopen */
     FILE *f=fopen(save_slot_path(slot),"w+b");   /* w+ : la post-passe de chiffrement RELIT le payload */
     if (!f) return false;
     SaveHeader h; memset(&h,0,sizeof h);
@@ -2347,9 +2523,8 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     { int nreg=0; for (int r=0;r<s->econ->n_regions;r++) if (s->econ->region[r].owner==s->player) nreg++;
       snprintf(h.line,sizeof h.line,"An %d — %s, %d région(s)",
                s->year, (s->player>=0&&s->player<w->n_countries)?w->country[s->player].name:"?", nreg); }
-    fwrite(&h,sizeof h,1,f);
+    bool ok = fwrite(&h,sizeof h,1,f)==1;        /* disque plein → échec NET, pas silencieux */
     long p0=ftell(f);
-    bool ok=true;
     ok&=sv_w(f,SV_TAG('W','R','L','D'), w,        sizeof *w);
     ok&=sv_w(f,SV_TAG('E','C','O','N'), s->econ,  sizeof *s->econ);
     ok&=sv_w(f,SV_TAG('P','R','O','S'), s->wp,    sizeof *s->wp);
@@ -2366,6 +2541,7 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     ok&=sv_w(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
     ok&=sv_w(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
     ok&=sv_w(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_w(f,SV_TAG('N','A','V','Y'), s->navy,  sizeof *s->navy);
     ok&=sv_w(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);   /* WarHost SANS scratch */
     ok&=sv_w(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
     ok&=sv_w(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
@@ -2390,24 +2566,78 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
       fseek(f,p0,SEEK_SET);
       if (fread(buf,1,h.payload,f)!=h.payload){ free(buf); fclose(f); return false; }
       h.plain_ck = scrypt_fnv1a(buf,h.payload);
-      h.nonce = ((uint64_t)time(NULL)<<32) ^ (uint64_t)SDL_GetTicks()
-              ^ ((uint64_t)params->seed<<13) ^ (uint64_t)(uintptr_t)buf;
+      /* Nonce : modèle « obfuscation, pas secret » (la clé vit dans le binaire) —
+       * l'unicité n'est requise que pour éviter un keystream identique entre deux
+       * sauvegardes ; le compteur monotone couvre les sauvegardes rapprochées. */
+      { static uint64_t seq=0; ++seq;
+        h.nonce = ((uint64_t)time(NULL)<<32) ^ (uint64_t)SDL_GetTicks()
+                ^ ((uint64_t)params->seed<<13) ^ (uint64_t)(uintptr_t)buf
+                ^ (seq<<48) ^ (uint64_t)clock(); }
       h.flags = SAVE_F_CRYPT;
       scrypt_stream(h.nonce, buf, h.payload);
       fseek(f,p0,SEEK_SET);
       ok &= fwrite(buf,1,h.payload,f)==h.payload;
       free(buf); }
-    fseek(f,0,SEEK_SET); fwrite(&h,sizeof h,1,f);
-    fclose(f);
+    fseek(f,0,SEEK_SET);
+    ok &= fwrite(&h,sizeof h,1,f)==1;            /* l'en-tête final (payload/nonce/empreinte) doit passer */
+    if (fclose(f)!=0) ok=false;                  /* le flush peut échouer (disque plein) */
     return ok;
 }
+/* Garde-fou post-chargement : le moteur entier boucle sur ces comptes et indices
+ * en LEUR FAISANT CONFIANCE (n_countries ≤ 56, cell.province < n_provinces…).
+ * L'empreinte FNV-1a n'est pas un MAC (la clé vit dans le binaire) : un fichier
+ * FORGÉ passe l'intégrité — on revalide donc les invariants avant de déclarer
+ * la partie prête. Refus net, comme le reste du chargeur. */
+static bool save_sane(const World *w, const Sim *s, int player){
+    if (w->n_provinces <0 || w->n_provinces >SCPS_MAX_PROV)      return false;
+    if (w->n_regions   <0 || w->n_regions   >SCPS_MAX_REG)       return false;
+    if (w->n_countries <0 || w->n_countries >SCPS_MAX_COUNTRY)   return false;
+    if (w->n_continents<0 || w->n_continents>SCPS_MAX_CONTINENT) return false;
+    if (w->n_rivers    <0 || w->n_rivers    >SCPS_MAX_RIVERS)    return false;
+    for (int i=0;i<w->n_rivers;i++)
+        if (w->river[i].len<0 || w->river[i].len>SCPS_RIVER_MAXLEN) return false;
+    if (player<0 || player>=w->n_countries) return false;
+    for (int i=0;i<SCPS_N;i++){ const Cell *c=&w->cell[i];
+        if (c->province >= w->n_provinces || c->region    >= w->n_regions ||
+            c->country  >= w->n_countries || c->continent >= w->n_continents) return false; }
+    for (int p=0;p<w->n_provinces;p++){ const Province *pr=&w->province[p];
+        if (pr->region >= w->n_regions || pr->country >= w->n_countries) return false; }
+    for (int r=0;r<w->n_regions;r++){ const Region *rg=&w->region[r];
+        if (rg->n_provinces<0 || rg->n_provinces>12 || rg->country>=w->n_countries) return false;
+        for (int k=0;k<rg->n_provinces;k++)
+            if (rg->province_ids[k]<0 || rg->province_ids[k]>=w->n_provinces) return false; }
+    for (int c=0;c<w->n_countries;c++){ const Country *ct=&w->country[c];
+        if (ct->n_regions<0 || ct->n_regions>12 || ct->capital_prov>=w->n_provinces) return false;
+        for (int k=0;k<ct->n_regions;k++)
+            if (ct->region_ids[k]<0 || ct->region_ids[k]>=w->n_regions) return false; }
+    if (s->econ->n_regions<0 || s->econ->n_regions>SCPS_MAX_REG) return false;
+    for (int r=0;r<s->econ->n_regions;r++){ const RegionEconomy *re=&s->econ->region[r];
+        if (re->owner >= w->n_countries) return false;
+        if (re->pop.n_groups<0 || re->pop.n_groups>SCPS_MAX_GROUPS) return false; }
+    if (s->rn->n<0 || s->rn->n>SCPS_MAX_ROUTES) return false;
+    for (int i=0;i<s->rn->n;i++){ const TradeRoute *rt=&s->rn->route[i];
+        if (rt->ra<0 || rt->ra>=s->econ->n_regions || rt->rb<0 || rt->rb>=s->econ->n_regions) return false; }
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){ const FieldArmy *a=&s->camp->army[i];
+        if (!a->active) continue;
+        if (a->owner<0 || a->owner>=w->n_countries) return false;
+        if (a->loc <0 || a->loc >=s->econ->n_regions) return false;
+        if (a->dest>=s->econ->n_regions || a->next>=s->econ->n_regions) return false; }
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){ const Navy *nv=&s->navy->n[i];
+        for (int t=0;t<HULL_COUNT;t++) if (nv->hull[t]<0 || nv->hull[t]>100000) return false;
+        if (nv->at_sea<0 || nv->build_hull<-1 || nv->build_hull>=HULL_COUNT) return false;
+        if (nv->home_port>=s->econ->n_regions) return false; }
+    return true;
+}
 /* charge un slot. 0 = ok ; 1 = absent/corrompu ; 2 = « ère antérieure » (version). */
+#define SAVE_MAX_PAYLOAD (256u<<20)   /* plafond de vraisemblance : pas de malloc(4 Go) sur en-tête forgé */
 static int game_load(int slot, World *w, Sim *s, WorldParams *params){
+    if (slot<1 || slot>3) return 1;
     FILE *f=fopen(save_slot_path(slot),"rb");
     if (!f) return 1;
     SaveHeader h;
     if (fread(&h,sizeof h,1,f)!=1 || h.magic!=SAVE_MAGIC){ fclose(f); return 1; }
     if (h.version!=SAVE_VERSION){ fclose(f); return 2; }
+    if (h.payload==0 || h.payload>SAVE_MAX_PAYLOAD){ fclose(f); return 1; }
     /* payload → mémoire ; déchiffré si marqué ; l'EMPREINTE du clair fait foi
      * (un octet altéré — chiffré ou non — et le chargement REFUSE net). */
     { uint8_t *buf=(uint8_t*)malloc(h.payload?h.payload:1);
@@ -2438,6 +2668,7 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     ok&=sv_r(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
     ok&=sv_r(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
     ok&=sv_r(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_r(f,SV_TAG('N','A','V','Y'), s->navy,  sizeof *s->navy);
     ok&=sv_r(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);
     ok&=sv_r(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
     ok&=sv_r(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
@@ -2445,7 +2676,10 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     { SaveMisc m;
       ok&=sv_r(f,SV_TAG('M','I','S','C'), &m, sizeof m);
       if (ok){ s->day=m.day; s->year=m.year; s->player=m.player; s->prev_dawned=m.prev_dawned;
-               s->camp_rng=m.camp_rng; g_player_race=(SpeciesArchetype)m.race; g_setup_ethos=m.ethos;
+               s->camp_rng=m.camp_rng;
+               if (m.race <0 || m.race >=(int32_t)RACE_COUNT)  m.race =(int32_t)RACE_HUMAIN;
+               if (m.ethos<0 || m.ethos>=(int32_t)ETHOS_COUNT) m.ethos=0;
+               g_player_race=(SpeciesArchetype)m.race; g_setup_ethos=m.ethos;
                memcpy(s->prev_owner_mo,m.prev_owner,sizeof m.prev_owner); } }
     ok&=sv_r(f,SV_TAG('I','T','R','D'), NULL,0); ok&=intertrade_load(f);
     ok&=sv_r(f,SV_TAG('A','G','Y','S'), NULL,0); ok&=agency_load(f);
@@ -2453,9 +2687,31 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     ok&=sv_r(f,SV_TAG('F','A','C','T'), NULL,0); ok&=faction_load(f);
     long p1=ftell(f); fclose(f);
     if (!ok || (uint32_t)(p1-p0)!=h.payload) return 1;     /* taille/section : refus net */
+    if (!save_sane(w, s, s->player)) return 1;             /* invariants du moteur : refus net */
+    demography_dyn_id_rebase(s->econ);                     /* drift_id dynamiques au-dessus du chargé */
     *params=h.params;
     s->ready=true;
     return 0;
+}
+
+/* F12 — capture d'écran (brief build §3) : on relit le framebuffer du renderer
+ * en RGB top-down (l'ordre que stb attend) et on écrit un PNG horodaté dans
+ * screenshots/. Utile au joueur, et à la boucle où une session de code regarde
+ * ses propres rendus. */
+static void viewer_screenshot(SDL_Renderer *ren){
+    int w=0,h=0; SDL_GetRendererOutputSize(ren,&w,&h);
+    if (w<=0||h<=0) return;
+    unsigned char *px=(unsigned char*)malloc((size_t)w*h*3);
+    if (!px) return;
+    if (SDL_RenderReadPixels(ren,NULL,SDL_PIXELFORMAT_RGB24,px,w*3)==0){
+        scps_mkdir("screenshots");
+        char name[96]; time_t t=time(NULL);
+        struct tm *lt=localtime(&t);
+        if (lt) strftime(name,sizeof name,"screenshots/scps_%Y%m%d_%H%M%S.png",lt);
+        else    snprintf(name,sizeof name,"screenshots/scps_%ld.png",(long)t);
+        if (stbi_write_png(name,w,h,3,px,w*3)) printf("\n[scps] capture : %s\n",name);
+    }
+    free(px);
 }
 
 /* ── rendu du shell : écrans pleins + surcouches (pause · tuto · confirmation) ── */
@@ -2465,18 +2721,20 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
     if (g_gs==GS_MENU){
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x07,0x0b,0x12,0xb8});   /* le monde respire derrière */
         draw_text(ren,g_font_big,win_w/2-44,win_h/4,COL_COPPER,"S C P S");
-        draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,"un monde qui ne vous attend pas — et qui se lit");
+        draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,tr(STR_MENU_SOUS_TITRE));
         int bx=win_w/2-90, by=win_h/4+70;
-        sh_button(ren,bx,by,180,"Jouer",false,false,SH_MENU_ITEM,0); by+=34;
+        sh_button(ren,bx,by,180,tr(STR_MENU_JOUER),false,false,SH_MENU_ITEM,0); by+=34;
         { SaveHeader hh; bool any=false;
           for (int sl=1;sl<=3 && !any;sl++) any=save_slot_info(sl,&hh);
-          sh_button(ren,bx,by,180,"Charger",false,!any,SH_MENU_ITEM,1); by+=34; }
-        sh_button(ren,bx,by,180,"Tutoriel",false,false,SH_MENU_ITEM,2); by+=34;
-        sh_button(ren,bx,by,180,"Quitter",false,false,SH_MENU_ITEM,3);
+          sh_button(ren,bx,by,180,tr(STR_MENU_CHARGER),false,!any,SH_MENU_ITEM,1); by+=34; }
+        sh_button(ren,bx,by,180,tr(STR_MENU_TUTORIEL),false,false,SH_MENU_ITEM,2); by+=34;
+        sh_button(ren,bx,by,180,tr(STR_MENU_QUITTER),false,false,SH_MENU_ITEM,3); by+=34;
+        { char lng[48]; tr_fmt(lng,sizeof lng,STR_MENU_LANGUE,lang_name(lang_get()));
+          sh_button(ren,bx,by,180,lng,false,false,SH_MENU_ITEM,4); }   /* Options : FR/EN à chaud */
     }
     else if (g_gs==GS_SETUP){
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x0a,0x0e,0x16,0xf2});
-        draw_text(ren,g_font_big,40,24,COL_COPPER,"FORGER UN MONDE");
+        draw_text(ren,g_font_big,40,24,COL_COPPER,tr(STR_SETUP_TITRE));
         /* colonne MONDE */
         int x=60,y=70; char v[24];
         draw_text(ren,g_font,x,y,COL_COPPER,"Le monde"); y+=24;
@@ -2556,24 +2814,25 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
         int bx=win_w/2-100, by=win_h/2-80;
         panel_bg(ren,bx-20,by-20,240,228);
-        draw_text(ren,g_font_big,bx,by-6,COL_COPPER,"PAUSE"); by+=30;
-        sh_button(ren,bx,by,200,"Reprendre",false,false,SH_PM_ITEM,0); by+=32;
-        sh_button(ren,bx,by,200,"Sauver",false,false,SH_PM_ITEM,4); by+=32;
-        sh_button(ren,bx,by,200,"Tutoriel",false,false,SH_PM_ITEM,1); by+=32;
-        sh_button(ren,bx,by,200,"Menu principal",false,false,SH_PM_ITEM,2); by+=32;
-        sh_button(ren,bx,by,200,"Quitter",false,false,SH_PM_ITEM,3);
+        draw_text(ren,g_font_big,bx,by-6,COL_COPPER,tr(STR_PAUSE_TITRE)); by+=30;
+        sh_button(ren,bx,by,200,tr(STR_PM_REPRENDRE),false,false,SH_PM_ITEM,0); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_SAUVER),false,false,SH_PM_ITEM,4); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_TUTORIEL),false,false,SH_PM_ITEM,1); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_MENU),false,false,SH_PM_ITEM,2); by+=32;
+        sh_button(ren,bx,by,200,tr(STR_PM_QUITTER),false,false,SH_PM_ITEM,3);
     }
     if (g_save_pick||g_load_pick){
         int pw=460, px=(win_w-pw)/2, py=win_h/2-90;
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
         panel_bg(ren,px,py,pw,180);
-        draw_text(ren,g_font_big,px+20,py+12,COL_COPPER, g_save_pick?"SAUVER — choisir un slot":"CHARGER — choisir un slot");
+        draw_text(ren,g_font_big,px+20,py+12,COL_COPPER, g_save_pick?tr(STR_PICK_SAUVER):tr(STR_PICK_CHARGER));
         for (int sl=1;sl<=3;sl++){
             SaveHeader hh; bool has=save_slot_info(sl,&hh);
             char lab[140];
-            if (has && hh.version==SAVE_VERSION) snprintf(lab,sizeof lab,"Slot %d — %s",sl,hh.line);
-            else if (has)                        snprintf(lab,sizeof lab,"Slot %d — sauvegarde d'une ère antérieure",sl);
-            else                                 snprintf(lab,sizeof lab,"Slot %d — vide",sl);
+            { char num[16]; snprintf(num,sizeof num,"%d",sl);
+              if (has && hh.version==SAVE_VERSION) tr_fmt(lab,sizeof lab,STR_SLOT_LINE,num,hh.line);
+              else if (has)                        tr_fmt(lab,sizeof lab,STR_SLOT_ANCIEN,num);
+              else                                 tr_fmt(lab,sizeof lab,STR_SLOT_VIDE,num); }
             bool grise = g_load_pick && (!has || hh.version!=SAVE_VERSION);
             sh_button(ren,px+20,py+46+(sl-1)*34,pw-40,lab,false,grise,
                       g_save_pick?SH_SLOT_SAVE:SH_SLOT_LOAD, sl);
@@ -2592,16 +2851,17 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
         int pw=620, ph=240, px=(win_w-pw)/2, py=(win_h-ph)/2;
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x88});
         panel_bg(ren,px,py,pw,ph);
-        draw_text(ren,g_font_big,px+20,py+14,COL_COPPER,TUTO_TITLES[g_tuto_page]);
-        { const char *t=TUTO_PAGES[g_tuto_page]; int ly=py+48; char line[200]; int li=0;
+        draw_text(ren,g_font_big,px+20,py+14,COL_COPPER,tr_band(STR_TUTO_TITLE_0,g_tuto_page,7));
+        { const char *t=tr_band(STR_TUTO_PAGE_0,g_tuto_page,7); int ly=py+48; char line[200]; int li=0;
           for (const char *c2=t;;c2++){
               if (*c2=='\n'||*c2==0){ line[li]=0; draw_text(ren,g_font,px+20,ly,COL_PARCH,line); ly+=20; li=0; if(!*c2)break; }
               else if (li<198) line[li++]=*c2;
           } }
-        char pg[24]; snprintf(pg,24,"%d / 7",g_tuto_page+1);
+        char pg[24]; { char num[16]; snprintf(num,sizeof num,"%d",g_tuto_page+1);
+                       tr_fmt(pg,sizeof pg,STR_TUTO_PAGEFMT,num); }
         draw_text(ren,g_font_small,px+pw/2-12,py+ph-26,COL_DIM,pg);
-        if (g_tuto_page>0) sh_button(ren,px+16,py+ph-34,90,"◀ préc.",false,false,SH_TUTO_PREV,0);
-        if (g_tuto_page<6) sh_button(ren,px+pw-106,py+ph-34,90,"suiv. ▶",false,false,SH_TUTO_NEXT,0);
+        if (g_tuto_page>0) sh_button(ren,px+16,py+ph-34,90,tr(STR_TUTO_PREC),false,false,SH_TUTO_PREV,0);
+        if (g_tuto_page<6) sh_button(ren,px+pw-106,py+ph-34,90,tr(STR_TUTO_SUIV),false,false,SH_TUTO_NEXT,0);
         draw_text(ren,g_font_small,px+16,py+ph-12,COL_DIM,"ESC ferme");
     }
     if (g_quit_confirm){
@@ -2647,6 +2907,13 @@ int main(int argc, char **argv) {
     if (!win || !ren) { fprintf(stderr,"SDL: %s\n",SDL_GetError()); return 1; }
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
+    /* La prise audio (§5) : ouvre un device si présent ; sinon MUET, sans erreur
+     * (conteneur/serveur sans carte → le release tourne quand même). */
+    if (!audio_init()) fprintf(stderr,"[scps] audio : aucun device — silence.\n");
+#ifdef SCPS_DEV
+    dev_overlay_init(win, ren);   /* §6 : l'overlay de dev (F3) — build -DSCPS_DEV seul */
+#endif
+
     /* Police diégétique (SDL_ttf) — DejaVu couvre les accents français. */
     if (TTF_Init() != 0) fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
     static const char *font_paths[] = {
@@ -2680,6 +2947,7 @@ int main(int argc, char **argv) {
     sim.host = (WarHost*)         malloc(sizeof(WarHost));
     sim.camp = (Campaign*)        malloc(sizeof(Campaign));
     sim.missions = (MissionsState*) malloc(sizeof(MissionsState));
+    sim.navy = (NavyState*)       malloc(sizeof(NavyState));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 
@@ -2852,7 +3120,14 @@ int main(int argc, char **argv) {
 
     while (running) {
         SDL_Event ev;
+#ifdef SCPS_DEV
+        dev_overlay_input_begin();
+#endif
         while (SDL_PollEvent(&ev)) {
+#ifdef SCPS_DEV
+            if (g_dev_overlay && ev.key.keysym.sym!=SDLK_F3
+                && dev_overlay_handle_event(&ev)) continue;   /* Nuklear a la main (sauf le toggle F3) */
+#endif
             switch (ev.type) {
 
             case SDL_QUIT: g_quit_confirm=true; dirty=true; break;   /* la croix passe par la CONFIRMATION */
@@ -2927,6 +3202,7 @@ int main(int argc, char **argv) {
                                     else if (sh2->a==1){ g_load_pick=1; }
                                     else if (sh2->a==2){ g_show_tuto=true; g_tuto_page=0; }
                                     else if (sh2->a==3) g_quit_confirm=true;
+                                    else if (sh2->a==4) lang_set(lang_get()==LANG_FR?LANG_EN:LANG_FR);
                                     break;
                                 case SH_SLIDER_DN: sh_apply_slider(&g_stage,sh2->a,-1); break;
                                 case SH_SLIDER_UP: sh_apply_slider(&g_stage,sh2->a,+1); break;
@@ -3148,6 +3424,10 @@ int main(int argc, char **argv) {
                             printf("\n[scps] Tribunal : trésor insuffisant pour acheter les matériaux.\n");
                     }
                     break;
+                case SDLK_F12:   viewer_screenshot(ren); break;   /* capture PNG horodatée */
+#ifdef SCPS_DEV
+                case SDLK_F3:    g_dev_overlay=!g_dev_overlay; break;   /* §6 : l'inspecteur brut */
+#endif
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
                 case SDLK_1:     mode=VIEW_TERRAIN;     dirty=true; break;
                 case SDLK_2:     mode=VIEW_POLITICAL;   dirty=true; break;
@@ -3186,6 +3466,9 @@ int main(int argc, char **argv) {
                 break;
             }
         }
+#ifdef SCPS_DEV
+        dev_overlay_input_end();
+#endif
 
         if (regen) {
             printf("\n[scps] Génération — graine %u · continents %d · âge %.2f"
@@ -3264,6 +3547,30 @@ int main(int argc, char **argv) {
                 SDL_RenderDrawPoint(ren,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
             }
         }
+        /* mer §9 : au survol d'une tuile de mer, LE MOT — cabotage · eaux mortes ·
+         * eaux vives · courant (et son sens). Des mots, jamais un vecteur nu. */
+        if (g_gs==GS_PLAYING && g_font_small && sim.ready){
+            int hmx,hmy; SDL_GetMouseState(&hmx,&hmy);
+            int hcx=(int)(hmx/cam.scale+cam.ox), hcy=(int)(hmy/cam.scale+cam.oy);
+            if (hcx>=0&&hcy>=0&&hcx<SCPS_W&&hcy<SCPS_H){
+                const Cell *hc=scps_cellc(world,hcx,hcy);
+                if (hc->sea){
+                    char sw[64]; const char *dir="";
+                    if (hc->sea==SEA_COURANT||hc->sea==SEA_VIVE){
+                        int ax=hc->cur_vx, ay=hc->cur_vy;
+                        dir = (abs(ax)>=abs(ay)) ? (ax>=0?" vers l'est":" vers l'ouest")
+                                                 : (ay>=0?" vers le sud":" vers le nord");
+                    }
+                    snprintf(sw,sizeof sw,"%s%s",
+                             hc->sea==SEA_CABOTAGE?"cabotage — lent mais sûr":
+                             hc->sea==SEA_MORTE   ?"eaux mortes — rien ne pousse un navire":
+                             hc->sea==SEA_VIVE    ?"eaux vives":
+                                                   "courant favorable",
+                             (hc->sea==SEA_COURANT||hc->sea==SEA_VIVE)?dir:"");
+                    draw_text(ren,g_font_small,hmx+14,hmy+10,COL_PARCH,sw);
+                }
+            }
+        }
         /* Overlay diégétique : bandeau royaume + panneau de province, via la
          * membrane (bandes + mots). Le viewer ne touche aucun flottant SCPS. */
         if (sim.ready && g_font) {
@@ -3309,6 +3616,10 @@ int main(int argc, char **argv) {
                   } } }
             draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }
+#ifdef SCPS_DEV
+        if (g_dev_overlay)   /* §6 : l'inspecteur brut PAR-DESSUS le jeu (dev seul) */
+            dev_overlay_draw(world, sim.econ, sim.ts, sim.dp, country_for_panel(world, selected), selected);
+#endif
         SDL_RenderPresent(ren);
 
         /* Status console */
@@ -3331,6 +3642,10 @@ int main(int argc, char **argv) {
     if (g_font_big) TTF_CloseFont(g_font_big);
     if (g_font_small) TTF_CloseFont(g_font_small);
     TTF_Quit();
+#ifdef SCPS_DEV
+    dev_overlay_shutdown();
+#endif
+    audio_shutdown();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

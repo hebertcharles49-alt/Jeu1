@@ -63,6 +63,10 @@ z[A-Z].png
 pop_demo
 econ_scan
 mapshot
+save_io_demo
+montage.png
+screenshots/
+scps_viewer_dev
 seed_*.ppm
 seed_*.png
 *.ppm
@@ -70,3 +74,6 @@ montage.bmp
 saves/
 chronicle_asan
 scps_ui.ppm
+audio_demo
+build_dev/
+scps_viewer_dev

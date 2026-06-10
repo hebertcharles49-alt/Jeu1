@@ -8,6 +8,7 @@
  * de la conquête abstraite.
  */
 #include "scps_campaign.h"
+#include "scps_navy.h"   /* réservation de transports (accès aux champs, pas d'appel) */
 #include "scps_labor.h"   /* capitale_defense / capitale_max_tier : la défense passive de la capitale */
 #include <math.h>
 #include <string.h>
@@ -132,6 +133,60 @@ bool campaign_order(Campaign *c, const WorldEconomy *econ, int owner,
                  * posture_march_mult(a->posture);
     a->days_left = a->leg_days;
     return true;
+}
+
+/* ── L'EMBARQUEMENT (mer §6) : port → mer → côte, tout en jours ─────────── */
+bool campaign_order_sea(Campaign *c, const World *w, const WorldEconomy *econ,
+                        struct NavyState *navy, int owner,
+                        int from_region, int target_region, const ArmyState *src_force){
+    if (owner<0 || owner>=SCPS_MAX_COUNTRY || !src_force || !navy || !w) return false;
+    if (from_region<0 || from_region>=econ->n_regions) return false;
+    if (target_region<0 || target_region>=econ->n_regions || from_region==target_region) return false;
+    long packets=force_units(src_force);
+    if (packets<=0) return false;
+    const RegionEconomy *pr=&econ->region[from_region];
+    if (pr->owner!=owner || pr->build.port<=0.f || !pr->coastal) return false;  /* on n'embarque qu'à SON port */
+    if (!econ->region[target_region].coastal) return false;                     /* on atterrit par la côte */
+    int ax,ay,bx,by;
+    if (!world_region_sea_anchor(w,from_region,&ax,&ay))  return false;
+    if (!world_region_sea_anchor(w,target_region,&bx,&by)) return false;
+    float days=world_sea_days(w,ax,ay,bx,by);
+    if (days<0.f) return false;                                                 /* bassins séparés */
+    int need_tr=(int)((packets+9)/10); if (need_tr<1) need_tr=1;                /* 1 transport = 10 paquets */
+    if (navy->n[owner].hull[HULL_TRANSPORT]-navy->n[owner].at_sea < need_tr) return false;
+    for (int e=0;e<SCPS_MAX_COUNTRY;e++)                                        /* coques §3 : le BLOCUS tient le port */
+        if (navy->n[e].mission==NAVY_BLOCUS && navy->n[e].mission_target==owner
+            && navy->n[e].hull[HULL_WAR]>0) return false;
+    FieldArmy *a=&c->army[owner];
+    a->active=true; a->owner=owner; a->loc=from_region; a->dest=target_region; a->next=-1;
+    a->force=*src_force;
+    a->taken=0; a->legs=0; a->battles=0;
+    a->phase=FA_EMBARK;
+    a->leg_days = 4.f + (float)packets/15.f;            /* charger 1 000 hommes prend des jours */
+    a->days_left= a->leg_days;
+    a->sail_days=days; a->sail_transports=need_tr;
+    a->intercept_done=false;
+    a->land_at_port = (econ->region[target_region].build.port>0.f);
+    navy->n[owner].at_sea += need_tr;                   /* la flotte est ENGAGÉE jusqu'au débarquement */
+    c->n_sails++; c->sail_days_sum += days;
+    return true;
+}
+
+/* Rend à la flotte les transports des armées revenues à terre (ou mortes). */
+void campaign_release_transports(Campaign *c, struct NavyState *navy){
+    if (!navy) return;
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){
+        FieldArmy *a=&c->army[i];
+        if (a->sail_transports<=0) continue;
+        bool at_sea = a->active && (a->phase==FA_EMBARK || a->phase==FA_SAIL || a->phase==FA_LAND);
+        if (at_sea) continue;
+        int o=a->owner;
+        if (o>=0 && o<SCPS_MAX_COUNTRY){
+            navy->n[o].at_sea -= a->sail_transports;
+            if (navy->n[o].at_sea<0) navy->n[o].at_sea=0;
+        }
+        a->sail_transports=0;
+    }
 }
 
 /* ---- POSTURE (§5 sidebar) : prudente marche/assiège LENTEMENT (préserve), -----
@@ -379,6 +434,7 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
             if (c->army[i].owner == c->army[j].owner) continue;
             if (diplo_status(dp, c->army[i].owner, c->army[j].owner)!=DIPLO_WAR) continue;
             if (c->army[i].phase==FA_BATTLE || c->army[j].phase==FA_BATTLE) continue;   /* déjà accrochées */
+            if (c->army[i].phase>=FA_EMBARK || c->army[j].phase>=FA_EMBARK) continue;    /* en mer : intouchable (v2 : l'interception) */
             if (c->army[i].broken_days>0 || c->army[j].broken_days>0) continue;          /* une brisée FUIT, ne s'accroche pas */
             bt_engage(c, i, j, c->army[i].loc);
         }
@@ -431,6 +487,33 @@ void campaign_tick(Campaign *c, const World *w, const WorldEconomy *e,
                 a->taken++;                                      /* RÉDUITE (enregistré, pas appliqué à econ) */
                 a->phase=FA_IDLE; a->dest=-1;
                 break;
+            } else if (a->phase==FA_EMBARK){                     /* mer §6 : on charge au port */
+                if (t < a->days_left){ a->days_left-=t; t=0.f; break; }
+                t -= a->days_left;
+                a->phase=FA_SAIL; a->leg_days=a->sail_days; a->days_left=a->sail_days;
+            } else if (a->phase==FA_SAIL){                       /* en mer : intouchable, AVEUGLE */
+                if (t < a->days_left){ a->days_left-=t; t=0.f; break; }
+                t -= a->days_left;
+                a->loc=a->dest; a->legs++;
+                a->phase=FA_LAND;
+                a->leg_days = (3.f + (float)force_units(&a->force)/20.f)
+                            * (a->land_at_port?1.f:1.6f);        /* hors port : plus lent */
+                a->days_left=a->leg_days;
+            } else if (a->phase==FA_LAND){
+                if (t < a->days_left){ a->days_left-=t; t=0.f; break; }
+                t -= a->days_left; a->days_left=0.f;
+                if (!a->land_at_port)                            /* la grève EXPOSE — léger, pas un mur */
+                    army_march_attrition(&a->force, c->reg_biome[a->loc], a->leg_days*0.5f);
+                if (force_units(&a->force)<=0){ a->active=false; a->phase=FA_IDLE; break; }
+                if (e->region[a->loc].owner==a->owner){          /* notre terre : débarqué, c'est tout */
+                    a->phase=FA_IDLE; a->dest=-1; a->next=-1; break;
+                }
+                a->phase=FA_SIEGE; a->next=-1;                   /* l'ennemi : on assiège depuis la côte */
+                a->days_left = siege_days(region_defense(e,a->loc),
+                                          region_food_months(e,a->loc),
+                                          terrain_defense_mult(c->reg_biome[a->loc], c->reg_height[a->loc]))
+                             * posture_siege_mult(a->posture);
+                break;
             } else break;                                        /* FA_IDLE */
         }
     }
@@ -459,6 +542,9 @@ const char *campaign_phase_name(FieldPhase ph){
         case FA_MARCH: return "En marche";
         case FA_SIEGE: return "En siège";
         case FA_BATTLE:return "En mêlée";
+        case FA_EMBARK:return "Embarque";
+        case FA_SAIL:  return "En mer";
+        case FA_LAND:  return "Débarque";
         default:       return "?";
     }
 }

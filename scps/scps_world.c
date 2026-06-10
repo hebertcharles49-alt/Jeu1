@@ -635,6 +635,10 @@ static void volcanoes_mark(World *w, const float *height) {
  * jaillissent dans le dur. CAUSAL : la géologie sculpte la côte. */
 static float g_hardness[SCPS_N];
 static void compute_hardness(float seed_f) {
+    /* §4 OpenMP : g_hardness[i] = f(x,y, plaques RO) — par-tuile pure. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         int pa,pb;
         float bs=plate_boundary(x,y,&pa,&pb,seed_f);
@@ -655,6 +659,17 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
     float land_bias = (P->land_amount-0.5f)*0.5f;
     float mtn_amp   = 0.42f + P->mountains*0.55f;   /* amplitude RÉDUITE : moins de relief, plus de vallées */
 
+    /* §4 OpenMP : boucle PAR-TUILE pure — chaque cellule (x,y) écrit son SEUL
+     * height[i] depuis un bruit fonction de (x,y) (plates_init/continents_init
+     * faits AVANT, en lecture seule) ; aucun voisin lu, aucune réduction →
+     * bit-identique quel que soit l'ordre des threads. La plus chère du worldgen
+     * (3 FBM × 5-7 octaves/cellule). make determinism reste VERT.
+     * GAIN MESURÉ (avec architecture/mountains/hardness, 4 cœurs) : world_generate
+     * 963 ms → 595 ms (×1.62). Le reste (érosion D8, Dijkstra, advection, relaxation
+     * des courants) est séquentiel — non parallélisé (dépendances de voisinage). */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float lat=fabsf(ny-0.5f)*2.f;
@@ -684,6 +699,11 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
      * les crêtes courent le long de la suture, pas dans tous les sens.
      * Les contreforts (R2) sont warpés par R1 → branchent sur la dorsale.
      */
+    /* §4 OpenMP : crêtes tectoniques — chaque cellule fait `height[i] += bump`
+     * sur SON index (lecture des plaques en RO), pas de couplage inter-tuile. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float mask=continental_mask(x,y,seed_f);
         if (mask<0.30f) continue;   /* pas de montagnes près des côtes */
@@ -737,6 +757,11 @@ static void step_geology(float *height, float seed_f, const WorldParams *P) {
  * r3 vis-à-vis de r2. On obtient un réseau arborescent, pas des boudins.
  * ====================================================================== */
 static void step_architecture(float *height, float seed_f) {
+    /* §4 OpenMP : chaque cellule LIT et ÉCRIT son seul height[i] (h=height[i] ;
+     * height[i] += …) — pas de voisin, bruits purs → bit-identique. */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++) {
         float nx=(float)x/SCPS_W, ny=(float)y/SCPS_H;
         float h=height[scps_idx(x,y)];
@@ -1812,8 +1837,10 @@ static void gen_region_names(World *w) {
         name_elf  (rg->name_elf,  sizeof(rg->name_elf),  e);
         name_dwarf(rg->name_dwarf,sizeof(rg->name_dwarf),e);
         name_orc  (rg->name_orc,  sizeof(rg->name_orc),  e);
-        /* nom courant = variante humaine */
-        snprintf(rg->name,sizeof(rg->name),"%s",rg->name_hum);
+        /* nom courant = variante humaine (copie bornée entre deux membres du
+         * même struct → pas le snprintf %s qui fait crier -Wrestrict à -O0). */
+        strncpy(rg->name, rg->name_hum, sizeof(rg->name)-1);
+        rg->name[sizeof(rg->name)-1]='\0';
     }
 }
 
@@ -1847,6 +1874,7 @@ static void build_hierarchy(World *w, int want_empires, int want_cities) {
         Region *rg=&w->region[r];
         rg->continent=w->province[p].continent;
         if (rg->n_provinces<12) rg->province_ids[rg->n_provinces++]=(int16_t)p;
+        else fprintf(stderr,"scps_world: région %d sature province_ids (12) — territoire %d non listé\n",r,p);
     }
     w->n_regions=nreg;
 
@@ -1871,6 +1899,7 @@ static void build_hierarchy(World *w, int want_empires, int want_cities) {
         Country *ct=&w->country[c];
         ct->continent=w->region[r].continent;
         if (ct->n_regions<12) ct->region_ids[ct->n_regions++]=(int16_t)r;
+        else fprintf(stderr,"scps_world: pays %d sature region_ids (12) — région %d non listée\n",c,r);
     }
     w->n_countries=ncty;
 
@@ -3107,4 +3136,122 @@ uint32_t province_palette(int id) {
     uint8_t g=(uint8_t)(hue2rgb_f(p,q,h      )*255);
     uint8_t bv=(uint8_t)(hue2rgb_f(p,q,h-1.f/3)*255);
     return 0xFF000000u|((uint32_t)r<<16)|((uint32_t)g<<8)|bv;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * LA MER §4 — LE COÛT DIRECTIONNEL (et la volta émerge)
+ * Le pathfinding réutilise le patron Dijkstra en DIRECTIONNEL : le coût
+ * dépend de l'arête (sens vs courant), pas de la tuile seule. L'aller et le
+ * retour entre deux ports DIFFÈRENT — la volta n'est pas scriptée, elle
+ * tombe du champ. Tout se mesure en JOURS.
+ * Surface d'équilibrage : SEA_DAY_BASE, k, m, P, CABOT.
+ * ════════════════════════════════════════════════════════════════════════ */
+#define SEA_DAY_BASE   0.50f   /* jours par cellule, eaux vives sans courant */
+#define SEA_K_ALIGN    1.20f   /* bonus dans le sens du courant (jusqu'à ÷2.2) */
+#define SEA_M_CONTRA   1.50f   /* malus contre le courant (jusqu'à ×2.5)      */
+#define SEA_P_MORTE    3.00f   /* eaux mortes : très lent, jamais interdit    */
+#define SEA_CABOT_DAY  0.65f   /* cabotage : constante modérée, FIXE          */
+
+/* Coût en jours du pas i→(i+dx,dy). Cellules marines uniquement. */
+static float sea_step_days(const World *w, int i, int dx, int dy, int j){
+    const Cell *c=&w->cell[i];
+    float base = SEA_DAY_BASE * ((dx&&dy)?1.41421356f:1.f);
+    if (c->sea==SEA_CABOTAGE || w->cell[j].sea==SEA_CABOTAGE)
+        return SEA_CABOT_DAY * ((dx&&dy)?1.41421356f:1.f);   /* la voie du pauvre : sûre, lente */
+    float il=1.f/sqrtf((float)(dx*dx+dy*dy));
+    float dxn=(float)dx*il, dyn=(float)dy*il;
+    float dot=(c->cur_vx*dxn + c->cur_vy*dyn)*(1.f/100.f);   /* v̂·d̂ pondéré par |v| ∈ [-1..1] */
+    float cost = base / (1.f + SEA_K_ALIGN*fmaxf(0.f,dot))
+                      * (1.f + SEA_M_CONTRA*fmaxf(0.f,-dot));
+    if (c->sea==SEA_MORTE) cost *= SEA_P_MORTE;              /* le désert liquide se contourne */
+    return cost;
+}
+
+/* Dijkstra directionnel sur les cellules marines — tas binaire d'indices. */
+static float g_sea_dist[SCPS_N];
+static int   g_sea_heap[SCPS_N];  static int g_sea_hn;
+static int   g_sea_pos [SCPS_N];                /* -1 = hors tas */
+static void sea_heap_up(int k){
+    while (k>0){ int p=(k-1)/2;
+        if (g_sea_dist[g_sea_heap[p]]<=g_sea_dist[g_sea_heap[k]]) break;
+        int t=g_sea_heap[p]; g_sea_heap[p]=g_sea_heap[k]; g_sea_heap[k]=t;
+        g_sea_pos[g_sea_heap[p]]=p; g_sea_pos[g_sea_heap[k]]=k; k=p; }
+}
+static void sea_heap_down(int k){
+    for(;;){ int l=2*k+1,r=l+1,m=k;
+        if (l<g_sea_hn && g_sea_dist[g_sea_heap[l]]<g_sea_dist[g_sea_heap[m]]) m=l;
+        if (r<g_sea_hn && g_sea_dist[g_sea_heap[r]]<g_sea_dist[g_sea_heap[m]]) m=r;
+        if (m==k) break;
+        int t=g_sea_heap[m]; g_sea_heap[m]=g_sea_heap[k]; g_sea_heap[k]=t;
+        g_sea_pos[g_sea_heap[m]]=m; g_sea_pos[g_sea_heap[k]]=k; k=m; }
+}
+static void sea_heap_push(int i){ g_sea_heap[g_sea_hn]=i; g_sea_pos[i]=g_sea_hn; sea_heap_up(g_sea_hn++); }
+static int  sea_heap_pop(void){
+    int top=g_sea_heap[0]; g_sea_pos[top]=-1;
+    g_sea_heap[0]=g_sea_heap[--g_sea_hn];
+    if (g_sea_hn>0){ g_sea_pos[g_sea_heap[0]]=0; sea_heap_down(0); }
+    return top;
+}
+
+float world_sea_days(const World *w, int ax, int ay, int bx, int by){
+    if (ax<0||ay<0||bx<0||by<0||ax>=SCPS_W||ay>=SCPS_H||bx>=SCPS_W||by>=SCPS_H) return -1.f;
+    int s=scps_idx(ax,ay), t=scps_idx(bx,by);
+    if (!w->cell[s].sea || !w->cell[t].sea) return -1.f;
+    for (int i=0;i<SCPS_N;i++){ g_sea_dist[i]=1e30f; g_sea_pos[i]=-1; }
+    g_sea_hn=0; g_sea_dist[s]=0.f; sea_heap_push(s);
+    static const int DX[8]={1,-1,0,0,1,1,-1,-1}, DY[8]={0,0,1,-1,1,-1,1,-1};
+    while (g_sea_hn>0){
+        int i=sea_heap_pop();
+        if (i==t) return g_sea_dist[i];
+        int x=i%SCPS_W, y=i/SCPS_W;
+        for (int k=0;k<8;k++){
+            int X=x+DX[k], Y=y+DY[k];
+            if (X<0||Y<0||X>=SCPS_W||Y>=SCPS_H) continue;
+            int j=scps_idx(X,Y);
+            if (!w->cell[j].sea) continue;
+            float nd=g_sea_dist[i]+sea_step_days(w,i,DX[k],DY[k],j);
+            if (nd<g_sea_dist[j]){
+                g_sea_dist[j]=nd;
+                if (g_sea_pos[j]<0) sea_heap_push(j); else sea_heap_up(g_sea_pos[j]);
+            }
+        }
+    }
+    return -1.f;   /* bassins séparés */
+}
+
+/* ── L'avant-port d'une région : cellule de MER au pied de sa côte. DÉRIVÉ du
+ * monde (cache par seed) — rien n'entre dans la sauvegarde. ── */
+static uint32_t g_anchor_seed=0xFFFFFFFFu;
+static int16_t  g_anchor_x[SCPS_MAX_REG], g_anchor_y[SCPS_MAX_REG];
+static void sea_anchor_build(const World *w){
+    for (int r=0;r<SCPS_MAX_REG;r++){ g_anchor_x[r]=-1; g_anchor_y[r]=-1; }
+    static const int DX[4]={1,-1,0,0}, DY[4]={0,0,1,-1};
+    /* meilleure distance² au germe de la première province côtière de la région */
+    static int32_t best[SCPS_MAX_REG];
+    for (int r=0;r<SCPS_MAX_REG;r++) best[r]=0x7FFFFFFF;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++){
+        const Cell *c=&w->cell[scps_idx(x,y)];
+        if (c->region<0 || c->region>=w->n_regions || !c->coast) continue;
+        int r=c->region;
+        int pid=c->province;
+        int sx=(pid>=0&&pid<w->n_provinces)?w->province[pid].seed_x:x;
+        int sy=(pid>=0&&pid<w->n_provinces)?w->province[pid].seed_y:y;
+        for (int k=0;k<4;k++){
+            int X=x+DX[k], Y=y+DY[k];
+            if (X<0||Y<0||X>=SCPS_W||Y>=SCPS_H) continue;
+            const Cell *m=&w->cell[scps_idx(X,Y)];
+            if (!m->sea) continue;
+            int32_t d2=(X-sx)*(X-sx)+(Y-sy)*(Y-sy);
+            if (d2<best[r]){ best[r]=d2; g_anchor_x[r]=(int16_t)X; g_anchor_y[r]=(int16_t)Y; }
+        }
+    }
+    g_anchor_seed=w->seed;
+}
+bool world_region_sea_anchor(const World *w, int region, int *sx, int *sy){
+    if (region<0 || region>=w->n_regions) return false;
+    if (g_anchor_seed!=w->seed) sea_anchor_build(w);
+    if (g_anchor_x[region]<0) return false;
+    if (sx) *sx=g_anchor_x[region];
+    if (sy) *sy=g_anchor_y[region];
+    return true;
 }

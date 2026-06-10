@@ -69,9 +69,9 @@ int main(int argc,char**argv){
     printf("   intermédiaire   : région %d  D̄=%.1f\n", mid,  mid >=0?cdist(&econ->region[mid ].culture,hc):0);
     printf("   gouffre         : région %d  D̄=%.1f\n", far,  far >=0?cdist(&econ->region[far ].culture,hc):0);
 
-    routes_order(rn,econ,home,near,false);
-    routes_order(rn,econ,home,mid, false);
-    routes_order(rn,econ,home,far, false);
+    routes_order(rn,NULL,econ,home,near,false);
+    routes_order(rn,NULL,econ,home,mid, false);
+    routes_order(rn,NULL,econ,home,far, false);
     /* ouvre les routes (terre 90 j) puis calcule les rendements. */
     routes_advance(rn,w,econ,150);
 

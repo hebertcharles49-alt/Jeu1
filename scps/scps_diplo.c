@@ -64,6 +64,13 @@ void diplo_init(DiploState *d){
     for (int c=0;c<SCPS_MAX_COUNTRY;c++) d->suzerain[c]=-1;   /* tous libres au départ */
     d->fronde_suz=-1; d->fronde_lead=-1; d->fronde_rng=0x9E3779B9u;
 }
+/* La graine du MONDE entre dans la fronde : sans elle, chaque partie rejouait la
+ * même séquence d'intimidations/ligues. (fronde_rng vit dans DiploState → la
+ * sauvegarde la préserve ; on ne sème qu'à la création d'une partie.) */
+void diplo_seed_rng(DiploState *d, uint32_t seed){
+    d->fronde_rng = 0x9E3779B9u ^ seed;
+    if (!d->fronde_rng) d->fronde_rng = 1u;
+}
 
 /* ═══ SUZERAINETÉ (brief leviers §3) — quatre contrats, trois voies, la rupture ═══ */
 const char *diplo_contrat_name(SuzContrat c){
@@ -398,7 +405,8 @@ static void set_sym(DiploState *d, int a, int b, DiploStatus s){
 void diplo_declare_war  (DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_WAR); }
 void diplo_declare_war_cb(DiploState *d,int a,int b,CasusBelli cb){
     set_sym(d,a,b,DIPLO_WAR);
-    if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY) d->cb[a][b]=(int8_t)cb;  /* le but de l'AGRESSEUR */
+    if (a>=0&&a<SCPS_MAX_COUNTRY&&b>=0&&b<SCPS_MAX_COUNTRY){ d->cb[a][b]=(int8_t)cb;  /* le but de l'AGRESSEUR */
+        if (cb==CB_ANTIPIRATERIE) d->n_war_antipirate++; }
 }
 CasusBelli diplo_war_goal(const DiploState *d,int a,int b){
     if (a<0||a>=SCPS_MAX_COUNTRY||b<0||b>=SCPS_MAX_COUNTRY) return CB_NONE;
@@ -407,6 +415,7 @@ CasusBelli diplo_war_goal(const DiploState *d,int a,int b){
 const char *diplo_cb_name(CasusBelli cb){
     switch(cb){ case CB_TERRITORIAL: return "territorial"; case CB_RELIGIOUS: return "religieux";
                 case CB_ECONOMIC: return "économique"; case CB_SUBJUGATION: return "assujettissement";
+                case CB_ANTIPIRATERIE: return "anti-piraterie";
                 default: return "aucun"; }
 }
 void diplo_form_alliance(DiploState *d,int a,int b){ set_sym(d,a,b,DIPLO_ALLIED); }
@@ -424,6 +433,14 @@ void diplo_make_peace   (DiploState *d,int a,int b){
         float dur = clampf(TRUCE_BASE + TRUCE_PER_YEAR*d->war_years[a][b], 0.f, TRUCE_MAX);
         d->truce[a][b]=d->truce[b][a]=dur;
         d->war_years[a][b]=d->war_years[b][a]=0.f;
+        /* COURSE (coques §5) : le but anti-piraterie se SOLDE au verdict — la
+         * victime victorieuse fait DÉSARMER le commanditaire (exécuté par la
+         * marine) et sa rancune s'éteint ; vaincue, la course continue, légitimée. */
+        { float sc=d->battle_score[a][b];
+          if ((CasusBelli)d->cb[a][b]==CB_ANTIPIRATERIE && sc>=20.f){
+              d->pirate_disarm[b]=1; d->pirate_rancor[a][b]=0.f; }
+          if ((CasusBelli)d->cb[b][a]==CB_ANTIPIRATERIE && sc<=-20.f){
+              d->pirate_disarm[a]=1; d->pirate_rancor[b][a]=0.f; } }
         d->cb[a][b]=d->cb[b][a]=CB_NONE;   /* le but de guerre s'éteint avec la guerre */
         d->battle_score[a][b]=d->battle_score[b][a]=0.f;   /* le bras-de-fer se solde */
         d->conquered[a][b]=d->conquered[b][a]=0;
@@ -567,9 +584,24 @@ static bool diplo_adjacent(const WorldEconomy *econ, int a, int b){
             if (econ->region[s].owner==b && econ->adj[r][s]) return true;
     return false;
 }
+void diplo_pirate_grief(DiploState *d, int victim, int sponsor, float amount){
+    if (!d||victim<0||victim>=SCPS_MAX_COUNTRY||sponsor<0||sponsor>=SCPS_MAX_COUNTRY) return;
+    d->pirate_rancor[victim][sponsor]=clampf(d->pirate_rancor[victim][sponsor]+amount,0.f,10.f);
+}
+float diplo_pirate_rancor(const DiploState *d, int victim, int sponsor){
+    if (!d||victim<0||victim>=SCPS_MAX_COUNTRY||sponsor<0||sponsor>=SCPS_MAX_COUNTRY) return 0.f;
+    return d->pirate_rancor[victim][sponsor];
+}
 CasusBelli diplo_casus_belli(const World *w, const WorldEconomy *econ, const WorldProsperity *wp,
                              const DiploState *d, int a, int b, Resource want){
     if (a<0||a>=w->n_countries||b<0||b>=w->n_countries||a==b) return CB_NONE;
+    /* ANTI-PIRATERIE (coques §5) — chatouiller un GÉANT trop longtemps : le seuil
+     * tombe avec la puissance de la VICTIME (le géant a les moyens de sa colère). */
+    if (d && a<SCPS_MAX_COUNTRY && b<SCPS_MAX_COUNTRY && d->pirate_rancor[a][b]>0.f){
+        float Pa=diplo_mil_power(w,econ,a), Pb=diplo_mil_power(w,econ,b);
+        float seuil=clampf(4.5f*(Pb/(Pa+0.1f)), 1.5f, 6.f);
+        if (d->pirate_rancor[a][b]>=seuil) return CB_ANTIPIRATERIE;
+    }
     /* ÉCONOMIQUE — le bien AIGU que la cible extrait et que nous n'avons pas (monopole) :
      * le casus belli du Mercantile bloqué (il vise la province-source). */
     if (want>RES_NONE && want<RES_COUNT && country_extracts(econ,b,want) && !country_extracts(econ,a,want))
@@ -881,8 +913,11 @@ void diplo_tick(DiploState *d, float dt){
         /* la fulgurance s'oublie : un conquérant arrêté cesse d'effrayer. */
         d->momentum[a] = fmaxf(0.f, d->momentum[a] - MOMENTUM_DECAY*dt);
         /* la RANCUNE (§6) s'estompe sur une génération (asymétrique : plein balayage). */
-        for (int b=0;b<SCPS_MAX_COUNTRY;b++)
+        for (int b=0;b<SCPS_MAX_COUNTRY;b++){
             if (d->rancor[a][b]>0.f) d->rancor[a][b]=fmaxf(0.f, d->rancor[a][b]-RANCOR_DECAY*dt);
+            if (d->pirate_rancor[a][b]>0.f)   /* la rancune de course s'oublie au même pas */
+                d->pirate_rancor[a][b]=fmaxf(0.f, d->pirate_rancor[a][b]-RANCOR_DECAY*dt);
+        }
         for (int b=a+1;b<SCPS_MAX_COUNTRY;b++){
             if (d->status[a][b]==DIPLO_WAR){
                 d->war_years[a][b]+=dt/365.f; d->war_years[b][a]=d->war_years[a][b];

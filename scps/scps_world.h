@@ -48,4 +48,19 @@ uint32_t    resource_color(Resource r);
 /* Palette de provinces — couleur ARGB stable par id */
 uint32_t province_palette(int id);
 
+/* ── LA MER (brief mer §4) : le mouvement directionnel sur le champ de courants ──
+ * coût(tuile, direction) = base / (1 + k·max(0, v̂·d̂)) × (1 + m·max(0, −v̂·d̂)) ;
+ * eaux mortes ×P ; cabotage = constante (sûr, lent, indifférent aux courants).
+ * Conséquence à NE PAS rater : l'aller ≠ le retour (la volta émerge du champ). */
+
+/* Jours de mer entre deux cellules MARINES (Dijkstra directionnel, 8 voisins).
+ * < 0 si injoignable (bassins séparés / cellule terrestre). */
+float world_sea_days(const World *w, int ax, int ay, int bx, int by);
+
+/* Ancre marine d'une RÉGION (l'avant-port) : la cellule de mer adjacente à la
+ * côte de la région, la plus proche du germe de sa meilleure province côtière.
+ * DÉRIVÉE du monde (cache interne par seed — rien à sérialiser).
+ * false si la région n'a aucune côte. */
+bool world_region_sea_anchor(const World *w, int region, int *sx, int *sy);
+
 #endif /* SCPS_WORLD_H */

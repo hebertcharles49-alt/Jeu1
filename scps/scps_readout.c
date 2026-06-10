@@ -11,6 +11,7 @@
  * de la légitimité (Partie 1/1.5).
  */
 #include "scps_readout.h"
+#include "scps_lang.h"   /* la table de chaînes : les MOTS vivent dans les tables compilées */
 #include "scps_factions.h"   /* la balance des factions-éthos (§9) */
 #include <stddef.h>   /* NULL */
 #include <string.h>   /* memset */
@@ -95,19 +96,9 @@ BandAcces band_acces(float p) {
     if (p >= 0.35f) return AC_PROCHE;
     return AC_LOINTAIN;
 }
-const char *label_forge(BandForge b) {
-    static const char *N[] = { "Forge rudimentaire","Forge artisanale","Manufacture","Industrie" };
-    return (b>=0 && b<=FORGE_INDUSTRIELLE) ? N[b] : "?";
-}
-const char *label_profondeur(BandProfondeur b) {
-    static const char *N[] = { "hors de portée","savoir de surface","savoir-faire d'atelier",
-                               "art profond","secret jalousement gardé" };
-    return (b>=0 && b<=PROF_SECRET_B) ? N[b] : "?";
-}
-const char *label_acces(BandAcces b) {
-    static const char *N[] = { "lointain","à portée","imminent","acquis" };
-    return (b>=0 && b<=AC_ACQUIS) ? N[b] : "?";
-}
+const char *label_forge(BandForge b){ return tr_band(STR_FORGE_0, (int)b, 4); }
+const char *label_profondeur(BandProfondeur b){ return tr_band(STR_PROF_0, (int)b, 5); }
+const char *label_acces(BandAcces b){ return tr_band(STR_ACCES_0, (int)b, 4); }
 /* MARCHÉ — l'état d'un bien, classé sur demande vs disponible (nus). MORT = ni
  * offre ni demande (la chaîne ne vit pas) ; le reste suit la couverture. */
 BandMarche band_marche(float demand, float avail) {
@@ -129,25 +120,13 @@ BandMoral band_moral(float f) {
     if (f >  0.25f) return MO_VACILLANT;
     return MO_ROMPU;
 }
-const char *label_moral(BandMoral b) {
-    static const char *N[]={ "ferme","éprouvé","vacillant","rompu" };
-    return (b>=0&&b<=MO_ROMPU)?N[b]:"?";
-}
-const char *label_fidelite(BandFidelite b) {
-    static const char *N[]={ "fidèle","tiède","frondeur","ligueur" };
-    return (b>=0&&b<=FID_LIGUEUR)?N[b]:"?";
-}
-const char *label_marche(BandMarche b) {
-    static const char *N[] = { "marché mort","pénurie sévère","tendu","sain","engorgé" };
-    return (b>=0 && b<=MARCHE_ENGORGE) ? N[b] : "?";
-}
+const char *label_moral(BandMoral b){ return tr_band(STR_MORAL_0, (int)b, 4); }
+const char *label_fidelite(BandFidelite b){ return tr_band(STR_FIDELITE_0, (int)b, 4); }
+const char *label_marche(BandMarche b){ return tr_band(STR_MARCHE_0, (int)b, 5); }
 
 /* ---- LENTILLES de carte (§6) — bandes → teintes DISCRÈTES, par région -------
  * Tout le classement vit ici : le viewer reçoit des couleurs, jamais un float. */
-const char *map_lens_name(MapLens l) {
-    static const char *N[LENS_COUNT] = { "—", "Prospérité", "Humeur", "Marché" };
-    return (l>=0 && l<LENS_COUNT) ? N[l] : "?";
-}
+const char *map_lens_name(MapLens l){ return tr_band(STR_LENS_0, (int)l, 4); }
 void map_lens_tints(const WorldEconomy *econ, const WorldLegitimacy *wl,
                     MapLens lens, uint32_t out[SCPS_MAX_REG]) {
     static const uint32_t T_PROSP[5]  = { 0xFF5a3d2e,0xFF8a6a3a,0xFFb0975a,0xFFd4b96a,0xFFf0d878 }; /* misère→opulence */
@@ -346,28 +325,24 @@ AllegeanceReadout allegeance_from_floats(
 /* ===================================================================== */
 /* LEXIQUE — labels (le MOT)                                              */
 /* ===================================================================== */
-#define LBL(fn, type, ...) \
-    const char *fn(type b){ static const char *N[]={__VA_ARGS__}; \
-        int n=(int)(sizeof(N)/sizeof(N[0])), ib=(int)b; \
-        return (ib>=0&&ib<n)?N[ib]:"?"; }
-
-LBL(label_stab,     BandStab,     "Submergée","Vacillante","Tenue","Assurée","Inébranlable")
-LBL(label_assise,   BandAssise,   "Consentie","Partagée","Contrainte","Tyrannique")
-LBL(label_legit,    BandLegit,    "Usurpée","Contestée","Tolérée","Reconnue","Sacrée")
-LBL(label_concorde, BandConcorde, "Unie","Murmurante","Fracturée","Sécession")
-LBL(label_prosp,    BandProsp,    "Misère","Disette","Suffisance","Aisance","Opulence")
-LBL(label_savoir,   BandSavoir,   "Obscurité","Lueur","Foyer","Phare")
-LBL(label_presage,  BandPresage,  "Calme","Frémissement","Ombre grandissante","Le seuil")
-LBL(label_stature,  BandStature,  "Désert","Hameau","Bourg","Cité","Métropole")
-LBL(label_flux,     BandFlux,     "Exode","Saignée","Stable","Afflux","Ruée")
-LBL(label_aisance,  BandAisance,  "Misère","Suffisance","Aisance","Faste")
-LBL(label_carrefour,BandCarrefour,"—","Florissante","Bouillonnante","En surchauffe")
-LBL(label_humeur,   BandHumeur,   "Révoltée","Frondeuse","Tiède","Loyale","Dévouée")
-LBL(label_lignee,   BandLignee,   "Du même sang","Cousine","Sœur lointaine","Étrangère",
-                                  "Hérétique proche","Inassimilable")
-LBL(label_agitation,BandAgitation,"Calme","Frémissante","Agitée","Insurgée")
-LBL(label_foi,      BandFoi,      "Dévote","Tiède","Hérétique")
-LBL(label_sedition, BandSedition, "Concorde","Murmures","Tendue","Séditieuse")
+#define LBL(fn, type, base, count) \
+    const char *fn(type b){ return tr_band(base##_0, (int)b, count); }
+LBL(label_stab,     BandStab,     STR_BANDE_STAB, 5)
+LBL(label_assise,     BandAssise,     STR_BANDE_ASSISE, 4)
+LBL(label_legit,     BandLegit,     STR_BANDE_LEGIT, 5)
+LBL(label_concorde,     BandConcorde,     STR_BANDE_CONCORDE, 4)
+LBL(label_prosp,     BandProsp,     STR_BANDE_PROSP, 5)
+LBL(label_savoir,     BandSavoir,     STR_BANDE_SAVOIR, 4)
+LBL(label_presage,     BandPresage,     STR_BANDE_PRESAGE, 4)
+LBL(label_stature,     BandStature,     STR_BANDE_STATURE, 5)
+LBL(label_flux,     BandFlux,     STR_BANDE_FLUX, 5)
+LBL(label_aisance,     BandAisance,     STR_BANDE_AISANCE, 4)
+LBL(label_carrefour,     BandCarrefour,     STR_BANDE_CARREFOUR, 4)
+LBL(label_humeur,     BandHumeur,     STR_BANDE_HUMEUR, 5)
+LBL(label_lignee,     BandLignee,     STR_BANDE_LIGNEE, 6)
+LBL(label_agitation,     BandAgitation,     STR_BANDE_AGITATION, 4)
+LBL(label_foi,     BandFoi,     STR_BANDE_FOI, 3)
+LBL(label_sedition,     BandSedition,     STR_BANDE_SEDITION, 4)
 #undef LBL
 BandSedition band_sedition(float t){
     if (t < 0.10f) return SED_CALME;
@@ -379,38 +354,22 @@ BandSedition band_sedition(float t){
 /* ===================================================================== */
 /* LEXIQUE — hovers (la DÉFINITION, jamais la valeur)                     */
 /* ===================================================================== */
-const char *hover_stab(void){ return
-    "La solidité de l'ordre : un royaume assuré encaisse les chocs, un royaume vacillant cède au premier vent."; }
-const char *hover_assise(void){ return
-    "Sur quoi repose l'obéissance : l'adhésion des cœurs, ou le seul poids des armes."; }
-const char *hover_legit(void){ return
-    "Le droit reconnu au trône de régner ; sacrée, nul ne la conteste — usurpée, chacun guette la chute."; }
-const char *hover_concorde(void){ return
-    "L'unité des peuples sous une même couronne ; quand les coutures lâchent, les marges rêvent d'indépendance."; }
-const char *hover_prosp(void){ return
-    "La richesse qui circule et qu'on parvient à lever ; un royaume opulent rayonne, une disette le vide."; }
-const char *hover_savoir(void){ return
-    "Le savoir né aux carrefours des cultures ; il nourrit les arts et les arcanes."; }
-const char *hover_presage(void){ return
-    "Ce que la quête de puissance attire ; plus on force l'arcane, plus l'ombre s'épaissit."; }
-const char *hover_stature(void){ return
-    "L'ampleur de l'établissement humain, du hameau perdu à la cité grouillante."; }
-const char *hover_flux(void){ return
-    "Le mouvement des âmes : un afflux gonfle la province, un exode la vide."; }
-const char *hover_aisance(void){ return
-    "La richesse qui circule ici ; les carrefours prospèrent, les culs-de-sac s'étiolent."; }
-const char *hover_carrefour(void){ return
-    "Quand des cultures se croisent ici, la richesse afflue — jusqu'à ce que le flux déborde et que la ville-monde se déchire."; }
-const char *hover_humeur(void){ return
-    "Le cœur de la province envers la couronne ; loyale, elle paie sans broncher — frondeuse, elle attend l'étincelle."; }
-const char *hover_lignee(void){ return
-    "Ce qui la lie à la culture du trône ; le même sang se gouverne aisément, l'inassimilable jamais sans la force."; }
-const char *hover_agitation(void){ return
-    "La colère qui monte dans la province ; soutenue, elle vire à la révolte — qu'apaisent la stabilité du royaume, la garnison et la légitimité."; }
-const char *hover_foi(void){ return
-    "La ferveur de la province envers le culte du trône ; dévote, elle nourrit la légitimité sacrée — hérétique, elle couve le schisme."; }
-const char *hover_sedition(void){ return
-    "La tension d'une faction forte dont les valeurs s'opposent à la direction du régime ; séditieuse, elle complote le coup d'État pour imposer son éthos."; }
+const char *hover_stab(void){ return tr(STR_HOVER_STAB); }
+const char *hover_assise(void){ return tr(STR_HOVER_ASSISE); }
+const char *hover_legit(void){ return tr(STR_HOVER_LEGIT); }
+const char *hover_concorde(void){ return tr(STR_HOVER_CONCORDE); }
+const char *hover_prosp(void){ return tr(STR_HOVER_PROSP); }
+const char *hover_savoir(void){ return tr(STR_HOVER_SAVOIR); }
+const char *hover_presage(void){ return tr(STR_HOVER_PRESAGE); }
+const char *hover_stature(void){ return tr(STR_HOVER_STATURE); }
+const char *hover_flux(void){ return tr(STR_HOVER_FLUX); }
+const char *hover_aisance(void){ return tr(STR_HOVER_AISANCE); }
+const char *hover_carrefour(void){ return tr(STR_HOVER_CARREFOUR); }
+const char *hover_humeur(void){ return tr(STR_HOVER_HUMEUR); }
+const char *hover_lignee(void){ return tr(STR_HOVER_LIGNEE); }
+const char *hover_agitation(void){ return tr(STR_HOVER_AGITATION); }
+const char *hover_foi(void){ return tr(STR_HOVER_FOI); }
+const char *hover_sedition(void){ return tr(STR_HOVER_SEDITION); }
 
 /* ===================================================================== */
 /* ENVELOPPES SIM — lisent les sorties STOCKÉES, jamais scps_core         */

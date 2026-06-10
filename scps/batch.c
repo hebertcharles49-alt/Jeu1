@@ -13,6 +13,7 @@
  */
 #include "scps_world.h"
 #include "scps_render.h"
+#include "stb_image_write.h"   /* PNG (vendoré) — montage.png, ~10× plus léger que le BMP */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,7 +115,24 @@ int main(int argc, char **argv) {
                w->n_countries, w->n_continents);
     }
 
-    write_bmp("montage.bmp", big, DW, DH);
+    /* PNG d'abord (léger, partout lisible) ; le BMP reste le FILET DE SÉCURITÉ
+     * si l'écriture PNG échoue (disque, droits). On convertit l'ARGB → RGB
+     * top-down (l'ordre que stb attend). */
+    { unsigned char *rgb = (unsigned char*)malloc((size_t)DW*DH*3);
+      if (rgb){
+          for (int i=0;i<DW*DH;i++){
+              uint32_t c=big[i];
+              rgb[i*3+0]=(unsigned char)((c>>16)&0xFF);
+              rgb[i*3+1]=(unsigned char)((c>>8)&0xFF);
+              rgb[i*3+2]=(unsigned char)(c&0xFF);
+          }
+          if (stbi_write_png("montage.png", DW, DH, 3, rgb, DW*3))
+              printf("[batch] écrit montage.png (%dx%d)\n", DW, DH);
+          else { write_bmp("montage.bmp", big, DW, DH);
+                 printf("[batch] PNG indisponible → repli montage.bmp\n"); }
+          free(rgb);
+      } else write_bmp("montage.bmp", big, DW, DH);   /* OOM : repli BMP */
+    }
     free(big); free(tile); free(w);
     return 0;
 }

@@ -269,6 +269,10 @@ void prosperity_tick(WorldProsperity *wp, const World *w,
                 st.D_bar = clampf(st.D_bar + lev.fracture,     0.f, 10.f);  /* fracture interne */
                 st.flux_faustien += lev.arcane;   /* arcane → pente faustienne (Elfe Arcanique) */
                 race_prod = lev.productivite;     /* Gnome Inventif / Orque Borné → rendement */
+                /* garde anti-contagion : un levier dégénéré (NaN/inf) polluerait
+                 * toute la chaîne P_réalisé → tech_cost. clampf laisse passer NaN. */
+                if (!isfinite(race_prod)) race_prod = 0.f;
+                race_prod = clampf(race_prod, -0.9f, 9.f);
             }
         }
 

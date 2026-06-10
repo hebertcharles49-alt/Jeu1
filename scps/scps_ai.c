@@ -391,7 +391,8 @@ static float content_dist(const PopCulture *a, const PopCulture *b){
 /* Partenaire commercial : région étrangère peuplée dont la distance de contenu
  * approche le PIC de la cloche (D̄≈5 : le plus à échanger). On ne déduplique pas
  * — rouvrir la même artère, c'est l'INTENSIFIER (un négociant y revient). */
-static int ai_pick_trade_partner(const WorldEconomy *econ, int home_region, int cid){
+static int ai_pick_trade_partner(const WorldEconomy *econ, const RouteNetwork *rn,
+                                 int home_region, int cid){
     if (home_region<0 || home_region>=econ->n_regions) return -1;
     const PopCulture *hc = &econ->region[home_region].culture;
     int best=-1; float bestgap=1e9f;
@@ -399,7 +400,15 @@ static int ai_pick_trade_partner(const WorldEconomy *econ, int home_region, int 
         const RegionEconomy *re = &econ->region[r];
         if (r==home_region || re->owner==cid) continue;
         if (!re->culture.settled || re->impassable) continue;
+        if (rn){ bool deja=false;            /* une route par paire : viser un partenaire NEUF */
+            for (int i=0;i<rn->n;i++){ const TradeRoute *t=&rn->route[i];
+                if ((t->ra==home_region&&t->rb==r)||(t->ra==r&&t->rb==home_region)){ deja=true; break; } }
+            if (deja) continue; }
         float gap = fabsf(content_dist(hc, &re->culture) - 5.f);
+        /* commerce asym. §5 : les positions d'AVAL valent plus (estuaires,
+         * terminus portuaires — là où le vrac converge et où tout s'achète). */
+        if (re->estuary)                      gap -= 0.6f;
+        else if (re->coastal && re->build.port>0.f) gap -= 0.3f;
         if (gap < bestgap){ bestgap=gap; best=r; }
     }
     return best;
@@ -592,7 +601,7 @@ static void ai_impose_contract(AiActor *a, const World *w, WorldEconomy *econ,
 }
 
 /* Économie : commercer OU bâtir (le frein réoriente l'énergie vers le K). */
-static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
+static void ai_econ_turn(AiActor *a, const World *w, WorldEconomy *econ, const AiView *v,
                          AgencyState *ag, RouteNetwork *rn, float brake){
     /* Famine d'abord : un peuple affamé ne bâtit ni cours ni comptoir. */
     if (v->food < AI_FOOD_FLOOR && a->home_region>=0){
@@ -641,8 +650,8 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
         }
     } else if (a->credit_trade>=1.f){
         a->credit_trade -= 1.f;
-        int p = ai_pick_trade_partner(econ, a->home_region, a->cid);
-        if (p>=0 && routes_order(rn, econ, a->home_region, p, false)){
+        int p = ai_pick_trade_partner(econ, rn, a->home_region, a->cid);
+        if (p>=0 && routes_order(rn, w, econ, a->home_region, p, false)){
             a->stats.routes++;
             faction_lever_apply(a->cid, FAC_MARCHAND, AI_LEVER_BUILD);   /* §4 : le négoce AVANCE les Marchands */
         } else if (a->home_region>=0 && agency_build(ag, econ, a->home_region, EDI_MARCHE)){
@@ -838,6 +847,19 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
             a->credit_war = fmaxf(0.f, a->credit_war - 0.5f);
             return;
         }
+    }
+
+    /* (2b) LA COLERE DU GEANT (coques 5) — un commanditaire de pirates nous
+     * saigne depuis trop longtemps : le CB anti-piraterie PRIME sur la prédation
+     * (la guerre a un but : faire DESARMER la course). */
+    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++){
+        if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_NEUTRAL) continue;
+        if (diplo_pirate_rancor(diplo,a->cid,b)<1.5f) continue;        /* en-deca, nul CB possible */
+        if (diplo_casus_belli(w,econ,wp,diplo,a->cid,b,RES_NONE)!=CB_ANTIPIRATERIE) continue;
+        if (!diplo_can_declare(diplo,a->cid,b)) continue;
+        diplo_declare_war_cb(diplo, a->cid, b, CB_ANTIPIRATERIE);
+        a->credit_war -= 1.f; a->stats.wars++;
+        return;
     }
 
     /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, AVEC un
@@ -1142,7 +1164,7 @@ void ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
     float brake = ai_consolidation_pressure(&v);
 
     if (econ_due){
-        ai_econ_turn(a, econ, &v, ag, rn, brake);
+        ai_econ_turn(a, w, econ, &v, ag, rn, brake);
         ai_relocate_turn(a, econ, &v, day);   /* §reloc : peupler sa province-ressource pour combler une pénurie */
         ai_interior_turn(a, w, econ, ag, diplo, &v, day);   /* §leviers : mater/former/purger selon l'éthos */
         /* §leviers — GUERRE COMMERCIALE : l'embargo est l'arme PRINCIPALE du Mercantile

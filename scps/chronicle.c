@@ -21,6 +21,7 @@
 #include "scps_intertrade.h"
 #include "scps_warhost.h"
 #include "scps_campaign.h"
+#include "scps_navy.h"
 #include "scps_diplo.h"
 #include "scps_events.h"
 #include "scps_modifier.h"
@@ -31,9 +32,11 @@
 #include "scps_labor.h"
 #include "scps_ai.h"
 #include "scps_species.h"
+#include "miniz.h"          /* HARNAIS DE DÉTERMINISME : mz_crc32 (vendoré, third_party) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define CORR_CAPTURED 30   /* §C3 : seuil « polity tenue par une faction » (corr 0-100) */
 
@@ -47,6 +50,7 @@ typedef struct {
     Campaign    *camp;   /* armées de campagne : marche/siège/bataille sur la carte (non-invasif) */
     uint32_t     camp_rng;
     MissionsState *missions; /* missions décennales (rythme + injection de ressources) */
+    NavyState   *navy;   /* la flotte (mer §5) : coques, chantier, entretien */
     int16_t prev_owner_mo[SCPS_MAX_REG];   /* propriétaires au mois précédent (détection de conquête) */
     int prev_dawned;         /* dernier âge avéné traité (engagement d'âge §7) */
     int day, year, player;
@@ -73,10 +77,27 @@ static void sim_campaign_year(Sim *s, World *w) {
                 frontier=r; target=sn; break;                       /* une frontière chaude */
             }
         }
-        if (frontier>=0)
+        if (frontier>=0){
             campaign_order(s->camp, s->econ, c, frontier, target, &s->host->army[c]);
+        } else {
+            /* pas de frontière TERRESTRE : la guerre passe la mer si un port, des
+             * transports et un chemin existent (mer §6/§8 — contraint par le champ). */
+            int port=navy_best_port(w,s->econ,c);
+            if (port>=0 && navy_transport_packets_free(s->navy,c)>0){
+                int tgt=-1;
+                for (int r2=0;r2<s->econ->n_regions && tgt<0;r2++){
+                    int ob=s->econ->region[r2].owner;
+                    if (ob<0||ob==c||diplo_status(s->dp,c,ob)!=DIPLO_WAR) continue;
+                    if (!s->econ->region[r2].coastal) continue;
+                    tgt=r2;
+                }
+                if (tgt>=0)
+                    campaign_order_sea(s->camp, w, s->econ, s->navy, c, port, tgt, &s->host->army[c]);
+            }
+        }
     }
     campaign_tick(s->camp, w, s->econ, s->dp, &s->camp_rng, 365.f);  /* une année de campagne */
+    campaign_release_transports(s->camp, s->navy);                    /* les transports rentrent à la rade */
 }
 
 static void sim_day(Sim *s, World *w) {
@@ -95,6 +116,7 @@ static void sim_day(Sim *s, World *w) {
     }
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
+    navy_tick(s->navy, w, s->econ, 1.f);   /* chantier + entretien (la chaîne navale TIRE) */
     /* — mensuel : économie + réputation diplomatique (O(n²)) + démographie — */
     if (s->day % 30 == 29) {
         econ_apply_country_tech(s->econ, s->ts, SCPS_MAX_COUNTRY);  /* §B1 : techs de prod du pays → prod_mult région */
@@ -115,6 +137,42 @@ static void sim_day(Sim *s, World *w) {
          *   de groupe : faim, sur-taxe, aliénation, non-intégration) allume un
          *   soulèvement, puis on tranche (sécession, coup, jacquerie, écrasement).
          *   Un pays NÉ d'une sécession prend vie. */
+        navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
+        navy_course_tick(s->navy, w, s->econ, s->dp, s->rn, &s->camp_rng,
+                         -1, 30.f);   /* coques : la course (raids - saignee - blocus - verdicts) */
+        navy_interception_tick(s->navy, s->camp, w, s->econ, s->dp, &s->camp_rng);   /* les convois se chassent */
+        /* IA navale FRUGALE (mer §5/§8) : un pays côtier prospère bâtit son port,
+         * puis un transport, puis tente la route MARITIME — décision par éthos
+         * (les poids fins viendront avec la passe course). */
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){
+            if (!s->ai_on[c]) continue;
+            int hr=s->ai[c].home_region;
+            if (hr<0||hr>=s->econ->n_regions) continue;
+            RegionEconomy *re=&s->econ->region[hr];
+            if (re->owner!=c) continue;
+            if (re->coastal && re->build.port<=0.f && re->treasury>400.f){
+                agency_build(s->ag, s->econ, hr, EDI_PORT);
+            } else if (navy_best_port(w,s->econ,c)>=0 && s->navy->n[c].build_hull<0){
+                if (s->navy->n[c].hull[HULL_TRANSPORT]<2 && re->treasury>500.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_TRANSPORT);
+                else if (s->navy->n[c].hull[HULL_MERCHANT]<1 && re->treasury>700.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_MERCHANT);
+            }
+            /* la route maritime : un partenaire porté, joignable, pas le même pays —
+             * et la SOBRIÉTÉ : trois liens maritimes au plus par pays. */
+            if (s->day%180==29 && navy_region_is_port(w,s->econ,hr)){
+                int mine=0;
+                for (int i=0;i<s->rn->n;i++){
+                    const TradeRoute *t=&s->rn->route[i];
+                    if (t->maritime && (t->ra==hr||t->rb==hr)) mine++;
+                }
+                for (int r2=0;r2<s->econ->n_regions && mine<3;r2++){
+                    if (s->econ->region[r2].owner==c||s->econ->region[r2].owner<0) continue;
+                    if (!navy_region_is_port(w,s->econ,r2)) continue;
+                    if (routes_order(s->rn, w, s->econ, hr, r2, true)){ mine++; break; }
+                }
+            }
+        }
         revolt_scan(s->rs, w, s->econ, s->drift, 30);
         revolt_tick(s->rs, w, s->econ, s->drift, s->wl, s->wp, 30);
         if (s->rs->last_spawned>=0){
@@ -171,6 +229,7 @@ static void sim_init(Sim *s, World *w) {
     legitimacy_init(s->wl, w, s->econ); prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
     statecraft_init(s->sc, w); agency_init(s->ag); diplo_init(s->dp); routes_init(s->rn);
+    diplo_seed_rng(s->dp, w->seed);   /* la fronde tire sa graine du monde (séquence par sim) */
     intertrade_reset();   /* embargos décrétés + flux inter-pays : RAZ par sim */
     /* RAZ PLEINE PLAGE (SCPS_MAX_COUNTRY, pas n_countries) : n_countries GRANDIT par
      * sécession en cours de sim — la sim suivante repart plus bas. Sans ça, les slots
@@ -192,7 +251,9 @@ static void sim_init(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);
+    demography_dyn_id_rebase(s->econ);   /* compteur de drift_id : repart au socle par sim */
     revolt_init(s->rs); warhost_init(s->host); missions_init(s->missions);
+    navy_init(s->navy);
     campaign_init(s->camp, w, s->econ);                  /* armées de campagne : table de terrain + RAZ */
     s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne, propre à la sim */
     faction_levers_reset();   /* §4 : stances de factions remises à zéro pour cette sim */
@@ -378,12 +439,62 @@ static void capture_age_snap(AgeSnap *snap, int year, const World *w, const Sim 
         snap->top_gold[a]=country_gold(e,c); snap->top_reg[a]=regions_of(e,c); }
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+ * LE HARNAIS DE DÉTERMINISME (brief build §2) — le JUGE DE PAIX.
+ * En mode --hash, chaque sim émet « HASH <graine> <crc> » : un CRC32 (miniz,
+ * vendoré) de sa propre SORTIE OBSERVABLE, rendue ici sous forme TEXTE
+ * canonique (le flux du monde : qui tient quoi, l'or, la tech, révoltes,
+ * diplomatie, la flotte, la course, les batailles). Le texte porte les
+ * flottants en %.9g — round-trippables : toute réduction dont l'ORDRE
+ * d'accumulation change (une parallélisation §4 mal placée) décale un bit,
+ * décale le hash, et `make determinism` vire au rouge. Même graine → même
+ * hash, toujours : c'est lui qui arbitre toute modif du moteur. */
+typedef struct { mz_ulong crc; } HashAcc;
+static void hx(HashAcc *h, const char *fmt, ...){
+    char b[256]; va_list ap; va_start(ap,fmt);
+    int n=vsnprintf(b,sizeof b,fmt,ap); va_end(ap);
+    if (n<0) return;
+    if (n>(int)sizeof b-1) n=(int)sizeof b-1;
+    h->crc = mz_crc32(h->crc, (const unsigned char*)b, (size_t)n);
+}
+static uint32_t chronicle_sim_hash(uint32_t seed, const Sim *s, const World *w){
+    HashAcc h; h.crc = MZ_CRC32_INIT;
+    hx(&h,"seed=%u nc=%d nr=%d np=%d nk=%d\n",seed,w->n_countries,w->n_regions,w->n_provinces,w->n_continents);
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
+        hx(&h,"C%d reg=%d gold=%.9g tech=%d role=%d\n",
+           c,regions_of(s->econ,c),country_gold(s->econ,c),s->ts[c].n_unlocked,(int)w->country[c].role);
+    for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++){ const RegionEconomy *re=&s->econ->region[r];
+        double pop=0; for(int k=0;k<CLASS_COUNT;k++) pop+=re->strata[k].pop;
+        hx(&h,"R%d o=%d t=%.9g p=%.9g c=%d e=%d b=%.9g\n",
+           r,re->owner,(double)re->treasury,pop,re->colonized,re->estuary,(double)re->balafre_days);
+    }
+    hx(&h,"rev ig=%d se=%d co=%d cc=%d cr=%d pl=%ld\n",
+       s->rs->n_ignited,s->rs->n_seceded,s->rs->n_coup,s->rs->n_concession,s->rs->n_crushed,(long)s->rs->pop_lost);
+    hx(&h,"dip sv=%d pr=%d cc=%d ci=%d df=%d ap=%d\n",
+       s->dp->n_servage,s->dp->n_protectorat,s->dp->n_concordat,s->dp->n_cite,s->dp->n_defections,s->dp->n_war_antipirate);
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++){ const Navy *nv=&s->navy->n[c];
+        if (!nv->built_total && !nv->raids_done && !nv->crew && !nv->intercepts) continue;
+        hx(&h,"N%d b=%d r=%d pz=%d nv=%d ic=%d dr=%ld cw=%d su=%.9g\n",
+           c,nv->built_total,nv->raids_done,nv->prises,nv->navals,nv->intercepts,(long)nv->drowned,nv->crew,(double)nv->supplies_eaten);
+    }
+    hx(&h,"camp bt=%d dc=%ld dp=%ld sl=%d\n",
+       s->camp->n_battles,(long)s->camp->dead_choc,(long)s->camp->dead_pursuit,s->camp->n_sails);
+    return (uint32_t)h.crc;
+}
+
 int main(int argc, char **argv){
-    uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
-    int nsims     = (argc>2)?atoi(argv[2]):10;   /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
-    int years     = (argc>3)?atoi(argv[3]):200;
-    int fix_emp   = (argc>4)?atoi(argv[4]):0;    /* >0 : empires FIXES (sinon cycle 2+k) */
-    int fix_cs    = (argc>5)?atoi(argv[5]):0;    /* >0 : cités-états FIXES (sinon cycle 5+k) */
+    /* positionnels FILTRÉS de l'option --hash (le harnais de déterminisme). */
+    const char *pos[8]; int np=0, hash_mode=0;
+    for (int i=1;i<argc;i++){
+        if (!strcmp(argv[i],"--hash")) hash_mode=1;
+        else if (np<8) pos[np++]=argv[i];
+    }
+    uint32_t base = (np>0)?(uint32_t)strtoul(pos[0],NULL,10):20240607u;
+    int nsims     = (np>1)?atoi(pos[1]):10;      /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
+    int years     = (np>2)?atoi(pos[2]):200;
+    int fix_emp   = (np>3)?atoi(pos[3]):0;       /* >0 : empires FIXES (sinon cycle 2+k) */
+    int fix_cs    = (np>4)?atoi(pos[4]):0;       /* >0 : cités-états FIXES (sinon cycle 5+k) */
+    int fix_cont  = (np>5)?atoi(pos[5]):0;       /* >0 : continents FIXES (mer §8 : bancs 2..4) */
     if (nsims<1) nsims=1;
     if (years<1) years=1;
 
@@ -398,8 +509,9 @@ int main(int argc, char **argv){
     s.ai=calloc(SCPS_MAX_COUNTRY,sizeof(AiActor)); s.ai_on=calloc(SCPS_MAX_COUNTRY,sizeof(bool));
     s.rs=malloc(sizeof(RevoltState)); s.host=malloc(sizeof(WarHost));
     s.missions=malloc(sizeof(MissionsState)); s.camp=malloc(sizeof(Campaign));
+    s.navy=malloc(sizeof(NavyState));
     if (!w||!s.econ||!s.wp||!s.wl||!s.net||!s.ts||!s.sc||!s.ag||!s.ev||!s.drift
-        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs||!s.host||!s.missions||!s.camp){
+        ||!s.labor||!s.dp||!s.rn||!s.ai||!s.ai_on||!s.rs||!s.host||!s.missions||!s.camp||!s.navy){
         fprintf(stderr,"OOM\n"); return 1; }
 
     printf("══════════════════════════════════════════════════════════════════════\n");
@@ -425,6 +537,11 @@ int main(int argc, char **argv){
     double tot_sat[CLASS_COUNT]={0}; double tot_trade=0;   /* §distrib : satisfaction par classe + commerce */
     long tot_captured=0, tot_worstcorr=0; int worlds_with_capture=0;   /* §C3 : le rot, agrégé */
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
+    long tot_hulls=0, tot_sails=0, tot_searoutes=0, tot_colonies_om=0;   /* mer §10 */
+    double tot_supplies=0, tot_saildays=0;
+    long tot_raids=0, tot_prises=0, tot_navals=0, tot_disarm=0, tot_warpir=0, tot_balafres=0;
+    double tot_loot=0;   /* coques §8 : la course, agrégée */
+    long tot_intercepts=0, tot_drowned=0;
 
     for (int k=0;k<nsims;k++){
         uint32_t seed = base + (uint32_t)k*101u;
@@ -435,9 +552,22 @@ int main(int argc, char **argv){
          * Graines toutes distinctes (base+k·101) → 100 mondes différents. */
         p.n_empires     = (fix_emp>0)? fix_emp : 2 + (k % 10);
         p.n_city_states = (fix_cs >0)? fix_cs  : 5 + (k % 10);
+        if (fix_cont>0) p.n_continents = fix_cont;
         world_generate(w, &p);
         /* silence le bruit de génération : on a déjà tout imprimé par sim plus bas */
         sim_init(&s, w);
+
+        /* LA VOLTA, mesurée (mer §10) : entre deux côtes éloignées, l'aller ne vaut
+         * pas le retour — l'asymétrie du champ de courants, en jours. */
+        { int rA=-1, rB=-1;
+          for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].coastal){ rA=r; break; }
+          for (int r=s.econ->n_regions-1;r>=0;r--) if (s.econ->region[r].coastal){ rB=r; break; }
+          if (rA>=0 && rB>=0 && rA!=rB){
+              float aller=navy_sea_days_regions(w,rA,rB), retour=navy_sea_days_regions(w,rB,rA);
+              if (aller>=0.f && retour>=0.f)
+                  printf("   mer : volta mesurée région %d ⇄ %d — aller %.0f j · retour %.0f j (asymétrie ×%.2f)\n",
+                         rA, rB, aller, retour, (aller>0.f)?retour/aller:0.f);
+          } }
 
         int cont = w->n_continents;
         int n_emp, n_city; role_counts(w, &n_emp, &n_city);
@@ -702,6 +832,64 @@ int main(int argc, char **argv){
           printf("              campagne : %d région(s) réduite(s) par les armées de terrain · %d en mouvement (non-invasif)\n",
                  reduced, moving);
           tot_campaign += reduced; }
+        { long hulls=0; double sup=0;   /* mer §10 : la chaîne navale TIRE */
+          for (int c=0;c<SCPS_MAX_COUNTRY;c++){ hulls+=s.navy->n[c].built_total; sup+=s.navy->n[c].supplies_eaten; }
+          int searoutes=0;
+          for (int i=0;i<s.rn->n;i++) if (s.rn->route[i].maritime && s.rn->route[i].open) searoutes++;
+          long col_om=0;   /* colonies OUTRE-MER : la région vit sur un autre continent que sa couronne */
+          for (int r=0;r<s.econ->n_regions && r<w->n_regions;r++){
+              const RegionEconomy *re=&s.econ->region[r];
+              if (!re->colonized || re->owner<0 || re->owner>=w->n_countries) continue;
+              int cp=w->country[re->owner].capital_prov;
+              if (cp<0||cp>=w->n_provinces) continue;
+              if (w->region[r].continent != w->province[cp].continent) col_om++;
+          }
+          printf("              mer : %ld coque(s) bâtie(s) · %.0f fournitures navales consommées · %d traversée(s) (%.0f j/trav.) · %d route(s) maritime(s) · %ld colonie(s) outre-mer\n",
+                 hulls, sup, s.camp->n_sails,
+                 (s.camp->n_sails>0)?(double)s.camp->sail_days_sum/s.camp->n_sails:0.0,
+                 searoutes, col_om);
+          tot_hulls+=hulls; tot_supplies+=sup; tot_sails+=s.camp->n_sails;
+          tot_saildays+=s.camp->sail_days_sum; tot_searoutes+=searoutes; tot_colonies_om+=col_om; }
+        { long raids=0, prises=0, navals=0, disarmed=0; double loot=0, blocj=0; int pirates=0, nids=0;
+          long intercepts=0, drowned=0, crews=0;
+          for (int c=0;c<SCPS_MAX_COUNTRY;c++){ const Navy *nv=&s.navy->n[c];
+              raids+=nv->raids_done; prises+=nv->prises; navals+=nv->navals; disarmed+=nv->disarmed;
+              loot+=nv->loot_gold; blocj+=nv->blocus_days;
+              intercepts+=nv->intercepts; drowned+=nv->drowned; crews+=nv->crew;
+              pirates+=nv->hull[HULL_PIRATE]; if (nv->nest_region>=0) nids++; }
+          int balafres=0; for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].balafre_days>0.f) balafres++;
+          printf("              course : %ld raid(s) (%.0f or pillés) - %d pirate(s) (%d nid(s) en eaux mortes) - %ld bataille(s) navale(s) - %ld prise(s) - %.0f j de blocus - %ld désarmement(s) - %d guerre(s) anti-piraterie - %d balafre(s) actives\n",
+                 raids, loot, pirates, nids, navals, prises, blocj, disarmed, s.dp->n_war_antipirate, balafres);
+          printf("              marine : %ld marin(s) embarqués - %ld interception(s) - %ld paquet(s) noyés\n",
+                 crews, intercepts, drowned);
+        { float vd,vu,bd,bu,pd,pu;   /* commerce asym. §6 : le tri par SENS, mesuré */
+          intertrade_asym_stats(&vd,&vu,&bd,&bu,&pd,&pu);
+          int nfluv=0, nmar=0;
+          for (int i=0;i<s.rn->n;i++){ if (s.rn->route[i].fluvial) nfluv++; if (s.rn->route[i].maritime&&s.rn->route[i].open) nmar++; }
+          printf("              commerce asym. : aval %.2f vs amont %.2f (ratio %.1fx) - vrac %.2f/%.2f - précieux %.2f/%.2f (aval/amont, %d remontée(s) de luxe) - %d route(s) fluviale(s)\n",
+                 vd, vu, (vu>0.01f)?vd/vu:0.f, bd, bu, pd, pu, intertrade_precious_upstream_events(), nfluv);
+          /* le Carrefour des EMBOUCHURES : les estuaires doivent monter d'eux-mêmes */
+          { int top_est=0;
+            for (int r=0;r<s.econ->n_regions;r++){
+                if (!s.econ->region[r].estuary) continue;
+                if (routes_count_for_region(s.rn,r)>=2) top_est++;
+            }
+            printf("              entrepôts : %d estuaire(s) en carrefour (≥2 routes)\n", top_est); }
+          /* LA VÉRIF des briefs : un continent PLUS RICHE qu'un autre (géographie, pas script) */
+          { double cw[SCPS_MAX_CONTINENT]={0}; double cpop[SCPS_MAX_CONTINENT]={0};
+            for (int r=0;r<s.econ->n_regions && r<w->n_regions;r++){
+                int ct2=w->region[r].continent;
+                if (ct2<0||ct2>=SCPS_MAX_CONTINENT) continue;
+                cw[ct2]+=s.econ->region[r].treasury;
+                for (int k=0;k<CLASS_COUNT;k++) cpop[ct2]+=s.econ->region[r].strata[k].pop;
+            }
+            printf("              continents :");
+            for (int ct2=0;ct2<w->n_continents && ct2<SCPS_MAX_CONTINENT;ct2++)
+                if (cpop[ct2]>0) printf(" C%d %.0f or (%.0fk hab)", ct2, cw[ct2], cpop[ct2]/1000.0);
+            printf("\n"); } }
+          tot_raids+=raids; tot_loot+=loot; tot_prises+=prises; tot_navals+=navals;
+          tot_disarm+=disarmed; tot_warpir+=s.dp->n_war_antipirate; tot_balafres+=balafres;
+          tot_intercepts+=intercepts; tot_drowned+=drowned; }
 
         tot_alliances += n_alliances;
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_emerged += emerged; tot_peakrev += peak_rev; tot_ages += nages;
@@ -710,6 +898,7 @@ int main(int argc, char **argv){
         tot_concession += s.rs->n_concession; tot_crushed += s.rs->n_crushed; tot_revdead += s.rs->pop_lost;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
         if (age_year[AGE_SOULEVEMENTS]>=0) worlds_with_uprising++;
+        if (hash_mode) printf("HASH %u %08x\n", seed, chronicle_sim_hash(seed, &s, w));
     }
 
     printf("\n══════════════════════════════════════════════════════════════════════\n");
@@ -739,6 +928,12 @@ int main(int argc, char **argv){
     printf("   syncrétisme culturel ........ %.1f nœud(s)/sim · %.1f archétype(s) distincts/sim (porte = CULTURE, plus race ; la diffusion par contact DIVERGE)\n",
            (double)tot_sync/(nsims>0?nsims:1), (double)tot_sync_distinct/(nsims>0?nsims:1));
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);
+    printf("   la mer ...................... %ld coque(s) · %.0f fournitures consommées (NE doit plus être zéro) · %ld traversée(s) (%.0f j moy.) · %ld route(s) maritime(s) · %ld colonie(s) outre-mer\n",
+           tot_hulls, tot_supplies, tot_sails, (tot_sails>0)?tot_saildays/(double)tot_sails:0.0, tot_searoutes, tot_colonies_om);
+    printf("   la course ................... %ld raid(s) (%.0f or) · %ld bataille(s) navale(s) · %ld prise(s) · %ld désarmement(s) · %ld guerre(s) anti-piraterie · %ld balafre(s) en fin de sim\n",
+           tot_raids, tot_loot, tot_navals, tot_prises, tot_disarm, tot_warpir, tot_balafres);
+    printf("   l'interception .............. %ld convoi(s) coulé(s) · %ld paquet(s) noyés (le transport sans escorte est une PROIE)\n",
+           tot_intercepts, tot_drowned);
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
     printf("   soulèvements incarnés ....... %ld allumés → %ld sécession(s) · %ld coup(s) · %ld concession(s) · %ld écrasé(s)\n",
            tot_ignited, tot_seceded, tot_coup, tot_concession, tot_crushed);
@@ -752,5 +947,7 @@ int main(int argc, char **argv){
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);
     free(s.ag); free(s.ev); free(s.drift); free(s.labor); free(s.dp); free(s.rn);
     warhost_free(s.host); free(s.camp); free(s.ai); free(s.ai_on); free(s.rs); free(s.host);
+    free(s.missions);   /* fuyait (6 496 o, vu par LeakSanitizer) */
+    free(s.navy);
     return 0;
 }

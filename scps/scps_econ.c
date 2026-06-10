@@ -458,6 +458,8 @@ void econ_init(WorldEconomy *e, const World *w) {
          * nourrissent plus). */
         re->raw_cap[RES_GRAIN] += subsist * (1.15f + 0.70f*reg_hab[rid]);
         re->raw_cap[RES_WOOD]  += subsist * 0.44f;   /* §6a : socle bois +10 % (intrant + chauffe) */
+        re->coastal = coastal;                       /* lu par la marine (rade) et l'agency (gate du Port) */
+        re->estuary = false;                         /* posé au balayage des cellules ci-dessous */
         if (coastal) re->raw_cap[RES_FISH] += subsist * 0.10f;   /* socle côtier minime : le poisson vient surtout des biomes halieutiques (§2) */
 
         /* ARCANE — le cristal sourd des NŒUDS telluriques : TRÈS rare, lié aux
@@ -551,6 +553,16 @@ void econ_init(WorldEconomy *e, const World *w) {
             re->price[r]=BASE_PRICE[r];
             re->stock[r]=0.f;
         }
+    }
+
+    /* ---- ESTUAIRES (commerce asym. §4) : la charnière fleuve ⇄ mer — là où le
+     * vrac d'un bassin versant converge. Une cellule de CÔTE au débit notable
+     * fait de sa région un entrepôt naturel (la bande Carrefour y montera). */
+    for (int i=0;i<SCPS_N;i++){
+        const Cell *c=&w->cell[i];
+        if (!c->coast || c->river<40) continue;
+        int r=c->region;
+        if (r>=0 && r<e->n_regions) e->region[r].estuary=true;
     }
 
     /* ---- Adjacence de régions (terre, 4-connexe) pour la colonisation ---- *
@@ -757,6 +769,10 @@ void econ_tick(WorldEconomy *e, float dt) {
             prod_mult *= (1.f + cap_bonus);
         }
         prod_mult *= (re->tech_prod>0.f ? re->tech_prod : 1.f);   /* §B1 : techs de PRODUCTION du pays (outils/capitale + SAVOIR-FAIRE) */
+        /* CÔTE BALAFRÉE (course §4) : la production de la province pillée est
+         * entaillée ~1 an ; l'immunité au raid décroît en parallèle. */
+        if (re->balafre_days>0.f){ re->balafre_days-=dt*365.f; prod_mult*=0.5f; }
+        if (re->raid_cd_days>0.f)  re->raid_cd_days-=dt*365.f;
 
         /* ---- 1. EXTRACTION = COLLECTE PASSIVE (∝ JOURNALIERS × TERRAIN) -
          * La récolte suit les BRAS qui occupent la tuile, pas le seul terrain : plus de
@@ -1143,6 +1159,11 @@ void econ_tick(WorldEconomy *e, float dt) {
  * Cité-État        : essaime uniquement vers ses propres régions vacantes.
  * Dans les deux cas : au plus une fondation par polité par tick.           */
 
+static void colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid);
+void econ_colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid){
+    if (src_rid<0||src_rid>=e->n_regions||dst_rid<0||dst_rid>=e->n_regions) return;
+    colonize_from(e,src_rid,dst_rid,cid);
+}
 static void colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid) {
     RegionEconomy *src=&e->region[src_rid];
     RegionEconomy *dst=&e->region[dst_rid];
