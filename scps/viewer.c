@@ -52,9 +52,12 @@
 #define WIN_H 1080
 
 /* ---- Temps de jeu : du snapshot au JEU VIVANT ------------------------ */
-typedef enum { SPEED_PAUSE=0, SPEED_1, SPEED_2, SPEED_5, SPEED_COUNT } GameSpeed;
-static const double DAYS_PER_SEC[SPEED_COUNT] = { 0.0, 3.0, 8.0, 24.0 };
-static const char  *SPEED_LABEL[SPEED_COUNT]  = { "❙❙ Pause", "▸ ×1", "▸▸ ×2", "▸▸▸ ×5" };
+typedef enum { SPEED_PAUSE=0, SPEED_1, SPEED_2, SPEED_3, SPEED_5, SPEED_COUNT } GameSpeed;
+static const double DAYS_PER_SEC[SPEED_COUNT] = { 0.0, 3.0, 8.0, 14.0, 24.0 };
+static const char  *SPEED_LABEL[SPEED_COUNT]  = { "❙❙", "▸ ×1", "▸▸ ×2", "▸▸ ×3", "▸▸▸ ×5" };
+static SDL_Rect g_speed_zone;   /* le cran est CLIQUABLE (clic = cran suivant, repasse à ×1) */
+static GameSpeed g_last_speed = SPEED_1;   /* Espace repart sur le DERNIER cran choisi */
+static SpeciesArchetype g_player_race = RACE_HUMAIN;   /* le choix de l'écran de création (shell) */
 #define GAME_YEARS 250
 
 /* ---- État caméra ----------------------------------------------------- */
@@ -654,7 +657,7 @@ static void sim_rebuild(Sim *s, World *w) {
         || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
-    worldgen_seed_peoples(w, s->econ, RACE_HUMAIN);
+    worldgen_seed_peoples(w, s->econ, g_player_race);   /* la race CHOISIE ancre le gradient */
     legitimacy_init(s->wl, w, s->econ);
     prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
@@ -811,7 +814,8 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
     draw_text(ren, g_font, agex, yA, sense_color(0.5f), age);
     zone_add((SDL_Rect){agex-3,yA-2,wage+6,19}, "L'âge courant du monde — reconnu quand le monde a atteint son état.");
     draw_text(ren, g_font, speedx, yA, (sp==SPEED_PAUSE)?sense_color(0.5f):COL_COPPER, spl);
-    zone_add((SDL_Rect){speedx-3,yA-2,wspeed+6,19}, "Vitesse du temps. Espace = pause ; + / − = accélérer / ralentir.");
+    g_speed_zone=(SDL_Rect){speedx-3,yA-2,wspeed+6,19};   /* CLIQUABLE : cran suivant */
+    zone_add(g_speed_zone, "Vitesse du temps — CLIC = cran suivant ; Espace = pause/reprise (dernier cran) ; +/− = accélérer/ralentir.");
 
     /* — Rang B : pays + INDICES 0-100 (colorés par valeur, rouge bas → vert haut).
      *   Pas d'« Assise » (on ne nomme pas le type de légitimité). Savoir/Influence
@@ -2147,13 +2151,272 @@ static void save_ppm(const char *path, const uint32_t *px, int w, int h) {
 
 /* ======================================================================= */
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * LE SHELL DU JEU (brief shell) — menu → création → litanie → OUVERTURE EN PAUSE
+ * → partie. Discipline ESC : fermer la couche du dessus, JAMAIS quitter l'appli
+ * (quitter = bouton + confirmation, seul chemin). Sauvegarde : chantier suivant
+ * (le menu vit avec « Charger » grisé — l'ordre du brief lui-même).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+typedef enum { GS_MENU=0, GS_SETUP, GS_OPENING, GS_PLAYING } GameState;
+static GameState g_gs = GS_MENU;
+static bool g_pause_menu=false, g_quit_confirm=false, g_show_tuto=false;
+static int  g_tuto_page=0;
+static int  g_setup_ethos=5, g_setup_race=(int)RACE_HUMAIN, g_setup_terre=5;  /* défauts : Pacifiste? non → voir tables */
+static char g_open_terre_line[120]="";
+static WorldParams g_stage;            /* l'écran de création édite une COPIE */
+static bool g_pending_open=false;      /* après la forge : entrer en OUVERTURE */
+/* cibles cliquables du shell */
+enum { SH_MENU_ITEM=1, SH_SLIDER_DN, SH_SLIDER_UP, SH_SEED_DICE, SH_PICK_ETHOS,
+       SH_PICK_RACE, SH_PICK_TERRE, SH_FORGER, SH_BACK, SH_OPEN_GO, SH_OPEN_REROLL,
+       SH_PM_ITEM, SH_QC_YES, SH_QC_NO, SH_TUTO_PREV, SH_TUTO_NEXT };
+typedef struct { SDL_Rect r; int kind, a; } ShellHit;
+static ShellHit g_shhits[80]; static int g_nshhits;
+static void shhit_reset(void){ g_nshhits=0; }
+static void shhit_add(SDL_Rect r,int k,int a){ if(g_nshhits<80){ g_shhits[g_nshhits].r=r; g_shhits[g_nshhits].kind=k; g_shhits[g_nshhits].a=a; g_nshhits++; } }
+
+/* ── LE TUTORIEL — texte embarqué tel quel (brief §7), pages courtes ── */
+static const char *TUTO_TITLES[7]={
+    "1 · Ce monde se lit.","2 · Le temps coule en jours.","3 · Ton empire.",
+    "4 · Décider coûte.","5 · Les autres.","6 · Le savoir voyage.","7 · La Brèche." };
+static const char *TUTO_PAGES[7]={
+    "Ici, pas de pourcentages cachés : l'état des choses se dit en MOTS.\nUne province est Unie ou Fracturée, un peuple Loyal ou Frondeur,\nun marché Sain ou En pénurie. Survole : tout se définit en bas d'écran.",
+    "En haut à droite : la date, l'âge du monde, la vitesse.\nESPACE met en pause — et en pause, tu peux tout consulter,\ntout ordonner. Rien ne presse jamais que toi.",
+    "En haut : ton or, tes vivres, tes matériaux, et la santé de ta couronne —\nStabilité, Légitimité, Cohésion, Prospérité. Clique une province pour la voir\nde près ; ouvre la BARRE DE GAUCHE pour l'empire entier :\nÉconomie, Démographie, Stocks, Armée, Filtres.",
+    "Tout ordre — bâtir, exploiter, déplacer, lever — entre dans une FILE\net prend des JOURS. Le prix s'affiche AVANT. Certains leviers rapportent\nvite et coûtent longtemps : mater une révolte tait la rue, pas la colère.",
+    "Tes voisins vivent : ils commercent, s'allient, jalousent.\nOn peut les lier — l'allié, le protégé, le serf, la cité marchande —\net chaque lien a son prix. Un embargo est une arme ; une guerre se gagne\nsur le champ, au MORAL, pas au nombre.",
+    "Ton arbre a un cœur et un cercle : le cœur se recherche,\nle CERCLE se gagne par le contact — commerce, frontières, peuples gouvernés.\nUne culture qu'on assimile est un savoir qu'on tarit.\nChoisis ce que tu fonds et ce que tu gardes distinct.",
+    "Certaines voies sont plus que puissantes — elles sont AVIDES.\nChaque pacte sombre, chaque forge interdite, chaque culte imposé CHARGE le monde.\nLa Brèche n'interdit rien : elle attend. Ton empire tombera — ils tombent tous.\nLa seule question est COMMENT, et ce que tu laisseras debout." };
+
+static const char *SH_ETHOS_N[6]={"Dominateur","Honneur","Mercantile","Bureaucrate","Ordre","Pacifiste"};
+static const char *SH_ETHOS_L[6]={
+    "la conquête est un droit","la parole vaut le sang","tout s'achète, surtout la paix",
+    "l'archive gouverne mieux que l'épée","la discipline tient le monde","rien ne vaut le sang"};
+static const char *SH_TERRE_N[6]={"Plaines","Côte","Estuaire","Collines","Forêt","Au hasard"};
+
+static void sh_button(SDL_Renderer *ren,int x,int y,int w,const char *txt,bool on,bool grise,int kind,int a){
+    fill_rect(ren,x,y,w,26, grise?(SDL_Color){0x12,0x16,0x20,0xff}: on?(SDL_Color){0x3a,0x2c,0x1a,0xff}:(SDL_Color){0x18,0x20,0x30,0xff});
+    draw_box(ren,x,y,w,26, grise?COL_PANEL2: on?COL_COPPER:COL_PANEL2);
+    int tw=text_w(g_font,txt);
+    draw_text(ren,g_font,x+(w-tw)/2,y+5, grise?(SDL_Color){0x55,0x55,0x55,0xff}: on?COL_COPPER:COL_PARCH, txt);
+    if (!grise) shhit_add((SDL_Rect){x,y,w,26},kind,a);
+}
+/* un slider du monde : étiquette, valeur, [−][+] */
+static int sh_slider(SDL_Renderer *ren,int x,int y,const char *lbl,const char *val,int idx,const char *hov){
+    draw_text(ren,g_font,x,y,COL_DIM,lbl);
+    draw_text(ren,g_font,x+150,y,COL_PARCH,val);
+    fill_rect(ren,x+230,y+1,18,16,(SDL_Color){0x18,0x20,0x30,0xff}); draw_box(ren,x+230,y+1,18,16,COL_PANEL2);
+    draw_text(ren,g_font,x+235,y,COL_PARCH,"-"); shhit_add((SDL_Rect){x+230,y+1,18,16},SH_SLIDER_DN,idx);
+    fill_rect(ren,x+252,y+1,18,16,(SDL_Color){0x18,0x20,0x30,0xff}); draw_box(ren,x+252,y+1,18,16,COL_PANEL2);
+    draw_text(ren,g_font,x+257,y,COL_PARCH,"+"); shhit_add((SDL_Rect){x+252,y+1,18,16},SH_SLIDER_UP,idx);
+    if (hov) zone_add((SDL_Rect){x,y-2,270,20},hov);
+    return y+24;
+}
+static void sh_apply_slider(WorldParams *p,int idx,int dir){
+    float st=0.05f*dir;
+    switch(idx){
+        case 0: p->n_continents+=dir; if(p->n_continents<1)p->n_continents=1; if(p->n_continents>8)p->n_continents=8; break;
+        case 1: p->land_amount+=st;  if(p->land_amount<0)p->land_amount=0; if(p->land_amount>1)p->land_amount=1; break;
+        case 2: p->world_age+=st;    if(p->world_age<0)p->world_age=0; if(p->world_age>1)p->world_age=1; break;
+        case 3: p->erosion+=st;      if(p->erosion<0)p->erosion=0; if(p->erosion>1)p->erosion=1; break;
+        case 4: p->mountains+=st;    if(p->mountains<0)p->mountains=0; if(p->mountains>1)p->mountains=1; break;
+        case 5: p->temperature+=st;  if(p->temperature<0)p->temperature=0; if(p->temperature>1)p->temperature=1; break;
+        case 6: p->humidity+=st;     if(p->humidity<0)p->humidity=0; if(p->humidity>1)p->humidity=1; break;
+        case 7: p->n_empires+=dir;   if(p->n_empires<2)p->n_empires=2; if(p->n_empires>15)p->n_empires=15; break;
+        case 8: p->n_city_states+=dir; if(p->n_city_states<0)p->n_city_states=0; if(p->n_city_states>20)p->n_city_states=20; break;
+    }
+}
+/* le VŒU DE TERRE — best-effort, jamais un mur : on déplace la capitale du joueur
+ * vers une de SES provinces qui honore le vœu ; sinon ligne honnête. */
+static void sh_apply_terre(World *w, Sim *s){
+    g_open_terre_line[0]=0;
+    if (g_setup_terre>=5) return;                          /* au hasard : on prend ce que la gen a donné */
+    int me=s->player;
+    Biome want1=BIO_PLAINS, want2=BIO_FARMLAND;
+    switch(g_setup_terre){
+        case 0: want1=BIO_PLAINS;  want2=BIO_FARMLAND; break;
+        case 1: want1=BIO_COAST;   want2=BIO_MANGROVE; break;
+        case 2: want1=BIO_COAST;   want2=BIO_MARSH;    break;   /* estuaire ≈ côte d'embouchure */
+        case 3: want1=BIO_HILLS;   want2=BIO_HIGHLANDS;break;
+        case 4: want1=BIO_FOREST;  want2=BIO_WOODS;    break;
+    }
+    int best=-1;
+    for (int p=0;p<w->n_provinces;p++){
+        if (w->province[p].country!=me) continue;
+        Biome b=w->province[p].biome_dominant;
+        bool estu = (g_setup_terre==2) ? (w->province[p].coastal && b!=BIO_DESERT) : false;
+        if (b==want1 || b==want2 || estu){ best=p; break; }
+    }
+    if (best>=0) w->country[me].capital_prov=best;
+    else snprintf(g_open_terre_line,sizeof g_open_terre_line,
+                  "Nulle %s libre sur ce monde — vous voilà où la terre a voulu.",
+                  SH_TERRE_N[g_setup_terre]);
+}
+static void sh_center_capital(const World *w, const Sim *s, Cam *cam, int win_w, int win_h){
+    int cp=(s->player>=0&&s->player<w->n_countries)?w->country[s->player].capital_prov:-1;
+    if (cp<0||cp>=w->n_provinces) return;
+    cam->scale=3.0f;
+    cam->ox=(float)w->province[cp].seed_x - (float)win_w/(2.f*cam->scale);
+    cam->oy=(float)w->province[cp].seed_y - (float)win_h/(2.f*cam->scale);
+}
+/* l'ouverture applique les CHOIX du joueur sur le monde fraîchement forgé */
+static void sh_enter_opening(World *w, Sim *s, Cam *cam, int win_w, int win_h, GameSpeed *speed){
+    sh_apply_terre(w,s);
+    { int cp=w->country[s->player].capital_prov;                    /* l'ÉTHOS choisi s'ancre au trône */
+      int cr=(cp>=0&&cp<w->n_provinces)?w->province[cp].region:-1;
+      if (cr>=0&&cr<s->econ->n_regions) s->econ->region[cr].culture.ethos=(Ethos)g_setup_ethos; }
+    sh_center_capital(w,s,cam,win_w,win_h);
+    *speed=SPEED_PAUSE;                                              /* PAUSE FORCÉE : on ne vole pas le premier regard */
+    g_gs=GS_OPENING;
+}
+/* la LITANIE de forge (une frame d'ambiance avant la gen synchrone) */
+static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv){
+    fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x0a,0x0e,0x16,0xff});
+    draw_text(ren,g_font_big,win_w/2-90,win_h/2-110,COL_COPPER,"LE MONDE SE FORGE");
+    static const char *L[]={ "géologie…","architecture…","altération…","érosion…","côtes…",
+                             "climat (vents)…","vallées…","biomes…","fertilité…","territoires…",
+                             "hiérarchie…","peuples…","ressources…","sites de départ…","rivières…" };
+    for (int i=0;i<15;i++) draw_text(ren,g_font,win_w/2-70,win_h/2-70+i*16,COL_DIM,L[i]);
+    char sd[48]; snprintf(sd,sizeof sd,"graine %u",seedv);
+    draw_text(ren,g_font,win_w/2-40,win_h/2+180,COL_PARCH,sd);
+}
+
+/* ── rendu du shell : écrans pleins + surcouches (pause · tuto · confirmation) ── */
+static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
+                       WorldParams *stage){
+    shhit_reset();
+    if (g_gs==GS_MENU){
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x07,0x0b,0x12,0xb8});   /* le monde respire derrière */
+        draw_text(ren,g_font_big,win_w/2-44,win_h/4,COL_COPPER,"S C P S");
+        draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,"un monde qui ne vous attend pas — et qui se lit");
+        int bx=win_w/2-90, by=win_h/4+70;
+        sh_button(ren,bx,by,180,"Jouer",false,false,SH_MENU_ITEM,0); by+=34;
+        sh_button(ren,bx,by,180,"Charger",false,true,SH_MENU_ITEM,1); by+=34;   /* grisé : la sauvegarde viendra */
+        sh_button(ren,bx,by,180,"Tutoriel",false,false,SH_MENU_ITEM,2); by+=34;
+        sh_button(ren,bx,by,180,"Quitter",false,false,SH_MENU_ITEM,3);
+    }
+    else if (g_gs==GS_SETUP){
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x0a,0x0e,0x16,0xf2});
+        draw_text(ren,g_font_big,40,24,COL_COPPER,"FORGER UN MONDE");
+        /* colonne MONDE */
+        int x=60,y=70; char v[24];
+        draw_text(ren,g_font,x,y,COL_COPPER,"Le monde"); y+=24;
+        snprintf(v,24,"%d",stage->n_continents); y=sh_slider(ren,x,y,"Continents",v,0,"Le nombre de masses (1-8).");
+        snprintf(v,24,"%.2f",stage->land_amount); y=sh_slider(ren,x,y,"Terres",v,1,"La part de terre émergée.");
+        snprintf(v,24,"%.2f",stage->world_age);   y=sh_slider(ren,x,y,"Âge du monde",v,2,"Un monde vieux a le relief usé.");
+        snprintf(v,24,"%.2f",stage->erosion);     y=sh_slider(ren,x,y,"Érosion",v,3,"L'eau qui ronge la pierre.");
+        snprintf(v,24,"%.2f",stage->mountains);   y=sh_slider(ren,x,y,"Montagnes",v,4,"Le relief qui sépare et protège.");
+        snprintf(v,24,"%.2f",stage->temperature); y=sh_slider(ren,x,y,"Température",v,5,"Des glaces aux fournaises.");
+        snprintf(v,24,"%.2f",stage->humidity);    y=sh_slider(ren,x,y,"Humidité",v,6,"La pluie fait les forêts.");
+        snprintf(v,24,"%d",stage->n_empires);     y=sh_slider(ren,x,y,"Empires",v,7,"Les couronnes rivales (2-15).");
+        snprintf(v,24,"%d",stage->n_city_states); y=sh_slider(ren,x,y,"Cités-états",v,8,"Les cités libres (0-20).");
+        y+=6; char sd[40]; snprintf(sd,40,"graine  %u",stage->seed);
+        draw_text(ren,g_font,x,y,COL_DIM,sd);
+        sh_button(ren,x+170,y-4,60,"dé",false,false,SH_SEED_DICE,0);
+        /* colonne JOUEUR */
+        int px=win_w/2+30, py=70;
+        draw_text(ren,g_font,px,py,COL_COPPER,"Le joueur"); py+=24;
+        draw_text(ren,g_font_small,px,py,COL_DIM,"Éthos"); py+=18;
+        for (int e=0;e<6;e++){
+            char lab[80]; snprintf(lab,80,"%s — %s",SH_ETHOS_N[e],SH_ETHOS_L[e]);
+            bool on=(g_setup_ethos==e);
+            fill_rect(ren,px,py,330,20,on?(SDL_Color){0x3a,0x2c,0x1a,0xff}:(SDL_Color){0x12,0x18,0x24,0xff});
+            draw_text(ren,g_font_small,px+8,py+3,on?COL_COPPER:COL_PARCH,lab);
+            shhit_add((SDL_Rect){px,py,330,20},SH_PICK_ETHOS,e); py+=22;
+        }
+        py+=8; draw_text(ren,g_font_small,px,py,COL_DIM,"Race"); py+=18;
+        for (int r=0;r<(int)RACE_COUNT;r++){
+            bool on=(g_setup_race==r);
+            int cx2=px+(r%3)*112, cy2=py+(r/3)*24;
+            fill_rect(ren,cx2,cy2,104,20,on?(SDL_Color){0x3a,0x2c,0x1a,0xff}:(SDL_Color){0x12,0x18,0x24,0xff});
+            draw_text(ren,g_font_small,cx2+8,cy2+3,on?COL_COPPER:COL_PARCH,species_name((SpeciesArchetype)r));
+            shhit_add((SDL_Rect){cx2,cy2,104,20},SH_PICK_RACE,r);
+        }
+        py+=56; draw_text(ren,g_font_small,px,py,COL_DIM,"Terre de départ (un vœu — jamais un mur)"); py+=18;
+        for (int t=0;t<6;t++){
+            bool on=(g_setup_terre==t);
+            int cx2=px+(t%3)*112, cy2=py+(t/3)*24;
+            fill_rect(ren,cx2,cy2,104,20,on?(SDL_Color){0x3a,0x2c,0x1a,0xff}:(SDL_Color){0x12,0x18,0x24,0xff});
+            draw_text(ren,g_font_small,cx2+8,cy2+3,on?COL_COPPER:COL_PARCH,SH_TERRE_N[t]);
+            shhit_add((SDL_Rect){cx2,cy2,104,20},SH_PICK_TERRE,t);
+        }
+        /* récapitulatif diégétique + Forger */
+        char rec[200];
+        snprintf(rec,200,"Un monde %s%s · %d empires · un peuple %s %s cherchant %s.",
+                 stage->world_age<0.4f?"jeune":"vieux",
+                 stage->mountains>0.6f?" et montagneux":"",
+                 stage->n_empires, species_name((SpeciesArchetype)g_setup_race),
+                 SH_ETHOS_N[g_setup_ethos],
+                 g_setup_terre<5?SH_TERRE_N[g_setup_terre]:"sa chance");
+        draw_text(ren,g_font,60,win_h-86,COL_DIM,rec);
+        sh_button(ren,60,win_h-52,200,"[ Forger le monde ]",true,false,SH_FORGER,0);
+        sh_button(ren,280,win_h-52,120,"Retour",false,false,SH_BACK,0);
+    }
+    else if (g_gs==GS_OPENING){
+        int pw=560, px=(win_w-pw)/2, py=win_h/2-120;
+        panel_bg(ren,px,py,pw,236);
+        draw_text(ren,g_font_big,px+24,py+18,COL_COPPER,"Vous voilà. Une région. 4 000 âmes.");
+        char l1[160];
+        int nemp=0,ncit=0;
+        for (int c2=0;c2<w->n_countries;c2++){
+            if (c2==s->player) continue;
+            if (w->country[c2].role==POLITY_CITY_STATE) ncit++;
+            else if (w->country[c2].role!=POLITY_UNCLAIMED) nemp++;
+        }
+        snprintf(l1,160,"Autour de vous : %d empires, %d cités libres, et un monde qui ne vous attend pas.",
+                 nemp, ncit);
+        draw_text(ren,g_font,px+24,py+52,COL_PARCH,l1);
+        if (g_open_terre_line[0]) draw_text(ren,g_font_small,px+24,py+76,COL_DIM,g_open_terre_line);
+        draw_text(ren,g_font_big,px+24,py+108,COL_PARCH,"« Voici comment votre empire tombera. »");
+        sh_button(ren,px+24, py+170,220,"[ Reroll le monde ]",false,false,SH_OPEN_REROLL,0);
+        sh_button(ren,px+pw-24-180,py+170,180,"[ Commencer ]",true,false,SH_OPEN_GO,0);
+        draw_text(ren,g_font_small,px+24,py+206,COL_DIM,"La partie s'ouvre EN PAUSE — votre premier geste sera Espace.");
+    }
+    /* surcouches (jouables aussi en partie) */
+    if (g_pause_menu && g_gs==GS_PLAYING){
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
+        int bx=win_w/2-100, by=win_h/2-80;
+        panel_bg(ren,bx-20,by-20,240,196);
+        draw_text(ren,g_font_big,bx,by-6,COL_COPPER,"PAUSE"); by+=30;
+        sh_button(ren,bx,by,200,"Reprendre",false,false,SH_PM_ITEM,0); by+=32;
+        sh_button(ren,bx,by,200,"Tutoriel",false,false,SH_PM_ITEM,1); by+=32;
+        sh_button(ren,bx,by,200,"Menu principal",false,false,SH_PM_ITEM,2); by+=32;
+        sh_button(ren,bx,by,200,"Quitter",false,false,SH_PM_ITEM,3);
+    }
+    if (g_show_tuto){
+        int pw=620, ph=240, px=(win_w-pw)/2, py=(win_h-ph)/2;
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x88});
+        panel_bg(ren,px,py,pw,ph);
+        draw_text(ren,g_font_big,px+20,py+14,COL_COPPER,TUTO_TITLES[g_tuto_page]);
+        { const char *t=TUTO_PAGES[g_tuto_page]; int ly=py+48; char line[200]; int li=0;
+          for (const char *c2=t;;c2++){
+              if (*c2=='\n'||*c2==0){ line[li]=0; draw_text(ren,g_font,px+20,ly,COL_PARCH,line); ly+=20; li=0; if(!*c2)break; }
+              else if (li<198) line[li++]=*c2;
+          } }
+        char pg[24]; snprintf(pg,24,"%d / 7",g_tuto_page+1);
+        draw_text(ren,g_font_small,px+pw/2-12,py+ph-26,COL_DIM,pg);
+        if (g_tuto_page>0) sh_button(ren,px+16,py+ph-34,90,"◀ préc.",false,false,SH_TUTO_PREV,0);
+        if (g_tuto_page<6) sh_button(ren,px+pw-106,py+ph-34,90,"suiv. ▶",false,false,SH_TUTO_NEXT,0);
+        draw_text(ren,g_font_small,px+16,py+ph-12,COL_DIM,"ESC ferme");
+    }
+    if (g_quit_confirm){
+        int pw=430, px=(win_w-pw)/2, py=win_h/2-60;
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
+        panel_bg(ren,px,py,pw,120);
+        draw_text(ren,g_font,px+20,py+16,COL_PARCH,"Quitter ? Toute progression non sauvée sera perdue.");
+        sh_button(ren,px+30,py+62,150,"Quitter",false,false,SH_QC_YES,0);
+        sh_button(ren,px+pw-30-150,py+62,150,"Rester",true,false,SH_QC_NO,0);
+    }
+}
+
 int main(int argc, char **argv) {
     bool shot = false, shot_tree = false, shot_war = false, shot_culture = false, shot_sidebar = false;
+    int  shot_shell = 0;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
         else if (!strcmp(argv[i], "--tree")) { shot = true; shot_tree = true; }
         else if (!strcmp(argv[i], "--sidebar")) { shot = true; shot_sidebar = true; }   /* tiroir Stocks + lentille Marché */
+        else if (!strcmp(argv[i], "--shellshot") && i+1<argc) { shot=true; shot_shell=1+atoi(argv[++i]); }  /* 1=menu 2=setup 3=ouverture */
         else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
         else if (!strcmp(argv[i], "--culture")) { shot = true; shot_culture = true; }  /* §5 : vue culture */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
@@ -2247,6 +2510,8 @@ int main(int argc, char **argv) {
     printf("[scps] Génération (graine %u)…\n", seed);
     world_generate(world, &params);
     sim_rebuild(&sim, world);   /* peuple + simule 30 ans (bandeau + panneau) */
+    g_gs = shot ? GS_PLAYING : GS_MENU;      /* le jeu COMMENCE au menu (le monde respire derrière) */
+    g_stage = params;
     printf("[scps] Prêt. TAB/1-0=vues  T=arbre de tech  E/D/S/A/F=sidebar (éco·démo·stocks·armée·filtres)  Z=cadrer  R=regénère  clic=territoire\n");
     printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
     printf("       l=terres m=montagnes t=température h=humidité (Maj=baisse)\n");
@@ -2260,7 +2525,16 @@ int main(int argc, char **argv) {
         selected = (pcap>=0) ? pcap : 0;
         rp.cam_ox=cam.ox; rp.cam_oy=cam.oy; rp.cam_scale=cam.scale; rp.selected_prov=selected;
         SDL_RenderClear(ren);
-        if (shot_tree && sim.ready && g_font) {
+        if (shot_shell && sim.ready && g_font) {
+            ViewMode smode0=VIEW_TERRAIN; rp.region_tint=NULL;
+            render_map(world, pb.pixels, pb.w, pb.h, &rp, smode0); pixbuf_upload(&pb);
+            if (pb.tex) SDL_RenderCopy(ren, pb.tex, NULL, NULL);
+            zone_reset();
+            g_gs = (shot_shell==1)?GS_MENU:(shot_shell==2)?GS_SETUP:GS_OPENING;
+            if (g_gs==GS_OPENING){ snprintf(g_open_terre_line,sizeof g_open_terre_line,
+                "Nulle plaine libre — vous voilà sur la côte."); }
+            shell_draw(ren,win_w,win_h,world,&sim,&g_stage);
+        } else if (shot_tree && sim.ready && g_font) {
             g_tree_open = TECH_CONSCRIPTION;                                  /* démo : un anneau de sous-techs ouvert (à gauche, loin du survol) */
             draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);   /* l'arbre concentrique du pays */
             if (g_tree_demo>=0){                                              /* démo : un survol (boîte 2 colonnes) */
@@ -2315,7 +2589,7 @@ int main(int argc, char **argv) {
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
 
-            case SDL_QUIT: running = false; break;
+            case SDL_QUIT: g_quit_confirm=true; dirty=true; break;   /* la croix passe par la CONFIRMATION */
 
             case SDL_WINDOWEVENT:
                 if (ev.window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -2343,6 +2617,59 @@ int main(int argc, char **argv) {
                     pan_sx = ev.button.x;
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
+                    /* LE SHELL capte d'abord (menu/création/ouverture + surcouches). */
+                    if (g_quit_confirm||g_show_tuto||g_pause_menu||g_gs!=GS_PLAYING){
+                        int hit=-1;
+                        for (int i2=0;i2<g_nshhits;i2++){ SDL_Rect *r2=&g_shhits[i2].r;
+                            if (ev.button.x>=r2->x&&ev.button.x<r2->x+r2->w&&ev.button.y>=r2->y&&ev.button.y<r2->y+r2->h){ hit=i2; break; } }
+                        if (hit>=0){
+                            ShellHit *sh2=&g_shhits[hit];
+                            switch(sh2->kind){
+                                case SH_QC_YES: running=false; break;
+                                case SH_QC_NO:  g_quit_confirm=false; break;
+                                case SH_TUTO_PREV: if(g_tuto_page>0)g_tuto_page--; break;
+                                case SH_TUTO_NEXT: if(g_tuto_page<6)g_tuto_page++; break;
+                                case SH_MENU_ITEM:
+                                    if (sh2->a==0){ g_stage=params; g_gs=GS_SETUP; }
+                                    else if (sh2->a==2){ g_show_tuto=true; g_tuto_page=0; }
+                                    else if (sh2->a==3) g_quit_confirm=true;
+                                    break;
+                                case SH_SLIDER_DN: sh_apply_slider(&g_stage,sh2->a,-1); break;
+                                case SH_SLIDER_UP: sh_apply_slider(&g_stage,sh2->a,+1); break;
+                                case SH_SEED_DICE: g_stage.seed ^= (uint32_t)SDL_GetTicks()*2654435761u; if(!g_stage.seed)g_stage.seed=1u; break;
+                                case SH_PICK_ETHOS: g_setup_ethos=sh2->a; break;
+                                case SH_PICK_RACE:  g_setup_race=sh2->a; g_player_race=(SpeciesArchetype)sh2->a; break;
+                                case SH_PICK_TERRE: g_setup_terre=sh2->a; break;
+                                case SH_BACK: g_gs=GS_MENU; break;
+                                case SH_FORGER:
+                                    params=g_stage; seed=params.seed;
+                                    sh_draw_litanie(ren,win_w,win_h,params.seed); SDL_RenderPresent(ren);
+                                    regen=true; g_pending_open=true;
+                                    break;
+                                case SH_OPEN_REROLL:
+                                    params.seed ^= (uint32_t)SDL_GetTicks()*2654435761u; if(!params.seed)params.seed=1u;
+                                    seed=params.seed;
+                                    sh_draw_litanie(ren,win_w,win_h,params.seed); SDL_RenderPresent(ren);
+                                    regen=true; g_pending_open=true;
+                                    break;
+                                case SH_OPEN_GO: g_gs=GS_PLAYING; break;   /* la pause TIENT : Espace sera le premier geste */
+                                case SH_PM_ITEM:
+                                    if (sh2->a==0) g_pause_menu=false;
+                                    else if (sh2->a==1){ g_show_tuto=true; g_tuto_page=0; }
+                                    else if (sh2->a==2){ g_pause_menu=false; g_gs=GS_MENU; speed=SPEED_PAUSE; }
+                                    else g_quit_confirm=true;
+                                    break;
+                            }
+                        }
+                        dirty=true; break;
+                    }
+                    /* cran de VITESSE cliquable (topbar) */
+                    if (g_gs==GS_PLAYING && ev.button.x>=g_speed_zone.x && ev.button.x<g_speed_zone.x+g_speed_zone.w
+                        && ev.button.y>=g_speed_zone.y && ev.button.y<g_speed_zone.y+g_speed_zone.h){
+                        speed=(GameSpeed)((speed+1)%SPEED_COUNT);
+                        if (speed!=SPEED_PAUSE) g_last_speed=speed;
+                        dirty=true; break;
+                    }
                     /* SIDEBAR d'abord (rail + tiroir) : la décision capte le clic. */
                     if (sim.ready && !show_tree) {
                         bool sbd=false;
@@ -2476,12 +2803,23 @@ int main(int argc, char **argv) {
                     regen=true; }
                 switch (ev.key.keysym.sym) {
                 case SDLK_ESCAPE:
-                    if (g_sb.tab>=0){ g_sb.tab=-1; dirty=true; break; }   /* replie le tiroir d'abord */
-                    running = false; break;
-                case SDLK_q:     running = false; break;
+                    /* L'ÉCHELLE ESC : fermer la couche du dessus — JAMAIS quitter l'appli. */
+                    if      (g_quit_confirm){ g_quit_confirm=false; }
+                    else if (g_show_tuto)   { g_show_tuto=false; }
+                    else if (g_pause_menu)  { g_pause_menu=false; }
+                    else if (g_gs==GS_SETUP){ g_gs=GS_MENU; }
+                    else if (g_gs==GS_OPENING){ g_gs=GS_MENU; }
+                    else if (g_gs==GS_MENU) { /* rien : on ne quitte que par le bouton */ }
+                    else if (show_tree)     { show_tree=false; g_tree_open=-1; }
+                    else if (g_sb.tab>=0)   { g_sb.tab=-1; }
+                    else { g_pause_menu=true; g_last_speed=(speed==SPEED_PAUSE)?g_last_speed:speed; speed=SPEED_PAUSE; }
+                    dirty=true; break;
                 /* --- Contrôle du TEMPS (§1) : Espace = pause ; +/- = vitesse --- */
                 case SDLK_SPACE:
-                    speed = (speed==SPEED_PAUSE) ? SPEED_1 : SPEED_PAUSE; break;
+                    if (g_gs!=GS_PLAYING||g_pause_menu||g_show_tuto||g_quit_confirm) break;
+                    if (speed==SPEED_PAUSE) speed=g_last_speed;            /* on repart sur SON cran */
+                    else { g_last_speed=speed; speed=SPEED_PAUSE; }
+                    break;
                 case SDLK_t:     /* T = l'Arbre de Tech (Ctrl+T = réglage température) */
                     if (SDL_GetModState() & KMOD_CTRL) { ADJ(temperature) }
                     else { show_tree = !show_tree; g_tree_open = -1; }
@@ -2497,9 +2835,11 @@ int main(int argc, char **argv) {
                 case SDLK_PLUS: case SDLK_EQUALS: case SDLK_KP_PLUS:
                     if (speed<SPEED_5) speed++;
                     if (speed==SPEED_PAUSE) speed=SPEED_1;
+                    if (speed!=SPEED_PAUSE) g_last_speed=speed;
                     break;
                 case SDLK_MINUS: case SDLK_KP_MINUS:
                     if (speed>SPEED_1) speed--;
+                    if (speed!=SPEED_PAUSE) g_last_speed=speed;
                     break;
                 /* --- ACTION (§4) : bâtir, via la couche d'agency, en JOURS --- */
                 case SDLK_b:
@@ -2558,6 +2898,8 @@ int main(int argc, char **argv) {
             world_generate(world, &params);
             sim_rebuild(&sim, world);
             selected = -1; dirty = true; regen = false;
+            if (g_pending_open){ g_pending_open=false;
+                sh_enter_opening(world,&sim,&cam,win_w,win_h,&speed); }
         }
 
         /* --- LE TEMPS COULE : la partie avance selon la vitesse (§1) --- */
@@ -2614,6 +2956,14 @@ int main(int argc, char **argv) {
             int mx2,my2; SDL_GetMouseState(&mx2,&my2);
             zone_reset(); bslot_reset(); orow_reset(); modebtn_reset(); topbtn_reset();
             int cid = country_for_panel(world, selected);
+            if (g_gs!=GS_PLAYING) {                              /* le SHELL tient l'écran */
+                shell_draw(ren,win_w,win_h,world,&sim,&g_stage);
+                draw_hover_footer(ren, win_w, win_h, mx2, my2);
+                SDL_RenderPresent(ren);
+                int cx0,cy0; SDL_GetMouseState(&cx0,&cy0); (void)cx0;(void)cy0;
+                SDL_Delay(8);
+                continue;                                        /* pas de HUD hors partie */
+            }
             if (show_tree) {                                    /* superposition de l'arbre (Tab) */
                 draw_tech_tree(ren, win_w, win_h, sim.econ, sim.ts, world, cid);
             } else {
@@ -2626,6 +2976,7 @@ int main(int argc, char **argv) {
                     draw_province_panel(ren, win_w, win_h, world, sim.econ, sim.wp, sim.wl, sim.drift, selected);
                 draw_sidebar(ren, win_w, win_h, &sim, world, mode, selected);   /* §sidebar : rail + tiroir d'empire */
             }
+            shell_draw(ren,win_w,win_h,world,&sim,&g_stage);     /* surcouches : pause · tuto · confirmation */
             draw_hover_footer(ren, win_w, win_h, mx2, my2);     /* survol : nom + EFFET du nœud */
         }
         SDL_RenderPresent(ren);
