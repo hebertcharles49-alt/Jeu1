@@ -139,8 +139,8 @@ int main(int argc, char **argv){
     for (int r=0;r<s.econ->n_regions && nc<4;r++) if (s.econ->region[r].culture.settled) chain[nc++]=r;
     if (nc>=4){
         int A=chain[0],B=chain[1],C=chain[2],D=chain[3];
-        routes_order(s.rn,s.econ,A,B,false);
-        routes_order(s.rn,s.econ,B,C,false);
+        routes_order(s.rn,NULL,s.econ,A,B,false);
+        routes_order(s.rn,NULL,s.econ,B,C,false);
         routes_advance(s.rn,s.w,s.econ,150);     /* ouvre les routes (terre 90 j) ; D reste isolée */
         float pA=region_pop(s.econ,A),pB=region_pop(s.econ,B),pC=region_pop(s.econ,C),pD=region_pop(s.econ,D);
         int infected=events_plague_spread(s.ev,s.w,s.econ,s.wl,s.sc,s.rn,A);

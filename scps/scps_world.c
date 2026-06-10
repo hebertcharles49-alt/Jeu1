@@ -3110,3 +3110,121 @@ uint32_t province_palette(int id) {
     uint8_t bv=(uint8_t)(hue2rgb_f(p,q,h-1.f/3)*255);
     return 0xFF000000u|((uint32_t)r<<16)|((uint32_t)g<<8)|bv;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * LA MER §4 — LE COÛT DIRECTIONNEL (et la volta émerge)
+ * Le pathfinding réutilise le patron Dijkstra en DIRECTIONNEL : le coût
+ * dépend de l'arête (sens vs courant), pas de la tuile seule. L'aller et le
+ * retour entre deux ports DIFFÈRENT — la volta n'est pas scriptée, elle
+ * tombe du champ. Tout se mesure en JOURS.
+ * Surface d'équilibrage : SEA_DAY_BASE, k, m, P, CABOT.
+ * ════════════════════════════════════════════════════════════════════════ */
+#define SEA_DAY_BASE   0.50f   /* jours par cellule, eaux vives sans courant */
+#define SEA_K_ALIGN    1.20f   /* bonus dans le sens du courant (jusqu'à ÷2.2) */
+#define SEA_M_CONTRA   1.50f   /* malus contre le courant (jusqu'à ×2.5)      */
+#define SEA_P_MORTE    3.00f   /* eaux mortes : très lent, jamais interdit    */
+#define SEA_CABOT_DAY  0.65f   /* cabotage : constante modérée, FIXE          */
+
+/* Coût en jours du pas i→(i+dx,dy). Cellules marines uniquement. */
+static float sea_step_days(const World *w, int i, int dx, int dy, int j){
+    const Cell *c=&w->cell[i];
+    float base = SEA_DAY_BASE * ((dx&&dy)?1.41421356f:1.f);
+    if (c->sea==SEA_CABOTAGE || w->cell[j].sea==SEA_CABOTAGE)
+        return SEA_CABOT_DAY * ((dx&&dy)?1.41421356f:1.f);   /* la voie du pauvre : sûre, lente */
+    float il=1.f/sqrtf((float)(dx*dx+dy*dy));
+    float dxn=(float)dx*il, dyn=(float)dy*il;
+    float dot=(c->cur_vx*dxn + c->cur_vy*dyn)*(1.f/100.f);   /* v̂·d̂ pondéré par |v| ∈ [-1..1] */
+    float cost = base / (1.f + SEA_K_ALIGN*fmaxf(0.f,dot))
+                      * (1.f + SEA_M_CONTRA*fmaxf(0.f,-dot));
+    if (c->sea==SEA_MORTE) cost *= SEA_P_MORTE;              /* le désert liquide se contourne */
+    return cost;
+}
+
+/* Dijkstra directionnel sur les cellules marines — tas binaire d'indices. */
+static float g_sea_dist[SCPS_N];
+static int   g_sea_heap[SCPS_N];  static int g_sea_hn;
+static int   g_sea_pos [SCPS_N];                /* -1 = hors tas */
+static void sea_heap_up(int k){
+    while (k>0){ int p=(k-1)/2;
+        if (g_sea_dist[g_sea_heap[p]]<=g_sea_dist[g_sea_heap[k]]) break;
+        int t=g_sea_heap[p]; g_sea_heap[p]=g_sea_heap[k]; g_sea_heap[k]=t;
+        g_sea_pos[g_sea_heap[p]]=p; g_sea_pos[g_sea_heap[k]]=k; k=p; }
+}
+static void sea_heap_down(int k){
+    for(;;){ int l=2*k+1,r=l+1,m=k;
+        if (l<g_sea_hn && g_sea_dist[g_sea_heap[l]]<g_sea_dist[g_sea_heap[m]]) m=l;
+        if (r<g_sea_hn && g_sea_dist[g_sea_heap[r]]<g_sea_dist[g_sea_heap[m]]) m=r;
+        if (m==k) break;
+        int t=g_sea_heap[m]; g_sea_heap[m]=g_sea_heap[k]; g_sea_heap[k]=t;
+        g_sea_pos[g_sea_heap[m]]=m; g_sea_pos[g_sea_heap[k]]=k; k=m; }
+}
+static void sea_heap_push(int i){ g_sea_heap[g_sea_hn]=i; g_sea_pos[i]=g_sea_hn; sea_heap_up(g_sea_hn++); }
+static int  sea_heap_pop(void){
+    int top=g_sea_heap[0]; g_sea_pos[top]=-1;
+    g_sea_heap[0]=g_sea_heap[--g_sea_hn];
+    if (g_sea_hn>0){ g_sea_pos[g_sea_heap[0]]=0; sea_heap_down(0); }
+    return top;
+}
+
+float world_sea_days(const World *w, int ax, int ay, int bx, int by){
+    if (ax<0||ay<0||bx<0||by<0||ax>=SCPS_W||ay>=SCPS_H||bx>=SCPS_W||by>=SCPS_H) return -1.f;
+    int s=scps_idx(ax,ay), t=scps_idx(bx,by);
+    if (!w->cell[s].sea || !w->cell[t].sea) return -1.f;
+    for (int i=0;i<SCPS_N;i++){ g_sea_dist[i]=1e30f; g_sea_pos[i]=-1; }
+    g_sea_hn=0; g_sea_dist[s]=0.f; sea_heap_push(s);
+    static const int DX[8]={1,-1,0,0,1,1,-1,-1}, DY[8]={0,0,1,-1,1,-1,1,-1};
+    while (g_sea_hn>0){
+        int i=sea_heap_pop();
+        if (i==t) return g_sea_dist[i];
+        int x=i%SCPS_W, y=i/SCPS_W;
+        for (int k=0;k<8;k++){
+            int X=x+DX[k], Y=y+DY[k];
+            if (X<0||Y<0||X>=SCPS_W||Y>=SCPS_H) continue;
+            int j=scps_idx(X,Y);
+            if (!w->cell[j].sea) continue;
+            float nd=g_sea_dist[i]+sea_step_days(w,i,DX[k],DY[k],j);
+            if (nd<g_sea_dist[j]){
+                g_sea_dist[j]=nd;
+                if (g_sea_pos[j]<0) sea_heap_push(j); else sea_heap_up(g_sea_pos[j]);
+            }
+        }
+    }
+    return -1.f;   /* bassins séparés */
+}
+
+/* ── L'avant-port d'une région : cellule de MER au pied de sa côte. DÉRIVÉ du
+ * monde (cache par seed) — rien n'entre dans la sauvegarde. ── */
+static uint32_t g_anchor_seed=0xFFFFFFFFu;
+static int16_t  g_anchor_x[SCPS_MAX_REG], g_anchor_y[SCPS_MAX_REG];
+static void sea_anchor_build(const World *w){
+    for (int r=0;r<SCPS_MAX_REG;r++){ g_anchor_x[r]=-1; g_anchor_y[r]=-1; }
+    static const int DX[4]={1,-1,0,0}, DY[4]={0,0,1,-1};
+    /* meilleure distance² au germe de la première province côtière de la région */
+    static int32_t best[SCPS_MAX_REG];
+    for (int r=0;r<SCPS_MAX_REG;r++) best[r]=0x7FFFFFFF;
+    for (int y=0;y<SCPS_H;y++) for (int x=0;x<SCPS_W;x++){
+        const Cell *c=&w->cell[scps_idx(x,y)];
+        if (c->region<0 || c->region>=w->n_regions || !c->coast) continue;
+        int r=c->region;
+        int pid=c->province;
+        int sx=(pid>=0&&pid<w->n_provinces)?w->province[pid].seed_x:x;
+        int sy=(pid>=0&&pid<w->n_provinces)?w->province[pid].seed_y:y;
+        for (int k=0;k<4;k++){
+            int X=x+DX[k], Y=y+DY[k];
+            if (X<0||Y<0||X>=SCPS_W||Y>=SCPS_H) continue;
+            const Cell *m=&w->cell[scps_idx(X,Y)];
+            if (!m->sea) continue;
+            int32_t d2=(X-sx)*(X-sx)+(Y-sy)*(Y-sy);
+            if (d2<best[r]){ best[r]=d2; g_anchor_x[r]=(int16_t)X; g_anchor_y[r]=(int16_t)Y; }
+        }
+    }
+    g_anchor_seed=w->seed;
+}
+bool world_region_sea_anchor(const World *w, int region, int *sx, int *sy){
+    if (region<0 || region>=w->n_regions) return false;
+    if (g_anchor_seed!=w->seed) sea_anchor_build(w);
+    if (g_anchor_x[region]<0) return false;
+    if (sx) *sx=g_anchor_x[region];
+    if (sy) *sy=g_anchor_y[region];
+    return true;
+}

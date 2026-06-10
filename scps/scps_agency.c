@@ -22,7 +22,7 @@ static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
     [EDI_FORTERESSE]   = { "Forteresse",    1100, { .H_coerc=2.0f }, {{RES_WOOD,RES_METAL},{60,50}} },
     [EDI_CITADELLE]    = { "Citadelle",     2200, { .H_coerc=3.0f }, {{RES_METAL,RES_TOOLS},{100,30}} },
     /* Ouverture → P (porte d'assimilation, contact, routes maritimes). */
-    [EDI_PORT]         = { "Port",          540,  { .P_open=1.0f }, {{RES_WOOD,RES_METAL},{80,20}} },
+    [EDI_PORT]         = { "Port",          540,  { .P_open=1.0f, .port=1.0f }, {{RES_WOOD,RES_METAL},{80,20}} },
     [EDI_CARAVANSERAIL]= { "Caravansérail", 365,  { .P_open=0.7f }, {{RES_WOOD},{45}} },
     /* Prospérité → PE local (capte le carrefour). */
     [EDI_MARCHE]       = { "Marché",        180,  { .PE_infra=1.0f }, {{RES_WOOD},{35}} },
@@ -76,6 +76,7 @@ float agency_build_gold(const WorldEconomy *econ, int region, Edifice e){
 
 bool agency_build(AgencyState *a, WorldEconomy *econ, int region, Edifice e){
     if (e<0||e>=EDIFICE_COUNT || !econ || region<0 || region>=econ->n_regions) return false;
+    if (e==EDI_PORT && !econ->region[region].coastal) return false;   /* un port se bâtit SUR la côte (mer §5) */
     RegionEconomy *re=&econ->region[region];
     float gold = agency_build_gold(econ, region, e);
     if (gold > re->treasury) return false;        /* pas l'or → pas de chantier (garde, comme colonize) */
@@ -224,6 +225,7 @@ bool agency_cancel(AgencyState *a, int idx){
 
 static void apply_delta(ProvBuild *b, const ProvBuild *d){
     b->K_inst  += d->K_inst;  b->H_coerc += d->H_coerc;  b->P_open += d->P_open;
+    b->port    += d->port;
     b->PE_infra+= d->PE_infra; b->food_cap += d->food_cap;
 }
 

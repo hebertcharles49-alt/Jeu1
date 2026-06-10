@@ -22,6 +22,7 @@ typedef struct {
     int   days_total, days_done;
     bool  open;
     float yield;           /* PE/tick produit (cloche × porte) */
+    float sea_days;        /* maritime : jours de mer port→port (la distance de COURANTS) */
 } TradeRoute;
 
 #define SCPS_MAX_ROUTES 256
@@ -29,9 +30,12 @@ typedef struct { TradeRoute route[SCPS_MAX_ROUTES]; int n; } RouteNetwork;
 
 void routes_init(RouteNetwork *rn);
 
-/* Ordonne une route entre deux régions peuplées. Maritime exige un Port à au
- * moins une extrémité. Renvoie false si plein / invalide / pas de port. */
-bool routes_order(RouteNetwork *rn, const WorldEconomy *econ,
+/* Ordonne une route entre deux régions peuplées. MARITIME (mer §7) : exige un
+ * PORT RÉEL aux DEUX bouts et un chemin port→port sous le seuil de jours — la
+ * distance maritime est une distance de courants, pas d'oiseau (w requis ;
+ * NULL accepté pour une route de terre). Renvoie false si plein / invalide /
+ * pas de port / mer infranchissable. */
+bool routes_order(RouteNetwork *rn, const World *w, const WorldEconomy *econ,
                   int ra, int rb, bool maritime);
 
 /* Avance de `days` jours : ouvre les routes mûres, recalcule le rendement via

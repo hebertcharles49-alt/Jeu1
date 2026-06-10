@@ -41,6 +41,7 @@
 #include "scps_warhost.h"   /* les armées VIVENT : mobilisation par pays */
 #include "scps_campaign.h"  /* … et MARCHENT : campagne sur la carte (marche/siège/bataille) */
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
+#include "scps_navy.h"     /* la flotte (mer §5) : coques, chantier, entretien, outre-mer */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 /* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
@@ -535,6 +536,7 @@ typedef struct {
     Campaign        *camp;     /* armées de campagne : marche/siège/bataille sur la carte (non-invasif) */
     uint32_t         camp_rng;
     MissionsState   *missions; /* missions décennales (rythme + injection de ressources) */
+    NavyState       *navy;     /* la flotte (mer §5) : coques, chantier, entretien */
     int              prev_dawned; /* dernier âge avéné traité (engagement d'âge §7) */
     AiActor         *ai;       /* un acteur IA par pays voisin (cadence étalée) */
     bool            *ai_on;    /* ce pays est-il piloté par l'IA ? */
@@ -567,10 +569,27 @@ static void sim_campaign_year(Sim *s, World *w) {
                 frontier=r; target=sn; break;
             }
         }
-        if (frontier>=0)
+        if (frontier>=0){
             campaign_order(s->camp, s->econ, c, frontier, target, &s->host->army[c]);
+        } else if (c!=s->player){
+            /* pas de frontière TERRESTRE : la guerre passe la mer si un port, des
+             * transports et un chemin existent (mer §6 — contraint par le champ). */
+            int port=navy_best_port(w,s->econ,c);
+            if (port>=0 && navy_transport_packets_free(s->navy,c)>0){
+                int tgt=-1;
+                for (int r2=0;r2<s->econ->n_regions && tgt<0;r2++){
+                    int ob=s->econ->region[r2].owner;
+                    if (ob<0||ob==c||diplo_status(s->dp,c,ob)!=DIPLO_WAR) continue;
+                    if (!s->econ->region[r2].coastal) continue;
+                    tgt=r2;
+                }
+                if (tgt>=0)
+                    campaign_order_sea(s->camp, w, s->econ, s->navy, c, port, tgt, &s->host->army[c]);
+            }
+        }
     }
     campaign_tick(s->camp, w, s->econ, s->dp, &s->camp_rng, 365.f);
+    campaign_release_transports(s->camp, s->navy);   /* les transports rentrent à la rade */
 }
 
 static void sim_day(Sim *s, World *w) {
@@ -590,11 +609,40 @@ static void sim_day(Sim *s, World *w) {
     }
     world_events_tick(s->ev, w, s->econ, s->wl, s->wp, s->sc, s->rn, s->ts, 1);
     labor_tick(s->labor);
+    navy_tick(s->navy, w, s->econ, 1.f);   /* chantier + entretien : la chaîne navale TIRE */
     /* — mensuel : ÉCONOMIE + réputation diplomatique (O(n²)) + démographie, tous
      * au pas dt=1/12 → même rythme annuel, mais plus fluide qu'un saut yearly — */
     if (s->day % 30 == 29) {
         econ_apply_country_tech(s->econ, s->ts, SCPS_MAX_COUNTRY);  /* §B1 : techs de prod du pays → prod_mult région */
         econ_tick(s->econ, 1.f/12.f);
+        navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
+        for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){   /* IA navale frugale (mer §5) */
+            if (!s->ai_on[c]) continue;
+            int hr=s->ai[c].home_region;
+            if (hr<0||hr>=s->econ->n_regions) continue;
+            RegionEconomy *re=&s->econ->region[hr];
+            if (re->owner!=c) continue;
+            if (re->coastal && re->build.port<=0.f && re->treasury>400.f){
+                agency_build(s->ag, s->econ, hr, EDI_PORT);
+            } else if (navy_best_port(w,s->econ,c)>=0 && s->navy->n[c].build_hull<0){
+                if (s->navy->n[c].hull[HULL_TRANSPORT]<2 && re->treasury>500.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_TRANSPORT);
+                else if (s->navy->n[c].hull[HULL_MERCHANT]<1 && re->treasury>700.f)
+                    navy_order_build(s->navy, w, s->econ, c, HULL_MERCHANT);
+            }
+            if (s->day%180==29 && navy_region_is_port(w,s->econ,hr)){
+                int mine=0;
+                for (int i=0;i<s->rn->n;i++){
+                    const TradeRoute *t=&s->rn->route[i];
+                    if (t->maritime && (t->ra==hr||t->rb==hr)) mine++;
+                }
+                for (int r2=0;r2<s->econ->n_regions && mine<3;r2++){
+                    if (s->econ->region[r2].owner==c||s->econ->region[r2].owner<0) continue;
+                    if (!navy_region_is_port(w,s->econ,r2)) continue;
+                    if (routes_order(s->rn, w, s->econ, hr, r2, true)){ mine++; break; }
+                }
+            }
+        }
         statecraft_tick(s->sc, w, s->econ, s->wp, s->wl, s->dp, s->rn, 30);
         demography_tick(w, s->econ, s->wl, s->drift, 5.f, 5.f, 1.f/12.f);
         /* — conquête du mois : un peuple passé sous une couronne ÉTRANGÈRE devient
@@ -664,7 +712,7 @@ static void sim_day(Sim *s, World *w) {
  * la partie avance par sim_day (plus de snapshot figé). */
 static void sim_rebuild(Sim *s, World *w) {
     if (!s->econ || !s->wp || !s->wl || !s->net || !s->ts || !s->sc
-        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp) return;
+        || !s->ag || !s->ev || !s->drift || !s->labor || !s->rs || !s->host || !s->camp || !s->navy) return;
     econ_init(s->econ, w);
     gen_population(w, s->econ);
     worldgen_seed_peoples(w, s->econ, g_player_race);   /* la race CHOISIE ancre le gradient */
@@ -699,6 +747,7 @@ static void sim_rebuild(Sim *s, World *w) {
     campaign_init(s->camp, w, s->econ);                  /* … qui marcheront sur la carte (terrain + RAZ) */
     s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne propre à la partie */
     missions_init(s->missions);                          /* missions décennales */
+    navy_init(s->navy);                                  /* la flotte : chantiers vides, rades à trouver */
     faction_levers_reset();                              /* §4 : stances de factions à zéro */
     s->prev_dawned=-1;                                   /* §7 : aucun âge encore traité */
     for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++)   /* photo des propriétaires (conquête) */
@@ -955,6 +1004,7 @@ enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_REL
        SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
        SBH_MARCH, SBH_MUSTER, SBH_CANCEL,
        SBH_CHIP_CUR,
+       SBH_NAVY_BUILD /* a=HullType */, SBH_SAIL /* a=région-cible */,
        SBH_LEV_REPRESS, SBH_LEV_ASSIM, SBH_LEV_PURGE, SBH_LEV_EMBARGO,
        SBH_LEV_CONTRAT /* a=SuzContrat, b=pays cible */ };
 typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
@@ -1299,6 +1349,60 @@ static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s
             zone_add((SDL_Rect){x+8,y-2,w-16,15},"Déployer la force mobilisée en ARMÉE DE CAMPAGNE au camp de la capitale — elle marchera sur ordre.");
         }
     }
+    /* ── LA FLOTTE (mer §5) : coques · chantier · rade — et l'embarquement ── */
+    y+=8;
+    { const Navy *nv=&s->navy->n[me];
+      int port=navy_best_port(world, s->econ, me);
+      draw_text(ren,g_font_small,x+10,y,COL_DIM,"Flotte"); y+=15;
+      if (port<0){
+          draw_text(ren,g_font_small,x+12,y,COL_DIM,
+                    s->econ->region[sb_capital_region(s,world)].coastal
+                    ? "aucune rade — bâtir un Port (panneau Bâtir)"
+                    : "pays sans côte — la mer est ailleurs"); y+=17;
+      } else {
+          snprintf(buf[nb],140,"%d combat · %d transport(s) (%d en mer) · %d marchand(s)",
+                   nv->hull[HULL_WAR], nv->hull[HULL_TRANSPORT], nv->at_sea, nv->hull[HULL_MERCHANT]);
+          draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=17;
+          if (nv->build_hull>=0){
+              snprintf(buf[nb],140,"chantier : %s — %d j", navy_hull_name((HullType)nv->build_hull),(int)nv->build_days);
+              draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++; y+=17;
+          } else {
+              static const HullType BB[3]={HULL_TRANSPORT,HULL_MERCHANT,HULL_WAR};
+              for (int k=0;k<3;k++){
+                  snprintf(buf[nb],140,"[chantier : %s]  %.0f or — fournitures navales + bois%s",
+                           navy_hull_name(BB[k]), navy_build_gold(s->econ,port,BB[k]),
+                           BB[k]==HULL_WAR?" + métal":"");
+                  draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+                  sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_NAVY_BUILD, (int)BB[k], 0);
+                  zone_add((SDL_Rect){x+8,y-2,w-16,15},"Commander une coque au chantier de la rade : la recette s'achète AU MARCHÉ (la Scierie navale a un débouché).");
+                  y+=17;
+              }
+          }
+          /* l'embarquement : armée au port + capacité + province visée côtière */
+          const FieldArmy *fa2=&s->camp->army[me];
+          if (fa2->active && fa2->phase==FA_IDLE && fa2->loc==port
+              && selected>=0 && selected<world->n_provinces){
+              int tr=world->province[selected].region;
+              if (tr>=0 && tr<s->econ->n_regions && tr!=port && s->econ->region[tr].coastal){
+                  float aller=navy_sea_days_regions(world,port,tr);
+                  float retour=navy_sea_days_regions(world,tr,port);
+                  long pk=campaign_units(s->camp,me);
+                  int need=(int)((pk+9)/10);
+                  if (aller>=0.f && navy_transport_packets_free(s->navy,me)>=(int)pk){
+                      snprintf(buf[nb],140,"[embarquer] vers la région %d — %.0f j (retour %.0f j) · %d transport(s)",
+                               tr, aller, retour, need);
+                      draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+                      sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_SAIL, tr, 0);
+                      zone_add((SDL_Rect){x+8,y-2,w-16,15},"Embarquer l'armée : charger (jours), traverser (l'ALLER ne vaut pas le RETOUR — la volta), débarquer (hors port : plus lent, exposé).");
+                      y+=17;
+                  } else if (aller>=0.f){
+                      snprintf(buf[nb],140,"traversée %.0f j — transports insuffisants (%d requis)", aller, need);
+                      draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++; y+=17;
+                  }
+              }
+          }
+      }
+    }
     (void)h;
 }
 
@@ -1520,7 +1624,18 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
             const FieldArmy *fa=&s->camp->army[s->player];
             if (campaign_order(s->camp, s->econ, s->player, fa->loc, hh->a, &fa->force))
                 printf("\n[scps] L'armée marche sur la région %d (itinéraire en jours).\n", hh->a);
+            else if (campaign_order_sea(s->camp, world, s->econ, s->navy, s->player, fa->loc, hh->a, &fa->force))
+                printf("\n[scps] La terre ne mène pas là : l'armée EMBARQUE pour la région %d.\n", hh->a);
         } break;
+        case SBH_SAIL: {
+            const FieldArmy *fa=&s->camp->army[s->player];
+            if (campaign_order_sea(s->camp, world, s->econ, s->navy, s->player, fa->loc, hh->a, &fa->force))
+                printf("\n[scps] L'armée embarque pour la région %d (la volta décidera des jours).\n", hh->a);
+        } break;
+        case SBH_NAVY_BUILD:
+            if (navy_order_build(s->navy, world, s->econ, s->player, (HullType)hh->a))
+                printf("\n[scps] Chantier naval : %s en construction.\n", navy_hull_name((HullType)hh->a));
+            break;
         case SBH_MUSTER:
             if (hh->a>=0 && campaign_order(s->camp, s->econ, s->player, hh->a, hh->a, &s->host->army[s->player]))
                 printf("\n[scps] L'ost se rassemble au camp de la capitale (région %d).\n", hh->a);
@@ -2310,7 +2425,7 @@ static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv
  * qui ne matche pas = refus poli (« sauvegarde d'une ère antérieure »).
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define SAVE_MAGIC   0x53504353u   /* "SCPS" */
-#define SAVE_VERSION 3u            /* v3 : courants marins dans World (v2 chiffrée, v1 claire → « ère antérieure ») */
+#define SAVE_VERSION 4u            /* v4 : LA MER — flotte (NAVY), port réel (ProvBuild.port), routes en jours de mer (v3 courants) */
 #define SAVE_F_CRYPT 1u
 typedef struct {
     uint32_t magic, version;
@@ -2377,6 +2492,7 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     ok&=sv_w(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
     ok&=sv_w(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
     ok&=sv_w(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_w(f,SV_TAG('N','A','V','Y'), s->navy,  sizeof *s->navy);
     ok&=sv_w(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);   /* WarHost SANS scratch */
     ok&=sv_w(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
     ok&=sv_w(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
@@ -2457,6 +2573,10 @@ static bool save_sane(const World *w, const Sim *s, int player){
         if (a->owner<0 || a->owner>=w->n_countries) return false;
         if (a->loc <0 || a->loc >=s->econ->n_regions) return false;
         if (a->dest>=s->econ->n_regions || a->next>=s->econ->n_regions) return false; }
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){ const Navy *nv=&s->navy->n[i];
+        for (int t=0;t<HULL_COUNT;t++) if (nv->hull[t]<0 || nv->hull[t]>100000) return false;
+        if (nv->at_sea<0 || nv->build_hull<-1 || nv->build_hull>=HULL_COUNT) return false;
+        if (nv->home_port>=s->econ->n_regions) return false; }
     return true;
 }
 /* charge un slot. 0 = ok ; 1 = absent/corrompu ; 2 = « ère antérieure » (version). */
@@ -2499,6 +2619,7 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     ok&=sv_r(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
     ok&=sv_r(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
     ok&=sv_r(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_r(f,SV_TAG('N','A','V','Y'), s->navy,  sizeof *s->navy);
     ok&=sv_r(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);
     ok&=sv_r(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
     ok&=sv_r(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
@@ -2746,6 +2867,7 @@ int main(int argc, char **argv) {
     sim.host = (WarHost*)         malloc(sizeof(WarHost));
     sim.camp = (Campaign*)        malloc(sizeof(Campaign));
     sim.missions = (MissionsState*) malloc(sizeof(MissionsState));
+    sim.navy = (NavyState*)       malloc(sizeof(NavyState));
     sim.ai   = (AiActor*)         calloc(SCPS_MAX_COUNTRY, sizeof(AiActor));
     sim.ai_on= (bool*)            calloc(SCPS_MAX_COUNTRY, sizeof(bool));
 
@@ -3328,6 +3450,30 @@ int main(int argc, char **argv) {
                 SDL_SetRenderDrawColor(ren,cl.r,cl.g,cl.b,(cc->sea==SEA_COURANT)?0xE0:0x90);
                 SDL_RenderDrawLine(ren,sx,sy,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
                 SDL_RenderDrawPoint(ren,sx+(int)(vx2/m*l),sy+(int)(vy2/m*l));
+            }
+        }
+        /* mer §9 : au survol d'une tuile de mer, LE MOT — cabotage · eaux mortes ·
+         * eaux vives · courant (et son sens). Des mots, jamais un vecteur nu. */
+        if (g_gs==GS_PLAYING && g_font_small && sim.ready){
+            int hmx,hmy; SDL_GetMouseState(&hmx,&hmy);
+            int hcx=(int)(hmx/cam.scale+cam.ox), hcy=(int)(hmy/cam.scale+cam.oy);
+            if (hcx>=0&&hcy>=0&&hcx<SCPS_W&&hcy<SCPS_H){
+                const Cell *hc=scps_cellc(world,hcx,hcy);
+                if (hc->sea){
+                    char sw[64]; const char *dir="";
+                    if (hc->sea==SEA_COURANT||hc->sea==SEA_VIVE){
+                        int ax=hc->cur_vx, ay=hc->cur_vy;
+                        dir = (abs(ax)>=abs(ay)) ? (ax>=0?" vers l'est":" vers l'ouest")
+                                                 : (ay>=0?" vers le sud":" vers le nord");
+                    }
+                    snprintf(sw,sizeof sw,"%s%s",
+                             hc->sea==SEA_CABOTAGE?"cabotage — lent mais sûr":
+                             hc->sea==SEA_MORTE   ?"eaux mortes — rien ne pousse un navire":
+                             hc->sea==SEA_VIVE    ?"eaux vives":
+                                                   "courant favorable",
+                             (hc->sea==SEA_COURANT||hc->sea==SEA_VIVE)?dir:"");
+                    draw_text(ren,g_font_small,hmx+14,hmy+10,COL_PARCH,sw);
+                }
             }
         }
         /* Overlay diégétique : bandeau royaume + panneau de province, via la

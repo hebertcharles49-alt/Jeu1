@@ -157,6 +157,8 @@ typedef struct {
     float food_cap;  /* rendement/stockage alimentaire → croissance */
     float faith;     /* foi (temple/sanctuaire) → SOUTIENT L local (apaise l'agitation) */
     float savoir;    /* savoir bâti (bibliothèque/monastère) → ACCÉLÈRE la recherche locale */
+    float port;      /* le PORT réel (chantier·rade·débouché — mer §5) ; ≠ P_open (le
+                      * Caravansérail ouvre P sans donner de rade). Posé par EDI_PORT. */
 } ProvBuild;
 
 /* ---- Économie d'une région -------------------------------------------- */
@@ -210,6 +212,10 @@ typedef struct {
     bool       impassable;           /* zone morte : infranchissable pour colonisation et commerce */
     bool       colonized;            /* effectivement peuplée/settlée */
     int16_t    owner;                /* pays qui contrôle la région (-1 = vierge) */
+    bool       coastal;              /* une province au moins touche la mer (posé à econ_init) */
+    /* LA COURSE (coques §4) : balafre côtière et immunité au raid. */
+    float      balafre_days;         /* > 0 : côte balafrée (production entaillée ~1 an) */
+    float      raid_cd_days;         /* > 0 : immunisée (~5 ans — on ne trait pas la même vache) */
 } RegionEconomy;
 
 /* Conteneur — possédé par l'appelant, séparé du World pour ne pas alourdir
@@ -254,6 +260,9 @@ float econ_off_culture_fraction(const ProvincePop *pp);
  * non encore peuplés. À appeler après econ_tick(). Renvoie le nb de régions
  * nouvellement colonisées ce tick. */
 int econ_colonize_tick(WorldEconomy *e, const World *w);
+/* Fonde une colonie de `cid` sur `dst` depuis `src` (pop essaimée, owner posé).
+ * Exposé pour la colonisation OUTRE-MER (scps_navy §8) — même acte fondateur. */
+void econ_colonize_from(WorldEconomy *e, int src_rid, int dst_rid, int cid);
 
 /* Migration interne basée sur la prospérité : les bourgeois et élites
  * migrent vers les régions plus riches adjacentes. Crée de la diaspora et

@@ -592,7 +592,7 @@ static void ai_impose_contract(AiActor *a, const World *w, WorldEconomy *econ,
 }
 
 /* Économie : commercer OU bâtir (le frein réoriente l'énergie vers le K). */
-static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
+static void ai_econ_turn(AiActor *a, const World *w, WorldEconomy *econ, const AiView *v,
                          AgencyState *ag, RouteNetwork *rn, float brake){
     /* Famine d'abord : un peuple affamé ne bâtit ni cours ni comptoir. */
     if (v->food < AI_FOOD_FLOOR && a->home_region>=0){
@@ -642,7 +642,7 @@ static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
     } else if (a->credit_trade>=1.f){
         a->credit_trade -= 1.f;
         int p = ai_pick_trade_partner(econ, a->home_region, a->cid);
-        if (p>=0 && routes_order(rn, econ, a->home_region, p, false)){
+        if (p>=0 && routes_order(rn, w, econ, a->home_region, p, false)){
             a->stats.routes++;
             faction_lever_apply(a->cid, FAC_MARCHAND, AI_LEVER_BUILD);   /* §4 : le négoce AVANCE les Marchands */
         } else if (a->home_region>=0 && agency_build(ag, econ, a->home_region, EDI_MARCHE)){
@@ -1142,7 +1142,7 @@ void ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
     float brake = ai_consolidation_pressure(&v);
 
     if (econ_due){
-        ai_econ_turn(a, econ, &v, ag, rn, brake);
+        ai_econ_turn(a, w, econ, &v, ag, rn, brake);
         ai_relocate_turn(a, econ, &v, day);   /* §reloc : peupler sa province-ressource pour combler une pénurie */
         ai_interior_turn(a, w, econ, ag, diplo, &v, day);   /* §leviers : mater/former/purger selon l'éthos */
         /* §leviers — GUERRE COMMERCIALE : l'embargo est l'arme PRINCIPALE du Mercantile
