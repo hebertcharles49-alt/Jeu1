@@ -834,7 +834,7 @@ static void draw_topbar(SDL_Renderer *ren, int win_w, const Sim *s, const World 
         FactionsReadout fc = faction_readout(w, s->econ, cid);
         TTF_Font *fs = g_font_small ? g_font_small : g_font;
         int yC=52, xc=12;
-        static const char *AB[6]   = {"Conqu","March","Légis","Gardi","Trans","Commu"};
+        static const char *AB[6]   = {"Conquérants","Marchands","Légistes","Gardiens","Transgresseurs","Communs"};
         static const SDL_Color FCOL[6] = {
             {0xc0,0x55,0x4a,0xff}, {0xc9,0xa2,0x4b,0xff}, {0x5f,0x8a,0xb0,0xff},
             {0x7a,0x5c,0x99,0xff}, {0x8a,0x3a,0x6a,0xff}, {0x6f,0x9a,0x5a,0xff},
@@ -1025,7 +1025,7 @@ static void sb_panel_eco(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, 
         float gold=intertrade_export_gold(me);
         snprintf(buf[nb],120,"%d route(s) vivante(s) · export %.0f or/an", routes, gold);
         draw_text(ren,g_font_small,x+10,y,COL_PARCH,buf[nb]); nb++; y+=20;
-        draw_text(ren,g_font_small,x+10,y,COL_DIM,"partenaires (clic = embargo / levée d'embargo) :"); y+=16;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"partenaires :"); y+=16;
         int shown=0;
         for (int c=0;c<world->n_countries && shown<10 && y<h-22;c++){
             if (c==me) continue;
@@ -1045,7 +1045,6 @@ static void sb_panel_eco(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, 
             zone_add((SDL_Rect){x+8,y-2,w-16,16}, hv[shown]);
             nb++; shown++; y+=16;
         }
-        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucun négoce inter-pays cette année");
     } else if (g_sb.eco_sub==1){
         draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            prix(or)  tend.  état"); y+=16;
         int idx[RES_COUNT], n=0;
@@ -1078,7 +1077,6 @@ static void sb_panel_eco(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, 
                      ev, ev>0.05f?sb_country_name(world,to):"—");
             draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=15; shown++;
         }
-        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucun flux inter-pays cette année");
     }
 }
 
@@ -1096,7 +1094,7 @@ static void sb_panel_demo(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s,
         draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=15;
     }
     y+=8;
-    draw_text(ren,g_font_small,x+10,y,COL_COPPER,"RELOCALISATION — peupler une province-ressource"); y+=16;
+    draw_text(ren,g_font_small,x+10,y,COL_COPPER,"Relocalisation"); y+=16;
     /* file d'ordres en cours (annulables) */
     for (int i=0;i<s->ag->n && y<h-120;i++){
         const BuildOrder *o=&s->ag->order[i];
@@ -1111,7 +1109,7 @@ static void sb_panel_demo(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s,
         y+=15;
     }
     if (g_sb.reloc_src<0){
-        draw_text(ren,g_font_small,x+10,y,COL_DIM,"1. choisis la SOURCE (réservoir de bras) :"); y+=15;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"source :"); y+=15;
         int picked[6], np=0;
         for (int k=0;k<6;k++){ int best=-1; float bp=0.f;
             for (int r=0;r<s->econ->n_regions;r++){
@@ -1137,7 +1135,7 @@ static void sb_panel_demo(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s,
         snprintf(buf[nb],130,"source : région %d   [changer]", g_sb.reloc_src);
         draw_text(ren,g_font_small,x+10,y,COL_COPPER,buf[nb]); nb++;
         sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_RELOC_CLR, 0,0); y+=16;
-        draw_text(ren,g_font_small,x+10,y,COL_DIM,"2. choisis la CIBLE (terre-ressource sous-peuplée) :"); y+=15;
+        draw_text(ren,g_font_small,x+10,y,COL_DIM,"cible :"); y+=15;
         int shown=0;
         for (int r=0;r<s->econ->n_regions && shown<6 && y<h-20;r++){
             const RegionEconomy *re=&s->econ->region[r];
@@ -1161,58 +1159,64 @@ static void sb_panel_demo(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s,
             zone_add((SDL_Rect){x+8,y-2,w-16,15},hv2[shown]);
             y+=15; shown++;
         }
-        if (!shown){ draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucune terre-ressource en manque à peupler"); }
     }
 }
 
-/* ── panneau STOCKS : tension d'abord, stratégiques épinglés + EXPLOITER ───── */
+/* ── panneau STOCKS — sobre : l'état par la COULEUR et l'ORDRE, jamais par les mots.
+ * Un bien mort n'existe pas à l'écran. L'exploitation est un chip de LIGNE (un ordre
+ * disponible = un état), pas une suggestion. ───────────────────────────────── */
+static bool sb_good_alive(int g){
+    return g_sbc.stk[g]>0.5f || g_sbc.dem[g]>0.05f || g_sbc.sup[g]>0.05f;
+}
 static void sb_panel_stocks(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s, const World *world){
     static char buf[56][130]; int nb=0;
-    (void)world;
+    (void)world; (void)w;
     static const Resource STRAT[3]={RES_SALTPETER,RES_CELESTIAL_IRON,RES_ARCANE_CRYSTAL};
-    draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            stock   net/j   couv.   état"); y+=16;
+    draw_text(ren,g_font_small,x+10,y,COL_DIM,"bien            stock   net/j   couv."); y+=16;
     int idx[RES_COUNT], n=0;
-    for (int k=0;k<3;k++) idx[n++]=(int)STRAT[k];                  /* stratégiques épinglés */
+    for (int k=0;k<3;k++) if (sb_good_alive((int)STRAT[k])) idx[n++]=(int)STRAT[k];   /* ★ vivants seulement */
     int base=n;
     for (int g=1;g<RES_COUNT;g++){
         bool strat=false; for(int k2=0;k2<3;k2++) if((int)STRAT[k2]==g) strat=true;
-        if (strat) continue;
-        if (g_sbc.dem[g]>0.05f||g_sbc.sup[g]>0.05f||g_sbc.stk[g]>0.5f) idx[n++]=g;
+        if (strat || !sb_good_alive(g)) continue;
+        idx[n++]=g;
     }
-    for (int i=base+1;i<n;i++){ int k=idx[i],j=i;                  /* le reste : tension d'abord */
+    for (int i=base+1;i<n;i++){ int k=idx[i],j=i;                  /* tensions en tête */
         while(j>base && (int)band_marche(g_sbc.dem[idx[j-1]],g_sbc.sup[idx[j-1]]+g_sbc.stk[idx[j-1]])
                       > (int)band_marche(g_sbc.dem[k],g_sbc.sup[k]+g_sbc.stk[k])){ idx[j]=idx[j-1]; j--; }
         idx[j]=k; }
     int off=g_sb.scroll[SBT_STOCKS]; if(off<0)off=0; if(off>n-1&&n>0)off=n-1;
-    int worst=-1;
-    for (int i=off;i<n && y<h-86;i++){
+    int chips=0;
+    for (int i=off;i<n && y<h-18;i++){
         int g=idx[i];
         BandMarche m=band_marche(g_sbc.dem[g], g_sbc.sup[g]+g_sbc.stk[g]);
-        if (worst<0 && (m==MARCHE_PENURIE||m==MARCHE_TENDU)) worst=g;
         float net=(g_sbc.sup[g]-g_sbc.dem[g])/30.f;                /* le tick éco est mensuel */
-        char couv[16]="—";
-        if (net<-0.01f) snprintf(couv,16,"%.0f j", g_sbc.stk[g]/(-net));
-        snprintf(buf[nb],130,"%s%-12.12s %6.0f  %+5.1f  %6s  %s",
-                 (i<base)?"\xe2\x98\x85 ":"  ", resource_name((Resource)g),
-                 g_sbc.stk[g], net, couv, label_marche(m));
-        draw_text(ren,g_font_small,x+8,y,sb_marche_col(m),buf[nb]); nb++; y+=15;
-    }
-    /* DÉCISION : exploiter sa propre terre pour la pire pénurie */
-    if (worst>=0){
-        y+=6;
-        snprintf(buf[nb],130,"EXPLOITER — %s en tension : tes terres qui le portent", resource_name((Resource)worst));
-        draw_text(ren,g_font_small,x+10,y,COL_COPPER,buf[nb]); nb++; y+=15;
-        int shown=0;
-        for (int r=0;r<s->econ->n_regions && shown<3 && y<h-18;r++){
-            const RegionEconomy *re=&s->econ->region[r];
-            if (re->owner!=s->player||!re->colonized||re->raw_cap[worst]<=0.f) continue;
-            snprintf(buf[nb],130,"région %-3d · gisement %.1f   [exploiter]", r, re->raw_cap[worst]);
-            draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
-            sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_EXPLOIT, r, worst);
-            zone_add((SDL_Rect){x+8,y-2,w-16,15},"Mettre l'aménagement en file (mine/carrière) — l'extraction montera à l'achèvement, en jours.");
-            y+=15; shown++;
+        if (net>-0.05f && net<0.05f) net=0.f;                       /* fini les −0.0 */
+        char couv[12]="";
+        if (net<-0.05f){
+            float dj=g_sbc.stk[g]/(-net);
+            if (dj>365.f) snprintf(couv,12,">1 an"); else snprintf(couv,12,"%.0f j",dj);
         }
-        if (!shown) draw_text(ren,g_font_small,x+12,y,COL_DIM,"aucune terre à toi ne le porte — importer ou conquérir");
+        char netl[12];
+        if (net==0.f) snprintf(netl,12,"  0.0"); else snprintf(netl,12,"%+5.1f",net);
+        snprintf(buf[nb],130,"%s%-12.12s %6.0f  %s  %6s",
+                 (i<base)?"\xe2\x98\x85 ":"  ", resource_name((Resource)g),
+                 g_sbc.stk[g], netl, couv);
+        draw_text(ren,g_font_small,x+8,y,sb_marche_col(m),buf[nb]); nb++;
+        /* un ordre DISPONIBLE est un état : le chip [exploiter] sur la ligne en tension,
+         * si une terre à toi porte ce bien (sinon : rien — le silence informe). */
+        if (chips<4 && (m==MARCHE_PENURIE||m==MARCHE_TENDU)){
+            for (int r=0;r<s->econ->n_regions;r++){
+                const RegionEconomy *re=&s->econ->region[r];
+                if (re->owner!=s->player||!re->colonized||re->raw_cap[g]<=0.f) continue;
+                sbhit_add((SDL_Rect){x+w-92,y-1,80,14}, SBH_EXPLOIT, r, g);
+                draw_text(ren,g_font_small,x+w-92,y,COL_COPPER,"[exploiter]");
+                zone_add((SDL_Rect){x+w-92,y-1,80,14},
+                    "Aménager l'extraction (mine/carrière) sur ta terre qui porte ce bien — en file, en jours.");
+                chips++; break;
+            }
+        }
+        y+=15;
     }
 }
 
@@ -1267,16 +1271,15 @@ static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s
                 zone_add((SDL_Rect){x+8,y-2,w-16,15},"ORDONNER la marche (itinéraire en jours, terrain décidant) ; une terre ennemie sera ASSIÉGÉE à l'arrivée.");
                 y+=17;
             }
-        } else { draw_text(ren,g_font_small,x+12,y,COL_DIM,"(clique une province sur la carte pour ordonner une marche)"); y+=15; }
+        }
     } else {
-        draw_text(ren,g_font_small,x+10,y,COL_DIM,"aucune armée de campagne déployée"); y+=16;
         if (units>0){
             int cr=sb_capital_region(s,world);
             snprintf(buf[nb],140,"[lever l'ost] rassembler à la capitale (région %d)", cr);
             draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
             sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_MUSTER, cr, 0);
             zone_add((SDL_Rect){x+8,y-2,w-16,15},"Déployer la force mobilisée en ARMÉE DE CAMPAGNE au camp de la capitale — elle marchera sur ordre.");
-        } else draw_text(ren,g_font_small,x+12,y,COL_DIM,"(monte la levée : il faut des paquets mobilisés)");
+        }
     }
     (void)h;
 }
@@ -1337,7 +1340,7 @@ static void sb_panel_leviers(SDL_Renderer *ren, int x, int y, int w, Sim *s,
               g_sb.purge_arm,SBH_LEV_PURGE,selreg,0,
               g_sb.purge_arm? "SECOND CLIC = la purge commence : ~12 % du groupe périra PAR AN pendant 4 ans · la stabilité vacillera des années · la Brèche se RAPPROCHERA."
                             : "PROCLAMER LA PURGE (4 ans, par tranches, arrêtable au prix du gâchis) : des familles périront · stabilité plombée · CHARGE faustienne. Deux clics.");
-      } else draw_text(ren,g_font_small,cx,ry+2,COL_DIM,"(sélectionne une de TES provinces)");
+      }
     }
     /* rangée COURONNE */
     { int cx=x+10, ry=y+38;
@@ -1369,7 +1372,7 @@ static void sb_panel_leviers(SDL_Renderer *ren, int x, int y, int w, Sim *s,
               }
           }
           (void)cx;
-      } else draw_text(ren,g_font_small,cx+4,ry+2,COL_DIM,"(sélectionne un pays étranger pour les contrats)");
+      }
     }
 }
 
@@ -1389,9 +1392,30 @@ static void draw_sidebar(SDL_Renderer *ren, int win_w, int win_h, Sim *s, World 
       if (g_sb.anim>target) { g_sb.anim-=dtf/0.15f; if(g_sb.anim<0.f)g_sb.anim=0.f; }
     }
     int dw=(int)(SB_DRAWER_W*g_sb.anim);
-    /* tiroir */
+    /* tiroir — il ÉPOUSE son contenu (borné), commence SOUS la topbar et s'arrête
+     * AU-DESSUS de la rangée de chips : aucun calque ne recouvre l'autre. */
     if (dw>2 && s->ready){
-        int dx=SB_RAIL_W, dy=44, dh=win_h-44-24;
+        int dx=SB_RAIL_W, dy=70;
+        int content=120;                              /* mesure grossière par onglet */
+        switch(g_sb.tab){
+            case SBT_STOCKS:{ int nn=0; for(int g=1;g<RES_COUNT;g++) if (sb_good_alive(g)) nn++;
+                              content=20+nn*15+8; } break;
+            case SBT_ECO:{ int nn=0;
+                if (g_sb.eco_sub==1){ for(int g=1;g<RES_COUNT;g++) if (g_sbc.dem[g]>0.05f||g_sbc.sup[g]>0.05f) nn++; }
+                else if (g_sb.eco_sub==2){ for(int g=1;g<RES_COUNT;g++) if (intertrade_import_vol(s->player,g)>0.05f||intertrade_export_vol(s->player,g)>0.05f) nn++; }
+                else { for(int c=0;c<world->n_countries;c++){ if(c==s->player) continue;
+                        if (intertrade_pair_value(s->player,c)>0.5f||intertrade_embargoed(s->player,c)
+                            ||diplo_status(s->dp,s->player,c)==DIPLO_WAR) nn++; } if(nn>10)nn=10; nn+=2; }
+                content=24+20+nn*16+8; } break;
+            case SBT_DEMO: content=22+3*15+8+16+15+6*15+24; break;
+            case SBT_ARMEE: content=22+16+24+6*16+3*17+8; break;
+            case SBT_FILTRES: content=3*40+15+24+30; break;
+            default: break;
+        }
+        int dh=32+content+96;                          /* titre + contenu + zone Leviers */
+        int dhmax=win_h-dy-52;                         /* au-dessus des chips de mode */
+        if (dh>dhmax) dh=dhmax;
+        if (dh<200)   dh=200;
         panel_bg(ren,dx,dy,dw,dh);
         if (g_sb.anim>0.95f){
             static const char *TITRE[SBT_COUNT]={"ÉCONOMIE","DÉMOGRAPHIE","STOCKS","ARMÉE","FILTRES DE CARTE"};
@@ -1837,7 +1861,7 @@ static void draw_outliner(SDL_Renderer *ren, int win_w, int win_h, const Sim *s,
     fill_rect(ren, px,py, 2,ph, COL_COPPER);          /* liseré cuivre sur le bord intérieur (gauche) */
     TTF_Font *fs = g_font_small?g_font_small:g_font;
     int x=px+12, y=py+10, rw=pw-22, bottom=py+ph-4, oi=0;
-    draw_text(ren, g_font, x, y, COL_COPPER, "Domaine · par urbanisation"); y+=20;
+    draw_text(ren, g_font, x, y, COL_COPPER, "Domaine"); y+=20;
     /* régions groupées par URBANISATION = le TIER de la capitale (grand → petit). */
     for (int tier=7; tier>=1 && y<bottom-16; tier--){
         int cnt=0;
