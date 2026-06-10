@@ -18,6 +18,7 @@
  */
 #include "scps_world.h"
 #include "scps_econ.h"
+#include "scps_routes.h"
 
 typedef enum { HULL_WAR=0, HULL_TRANSPORT, HULL_MERCHANT, HULL_PIRATE, HULL_COUNT } HullType;
 
@@ -36,9 +37,12 @@ typedef struct {
     int   mission;            /* NavyMission (v1 : posée, lue par la passe course) */
     int   mission_target;     /* selon mission : pays (blocus) / route (escorte) / région (zone) */
     int   nest_region;        /* PIRATE : la région-mer du repaire (-1) — posé par la passe course */
+    float raid_cd;            /* COURSE : jours avant le prochain raid de ce commanditaire */
     /* télémétrie (chronicle §10) */
     int   built_total;        /* coques bâties (cumul sim) */
     float supplies_eaten;     /* fournitures navales consommées (chantier + entretien) */
+    int   raids_done, prises, navals, disarmed;   /* la course, mesurée */
+    float loot_gold, blocus_days;
 } Navy;
 
 typedef struct NavyState { Navy n[SCPS_MAX_COUNTRY]; } NavyState;
@@ -79,5 +83,16 @@ int  navy_colonize_tick(NavyState *ns, const World *w, WorldEconomy *econ, float
 
 /* Jours de mer port-à-port entre les rades de deux régions (< 0 si impossible). */
 float navy_sea_days_regions(const World *w, int reg_a, int reg_b);
+
+/* LA COURSE (coques) : doctrine par éthos (Honneur/Dominateur convertissent,
+ * Mercantile protège puis escorte, Ordre patrouille/bloque), nids en eaux
+ * mortes, raids (1/10 - balafre 1 an - immunité 5 ans), saignée des routes
+ * (marchands plafond 50 %, escorte sans plafond), blocus, et le VERDICT
+ * anti-piraterie (désarmement). `player` est exclu de la doctrine auto.
+ * Cadence : mensuelle (dt_days=30). */
+struct DiploState;
+void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
+                      struct DiploState *dp, RouteNetwork *rn, uint32_t *rng,
+                      int player, float dt_days);
 
 #endif /* SCPS_NAVY_H */

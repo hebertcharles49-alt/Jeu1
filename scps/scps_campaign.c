@@ -154,6 +154,9 @@ bool campaign_order_sea(Campaign *c, const World *w, const WorldEconomy *econ,
     if (days<0.f) return false;                                                 /* bassins séparés */
     int need_tr=(int)((packets+9)/10); if (need_tr<1) need_tr=1;                /* 1 transport = 10 paquets */
     if (navy->n[owner].hull[HULL_TRANSPORT]-navy->n[owner].at_sea < need_tr) return false;
+    for (int e=0;e<SCPS_MAX_COUNTRY;e++)                                        /* coques §3 : le BLOCUS tient le port */
+        if (navy->n[e].mission==NAVY_BLOCUS && navy->n[e].mission_target==owner
+            && navy->n[e].hull[HULL_WAR]>0) return false;
     FieldArmy *a=&c->army[owner];
     a->active=true; a->owner=owner; a->loc=from_region; a->dest=target_region; a->next=-1;
     a->force=*src_force;

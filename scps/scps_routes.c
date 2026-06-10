@@ -81,6 +81,10 @@ void routes_advance(RouteNetwork *rn, const World *w, WorldEconomy *econ, int da
         t->yield = t->capacity * 10.f * bell * gate;       /* échelle ~ PE */
         if (t->maritime)                                    /* mer §7 : le COURANT fait la distance */
             t->yield *= 1.f/(1.f+t->sea_days/40.f);
+        if (t->pirate_press>0.f){                           /* coques §4 : la SAIGNÉE pèse sur le flux */
+            if (t->pirate_press>=90.f) t->yield=0.f;        /* blocus : le lien est COUPÉ */
+            else t->yield *= 1.f/(1.f+0.08f*t->pirate_press);
+        }
         econ->region[t->ra].route_pe += t->yield;
         econ->region[t->rb].route_pe += t->yield;
     }

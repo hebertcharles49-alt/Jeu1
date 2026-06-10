@@ -40,10 +40,11 @@ typedef enum {
     CB_TERRITORIAL,   /* adjacence / revendication / province perdue → prend des provinces */
     CB_RELIGIOUS,     /* schisme + prosélytisme → humiliation (peu/pas de terre) */
     CB_ECONOMIC,      /* un bien aigu MONOPOLISÉ par la cible → la province-source */
-    CB_SUBJUGATION    /* menace + projection → vassalité (pas d'annexion massive) */
+    CB_SUBJUGATION,   /* menace + projection → vassalité (pas d'annexion massive) */
+    CB_ANTIPIRATERIE  /* la course subie trop longtemps (coques §5) → but : DÉSARMER le commanditaire */
 } CasusBelli;
 
-typedef struct {
+typedef struct DiploState {
     DiploStatus status[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       war_years[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
     float       truce[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];  /* jours d'interdiction de guerre (fond) */
@@ -61,6 +62,13 @@ typedef struct {
      * génération. Donne à a un casus belli territorial (irrédentisme, sans adjacence)
      * et galvanise sa guerre de reconquête (ralliement). */
     float       rancor     [SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
+    /* LA COURSE (coques §5) : rancune de la VICTIME envers le COMMANDITAIRE
+     * identifié — même patron d'accumulation/déclin que la fronde. pirate_disarm :
+     * verdict d'une guerre anti-piraterie perdue — la flotte pirate se désarme
+     * (lu/exécuté par scps_navy, qui efface le drapeau). */
+    float       pirate_rancor[SCPS_MAX_COUNTRY][SCPS_MAX_COUNTRY];
+    int8_t      pirate_disarm[SCPS_MAX_COUNTRY];
+    int         n_war_antipirate;     /* télémétrie : guerres anti-piraterie déclarées */
     /* SOUILLURE FAUSTIENNE — faustian[c] = à quel point c développe l'interdit
      * (synchronisé sur sa charge de tech). Une foi ORTHODOXE a une CHANCE de
      * croiser contre un empire qui développe le faustien (Gardiens vs Transgresseurs). */
@@ -221,6 +229,9 @@ float diplo_reparations(DiploState *d, World *w, WorldEconomy *econ, int a, int 
  * de reconquête) et l'UI. Posée par diplo_conquer_region sur le DÉPOSSÉDÉ, plus
  * profonde si la prise fut ILLÉGITIME ; survit à la paix, décroît dans diplo_tick. */
 float diplo_rancor(const DiploState *d, int a, int b);
+/* COURSE : grief de piraterie (victime → commanditaire IDENTIFIÉ) ; clampé [0..10]. */
+void  diplo_pirate_grief (DiploState *d, int victim, int sponsor, float amount);
+float diplo_pirate_rancor(const DiploState *d, int victim, int sponsor);
 
 /* SOUILLURE FAUSTIENNE — synchronisée chaque an depuis la charge de tech d'un pays.
  * diplo_faustian_cb : un attaquant ORTHODOXE (foi régnante austère) contre un

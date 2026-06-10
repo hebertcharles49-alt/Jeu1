@@ -23,6 +23,8 @@ typedef struct {
     bool  open;
     float yield;           /* PE/tick produit (cloche × porte) */
     float sea_days;        /* maritime : jours de mer port→port (la distance de COURANTS) */
+    float pirate_press;    /* COURSE (coques §4) : pression nette après marchands/escorte —
+                            * écrite par scps_navy, appliquée ici ; ≥ 90 = BLOCUS (lien coupé) */
 } TradeRoute;
 
 #define SCPS_MAX_ROUTES 256

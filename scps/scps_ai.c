@@ -845,6 +845,19 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
         }
     }
 
+    /* (2b) LA COLERE DU GEANT (coques 5) — un commanditaire de pirates nous
+     * saigne depuis trop longtemps : le CB anti-piraterie PRIME sur la prédation
+     * (la guerre a un but : faire DESARMER la course). */
+    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++){
+        if (b==a->cid || diplo_status(diplo,a->cid,b)!=DIPLO_NEUTRAL) continue;
+        if (diplo_pirate_rancor(diplo,a->cid,b)<1.5f) continue;        /* en-deca, nul CB possible */
+        if (diplo_casus_belli(w,econ,wp,diplo,a->cid,b,RES_NONE)!=CB_ANTIPIRATERIE) continue;
+        if (!diplo_can_declare(diplo,a->cid,b)) continue;
+        diplo_declare_war_cb(diplo, a->cid, b, CB_ANTIPIRATERIE);
+        a->credit_war -= 1.f; a->stats.wars++;
+        return;
+    }
+
     /* (3) PRÉDATION — la meilleure cible (lue) : hors trêve, hors allié, AVEC un
      * casus belli qui colle au but, friction d'élargissement comprise. */
     Resource want = ai_war_want(v);

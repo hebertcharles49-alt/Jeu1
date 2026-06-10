@@ -136,6 +136,8 @@ static void sim_day(Sim *s, World *w) {
          *   soulèvement, puis on tranche (sécession, coup, jacquerie, écrasement).
          *   Un pays NÉ d'une sécession prend vie. */
         navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
+        navy_course_tick(s->navy, w, s->econ, s->dp, s->rn, &s->camp_rng,
+                         -1, 30.f);   /* coques : la course (raids - saignee - blocus - verdicts) */
         /* IA navale FRUGALE (mer §5/§8) : un pays côtier prospère bâtit son port,
          * puis un transport, puis tente la route MARITIME — décision par éthos
          * (les poids fins viendront avec la passe course). */
@@ -485,6 +487,8 @@ int main(int argc, char **argv){
     int  worlds_with_ironorder=0, worlds_with_uprising=0;
     long tot_hulls=0, tot_sails=0, tot_searoutes=0, tot_colonies_om=0;   /* mer §10 */
     double tot_supplies=0, tot_saildays=0;
+    long tot_raids=0, tot_prises=0, tot_navals=0, tot_disarm=0, tot_warpir=0, tot_balafres=0;
+    double tot_loot=0;   /* coques §8 : la course, agrégée */
 
     for (int k=0;k<nsims;k++){
         uint32_t seed = base + (uint32_t)k*101u;
@@ -793,6 +797,16 @@ int main(int argc, char **argv){
                  searoutes, col_om);
           tot_hulls+=hulls; tot_supplies+=sup; tot_sails+=s.camp->n_sails;
           tot_saildays+=s.camp->sail_days_sum; tot_searoutes+=searoutes; tot_colonies_om+=col_om; }
+        { long raids=0, prises=0, navals=0, disarmed=0; double loot=0, blocj=0; int pirates=0, nids=0;
+          for (int c=0;c<SCPS_MAX_COUNTRY;c++){ const Navy *nv=&s.navy->n[c];
+              raids+=nv->raids_done; prises+=nv->prises; navals+=nv->navals; disarmed+=nv->disarmed;
+              loot+=nv->loot_gold; blocj+=nv->blocus_days;
+              pirates+=nv->hull[HULL_PIRATE]; if (nv->nest_region>=0) nids++; }
+          int balafres=0; for (int r=0;r<s.econ->n_regions;r++) if (s.econ->region[r].balafre_days>0.f) balafres++;
+          printf("              course : %ld raid(s) (%.0f or pillés) - %d pirate(s) (%d nid(s) en eaux mortes) - %ld bataille(s) navale(s) - %ld prise(s) - %.0f j de blocus - %ld désarmement(s) - %d guerre(s) anti-piraterie - %d balafre(s) actives\n",
+                 raids, loot, pirates, nids, navals, prises, blocj, disarmed, s.dp->n_war_antipirate, balafres);
+          tot_raids+=raids; tot_loot+=loot; tot_prises+=prises; tot_navals+=navals;
+          tot_disarm+=disarmed; tot_warpir+=s.dp->n_war_antipirate; tot_balafres+=balafres; }
 
         tot_alliances += n_alliances;
         tot_wars += war_onsets; tot_absorbed += absorbed; tot_emerged += emerged; tot_peakrev += peak_rev; tot_ages += nages;
@@ -832,6 +846,8 @@ int main(int argc, char **argv){
     printf("   régions réduites (campagne) . %ld   (moy. %.1f/sim ; armées de terrain, hors conquête abstraite)\n", tot_campaign, (double)tot_campaign/nsims);
     printf("   la mer ...................... %ld coque(s) · %.0f fournitures consommées (NE doit plus être zéro) · %ld traversée(s) (%.0f j moy.) · %ld route(s) maritime(s) · %ld colonie(s) outre-mer\n",
            tot_hulls, tot_supplies, tot_sails, (tot_sails>0)?tot_saildays/(double)tot_sails:0.0, tot_searoutes, tot_colonies_om);
+    printf("   la course ................... %ld raid(s) (%.0f or) · %ld bataille(s) navale(s) · %ld prise(s) · %ld désarmement(s) · %ld guerre(s) anti-piraterie · %ld balafre(s) en fin de sim\n",
+           tot_raids, tot_loot, tot_navals, tot_prises, tot_disarm, tot_warpir, tot_balafres);
     printf("   pic de révolte moyen ........ %.1f pays\n", (double)tot_peakrev/nsims);
     printf("   soulèvements incarnés ....... %ld allumés → %ld sécession(s) · %ld coup(s) · %ld concession(s) · %ld écrasé(s)\n",
            tot_ignited, tot_seceded, tot_coup, tot_concession, tot_crushed);

@@ -616,6 +616,8 @@ static void sim_day(Sim *s, World *w) {
         econ_apply_country_tech(s->econ, s->ts, SCPS_MAX_COUNTRY);  /* §B1 : techs de prod du pays → prod_mult région */
         econ_tick(s->econ, 1.f/12.f);
         navy_colonize_tick(s->navy, w, s->econ, 30.f);   /* mer §8 : on découvre ce que la volta touche */
+        navy_course_tick(s->navy, w, s->econ, s->dp, s->rn, &s->camp_rng,
+                         s->player, 30.f);   /* coques : la course (raids - saignee - blocus - verdicts) */
         for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++){   /* IA navale frugale (mer §5) */
             if (!s->ai_on[c]) continue;
             int hr=s->ai[c].home_region;
@@ -1004,7 +1006,7 @@ enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_REL
        SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
        SBH_MARCH, SBH_MUSTER, SBH_CANCEL,
        SBH_CHIP_CUR,
-       SBH_NAVY_BUILD /* a=HullType */, SBH_SAIL /* a=région-cible */,
+       SBH_NAVY_BUILD /* a=HullType */, SBH_SAIL /* a=région-cible */, SBH_NAVY_CONV /* a=1 vers pirate */,
        SBH_LEV_REPRESS, SBH_LEV_ASSIM, SBH_LEV_PURGE, SBH_LEV_EMBARGO,
        SBH_LEV_CONTRAT /* a=SuzContrat, b=pays cible */ };
 typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
@@ -1360,9 +1362,28 @@ static void sb_panel_armee(SDL_Renderer *ren, int x, int y, int w, int h, Sim *s
                     ? "aucune rade — bâtir un Port (panneau Bâtir)"
                     : "pays sans côte — la mer est ailleurs"); y+=17;
       } else {
-          snprintf(buf[nb],140,"%d combat · %d transport(s) (%d en mer) · %d marchand(s)",
-                   nv->hull[HULL_WAR], nv->hull[HULL_TRANSPORT], nv->at_sea, nv->hull[HULL_MERCHANT]);
+          snprintf(buf[nb],140,"%d combat · %d transport(s) (%d en mer) · %d marchand(s) · %d pirate(s)",
+                   nv->hull[HULL_WAR], nv->hull[HULL_TRANSPORT], nv->at_sea, nv->hull[HULL_MERCHANT], nv->hull[HULL_PIRATE]);
           draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++; y+=17;
+          { float worst=0.f;   /* coques §7 : l'état des routes, en mots */
+            for (int i=0;i<s->rn->n;i++){ const TradeRoute *t=&s->rn->route[i];
+                if (!t->open||!t->maritime) continue;
+                if (s->econ->region[t->ra].owner!=me && s->econ->region[t->rb].owner!=me) continue;
+                if (t->pirate_press>worst) worst=t->pirate_press; }
+            if (worst>0.f){
+                snprintf(buf[nb],140,"routes : %s", worst>=90.f?"BLOQUÉES":worst>2.f?"infestées":"harcelées");
+                draw_text(ren,g_font_small,x+12,y,worst>2.f?COL_COPPER:COL_DIM,buf[nb]); nb++; y+=17;
+            } }
+          if (nv->hull[HULL_MERCHANT]>0 || nv->hull[HULL_PIRATE]>0){
+              bool top=(nv->hull[HULL_MERCHANT]>0);
+              snprintf(buf[nb],140,"[convertir : %s]  la course %s",
+                       top?"marchand → pirate":"pirate → marchand",
+                       top?"(revenu déniable — la rancune s'armera)":"(désarmer apaise)");
+              draw_text(ren,g_font_small,x+12,y,COL_PARCH,buf[nb]); nb++;
+              sbhit_add((SDL_Rect){x+8,y-2,w-16,15}, SBH_NAVY_CONV, top?1:0, 0);
+              zone_add((SDL_Rect){x+8,y-2,w-16,15},"Conversion AU CHANTIER, peu coûteuse, réversible : c'est sa nature. Le pirate niche en eaux mortes, pille les côtes (1/10), saigne les routes — et désigne son commanditaire s'il est pris.");
+              y+=17;
+          }
           if (nv->build_hull>=0){
               snprintf(buf[nb],140,"chantier : %s — %d j", navy_hull_name((HullType)nv->build_hull),(int)nv->build_days);
               draw_text(ren,g_font_small,x+12,y,COL_DIM,buf[nb]); nb++; y+=17;
@@ -1636,6 +1657,10 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
             if (navy_order_build(s->navy, world, s->econ, s->player, (HullType)hh->a))
                 printf("\n[scps] Chantier naval : %s en construction.\n", navy_hull_name((HullType)hh->a));
             break;
+        case SBH_NAVY_CONV:
+            if (navy_convert(s->navy, world, s->econ, s->player, hh->a!=0))
+                printf("\n[scps] Chantier : %s.\n", hh->a?"un marchand passe à la COURSE":"un pirate rentre dans le rang");
+            break;
         case SBH_MUSTER:
             if (hh->a>=0 && campaign_order(s->camp, s->econ, s->player, hh->a, hh->a, &s->host->army[s->player]))
                 printf("\n[scps] L'ost se rassemble au camp de la capitale (région %d).\n", hh->a);
@@ -1725,6 +1750,15 @@ static void draw_province_panel(SDL_Renderer *ren, int win_w, int win_h,
     snprintf(line,sizeof line, "%ld habitants", p.ames);
     draw_text(ren, g_font, x, y, COL_PARCH, line);
     zone_add((SDL_Rect){x-2,y-2,rw,19}, "Le nombre total d'habitants de la province."); y += 22;
+    { int breg=(pid>=0&&pid<w->n_provinces)?w->province[pid].region:-1;   /* coques §7 : la balafre SE VOIT */
+      if (breg>=0 && breg<econ->n_regions && econ->region[breg].balafre_days>0.f){
+          char bal[64];
+          snprintf(bal,sizeof bal,"côte balafrée — pillée il y a %d mois",
+                   (int)((365.f-econ->region[breg].balafre_days)/30.f));
+          draw_text(ren, g_font_small, x, y, COL_COPPER, bal);
+          zone_add((SDL_Rect){x-2,y-2,rw,17}, "Des pirates ont pillé cette côte (1/10 des stocks) : production entaillée ~1 an ; la province est immunisée ~5 ans (la course ne trait pas deux fois la même vache).");
+          y += 18;
+      } }
 
     /* CAMEMBERTS — Culture + Religion côte à côte (la race SUIT la culture :
      * pas de 3ᵉ disque). Surface sobre ; le détail vit dans le survol. */
