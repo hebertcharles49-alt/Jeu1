@@ -24,7 +24,8 @@
 #include "scps_tech.h"
 #include "scps_legitimacy.h"
 #include "scps_prosperity.h"
-#include "scps_readout.h"   /* la membrane : viewer ne voit QUE des bandes + mots.
+#include "scps_readout.h"
+#include "scps_crypt.h"   /* sauvegardes chiffrées (ChaCha20 + empreinte du clair) */   /* la membrane : viewer ne voit QUE des bandes + mots.
                              * (n'inclut PAS scps_core.h — cloison vérifiée par grep) */
 #include "scps_statecraft.h"/* Influence/Opinion/Diplomates : API en ENTIERS de jeu */
 #include "scps_agency.h"    /* actions du joueur (file de construction, en JOURS) */
@@ -2291,7 +2292,8 @@ static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv
  * qui ne matche pas = refus poli (« sauvegarde d'une ère antérieure »).
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define SAVE_MAGIC   0x53504353u   /* "SCPS" */
-#define SAVE_VERSION 1u
+#define SAVE_VERSION 2u            /* v2 : payload CHIFFRÉ (ChaCha20) + empreinte du clair */
+#define SAVE_F_CRYPT 1u
 typedef struct {
     uint32_t magic, version;
     uint32_t seed;
@@ -2300,6 +2302,9 @@ typedef struct {
     int64_t  stamp;            /* horodatage (time) */
     char     line[96];         /* « An 87 — Empire de X, 12 régions » (écran Charger) */
     uint32_t payload;          /* taille attendue après l'en-tête (intégrité) */
+    uint32_t flags;            /* SAVE_F_CRYPT : sections chiffrées (l'en-tête reste en CLAIR) */
+    uint64_t nonce;            /* nonce ChaCha20 — unique par sauvegarde */
+    uint64_t plain_ck;         /* empreinte FNV-1a du CLAIR : un octet altéré = refus net */
 } SaveHeader;
 typedef struct { int32_t day, year, player, prev_dawned; uint32_t camp_rng;
                  int32_t race, ethos; int16_t prev_owner[SCPS_MAX_REG]; } SaveMisc;
@@ -2326,7 +2331,7 @@ static bool sv_r(FILE *f, uint32_t tag, void *p, size_t sz){
 /* sauve la partie ENTIÈRE dans un slot ; renvoie false si l'écriture échoue. */
 static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     { int rc_=system("mkdir -p saves"); (void)rc_; }
-    FILE *f=fopen(save_slot_path(slot),"wb");
+    FILE *f=fopen(save_slot_path(slot),"w+b");   /* w+ : la post-passe de chiffrement RELIT le payload */
     if (!f) return false;
     SaveHeader h; memset(&h,0,sizeof h);
     h.magic=SAVE_MAGIC; h.version=SAVE_VERSION; h.seed=params->seed;
@@ -2368,9 +2373,23 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     ok&=sv_w(f,SV_TAG('A','G','Y','S'), NULL,0); agency_save(f);
     ok&=sv_w(f,SV_TAG('D','P','L','S'), NULL,0); diplo_save_statics(f);
     ok&=sv_w(f,SV_TAG('F','A','C','T'), NULL,0); faction_save(f);
-    /* intégrité : la taille attendue s'écrit dans l'en-tête */
+    /* intégrité + CHIFFREMENT (post-passe) : on relit le payload CLAIR, on prend son
+     * empreinte, on le chiffre (ChaCha20, nonce unique), on le réécrit en place.
+     * L'en-tête reste en clair (l'écran Charger lit la ligne sans déchiffrer). */
     long p1=ftell(f);
     h.payload=(uint32_t)(p1-p0);
+    { uint8_t *buf=(uint8_t*)malloc(h.payload);
+      if (!buf){ fclose(f); return false; }
+      fseek(f,p0,SEEK_SET);
+      if (fread(buf,1,h.payload,f)!=h.payload){ free(buf); fclose(f); return false; }
+      h.plain_ck = scrypt_fnv1a(buf,h.payload);
+      h.nonce = ((uint64_t)time(NULL)<<32) ^ (uint64_t)SDL_GetTicks()
+              ^ ((uint64_t)params->seed<<13) ^ (uint64_t)(uintptr_t)buf;
+      h.flags = SAVE_F_CRYPT;
+      scrypt_stream(h.nonce, buf, h.payload);
+      fseek(f,p0,SEEK_SET);
+      ok &= fwrite(buf,1,h.payload,f)==h.payload;
+      free(buf); }
     fseek(f,0,SEEK_SET); fwrite(&h,sizeof h,1,f);
     fclose(f);
     return ok;
@@ -2382,6 +2401,18 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     SaveHeader h;
     if (fread(&h,sizeof h,1,f)!=1 || h.magic!=SAVE_MAGIC){ fclose(f); return 1; }
     if (h.version!=SAVE_VERSION){ fclose(f); return 2; }
+    /* payload → mémoire ; déchiffré si marqué ; l'EMPREINTE du clair fait foi
+     * (un octet altéré — chiffré ou non — et le chargement REFUSE net). */
+    { uint8_t *buf=(uint8_t*)malloc(h.payload?h.payload:1);
+      if (!buf){ fclose(f); return 1; }
+      if (fread(buf,1,h.payload,f)!=h.payload){ free(buf); fclose(f); return 1; }
+      fclose(f);
+      if (h.flags & SAVE_F_CRYPT) scrypt_stream(h.nonce, buf, h.payload);
+      if (scrypt_fnv1a(buf,h.payload)!=h.plain_ck){ free(buf); return 1; }   /* altéré → refus */
+      f=tmpfile();
+      if (!f){ free(buf); return 1; }
+      if (fwrite(buf,1,h.payload,f)!=h.payload){ free(buf); fclose(f); return 1; }
+      free(buf); rewind(f); }
     long p0=ftell(f);
     bool ok=true;
     ok&=sv_r(f,SV_TAG('W','R','L','D'), w,        sizeof *w);
@@ -2704,9 +2735,23 @@ int main(int argc, char **argv) {
         for (int d2=0;d2<400;d2++) sim_day(&sim, world);
         DIGEST(dB);
         bool same = (strcmp(dA,dB)==0);
-        printf("A: %s\nB: %s\n══════════════════════════════════════\n BILAN : %s\n", dA, dB,
-               same? "1 réussi, 0 échoué (restitution AU JOUR PRÈS)":"0 réussi, 1 ÉCHOUÉ");
-        return same?0:1;
+        /* 2e contrôle : un octet ALTÉRÉ au milieu du payload chiffré → REFUS net. */
+        bool tamper_ok=false;
+        { FILE *tf=fopen(save_slot_path(3),"r+b");
+          if (tf){ SaveHeader th;
+            if (fread(&th,sizeof th,1,tf)==1){
+                long mid=(long)sizeof th + (long)th.payload/2;
+                fseek(tf,mid,SEEK_SET); int c2=fgetc(tf);
+                fseek(tf,mid,SEEK_SET); fputc(c2^0x5A,tf);
+            }
+            fclose(tf);
+            tamper_ok = (game_load(3, world, &sim, &params)!=0);   /* doit ÉCHOUER */
+          } }
+        printf("A: %s\nB: %s\n  altération d'un octet → %s\n"
+               "══════════════════════════════════════\n BILAN : %d réussis, %d échoués\n",
+               dA, dB, tamper_ok?"REFUSÉE (empreinte)":"ACCEPTÉE (BUG)",
+               (same?1:0)+(tamper_ok?1:0), (same?0:1)+(tamper_ok?0:1));
+        return (same&&tamper_ok)?0:1;
     }
     printf("[scps] Prêt. TAB/1-0=vues  T=arbre de tech  E/D/S/A/F=sidebar (éco·démo·stocks·armée·filtres)  Z=cadrer  R=regénère  clic=territoire\n");
     printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
