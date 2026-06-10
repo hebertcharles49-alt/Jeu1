@@ -929,13 +929,16 @@ typedef struct {
     float   anim;                 /* 0..1 — glissement du tiroir (~150 ms) */
     int     reloc_src;            /* étape 1 de la relocalisation (-1 = pas choisie) */
     MapLens lens;                 /* lentille readout (LENS_NONE = vues classiques) */
+    bool    purge_arm;            /* purge : 1er clic ARME, 2e confirme (acte irréversible) */
 } Sidebar;
-static Sidebar g_sb = { -1, 1, {0,0,0,0,0}, 0.f, -1, LENS_NONE };
+static Sidebar g_sb = { -1, 1, {0,0,0,0,0}, 0.f, -1, LENS_NONE, false };
 
 /* cibles cliquables du tiroir (reconstruites chaque frame, comme zone_add) */
 enum { SBH_TAB=1, SBH_ECOSUB, SBH_EMBARGO, SBH_RELOC_SRC, SBH_RELOC_DST, SBH_RELOC_CLR,
        SBH_EXPLOIT, SBH_LEVY, SBH_POSTURE, SBH_CHIP_MODE, SBH_CHIP_LENS, SBH_REFILL,
-       SBH_MARCH, SBH_MUSTER, SBH_CANCEL };
+       SBH_MARCH, SBH_MUSTER, SBH_CANCEL,
+       SBH_LEV_REPRESS, SBH_LEV_ASSIM, SBH_LEV_PURGE, SBH_LEV_EMBARGO,
+       SBH_LEV_CONTRAT /* a=SuzContrat, b=pays cible */ };
 typedef struct { SDL_Rect r; int kind, a, b; } SbHit;
 static SbHit g_sbhits[120]; static int g_nsbhits;
 static void sbhit_reset(void){ g_nsbhits=0; }
@@ -1308,6 +1311,68 @@ static void sb_panel_filtres(SDL_Renderer *ren, int x, int y, int w, int h, View
     }
 }
 
+/* ── zone basse : LES LEVIERS (brief leviers §1) — gouverner d'où l'on observe ──
+ * Toujours la même, quel que soit l'onglet. Intérieur (mater·former·purger — cible :
+ * la province SÉLECTIONNÉE, à toi) + Couronne (embargo · contrats — cible : le pays
+ * de la sélection). Chaque bouton : coût AVANT (survol), ordre en file/en jours.
+ * La PURGE exige DEUX clics — un acte irréversible mérite deux temps. */
+static void sb_panel_leviers(SDL_Renderer *ren, int x, int y, int w, Sim *s,
+                             const World *world, int selected){
+    fill_rect(ren,x+6,y-4,w-12,1,COL_PANEL2);
+    draw_text(ren,g_font_small,x+10,y,COL_COPPER,"LEVIERS");
+    int selreg=(selected>=0&&selected<world->n_provinces)?world->province[selected].region:-1;
+    bool mine=(selreg>=0&&selreg<s->econ->n_regions&&s->econ->region[selreg].owner==s->player);
+    int tgt=(selreg>=0&&selreg<s->econ->n_regions)?s->econ->region[selreg].owner:-1;
+    bool foreign=(tgt>=0&&tgt!=s->player);
+    /* rangée INTÉRIEUR */
+    { int cx=x+10, ry=y+14;
+      draw_text(ren,g_font_small,cx,ry,COL_DIM,"Intérieur:"); cx+=62;
+      if (mine){
+          cx=sb_chip(ren,cx,ry,"Mater",false,SBH_LEV_REPRESS,selreg,0,
+              "MATER (30 j) : la botte — l'agitation se TAIT (le grief est masqué, il ressortira amplifié) ; l'Assise glisse vers Contrainte.");
+          bool creuset = s->ts[s->player].unlocked[TECH_INTEGRATION];
+          cx=sb_chip(ren,cx,ry,creuset?"Former (Creuset)":"Former",false,SBH_LEV_ASSIM,selreg,creuset?1:0,
+              "FORMER (1 an) : écoles & magistrats — la minorité s'assimile plus vite. AVERTISSEMENT : cette culture est une source de savoir — la former, c'est TARIR le canal.");
+          (void)sb_chip(ren,cx,ry, g_sb.purge_arm?"CONFIRMER LA PURGE ?":"Purger…",
+              g_sb.purge_arm,SBH_LEV_PURGE,selreg,0,
+              g_sb.purge_arm? "SECOND CLIC = la purge commence : ~12 % du groupe périra PAR AN pendant 4 ans · la stabilité vacillera des années · la Brèche se RAPPROCHERA."
+                            : "PROCLAMER LA PURGE (4 ans, par tranches, arrêtable au prix du gâchis) : des familles périront · stabilité plombée · CHARGE faustienne. Deux clics.");
+      } else draw_text(ren,g_font_small,cx,ry+2,COL_DIM,"(sélectionne une de TES provinces)");
+    }
+    /* rangée COURONNE */
+    { int cx=x+10, ry=y+38;
+      draw_text(ren,g_font_small,cx,ry,COL_DIM,"Couronne:"); cx+=62;
+      cx=sb_chip(ren,cx,ry,"Embargo…",false,SBH_LEV_EMBARGO,0,0,
+          "Ouvre Économie·Commerce : décréter/lever l'embargo par partenaire (le commerce perdu se lit AVANT).");
+      if (foreign){
+          float ws=diplo_war_score(s->dp, s->player, tgt);
+          bool at_war=(diplo_status(s->dp,s->player,tgt)==DIPLO_WAR);
+          bool winning=(at_war && ws>=15.f);
+          bool free_v=(diplo_suzerain(s->dp,tgt)<0);
+          if (winning && free_v){
+              cx=sb_chip(ren,cx,ry,"Imposer: servage",false,SBH_LEV_CONTRAT,CONTRAT_SERVAGE,tgt,
+                  "IMPOSER LE SERVAGE au vaincu : tribut LOURD + levées — mais la coercition et la fracture montent CHEZ TOI aussi (parenté servile) ; un serf complote.");
+              cx=sb_chip(ren,cx,ry,"protectorat",false,SBH_LEV_CONTRAT,CONTRAT_PROTECTORAT,tgt,
+                  "IMPOSER LE PROTECTORAT : tribut léger, un glacis — ses guerres t'APPELLERONT (un protecteur qui ne vient pas perd le contrat ET la face).");
+          } else if (free_v && !at_war){
+              if (world->country[tgt].role==POLITY_CITY_STATE)
+                  cx=sb_chip(ren,cx,ry,"Lier la cité",false,SBH_LEV_CONTRAT,CONTRAT_CITE,tgt,
+                      "CONTRAT DE CITÉ : route marchande GARANTIE (ni guerre ni embargo) — la cité reste LIBRE et inannexable tant que le contrat tient.");
+              else {
+                  int cr=sb_capital_region(s,world);
+                  int tr=(world->country[tgt].capital_prov>=0)?world->province[world->country[tgt].capital_prov].region:-1;
+                  bool same_credo=(cr>=0&&tr>=0&&tr<s->econ->n_regions&&cr<s->econ->n_regions
+                                   && s->econ->region[cr].culture.credo==s->econ->region[tr].culture.credo);
+                  if (same_credo)
+                      cx=sb_chip(ren,cx,ry,"Concordat",false,SBH_LEV_CONTRAT,CONTRAT_CONCORDAT,tgt,
+                          "CONCORDAT (co-religionnaires) : légitimité partagée, canal de foi — pas d'or ; l'hérésie de l'un devient le souci de l'autre.");
+              }
+          }
+          (void)cx;
+      } else draw_text(ren,g_font_small,cx+4,ry+2,COL_DIM,"(sélectionne un pays étranger pour les contrats)");
+    }
+}
+
 /* ── le RAIL + le TIROIR ───────────────────────────────────────────────────── */
 static void draw_sidebar(SDL_Renderer *ren, int win_w, int win_h, Sim *s, World *world,
                          ViewMode mode, int selected){
@@ -1332,7 +1397,7 @@ static void draw_sidebar(SDL_Renderer *ren, int win_w, int win_h, Sim *s, World 
             static const char *TITRE[SBT_COUNT]={"ÉCONOMIE","DÉMOGRAPHIE","STOCKS","ARMÉE","FILTRES DE CARTE"};
             if (g_sb.tab>=0&&g_sb.tab<SBT_COUNT)
                 draw_text(ren,g_font,dx+10,dy+8,COL_COPPER,TITRE[g_sb.tab]);
-            int py=dy+32, ph=dy+dh;
+            int py=dy+32, ph=dy+dh-96;          /* on réserve la zone basse aux LEVIERS */
             switch(g_sb.tab){
                 case SBT_ECO:     sb_panel_eco   (ren,dx,py,dw,ph,s,world); break;
                 case SBT_DEMO:    sb_panel_demo  (ren,dx,py,dw,ph,s,world); break;
@@ -1341,6 +1406,7 @@ static void draw_sidebar(SDL_Renderer *ren, int win_w, int win_h, Sim *s, World 
                 case SBT_FILTRES: sb_panel_filtres(ren,dx,py,dw,ph,mode); break;
                 default: break;
             }
+            sb_panel_leviers(ren, dx, dy+dh-92, dw, s, world, selected);   /* zone basse : toujours là */
         }
     }
     /* rail (toujours visible, par-dessus) */
@@ -1372,6 +1438,7 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
         return (mx < SB_RAIL_W + ((g_sb.tab>=0)?dw:0));   /* le tiroir absorbe le clic perdu */
     }
     SbHit *hh=&g_sbhits[hit]; *dirty=true;
+    if (hh->kind!=SBH_LEV_PURGE) g_sb.purge_arm=false;   /* tout autre clic DÉSARME la purge */
     switch(hh->kind){
         case SBH_TAB:      g_sb.tab=(g_sb.tab==hh->a)?-1:hh->a; break;
         case SBH_ECOSUB:   g_sb.eco_sub=hh->a; break;
@@ -1413,6 +1480,32 @@ static bool sidebar_click(Sim *s, World *world, int mx, int my, ViewMode *mode, 
                 printf("\n[scps] L'ost se rassemble au camp de la capitale (région %d).\n", hh->a);
             break;
         case SBH_CANCEL:   agency_cancel(s->ag, hh->a); break;
+        case SBH_LEV_REPRESS:
+            g_sb.purge_arm=false;
+            if (agency_order_repress(s->ag, hh->a))
+                printf("\n[scps] MATER : la garnison marche sur la région %d (30 j) — l'agitation se taira ; le grief, lui, attendra.\n", hh->a);
+            break;
+        case SBH_LEV_ASSIM:
+            g_sb.purge_arm=false;
+            if (agency_order_assimilate(s->ag, hh->a, hh->b!=0))
+                printf("\n[scps] FORMER : écoles et magistrats en région %d (1 an%s) — une source de savoir va se tarir.\n",
+                       hh->a, hh->b?", Creuset":"");
+            break;
+        case SBH_LEV_PURGE:
+            if (!g_sb.purge_arm){ g_sb.purge_arm=true; }       /* 1er clic : ARME */
+            else {
+                g_sb.purge_arm=false;
+                if (agency_order_purge(s->ag, hh->a))
+                    printf("\n[scps] LA PURGE EST PROCLAMÉE (région %d) : 4 ans de tranches — des familles périront, la Brèche se rapproche.\n", hh->a);
+            }
+            break;
+        case SBH_LEV_EMBARGO: g_sb.purge_arm=false; g_sb.tab=SBT_ECO; g_sb.eco_sub=0; break;
+        case SBH_LEV_CONTRAT:
+            g_sb.purge_arm=false;
+            diplo_set_vassal(s->dp, s->player, hh->b, (SuzContrat)hh->a);
+            printf("\n[scps] CONTRAT : %s — %s passe sous ta couronne (le lien tiendra tant que ta force le tient).\n",
+                   diplo_contrat_name((SuzContrat)hh->a), sb_country_name(world,hh->b));
+            break;
         case SBH_CHIP_MODE: *mode=(ViewMode)hh->a; g_sb.lens=LENS_NONE; break;
         case SBH_CHIP_LENS: g_sb.lens=(g_sb.lens==(MapLens)hh->a)?LENS_NONE:(MapLens)hh->a; break;
         default: break;

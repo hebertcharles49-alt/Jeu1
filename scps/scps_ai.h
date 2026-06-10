@@ -95,8 +95,12 @@ typedef struct {
     int      next_strat_day;
     int      next_research_day;  /* cadence de RECHERCHE (l'arbre de tech) */
     int      next_reloc_day;     /* §reloc : prochaine relocalisation autorisée (ensemencer, pas pomper) */
+    int      next_interior_day;  /* §leviers : cadence des leviers intérieurs (mater/former/purger) */
+    int      next_embargo_day;   /* §leviers : cadence de la guerre commerciale (Mercantile) */
+    int      next_purge_ok_day;  /* §leviers : la purge est RARE — long verrou par pays */
     int      peace_lock_until;   /* après une consolidation : pas de guerre avant */
     bool     can_enslave;        /* §4c : l'Économie servile (TECH_ESCLAVAGE) débloquée ? */
+    bool     has_creuset;        /* §leviers : Droit d'intégration (TECH_INTEGRATION) — forme mieux */
 
     uint32_t rng;            /* graine perso (jitter, départage) */
     AiStats  stats;

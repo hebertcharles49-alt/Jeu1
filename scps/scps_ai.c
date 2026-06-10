@@ -13,6 +13,7 @@
 #include "scps_tech.h"
 #include "scps_species.h"
 #include "scps_factions.h"   /* l'éthos effectif + la fracture de valeurs (frein interne §6) */
+#include "scps_intertrade.h" /* §leviers : l'embargo — la guerre commerciale du Mercantile */
 #include <string.h>
 #include <math.h>
 
@@ -507,6 +508,89 @@ static void ai_relocate_turn(AiActor *a, WorldEconomy *econ, const AiView *v, in
     a->next_reloc_day = day + AI_RELOC_COOLDOWN;          /* ensemencer, pas pomper (§3) */
 }
 
+/* (définis plus bas — utilisés par les leviers) */
+static Ethos ai_capital_ethos(const World *w, const WorldEconomy *econ, int cid);
+static int   ai_owned_regions(const WorldEconomy *econ, int cid);
+
+/* ═══ LEVIERS INTÉRIEURS — l'IA en use selon son ÉTHOS et sa SITUATION (brief §4).
+ * Jamais au hasard : le tempérament penche, le déclencheur arme. La purge est RARE
+ * (seuil très haut + long verrou) — un événement de récit, pas une routine. ═══ */
+#define AI_INTERIOR_CADENCE 900     /* ~2.5 ans entre deux leviers intérieurs */
+#define AI_PURGE_LOCK       14600   /* ~40 ans : une purge par génération AU PLUS */
+static void ai_interior_turn(AiActor *a, const World *w, WorldEconomy *econ,
+                             AgencyState *ag, const DiploState *dp, const AiView *v, int day){
+    if (day < a->next_interior_day) return;
+    Ethos eth = ai_capital_ethos(w, econ, a->cid);
+    bool at_war=false;
+    for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++)
+        if (b!=a->cid && diplo_status(dp,a->cid,b)==DIPLO_WAR){ at_war=true; break; }
+    /* balayer SES provinces : la pire agitation, la plus grosse minorité mal intégrée */
+    int worst_agit=-1; float worst_sat=1.f;
+    int worst_min=-1;  long  min_count=0; float min_integ=1.f;
+    for (int r=0;r<econ->n_regions;r++){
+        RegionEconomy *re=&econ->region[r];
+        if (re->owner!=a->cid || !re->colonized) continue;
+        if (re->satisfaction<worst_sat && re->coercion<0.30f){ worst_sat=re->satisfaction; worst_agit=r; }
+        if (re->pop.n_groups>=2){
+            int dom=0; for (int g=1;g<re->pop.n_groups;g++) if (re->pop.groups[g].count>re->pop.groups[dom].count) dom=g;
+            long tot=0; for (int g=0;g<re->pop.n_groups;g++) tot+=re->pop.groups[g].count;
+            for (int g=0;g<re->pop.n_groups;g++){
+                if (g==dom) continue;
+                const PopGroup *pg=&re->pop.groups[g];
+                if (tot>0 && pg->count*3 >= tot && pg->count>min_count){
+                    min_count=pg->count; min_integ=pg->integration; worst_min=r;
+                }
+            }
+        }
+    }
+    /* MATER — fermeté martiale : agitation profonde, la douceur a échoué (ou n'est
+     * pas son genre). Dominateur/Honneur/Ordre volontiers ; Bureaucrate en dernier
+     * recours ; Pacifiste à l'ultime (et il lèvera vite). */
+    bool martial = (eth==ETHOS_DOMINATEUR||eth==ETHOS_HONNEUR||eth==ETHOS_ORDRE);
+    float repress_seuil = martial?0.25f : (eth==ETHOS_BUREAUCRATE)?0.12f : 0.08f;
+    if (worst_agit>=0 && worst_sat<repress_seuil){
+        if (agency_order_repress(ag, worst_agit)){ a->next_interior_day=day+AI_INTERIOR_CADENCE; return; }
+    }
+    /* FORMER — l'art du Bureaucrate (le Creuset) : une grosse minorité mal intégrée,
+     * pas de guerre en cours (on ne scolarise pas sous les bombes). */
+    bool integrateur = (eth==ETHOS_BUREAUCRATE||eth==ETHOS_ORDRE||eth==ETHOS_PACIFISTE);
+    if (!at_war && worst_min>=0 && min_integ<0.40f && (integrateur || a->has_creuset)){
+        if (agency_order_assimilate(ag, worst_min, a->has_creuset)){
+            a->next_interior_day=day+AI_INTERIOR_CADENCE; return; }
+    }
+    /* PURGER — seuil TRÈS haut : credo purificateur au trône, OU Dominateur en crise
+     * de cohésion avec une minorité massive et inassimilée. Long verrou (génération).
+     * Pacifiste/Mercantile/Bureaucrate : jamais (leur IA — le joueur, lui, peut). */
+    if (day>=a->next_purge_ok_day && worst_min>=0){
+        int cr=(a->home_region>=0&&a->home_region<econ->n_regions)?a->home_region:-1;
+        bool purificateur = (cr>=0 && econ->region[cr].culture.credo==CREDO_PURIFICATEUR);
+        bool dominateur_crise = (eth==ETHOS_DOMINATEUR && v->fracture>6.f && min_integ<0.15f);
+        if (purificateur || dominateur_crise){
+            if (agency_order_purge(ag, worst_min)){
+                a->next_purge_ok_day=day+AI_PURGE_LOCK;
+                a->next_interior_day=day+AI_INTERIOR_CADENCE; return;
+            }
+        }
+    }
+    a->next_interior_day=day+AI_INTERIOR_CADENCE/2;   /* rien à faire : on repasse plus tôt */
+}
+
+/* §leviers — IMPOSER À LA VICTOIRE (au lieu d'annexer) : l'éthos choisit le contrat.
+ * Le Dominateur/Honneur font des SERFS ; l'Ordre des PROTECTORATS (glacis) ; le
+ * Mercantile lie les CITÉS ; le Bureaucrate prend un protectorat s'il est déjà large
+ * (un vassal vaut mieux que des provinces ingouvernables) ; le Pacifiste signe et part. */
+static void ai_impose_contract(AiActor *a, const World *w, WorldEconomy *econ,
+                               DiploState *dp, int loser){
+    if (loser<0 || loser>=w->n_countries || diplo_suzerain(dp,loser)>=0) return;
+    Ethos eth = ai_capital_ethos(w, econ, a->cid);
+    SuzContrat c=CONTRAT_NONE;
+    if (eth==ETHOS_DOMINATEUR || eth==ETHOS_HONNEUR) c=CONTRAT_SERVAGE;
+    else if (eth==ETHOS_ORDRE) c=CONTRAT_PROTECTORAT;
+    else if (eth==ETHOS_MERCANTILE && w->country[loser].role==POLITY_CITY_STATE) c=CONTRAT_CITE;
+    else if (eth==ETHOS_BUREAUCRATE && ai_owned_regions(econ,a->cid)>=7) c=CONTRAT_PROTECTORAT;
+    if (c!=CONTRAT_NONE) diplo_set_vassal(dp, a->cid, loser, c);
+}
+
 /* Économie : commercer OU bâtir (le frein réoriente l'énergie vers le K). */
 static void ai_econ_turn(AiActor *a, WorldEconomy *econ, const AiView *v,
                          AgencyState *ag, RouteNetwork *rn, float brake){
@@ -652,6 +736,7 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
                  * (« les 95 % »), on VIDE les coffres du vaincu, puis on signe. */
                 diplo_loot(w, econ, a->cid, victim, budget - spent);
                 diplo_reparations(diplo, w, econ, a->cid, victim);
+                ai_impose_contract(a, w, econ, diplo, victim);   /* §leviers : imposer plutôt qu'annexer */
                 diplo_make_peace(diplo, a->cid, victim);
             } else if (diplo_conquer_region(diplo, w, econ, wl, a->cid, er, a->can_enslave)){
                 a->credit_war -= 1.f; a->stats.conquests++;
@@ -661,6 +746,9 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
                  * (la prochaine province, si trop chère, déclenchera la paix ci-dessus). */
                 if (!territorial && enemy>=0){
                     diplo_reparations(diplo, w, econ, a->cid, enemy);
+                    if (goal==CB_SUBJUGATION && diplo_suzerain(diplo,enemy)<0)
+                        diplo_set_vassal(diplo, a->cid, enemy, CONTRAT_SERVAGE);   /* la vassalité EST le but */
+                    else ai_impose_contract(a, w, econ, diplo, enemy);
                     diplo_make_peace(diplo, a->cid, enemy);
                 }
             }
@@ -673,6 +761,7 @@ static void ai_strat_turn(AiActor *a, World *w, WorldEconomy *econ, WorldProsper
                              - ((b<SCPS_MAX_COUNTRY)? diplo->conq_value[a->cid][b] : 0.f);
                     diplo_loot(w, econ, a->cid, b, lo);
                     diplo_reparations(diplo, w, econ, a->cid, b);
+                    ai_impose_contract(a, w, econ, diplo, b);    /* §leviers : imposer plutôt qu'annexer */
                     diplo_make_peace(diplo, a->cid, b);
                 }
         }
@@ -1035,6 +1124,7 @@ void ai_research_step(AiActor *a, TechState *ts, const World *w,
         }
     }
     a->can_enslave = ts->unlocked[TECH_ESCLAVAGE];   /* §4c : le gate de l'esclavage suit la tech */
+    a->has_creuset = ts->unlocked[TECH_INTEGRATION]; /* §leviers : le Creuset forme mieux */
 }
 
 /* ===================================================================== */
@@ -1054,6 +1144,21 @@ void ai_step(AiActor *a, World *w, WorldEconomy *econ, WorldProsperity *wp,
     if (econ_due){
         ai_econ_turn(a, econ, &v, ag, rn, brake);
         ai_relocate_turn(a, econ, &v, day);   /* §reloc : peupler sa province-ressource pour combler une pénurie */
+        ai_interior_turn(a, w, econ, ag, diplo, &v, day);   /* §leviers : mater/former/purger selon l'éthos */
+        /* §leviers — GUERRE COMMERCIALE : l'embargo est l'arme PRINCIPALE du Mercantile
+         * (il ne purge pas, mauvais pour les affaires — il étrangle). Cible : l'hégémon
+         * perçu, s'il n'est ni allié ni client (un pacte de cité est sacré). */
+        if (day >= a->next_embargo_day){
+            a->next_embargo_day = day + 3600;            /* ~10 ans entre deux décrets */
+            if (ai_capital_ethos(w,econ,a->cid)==ETHOS_MERCANTILE){
+                int heg=diplo_perceived_hegemon(w, econ, wp, diplo, a->cid);
+                if (heg>=0 && heg!=a->cid
+                    && diplo_status(diplo,a->cid,heg)!=DIPLO_ALLIED
+                    && !diplo_trade_pact(diplo,a->cid,heg)
+                    && diplo_suzerain(diplo,a->cid)!=heg)
+                    intertrade_order_embargo(a->cid, heg, true);
+            }
+        }
         a->next_econ_day = day + AI_ECON_CADENCE/2 + (int)(frand(&a->rng)*AI_ECON_CADENCE);
     }
     if (strat_due){
