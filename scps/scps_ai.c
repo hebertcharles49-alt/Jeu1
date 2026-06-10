@@ -391,7 +391,8 @@ static float content_dist(const PopCulture *a, const PopCulture *b){
 /* Partenaire commercial : région étrangère peuplée dont la distance de contenu
  * approche le PIC de la cloche (D̄≈5 : le plus à échanger). On ne déduplique pas
  * — rouvrir la même artère, c'est l'INTENSIFIER (un négociant y revient). */
-static int ai_pick_trade_partner(const WorldEconomy *econ, int home_region, int cid){
+static int ai_pick_trade_partner(const WorldEconomy *econ, const RouteNetwork *rn,
+                                 int home_region, int cid){
     if (home_region<0 || home_region>=econ->n_regions) return -1;
     const PopCulture *hc = &econ->region[home_region].culture;
     int best=-1; float bestgap=1e9f;
@@ -399,6 +400,10 @@ static int ai_pick_trade_partner(const WorldEconomy *econ, int home_region, int 
         const RegionEconomy *re = &econ->region[r];
         if (r==home_region || re->owner==cid) continue;
         if (!re->culture.settled || re->impassable) continue;
+        if (rn){ bool deja=false;            /* une route par paire : viser un partenaire NEUF */
+            for (int i=0;i<rn->n;i++){ const TradeRoute *t=&rn->route[i];
+                if ((t->ra==home_region&&t->rb==r)||(t->ra==r&&t->rb==home_region)){ deja=true; break; } }
+            if (deja) continue; }
         float gap = fabsf(content_dist(hc, &re->culture) - 5.f);
         if (gap < bestgap){ bestgap=gap; best=r; }
     }
@@ -641,7 +646,7 @@ static void ai_econ_turn(AiActor *a, const World *w, WorldEconomy *econ, const A
         }
     } else if (a->credit_trade>=1.f){
         a->credit_trade -= 1.f;
-        int p = ai_pick_trade_partner(econ, a->home_region, a->cid);
+        int p = ai_pick_trade_partner(econ, rn, a->home_region, a->cid);
         if (p>=0 && routes_order(rn, w, econ, a->home_region, p, false)){
             a->stats.routes++;
             faction_lever_apply(a->cid, FAC_MARCHAND, AI_LEVER_BUILD);   /* §4 : le négoce AVANCE les Marchands */
