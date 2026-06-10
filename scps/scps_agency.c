@@ -7,6 +7,7 @@
  */
 #include "scps_agency.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 static const EdificeDef EDIFICES[EDIFICE_COUNT] = {
@@ -109,6 +110,21 @@ void agency_init(AgencyState *a){
     memset(g_pend_fract, 0,sizeof g_pend_fract);
     memset(g_pend_H,     0,sizeof g_pend_H);
     g_n_repress=g_n_assim=g_n_purge=0; g_purge_dead=0;
+}
+
+void agency_save(FILE *f){
+    fwrite(g_pend_charge,sizeof g_pend_charge,1,f);
+    fwrite(g_pend_fract, sizeof g_pend_fract, 1,f);
+    fwrite(g_pend_H,     sizeof g_pend_H,     1,f);
+    fwrite(&g_n_repress,sizeof g_n_repress,1,f); fwrite(&g_n_assim,sizeof g_n_assim,1,f);
+    fwrite(&g_n_purge,sizeof g_n_purge,1,f);     fwrite(&g_purge_dead,sizeof g_purge_dead,1,f);
+}
+bool agency_load(FILE *f){
+    return fread(g_pend_charge,sizeof g_pend_charge,1,f)==1
+        && fread(g_pend_fract, sizeof g_pend_fract, 1,f)==1
+        && fread(g_pend_H,     sizeof g_pend_H,     1,f)==1
+        && fread(&g_n_repress,sizeof g_n_repress,1,f)==1 && fread(&g_n_assim,sizeof g_n_assim,1,f)==1
+        && fread(&g_n_purge,sizeof g_n_purge,1,f)==1     && fread(&g_purge_dead,sizeof g_purge_dead,1,f)==1;
 }
 
 static bool enqueue(AgencyState *a, ActionKind k, int region, int param, int days){

@@ -18,6 +18,7 @@
  * leviers-votes, les conflits de valeurs, l'engagement d'âge et les missions.
  */
 #include "scps_world.h"   /* World, WorldEconomy */
+#include <stdio.h>
 #include "scps_econ.h"    /* PopCulture, PopGroup, SocialClass, RegionEconomy */
 
 /* ===================================================================== */
@@ -105,7 +106,10 @@ float faction_coup_tension(const float weights[FAC_COUNT], EthosFaction *out_ali
  * et FÂCHE les opposées (elles accumulent du grief → couvent le coup). Favoriser
  * longtemps fait DÉRIVER le pays vers cet éthos. État de stance PAR PAYS, remis à
  * zéro par sim (faction_levers_reset), qui s'efface s'il n'est pas entretenu. */
-void faction_levers_reset(void);                                  /* début de partie/sim */
+void faction_levers_reset(void);
+/* sauvegarde : biais/rancœur/capture des factions (statiques du module). */
+void faction_save(FILE *f);
+bool faction_load(FILE *f);                                  /* début de partie/sim */
 void faction_lever_apply(int cid, EthosFaction advanced, float strength);  /* un vote */
 void faction_levers_decay(float rate);                            /* la stance non tenue s'efface */
 void faction_levers_on_coup(int cid);                             /* un coup DÉCHARGE la rancœur du pays */

@@ -2165,8 +2165,12 @@ static int  g_setup_ethos=5, g_setup_race=(int)RACE_HUMAIN, g_setup_terre=5;  /*
 static char g_open_terre_line[120]="";
 static WorldParams g_stage;            /* l'écran de création édite une COPIE */
 static bool g_pending_open=false;      /* après la forge : entrer en OUVERTURE */
+static int  g_save_pick=0, g_load_pick=0;   /* surcouches : choisir un slot (1=ouvert) */
+static int  g_load_confirm=-1;               /* slot à charger après confirmation (partie en cours) */
+static bool g_game_started=false;            /* une partie a commencé (→ confirmation au chargement) */
 /* cibles cliquables du shell */
-enum { SH_MENU_ITEM=1, SH_SLIDER_DN, SH_SLIDER_UP, SH_SEED_DICE, SH_PICK_ETHOS,
+enum { SH_SLOT_SAVE=100, SH_SLOT_LOAD, SH_PICK_CLOSE, SH_LOADC_YES, SH_LOADC_NO,
+       SH_MENU_ITEM=1, SH_SLIDER_DN, SH_SLIDER_UP, SH_SEED_DICE, SH_PICK_ETHOS,
        SH_PICK_RACE, SH_PICK_TERRE, SH_FORGER, SH_BACK, SH_OPEN_GO, SH_OPEN_REROLL,
        SH_PM_ITEM, SH_QC_YES, SH_QC_NO, SH_TUTO_PREV, SH_TUTO_NEXT };
 typedef struct { SDL_Rect r; int kind, a; } ShellHit;
@@ -2280,6 +2284,142 @@ static void sh_draw_litanie(SDL_Renderer *ren,int win_w,int win_h,uint32_t seedv
     draw_text(ren,g_font,win_w/2-40,win_h/2+180,COL_PARCH,sd);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * LA SAUVEGARDE (brief shell §6) — en-tête versionné + sections TAGUÉES.
+ * Chaque struct de système est PLATE (audité) ; les modules à états statiques
+ * (intertrade, agency, diplo, factions) possèdent leur sérialisation. Version
+ * qui ne matche pas = refus poli (« sauvegarde d'une ère antérieure »).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+#define SAVE_MAGIC   0x53504353u   /* "SCPS" */
+#define SAVE_VERSION 1u
+typedef struct {
+    uint32_t magic, version;
+    uint32_t seed;
+    int32_t  day, year, player;
+    WorldParams params;
+    int64_t  stamp;            /* horodatage (time) */
+    char     line[96];         /* « An 87 — Empire de X, 12 régions » (écran Charger) */
+    uint32_t payload;          /* taille attendue après l'en-tête (intégrité) */
+} SaveHeader;
+typedef struct { int32_t day, year, player, prev_dawned; uint32_t camp_rng;
+                 int32_t race, ethos; int16_t prev_owner[SCPS_MAX_REG]; } SaveMisc;
+static const char *save_slot_path(int slot){
+    static char p[64]; snprintf(p,sizeof p,"saves/slot_%d.scps",slot); return p;
+}
+static bool save_slot_info(int slot, SaveHeader *out){
+    FILE *f=fopen(save_slot_path(slot),"rb");
+    if (!f) return false;
+    bool ok = fread(out,sizeof *out,1,f)==1 && out->magic==SAVE_MAGIC;
+    fclose(f); return ok;
+}
+#define SV_TAG(a,b,c,d) ((uint32_t)(a)|((uint32_t)(b)<<8)|((uint32_t)(c)<<16)|((uint32_t)(d)<<24))
+static bool sv_w(FILE *f, uint32_t tag, const void *p, size_t sz){
+    uint32_t z=(uint32_t)sz;
+    return fwrite(&tag,4,1,f)==1 && fwrite(&z,4,1,f)==1 && (sz==0 || fwrite(p,sz,1,f)==1);
+}
+static bool sv_r(FILE *f, uint32_t tag, void *p, size_t sz){
+    uint32_t t,z;
+    if (fread(&t,4,1,f)!=1 || fread(&z,4,1,f)!=1) return false;
+    if (t!=tag || z!=(uint32_t)sz) return false;
+    return sz==0 || fread(p,sz,1,f)==1;
+}
+/* sauve la partie ENTIÈRE dans un slot ; renvoie false si l'écriture échoue. */
+static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
+    { int rc_=system("mkdir -p saves"); (void)rc_; }
+    FILE *f=fopen(save_slot_path(slot),"wb");
+    if (!f) return false;
+    SaveHeader h; memset(&h,0,sizeof h);
+    h.magic=SAVE_MAGIC; h.version=SAVE_VERSION; h.seed=params->seed;
+    h.day=s->day; h.year=s->year; h.player=s->player; h.params=*params;
+    h.stamp=(int64_t)time(NULL);
+    { int nreg=0; for (int r=0;r<s->econ->n_regions;r++) if (s->econ->region[r].owner==s->player) nreg++;
+      snprintf(h.line,sizeof h.line,"An %d — %s, %d région(s)",
+               s->year, (s->player>=0&&s->player<w->n_countries)?w->country[s->player].name:"?", nreg); }
+    fwrite(&h,sizeof h,1,f);
+    long p0=ftell(f);
+    bool ok=true;
+    ok&=sv_w(f,SV_TAG('W','R','L','D'), w,        sizeof *w);
+    ok&=sv_w(f,SV_TAG('E','C','O','N'), s->econ,  sizeof *s->econ);
+    ok&=sv_w(f,SV_TAG('P','R','O','S'), s->wp,    sizeof *s->wp);
+    ok&=sv_w(f,SV_TAG('L','E','G','I'), s->wl,    sizeof *s->wl);
+    ok&=sv_w(f,SV_TAG('N','E','T','W'), s->net,   sizeof *s->net);
+    ok&=sv_w(f,SV_TAG('T','E','C','H'), s->ts,    sizeof(TechState)*SCPS_MAX_COUNTRY);
+    ok&=sv_w(f,SV_TAG('S','T','A','T'), s->sc,    sizeof *s->sc);
+    ok&=sv_w(f,SV_TAG('A','G','C','Y'), s->ag,    sizeof *s->ag);
+    ok&=sv_w(f,SV_TAG('E','V','N','T'), s->ev,    sizeof *s->ev);
+    ok&=sv_w(f,SV_TAG('D','R','F','T'), s->drift, sizeof *s->drift);
+    ok&=sv_w(f,SV_TAG('L','A','B','O'), s->labor, sizeof *s->labor);
+    ok&=sv_w(f,SV_TAG('D','I','P','L'), s->dp,    sizeof *s->dp);
+    ok&=sv_w(f,SV_TAG('R','T','E','S'), s->rn,    sizeof *s->rn);
+    ok&=sv_w(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
+    ok&=sv_w(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
+    ok&=sv_w(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_w(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);   /* WarHost SANS scratch */
+    ok&=sv_w(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
+    ok&=sv_w(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
+    ok&=sv_w(f,SV_TAG('A','I','O','N'), s->ai_on, sizeof(bool)*SCPS_MAX_COUNTRY);
+    { SaveMisc m; memset(&m,0,sizeof m);
+      m.day=s->day; m.year=s->year; m.player=s->player; m.prev_dawned=s->prev_dawned;
+      m.camp_rng=s->camp_rng; m.race=(int32_t)g_player_race; m.ethos=g_setup_ethos;
+      memcpy(m.prev_owner,s->prev_owner_mo,sizeof m.prev_owner);
+      ok&=sv_w(f,SV_TAG('M','I','S','C'), &m, sizeof m); }
+    /* les modules à ÉTATS STATIQUES possèdent leur sérialisation */
+    ok&=sv_w(f,SV_TAG('I','T','R','D'), NULL,0); intertrade_save(f);
+    ok&=sv_w(f,SV_TAG('A','G','Y','S'), NULL,0); agency_save(f);
+    ok&=sv_w(f,SV_TAG('D','P','L','S'), NULL,0); diplo_save_statics(f);
+    ok&=sv_w(f,SV_TAG('F','A','C','T'), NULL,0); faction_save(f);
+    /* intégrité : la taille attendue s'écrit dans l'en-tête */
+    long p1=ftell(f);
+    h.payload=(uint32_t)(p1-p0);
+    fseek(f,0,SEEK_SET); fwrite(&h,sizeof h,1,f);
+    fclose(f);
+    return ok;
+}
+/* charge un slot. 0 = ok ; 1 = absent/corrompu ; 2 = « ère antérieure » (version). */
+static int game_load(int slot, World *w, Sim *s, WorldParams *params){
+    FILE *f=fopen(save_slot_path(slot),"rb");
+    if (!f) return 1;
+    SaveHeader h;
+    if (fread(&h,sizeof h,1,f)!=1 || h.magic!=SAVE_MAGIC){ fclose(f); return 1; }
+    if (h.version!=SAVE_VERSION){ fclose(f); return 2; }
+    long p0=ftell(f);
+    bool ok=true;
+    ok&=sv_r(f,SV_TAG('W','R','L','D'), w,        sizeof *w);
+    ok&=sv_r(f,SV_TAG('E','C','O','N'), s->econ,  sizeof *s->econ);
+    ok&=sv_r(f,SV_TAG('P','R','O','S'), s->wp,    sizeof *s->wp);
+    ok&=sv_r(f,SV_TAG('L','E','G','I'), s->wl,    sizeof *s->wl);
+    ok&=sv_r(f,SV_TAG('N','E','T','W'), s->net,   sizeof *s->net);
+    ok&=sv_r(f,SV_TAG('T','E','C','H'), s->ts,    sizeof(TechState)*SCPS_MAX_COUNTRY);
+    ok&=sv_r(f,SV_TAG('S','T','A','T'), s->sc,    sizeof *s->sc);
+    ok&=sv_r(f,SV_TAG('A','G','C','Y'), s->ag,    sizeof *s->ag);
+    ok&=sv_r(f,SV_TAG('E','V','N','T'), s->ev,    sizeof *s->ev);
+    ok&=sv_r(f,SV_TAG('D','R','F','T'), s->drift, sizeof *s->drift);
+    ok&=sv_r(f,SV_TAG('L','A','B','O'), s->labor, sizeof *s->labor);
+    ok&=sv_r(f,SV_TAG('D','I','P','L'), s->dp,    sizeof *s->dp);
+    ok&=sv_r(f,SV_TAG('R','T','E','S'), s->rn,    sizeof *s->rn);
+    ok&=sv_r(f,SV_TAG('R','V','L','T'), s->rs,    sizeof *s->rs);
+    ok&=sv_r(f,SV_TAG('M','I','S','S'), s->missions, sizeof *s->missions);
+    ok&=sv_r(f,SV_TAG('C','A','M','P'), s->camp,  sizeof *s->camp);
+    ok&=sv_r(f,SV_TAG('H','A','R','M'), s->host->army, sizeof s->host->army);
+    ok&=sv_r(f,SV_TAG('H','L','V','Y'), s->host->levy, sizeof s->host->levy);
+    ok&=sv_r(f,SV_TAG('A','I','A','C'), s->ai,    sizeof(AiActor)*SCPS_MAX_COUNTRY);
+    ok&=sv_r(f,SV_TAG('A','I','O','N'), s->ai_on, sizeof(bool)*SCPS_MAX_COUNTRY);
+    { SaveMisc m;
+      ok&=sv_r(f,SV_TAG('M','I','S','C'), &m, sizeof m);
+      if (ok){ s->day=m.day; s->year=m.year; s->player=m.player; s->prev_dawned=m.prev_dawned;
+               s->camp_rng=m.camp_rng; g_player_race=(SpeciesArchetype)m.race; g_setup_ethos=m.ethos;
+               memcpy(s->prev_owner_mo,m.prev_owner,sizeof m.prev_owner); } }
+    ok&=sv_r(f,SV_TAG('I','T','R','D'), NULL,0); ok&=intertrade_load(f);
+    ok&=sv_r(f,SV_TAG('A','G','Y','S'), NULL,0); ok&=agency_load(f);
+    ok&=sv_r(f,SV_TAG('D','P','L','S'), NULL,0); ok&=diplo_load_statics(f);
+    ok&=sv_r(f,SV_TAG('F','A','C','T'), NULL,0); ok&=faction_load(f);
+    long p1=ftell(f); fclose(f);
+    if (!ok || (uint32_t)(p1-p0)!=h.payload) return 1;     /* taille/section : refus net */
+    *params=h.params;
+    s->ready=true;
+    return 0;
+}
+
 /* ── rendu du shell : écrans pleins + surcouches (pause · tuto · confirmation) ── */
 static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
                        WorldParams *stage){
@@ -2290,7 +2430,9 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
         draw_text(ren,g_font,win_w/2-150,win_h/4+26,COL_DIM,"un monde qui ne vous attend pas — et qui se lit");
         int bx=win_w/2-90, by=win_h/4+70;
         sh_button(ren,bx,by,180,"Jouer",false,false,SH_MENU_ITEM,0); by+=34;
-        sh_button(ren,bx,by,180,"Charger",false,true,SH_MENU_ITEM,1); by+=34;   /* grisé : la sauvegarde viendra */
+        { SaveHeader hh; bool any=false;
+          for (int sl=1;sl<=3 && !any;sl++) any=save_slot_info(sl,&hh);
+          sh_button(ren,bx,by,180,"Charger",false,!any,SH_MENU_ITEM,1); by+=34; }
         sh_button(ren,bx,by,180,"Tutoriel",false,false,SH_MENU_ITEM,2); by+=34;
         sh_button(ren,bx,by,180,"Quitter",false,false,SH_MENU_ITEM,3);
     }
@@ -2375,12 +2517,38 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
     if (g_pause_menu && g_gs==GS_PLAYING){
         fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
         int bx=win_w/2-100, by=win_h/2-80;
-        panel_bg(ren,bx-20,by-20,240,196);
+        panel_bg(ren,bx-20,by-20,240,228);
         draw_text(ren,g_font_big,bx,by-6,COL_COPPER,"PAUSE"); by+=30;
         sh_button(ren,bx,by,200,"Reprendre",false,false,SH_PM_ITEM,0); by+=32;
+        sh_button(ren,bx,by,200,"Sauver",false,false,SH_PM_ITEM,4); by+=32;
         sh_button(ren,bx,by,200,"Tutoriel",false,false,SH_PM_ITEM,1); by+=32;
         sh_button(ren,bx,by,200,"Menu principal",false,false,SH_PM_ITEM,2); by+=32;
         sh_button(ren,bx,by,200,"Quitter",false,false,SH_PM_ITEM,3);
+    }
+    if (g_save_pick||g_load_pick){
+        int pw=460, px=(win_w-pw)/2, py=win_h/2-90;
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
+        panel_bg(ren,px,py,pw,180);
+        draw_text(ren,g_font_big,px+20,py+12,COL_COPPER, g_save_pick?"SAUVER — choisir un slot":"CHARGER — choisir un slot");
+        for (int sl=1;sl<=3;sl++){
+            SaveHeader hh; bool has=save_slot_info(sl,&hh);
+            char lab[140];
+            if (has && hh.version==SAVE_VERSION) snprintf(lab,sizeof lab,"Slot %d — %s",sl,hh.line);
+            else if (has)                        snprintf(lab,sizeof lab,"Slot %d — sauvegarde d'une ère antérieure",sl);
+            else                                 snprintf(lab,sizeof lab,"Slot %d — vide",sl);
+            bool grise = g_load_pick && (!has || hh.version!=SAVE_VERSION);
+            sh_button(ren,px+20,py+46+(sl-1)*34,pw-40,lab,false,grise,
+                      g_save_pick?SH_SLOT_SAVE:SH_SLOT_LOAD, sl);
+        }
+        sh_button(ren,px+pw-130,py+150,110,"Retour",false,false,SH_PICK_CLOSE,0);
+    }
+    if (g_load_confirm>=0){
+        int pw=440, px=(win_w-pw)/2, py=win_h/2-50;
+        fill_rect(ren,0,0,win_w,win_h,(SDL_Color){0x05,0x08,0x0e,0x99});
+        panel_bg(ren,px,py,pw,110);
+        draw_text(ren,g_font,px+20,py+16,COL_PARCH,"Charger ? La partie en cours sera perdue.");
+        sh_button(ren,px+30,py+58,150,"Charger",false,false,SH_LOADC_YES,g_load_confirm);
+        sh_button(ren,px+pw-30-150,py+58,150,"Rester",true,false,SH_LOADC_NO,0);
     }
     if (g_show_tuto){
         int pw=620, ph=240, px=(win_w-pw)/2, py=(win_h-ph)/2;
@@ -2411,12 +2579,14 @@ static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
 int main(int argc, char **argv) {
     bool shot = false, shot_tree = false, shot_war = false, shot_culture = false, shot_sidebar = false;
     int  shot_shell = 0;
+    bool savetest = false;
     uint32_t shot_seed = 0; bool have_shot_seed = false;
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--shot")) shot = true;
         else if (!strcmp(argv[i], "--tree")) { shot = true; shot_tree = true; }
         else if (!strcmp(argv[i], "--sidebar")) { shot = true; shot_sidebar = true; }   /* tiroir Stocks + lentille Marché */
         else if (!strcmp(argv[i], "--shellshot") && i+1<argc) { shot=true; shot_shell=1+atoi(argv[++i]); }  /* 1=menu 2=setup 3=ouverture */
+        else if (!strcmp(argv[i], "--savetest")) savetest=true;   /* vérif sauvegarde : sauver-recharger = continuation identique */
         else if (!strcmp(argv[i], "--war"))  { shot = true; shot_war  = true; }  /* §4 : capturer les armées sur la carte */
         else if (!strcmp(argv[i], "--culture")) { shot = true; shot_culture = true; }  /* §5 : vue culture */
         else { shot_seed = (uint32_t)strtoul(argv[i], NULL, 10); have_shot_seed = true; }
@@ -2512,6 +2682,32 @@ int main(int argc, char **argv) {
     sim_rebuild(&sim, world);   /* peuple + simule 30 ans (bandeau + panneau) */
     g_gs = shot ? GS_PLAYING : GS_MENU;      /* le jeu COMMENCE au menu (le monde respire derrière) */
     g_stage = params;
+
+    /* ── --savetest : LA VÉRIF du brief (4) — sauver puis recharger restitue la
+     * partie AU JOUR PRÈS : on avance N jours, on sauve, on avance M jours (digest A) ;
+     * on recharge, on ré-avance M jours (digest B) ; A doit ÉGALER B. ── */
+    if (savetest){
+        #define DIGEST(tag) do{ double dpop=0,dgld=0; long dtech=0; unsigned long downer=5381; \
+            for (int r=0;r<sim.econ->n_regions;r++){ const RegionEconomy *re=&sim.econ->region[r]; \
+                for (int c2=0;c2<CLASS_COUNT;c2++) dpop+=re->strata[c2].pop; \
+                dgld+=re->treasury; downer=downer*33+(unsigned long)(re->owner+2); } \
+            for (int c2=0;c2<SCPS_MAX_COUNTRY;c2++) dtech+=sim.ts[c2].n_unlocked; \
+            snprintf(tag,sizeof tag,"day=%d pop=%.1f or=%.1f tech=%ld own=%lu pays=%d frondes=%d", \
+                     sim.day,dpop,dgld,dtech,downer,world->n_countries,sim.dp->n_frondes); }while(0)
+        char dA[200], dB[200];
+        for (int d2=0;d2<600;d2++) sim_day(&sim, world);
+        if (!game_save(3, world, &sim, &params)){ printf("savetest: ÉCHEC d'écriture\n"); return 1; }
+        for (int d2=0;d2<400;d2++) sim_day(&sim, world);
+        DIGEST(dA);
+        int rc=game_load(3, world, &sim, &params);
+        if (rc!=0){ printf("savetest: ÉCHEC de lecture (%d)\n", rc); return 1; }
+        for (int d2=0;d2<400;d2++) sim_day(&sim, world);
+        DIGEST(dB);
+        bool same = (strcmp(dA,dB)==0);
+        printf("A: %s\nB: %s\n══════════════════════════════════════\n BILAN : %s\n", dA, dB,
+               same? "1 réussi, 0 échoué (restitution AU JOUR PRÈS)":"0 réussi, 1 ÉCHOUÉ");
+        return same?0:1;
+    }
     printf("[scps] Prêt. TAB/1-0=vues  T=arbre de tech  E/D/S/A/F=sidebar (éco·démo·stocks·armée·filtres)  Z=cadrer  R=regénère  clic=territoire\n");
     printf("[scps] Réglages (régénèrent) : c=continents g=âge e=érosion\n");
     printf("       l=terres m=montagnes t=température h=humidité (Maj=baisse)\n");
@@ -2618,7 +2814,7 @@ int main(int argc, char **argv) {
                     pan_sy = ev.button.y;
                 } else if (ev.button.button == SDL_BUTTON_LEFT) {
                     /* LE SHELL capte d'abord (menu/création/ouverture + surcouches). */
-                    if (g_quit_confirm||g_show_tuto||g_pause_menu||g_gs!=GS_PLAYING){
+                    if (g_quit_confirm||g_show_tuto||g_pause_menu||g_save_pick||g_load_pick||g_load_confirm>=0||g_gs!=GS_PLAYING){
                         int hit=-1;
                         for (int i2=0;i2<g_nshhits;i2++){ SDL_Rect *r2=&g_shhits[i2].r;
                             if (ev.button.x>=r2->x&&ev.button.x<r2->x+r2->w&&ev.button.y>=r2->y&&ev.button.y<r2->y+r2->h){ hit=i2; break; } }
@@ -2626,11 +2822,39 @@ int main(int argc, char **argv) {
                             ShellHit *sh2=&g_shhits[hit];
                             switch(sh2->kind){
                                 case SH_QC_YES: running=false; break;
+                                case SH_PICK_CLOSE: g_save_pick=g_load_pick=0; break;
+                                case SH_SLOT_SAVE:
+                                    if (game_save(sh2->a, world, &sim, &params))
+                                        printf("\n[scps] Sauvé — slot %d.\n", sh2->a);
+                                    else printf("\n[scps] Échec d'écriture (slot %d).\n", sh2->a);
+                                    g_save_pick=0;
+                                    break;
+                                case SH_SLOT_LOAD:
+                                    if (g_game_started){ g_load_confirm=sh2->a; g_load_pick=0; }
+                                    else {
+                                        int rc=game_load(sh2->a, world, &sim, &params);
+                                        if (rc==0){ seed=params.seed; g_load_pick=0; g_pause_menu=false;
+                                            g_game_started=true; speed=SPEED_PAUSE; g_sbc.day=-1; selected=-1;
+                                            sh_center_capital(world,&sim,&cam,win_w,win_h);
+                                            g_gs=GS_PLAYING; }
+                                        else printf("\n[scps] %s\n", rc==2?"Sauvegarde d'une ère antérieure — refusée poliment.":"Slot illisible.");
+                                    }
+                                    break;
+                                case SH_LOADC_YES: {
+                                    int rc=game_load(sh2->a, world, &sim, &params);
+                                    if (rc==0){ seed=params.seed; g_pause_menu=false; speed=SPEED_PAUSE;
+                                        g_sbc.day=-1; selected=-1; g_game_started=true;
+                                        sh_center_capital(world,&sim,&cam,win_w,win_h); g_gs=GS_PLAYING; }
+                                    else printf("\n[scps] %s\n", rc==2?"Sauvegarde d'une ère antérieure — refusée poliment.":"Slot illisible.");
+                                    g_load_confirm=-1;
+                                } break;
+                                case SH_LOADC_NO: g_load_confirm=-1; break;
                                 case SH_QC_NO:  g_quit_confirm=false; break;
                                 case SH_TUTO_PREV: if(g_tuto_page>0)g_tuto_page--; break;
                                 case SH_TUTO_NEXT: if(g_tuto_page<6)g_tuto_page++; break;
                                 case SH_MENU_ITEM:
                                     if (sh2->a==0){ g_stage=params; g_gs=GS_SETUP; }
+                                    else if (sh2->a==1){ g_load_pick=1; }
                                     else if (sh2->a==2){ g_show_tuto=true; g_tuto_page=0; }
                                     else if (sh2->a==3) g_quit_confirm=true;
                                     break;
@@ -2652,9 +2876,10 @@ int main(int argc, char **argv) {
                                     sh_draw_litanie(ren,win_w,win_h,params.seed); SDL_RenderPresent(ren);
                                     regen=true; g_pending_open=true;
                                     break;
-                                case SH_OPEN_GO: g_gs=GS_PLAYING; break;   /* la pause TIENT : Espace sera le premier geste */
+                                case SH_OPEN_GO: g_gs=GS_PLAYING; g_game_started=true; break;   /* la pause TIENT : Espace sera le premier geste */
                                 case SH_PM_ITEM:
                                     if (sh2->a==0) g_pause_menu=false;
+                                    else if (sh2->a==4){ g_save_pick=1; }
                                     else if (sh2->a==1){ g_show_tuto=true; g_tuto_page=0; }
                                     else if (sh2->a==2){ g_pause_menu=false; g_gs=GS_MENU; speed=SPEED_PAUSE; }
                                     else g_quit_confirm=true;
@@ -2805,6 +3030,8 @@ int main(int argc, char **argv) {
                 case SDLK_ESCAPE:
                     /* L'ÉCHELLE ESC : fermer la couche du dessus — JAMAIS quitter l'appli. */
                     if      (g_quit_confirm){ g_quit_confirm=false; }
+                    else if (g_load_confirm>=0){ g_load_confirm=-1; }
+                    else if (g_save_pick||g_load_pick){ g_save_pick=g_load_pick=0; }
                     else if (g_show_tuto)   { g_show_tuto=false; }
                     else if (g_pause_menu)  { g_pause_menu=false; }
                     else if (g_gs==GS_SETUP){ g_gs=GS_MENU; }

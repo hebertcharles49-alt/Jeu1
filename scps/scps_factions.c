@@ -6,6 +6,7 @@
  * on en tire un profil de factions. Les passes suivantes feront agir ce profil.
  */
 #include "scps_factions.h"
+#include <stdio.h>
 #include "scps_species.h"   /* SpeciesArchetype */
 #include <string.h>         /* memset (reset des stances) */
 
@@ -184,6 +185,16 @@ static float g_capture[SCPS_MAX_COUNTRY][FAC_COUNT];
 #define CAPTURE_MAX            0.85f  /* plafond du rot : un État jamais 100 % capturé */
 #define CAPTURE_DECAY_FRAC     0.04f  /* la capture décroît à 4 % du rythme du grief (lent) */
 
+void faction_save(FILE *f){
+    fwrite(g_lever_bias, sizeof g_lever_bias, 1,f);
+    fwrite(g_lever_grief,sizeof g_lever_grief,1,f);
+    fwrite(g_capture,    sizeof g_capture,    1,f);
+}
+bool faction_load(FILE *f){
+    return fread(g_lever_bias, sizeof g_lever_bias, 1,f)==1
+        && fread(g_lever_grief,sizeof g_lever_grief,1,f)==1
+        && fread(g_capture,    sizeof g_capture,    1,f)==1;
+}
 void faction_levers_reset(void){
     memset(g_lever_bias, 0, sizeof g_lever_bias);
     memset(g_lever_grief,0, sizeof g_lever_grief);

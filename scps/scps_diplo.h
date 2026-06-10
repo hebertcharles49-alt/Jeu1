@@ -18,6 +18,7 @@
 #include "scps_econ.h"
 #include "scps_prosperity.h"
 #include "scps_legitimacy.h"
+#include <stdio.h>
 
 typedef struct {
     float threat;       /* menace de b sur a */
@@ -108,6 +109,9 @@ void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ,
 float diplo_vassal_grief(const DiploState *d, int vassal);   /* [0..1] nu — à BANDER côté readout */
 
 void diplo_init(DiploState *d);
+/* sauvegarde : statiques du module (cooldown d'intimidation de la fronde). */
+void diplo_save_statics(FILE *f);
+bool diplo_load_statics(FILE *f);
 
 /* ---- Lecteurs ---------------------------------------------------------- */
 float    diplo_eco_power(const WorldProsperity *wp, int cid);

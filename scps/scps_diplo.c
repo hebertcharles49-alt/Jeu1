@@ -56,6 +56,8 @@ static inline float absf(float v){return v<0?-v:v;}
 #define RANCOR_RALLY_NORM 3.0f          /* échelle de saturation du ralliement */
 
 static int g_intim_cd[SCPS_MAX_COUNTRY];   /* l'intimidation n'est pas gratuite : ~5 ans entre deux démonstrations */
+void diplo_save_statics(FILE *f){ fwrite(g_intim_cd,sizeof g_intim_cd,1,f); }
+bool diplo_load_statics(FILE *f){ return fread(g_intim_cd,sizeof g_intim_cd,1,f)==1; }
 void diplo_init(DiploState *d){
     memset(d,0,sizeof(*d));
     memset(g_intim_cd,0,sizeof g_intim_cd);

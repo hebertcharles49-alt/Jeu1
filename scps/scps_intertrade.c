@@ -8,6 +8,7 @@
 #include "scps_intertrade.h"
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ---- calibrage --------------------------------------------------------- */
 #define IT_TRANSPORT   0.06f   /* coût de transport longue distance (fraction du prix moyen) */
@@ -63,6 +64,9 @@ float intertrade_export_gold(int cid){ return cid_ok(cid)?g_gold[cid]:0.f; }
 float intertrade_pair_value (int cid,int other){
     return (cid_ok(cid)&&cid_ok(other))? g_pair[cid][other] : 0.f;
 }
+
+void intertrade_save(FILE *f){ fwrite(g_embargo,sizeof g_embargo,1,f); }
+bool intertrade_load(FILE *f){ return fread(g_embargo,sizeof g_embargo,1,f)==1; }
 
 static bool pair_at_peace(const DiploState *dp, int ca, int cb){
     return !dp || diplo_status(dp, ca, cb) != DIPLO_WAR;

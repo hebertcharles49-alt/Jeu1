@@ -67,3 +67,6 @@ seed_*.ppm
 seed_*.png
 *.ppm
 montage.bmp
+saves/
+chronicle_asan
+scps_ui.ppm

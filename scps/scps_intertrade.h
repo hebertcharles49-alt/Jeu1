@@ -21,6 +21,7 @@
  * volume) ; la traduction en mots reste à la membrane.
  */
 #include "scps_econ.h"
+#include <stdio.h>
 #include "scps_routes.h"
 #include "scps_diplo.h"
 
@@ -54,5 +55,9 @@ float intertrade_pair_value (int cid, int other);  /* valeur échangée avec ce 
 void  intertrade_order_embargo(int cid, int target, bool on);
 bool  intertrade_embargoed    (int cid, int target);   /* l'un OU l'autre a décrété */
 void  intertrade_reset(void);
+/* sauvegarde (shell §6) : le module possède sa sérialisation — embargos décrétés
+ * (les flux du dernier tick se recalculent, eux). */
+void  intertrade_save(FILE *f);
+bool  intertrade_load(FILE *f);
 
 #endif /* SCPS_INTERTRADE_H */

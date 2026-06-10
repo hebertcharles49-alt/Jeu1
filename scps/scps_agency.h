@@ -18,6 +18,7 @@
 #include "scps_world.h"       /* World (biome) */
 #include "scps_legitimacy.h"  /* WorldLegitimacy (défrichement ronge L) */
 #include "scps_demography.h"  /* leviers intérieurs : coercition (Kuran), groupes, ModifierStack */
+#include <stdio.h>
 
 #define SCPS_DAYS_PER_YEAR 365
 #define SCPS_GAME_YEARS    250
@@ -128,6 +129,9 @@ bool agency_drain_levier_costs(int cid, float *charge, float *fracture, float *H
 /* Chronique des leviers (cumul sim, RAZ par agency_init) : matages, formations,
  * purges achevées, morts de purge. */
 void agency_levier_stats(int *repress, int *assim, int *purges, long *purge_dead);
+/* sauvegarde : les statiques du module (coûts différés + chronique des leviers). */
+void agency_save(FILE *f);
+bool agency_load(FILE *f);
 
 /* Avance de `days` jours : progresse les chantiers ; à l'achèvement, applique
  * l'effet (déplace une coordonnée que le moteur LIT). `drift` (pile de dérive
