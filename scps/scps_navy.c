@@ -316,6 +316,9 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
             Ethos e=navy_ethos(w,econ,c);
             int port=navy_best_port(w,econ,c);
             if (port>=0){
+                if (e==ETHOS_HONNEUR && n->build_hull<0 && n->hull[HULL_WAR]<1
+                    && n->hull[HULL_PIRATE]>0)
+                    navy_order_build(ns,w,econ,c,HULL_WAR);     /* la course s'escorte */
                 if (e==ETHOS_HONNEUR && n->hull[HULL_WAR]>=1){   /* l'Honneur CHASSE en guerre */
                     bool guerre=false;
                     for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY && !guerre;b++)
@@ -345,9 +348,11 @@ void navy_course_tick(NavyState *ns, const World *w, WorldEconomy *econ,
                     }
                     if (n->hull[HULL_WAR]>0) n->mission=NAVY_ESCORTE;
                 }
-                /* l'Ordre patrouille ses eaux ; en guerre, le BLOCUS du port ennemi */
+                /* l'Ordre patrouille ses eaux ; en guerre, le BLOCUS du port ennemi.
+                 * Dominateur ET Bureaucrate ARMENT des bordées (sans elles, blocus
+                 * et interception restaient lettre morte — 0/308 au balayage). */
                 if (e==ETHOS_DOMINATEUR || e==ETHOS_BUREAUCRATE){
-                    if (n->build_hull<0 && n->hull[HULL_WAR]<2 && navy_ethos(w,econ,c)==ETHOS_BUREAUCRATE)
+                    if (n->build_hull<0 && n->hull[HULL_WAR]<2)
                         navy_order_build(ns,w,econ,c,HULL_WAR);
                     int foe=-1, foe_any=-1;
                     for (int b=0;b<w->n_countries && b<SCPS_MAX_COUNTRY;b++){
