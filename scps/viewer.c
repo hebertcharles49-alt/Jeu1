@@ -43,6 +43,7 @@
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
 #include "scps_navy.h"     /* la flotte (mer §5) : coques, chantier, entretien, outre-mer */
 #include "scps_lang.h"     /* la table de chaînes : tout mot face-joueur vient des tables */
+#include "stb_image_write.h"  /* F12 : capture d'écran PNG (vendoré) */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
 /* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
@@ -2685,6 +2686,26 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     return 0;
 }
 
+/* F12 — capture d'écran (brief build §3) : on relit le framebuffer du renderer
+ * en RGB top-down (l'ordre que stb attend) et on écrit un PNG horodaté dans
+ * screenshots/. Utile au joueur, et à la boucle où une session de code regarde
+ * ses propres rendus. */
+static void viewer_screenshot(SDL_Renderer *ren){
+    int w=0,h=0; SDL_GetRendererOutputSize(ren,&w,&h);
+    if (w<=0||h<=0) return;
+    unsigned char *px=(unsigned char*)malloc((size_t)w*h*3);
+    if (!px) return;
+    if (SDL_RenderReadPixels(ren,NULL,SDL_PIXELFORMAT_RGB24,px,w*3)==0){
+        scps_mkdir("screenshots");
+        char name[96]; time_t t=time(NULL);
+        struct tm *lt=localtime(&t);
+        if (lt) strftime(name,sizeof name,"screenshots/scps_%Y%m%d_%H%M%S.png",lt);
+        else    snprintf(name,sizeof name,"screenshots/scps_%ld.png",(long)t);
+        if (stbi_write_png(name,w,h,3,px,w*3)) printf("\n[scps] capture : %s\n",name);
+    }
+    free(px);
+}
+
 /* ── rendu du shell : écrans pleins + surcouches (pause · tuto · confirmation) ── */
 static void shell_draw(SDL_Renderer *ren,int win_w,int win_h,World *w,Sim *s,
                        WorldParams *stage){
@@ -3381,6 +3402,7 @@ int main(int argc, char **argv) {
                             printf("\n[scps] Tribunal : trésor insuffisant pour acheter les matériaux.\n");
                     }
                     break;
+                case SDLK_F12:   viewer_screenshot(ren); break;   /* capture PNG horodatée */
                 case SDLK_TAB:   mode=(ViewMode)((mode+1)%VIEW_COUNT); dirty=true; printf("\n"); break;
                 case SDLK_1:     mode=VIEW_TERRAIN;     dirty=true; break;
                 case SDLK_2:     mode=VIEW_POLITICAL;   dirty=true; break;

@@ -9,7 +9,15 @@ CFLAGS  ?= -O2 -Wall -Wextra -std=c99
 # Génération automatique des dépendances d'en-têtes (.d) : un .o est recompilé
 # quand un .h qu'il inclut change.
 CFLAGS  += -MMD -MP
+# Vendoring single-header (third_party/) : un chemin d'inclusion, des objets
+# committés. Aucun gestionnaire de paquets, aucun lien dynamique nouveau.
+CFLAGS  += -Ithird_party
 OBJDIR  := build
+
+# miniz (MIT, vendoré) : on n'emploie que crc32 + deflate (zlib mz_compress/
+# mz_uncompress). On COUPE l'archive ZIP, le stdio interne et le temps —
+# surface minimale, et plus de #pragma message parasite.
+MINIZ_FLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS
 
 # Détection automatique : MSYS2/MinGW expose OS=Windows_NT.
 ifeq ($(OS),Windows_NT)
@@ -40,6 +48,12 @@ $(OBJDIR):
 # d'inclusion (inoffensif pour les fichiers headless).
 $(OBJDIR)/scps_%.o: scps/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) -c $< -o $@
+
+# ---- third_party : objets vendorés (single-file, MIT/domaine public) ------
+$(OBJDIR)/tp_miniz.o: third_party/miniz.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(MINIZ_FLAGS) -c $< -o $@
+$(OBJDIR)/tp_stbiw.o: third_party/stb_image_write_impl.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # ---- Moteur SCPS headless (§2 + annexe) — colonne vertébrale VÉRIFIÉE -----
 # Banc d'essai auto-vérifiant (35 contrôles, sortie ≠ 0 si échec).
@@ -76,7 +90,8 @@ SCPS_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
              $(OBJDIR)/scps_scps_modifier.o $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_scps_missions.o $(OBJDIR)/scps_scps_intertrade.o \
              $(OBJDIR)/scps_scps_army.o $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_campaign.o \
              $(OBJDIR)/scps_scps_navy.o \
-             $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_crypt.o $(OBJDIR)/scps_viewer.o
+             $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_scps_crypt.o \
+             $(OBJDIR)/tp_stbiw.o $(OBJDIR)/scps_viewer.o
 SCPS_TARGET := scps_viewer$(EXE)
 
 scps: $(SCPS_TARGET)
@@ -108,7 +123,8 @@ econ_scan: $(ECON_SCAN_OBJS)
 
 # ---- Planche-contact de 5 mondes (montage.bmp) ---------------------------
 SCPS_BATCH_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_render.o \
-                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_batch.o
+                   $(OBJDIR)/scps_scps_culture.o $(OBJDIR)/scps_scps_species.o \
+                   $(OBJDIR)/tp_stbiw.o $(OBJDIR)/scps_batch.o
 scps_batch: $(SCPS_BATCH_OBJS)
 	$(CC) $(SCPS_BATCH_OBJS) -o $@ -lm
 
@@ -281,10 +297,37 @@ CHRONICLE_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_econ.o \
                   $(OBJDIR)/scps_scps_labor.o $(OBJDIR)/scps_scps_modifier.o \
                   $(OBJDIR)/scps_scps_revolt.o $(OBJDIR)/scps_scps_army.o \
                   $(OBJDIR)/scps_scps_warhost.o $(OBJDIR)/scps_scps_campaign.o $(OBJDIR)/scps_scps_missions.o \
-                  $(OBJDIR)/scps_scps_navy.o \
+                  $(OBJDIR)/scps_scps_navy.o $(OBJDIR)/tp_miniz.o \
                   $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_chronicle.o
 chronicle: $(CHRONICLE_OBJS)
 	$(CC) $(CHRONICLE_OBJS) -o $@ -lm
+
+# ---- Banc save_io : compression de bloc + CRC32 round-trip (build §9.5) ---
+SAVE_IO_DEMO_OBJS := $(OBJDIR)/scps_scps_save_io.o $(OBJDIR)/tp_miniz.o $(OBJDIR)/scps_save_io_demo.o
+save_io_demo: $(SAVE_IO_DEMO_OBJS)
+	$(CC) $(SAVE_IO_DEMO_OBJS) -o $@ -lm
+
+# ---- LE HARNAIS DE DÉTERMINISME (brief build §2) — le juge de paix --------
+# Deux balayages IDENTIQUES (5 graines × 12 ans), comparaison des HASH par sim :
+# vert si reproductible, rouge à la moindre divergence. À RELANCER après chaque
+# pragma OpenMP retenu (§4) — un speedup qui casse le hash est une dette.
+# Horizon court À DESSEIN : worldgen (la cible §4) est figé dès l'an 0 et toute
+# divergence cascade aussitôt (courants → routes → colonisation) ; 12 ans
+# couvrent aussi les réductions éco/sim — assez pour juger, assez bref pour
+# rejuger après chaque boucle. (DET_YEARS surchargeable : `make determinism DET_YEARS=40`.)
+DET_YEARS ?= 12
+determinism: chronicle
+	@A=$$(./chronicle --hash 7 5 $(DET_YEARS) 2>/dev/null | grep '^HASH'); \
+	 B=$$(./chronicle --hash 7 5 $(DET_YEARS) 2>/dev/null | grep '^HASH'); \
+	 if [ "$$A" = "$$B" ] && [ -n "$$A" ]; then \
+	   echo "determinism OK : $$(printf '%s\n' "$$A" | wc -l) sims, hashes STABLES (5 graines × $(DET_YEARS) ans)"; \
+	   printf '%s\n' "$$A"; \
+	 else \
+	   echo "determinism ÉCHEC : deux runs IDENTIQUES divergent —"; \
+	   echo "  run A :"; printf '%s\n' "$$A"; \
+	   echo "  run B :"; printf '%s\n' "$$B"; exit 1; \
+	 fi
+.PHONY: determinism
 
 # ---- Diagnostic mémoire : chronicle sous AddressSanitizer + UBSan ---------
 # Compile les sources d'un bloc AVEC les sanitizers (compile + link ensemble),

@@ -32,9 +32,11 @@
 #include "scps_labor.h"
 #include "scps_ai.h"
 #include "scps_species.h"
+#include "miniz.h"          /* HARNAIS DE DÉTERMINISME : mz_crc32 (vendoré, third_party) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define CORR_CAPTURED 30   /* §C3 : seuil « polity tenue par une faction » (corr 0-100) */
 
@@ -437,13 +439,62 @@ static void capture_age_snap(AgeSnap *snap, int year, const World *w, const Sim 
         snap->top_gold[a]=country_gold(e,c); snap->top_reg[a]=regions_of(e,c); }
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+ * LE HARNAIS DE DÉTERMINISME (brief build §2) — le JUGE DE PAIX.
+ * En mode --hash, chaque sim émet « HASH <graine> <crc> » : un CRC32 (miniz,
+ * vendoré) de sa propre SORTIE OBSERVABLE, rendue ici sous forme TEXTE
+ * canonique (le flux du monde : qui tient quoi, l'or, la tech, révoltes,
+ * diplomatie, la flotte, la course, les batailles). Le texte porte les
+ * flottants en %.9g — round-trippables : toute réduction dont l'ORDRE
+ * d'accumulation change (une parallélisation §4 mal placée) décale un bit,
+ * décale le hash, et `make determinism` vire au rouge. Même graine → même
+ * hash, toujours : c'est lui qui arbitre toute modif du moteur. */
+typedef struct { mz_ulong crc; } HashAcc;
+static void hx(HashAcc *h, const char *fmt, ...){
+    char b[256]; va_list ap; va_start(ap,fmt);
+    int n=vsnprintf(b,sizeof b,fmt,ap); va_end(ap);
+    if (n<0) return;
+    if (n>(int)sizeof b-1) n=(int)sizeof b-1;
+    h->crc = mz_crc32(h->crc, (const unsigned char*)b, (size_t)n);
+}
+static uint32_t chronicle_sim_hash(uint32_t seed, const Sim *s, const World *w){
+    HashAcc h; h.crc = MZ_CRC32_INIT;
+    hx(&h,"seed=%u nc=%d nr=%d np=%d nk=%d\n",seed,w->n_countries,w->n_regions,w->n_provinces,w->n_continents);
+    for (int c=0;c<w->n_countries && c<SCPS_MAX_COUNTRY;c++)
+        hx(&h,"C%d reg=%d gold=%.9g tech=%d role=%d\n",
+           c,regions_of(s->econ,c),country_gold(s->econ,c),s->ts[c].n_unlocked,(int)w->country[c].role);
+    for (int r=0;r<s->econ->n_regions && r<SCPS_MAX_REG;r++){ const RegionEconomy *re=&s->econ->region[r];
+        double pop=0; for(int k=0;k<CLASS_COUNT;k++) pop+=re->strata[k].pop;
+        hx(&h,"R%d o=%d t=%.9g p=%.9g c=%d e=%d b=%.9g\n",
+           r,re->owner,(double)re->treasury,pop,re->colonized,re->estuary,(double)re->balafre_days);
+    }
+    hx(&h,"rev ig=%d se=%d co=%d cc=%d cr=%d pl=%ld\n",
+       s->rs->n_ignited,s->rs->n_seceded,s->rs->n_coup,s->rs->n_concession,s->rs->n_crushed,(long)s->rs->pop_lost);
+    hx(&h,"dip sv=%d pr=%d cc=%d ci=%d df=%d ap=%d\n",
+       s->dp->n_servage,s->dp->n_protectorat,s->dp->n_concordat,s->dp->n_cite,s->dp->n_defections,s->dp->n_war_antipirate);
+    for (int c=0;c<SCPS_MAX_COUNTRY;c++){ const Navy *nv=&s->navy->n[c];
+        if (!nv->built_total && !nv->raids_done && !nv->crew && !nv->intercepts) continue;
+        hx(&h,"N%d b=%d r=%d pz=%d nv=%d ic=%d dr=%ld cw=%d su=%.9g\n",
+           c,nv->built_total,nv->raids_done,nv->prises,nv->navals,nv->intercepts,(long)nv->drowned,nv->crew,(double)nv->supplies_eaten);
+    }
+    hx(&h,"camp bt=%d dc=%ld dp=%ld sl=%d\n",
+       s->camp->n_battles,(long)s->camp->dead_choc,(long)s->camp->dead_pursuit,s->camp->n_sails);
+    return (uint32_t)h.crc;
+}
+
 int main(int argc, char **argv){
-    uint32_t base = (argc>1)?(uint32_t)strtoul(argv[1],NULL,10):20240607u;
-    int nsims     = (argc>2)?atoi(argv[2]):10;   /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
-    int years     = (argc>3)?atoi(argv[3]):200;
-    int fix_emp   = (argc>4)?atoi(argv[4]):0;    /* >0 : empires FIXES (sinon cycle 2+k) */
-    int fix_cs    = (argc>5)?atoi(argv[5]):0;    /* >0 : cités-états FIXES (sinon cycle 5+k) */
-    int fix_cont  = (argc>6)?atoi(argv[6]):0;    /* >0 : continents FIXES (mer §8 : bancs 2..4) */
+    /* positionnels FILTRÉS de l'option --hash (le harnais de déterminisme). */
+    const char *pos[8]; int np=0, hash_mode=0;
+    for (int i=1;i<argc;i++){
+        if (!strcmp(argv[i],"--hash")) hash_mode=1;
+        else if (np<8) pos[np++]=argv[i];
+    }
+    uint32_t base = (np>0)?(uint32_t)strtoul(pos[0],NULL,10):20240607u;
+    int nsims     = (np>1)?atoi(pos[1]):10;      /* sim i : 2+i empires, 5+i cités (2→11 / 5→14) */
+    int years     = (np>2)?atoi(pos[2]):200;
+    int fix_emp   = (np>3)?atoi(pos[3]):0;       /* >0 : empires FIXES (sinon cycle 2+k) */
+    int fix_cs    = (np>4)?atoi(pos[4]):0;       /* >0 : cités-états FIXES (sinon cycle 5+k) */
+    int fix_cont  = (np>5)?atoi(pos[5]):0;       /* >0 : continents FIXES (mer §8 : bancs 2..4) */
     if (nsims<1) nsims=1;
     if (years<1) years=1;
 
@@ -847,6 +898,7 @@ int main(int argc, char **argv){
         tot_concession += s.rs->n_concession; tot_crushed += s.rs->n_crushed; tot_revdead += s.rs->pop_lost;
         if (age_year[AGE_ORDRE_FER]>=0)   worlds_with_ironorder++;
         if (age_year[AGE_SOULEVEMENTS]>=0) worlds_with_uprising++;
+        if (hash_mode) printf("HASH %u %08x\n", seed, chronicle_sim_hash(seed, &s, w));
     }
 
     printf("\n══════════════════════════════════════════════════════════════════════\n");
