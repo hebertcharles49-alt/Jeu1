@@ -264,7 +264,7 @@ AI_DEMO_OBJS := $(OBJDIR)/scps_scps_world.o $(OBJDIR)/scps_scps_readout.o $(OBJD
                 $(OBJDIR)/scps_scps_tech.o $(OBJDIR)/scps_scps_core.o \
                 $(OBJDIR)/scps_scps_legitimacy.o $(OBJDIR)/scps_scps_prosperity.o \
                 $(OBJDIR)/scps_scps_species.o $(OBJDIR)/scps_scps_agency.o \
-                $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_diplo.o \
+                $(OBJDIR)/scps_scps_routes.o $(OBJDIR)/scps_scps_diplo.o $(OBJDIR)/scps_scps_intertrade.o \
                 $(OBJDIR)/scps_scps_factions.o $(OBJDIR)/scps_scps_ai.o $(OBJDIR)/scps_ai_demo.o
 ai_demo: $(AI_DEMO_OBJS)
 	$(CC) $(AI_DEMO_OBJS) -o $@ -lm

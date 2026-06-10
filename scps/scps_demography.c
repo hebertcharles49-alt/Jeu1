@@ -13,6 +13,12 @@
 #include <math.h>
 #include <stdio.h>
 
+/* drift_id dynamiques (migration · conquête) : compteur unique, rebasé après
+ * chargement (cf. demography_dyn_id_rebase). Le socle laisse la place aux ids
+ * d'attache (1..n_groupes) loin en dessous. */
+#define DYN_DRIFT_BASE 1000000
+static int g_dyn_drift_id = DYN_DRIFT_BASE;
+
 /* ---- Constantes de légitimité (miroir de scps_legitimacy : non-régression) */
 #define K_ALIGN          1.0f
 #define W_ALIGN          0.55f
@@ -375,6 +381,24 @@ void demography_attach(World *w, WorldEconomy *econ, ModifierStack *drift){
         g->diaspora=false; g->drift_id=id++;
         pp->n_groups=1;     /* MONO-GROUPE → non-régression (les nombres d'hier) */
     }
+    g_dyn_drift_id=DYN_DRIFT_BASE;   /* nouvelle partie : le compteur dynamique repart au socle */
+}
+
+/* ---- drift_id DYNAMIQUES (migration · conquête) ------------------------- *
+ * Un compteur UNIQUE et monotone : l'ancien schéma donnait 900000+région aux
+ * colons de conquête → deux vagues sur la MÊME région partageaient un drift_id
+ * (la dérive de l'une lue par l'autre). Le compteur n'étant pas sérialisé, on
+ * le REBASE au-dessus du maximum chargé après game_load (sinon collision avec
+ * les groupes d'une partie sauvegardée). */
+int demography_dyn_id_next(void){ return g_dyn_drift_id++; }
+void demography_dyn_id_rebase(const WorldEconomy *econ){
+    int hi=DYN_DRIFT_BASE-1;
+    for (int r=0;r<econ->n_regions;r++){
+        const ProvincePop *pp=&econ->region[r].pop;
+        for (int i=0;i<pp->n_groups;i++)
+            if (pp->groups[i].drift_id>hi) hi=pp->groups[i].drift_id;
+    }
+    g_dyn_drift_id=hi+1;
 }
 
 /* ÉMERGENCE DE CLASSE (§pop précise) : la classe de CHAQUE groupe (race×culture×foi)
@@ -434,7 +458,6 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
         if (dom) re->culture = dom->culture;                     /* la dominante mène la province */
     }
     /* 2. Migration : les groupes affluent vers la prospérité voisine (round-robin). */
-    static int mig_id=1000000;
     for (int r=0; r<econ->n_regions; r++){
         RegionEconomy *re=&econ->region[r];
         if (re->pop.n_groups<=0 || !re->culture.settled) continue;
@@ -447,7 +470,7 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
         long amount=dom->count/MIG_FRACTION;
         if (amount<MIG_MIN) continue;
         int gi=(int)(dom-re->pop.groups);
-        migration_move(&re->pop, &econ->region[best].pop, gi, amount, mig_id++);
+        migration_move(&re->pop, &econ->region[best].pop, gi, amount, demography_dyn_id_next());
     }
     /* 3. ÉMERGENCE DE CLASSE : la classe de chaque groupe sort des emplois (capitale
      *    + ateliers). Après migration/assimilation, le tissu social se recompose. */
@@ -472,7 +495,7 @@ void demography_on_conquest(World *w, WorldEconomy *econ, ModifierStack *drift, 
         g.race=crown->race; g.origin_sphere=species_sphere(crown->race);
         g.origin=*crown; g.culture=*crown; g.klass=CLASS_ELITE;
         g.count=total/5+50; g.L=7.f; g.agit_base=agit_from_L(7.f); g.integration=1.f;
-        g.diaspora=true; g.drift_id=900000+region;
+        g.diaspora=true; g.drift_id=demography_dyn_id_next();
         pp->groups[pp->n_groups++]=g;
     }
 }

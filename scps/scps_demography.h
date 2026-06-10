@@ -111,4 +111,11 @@ void demography_tick(World *w, WorldEconomy *econ, WorldLegitimacy *wl,
  * laisse les locaux conquis en minorité restive. Crée du D INTERNE vécu. */
 void demography_on_conquest(World *w, WorldEconomy *econ, ModifierStack *drift, int region, int conqueror);
 
+/* drift_id DYNAMIQUES (migration/conquête) : compteur unique et monotone — deux
+ * groupes vivants ne partagent jamais une identité de dérive. rebase : à appeler
+ * après un chargement (le compteur n'est pas sérialisé) — repart au-dessus du
+ * plus grand drift_id vivant. */
+int  demography_dyn_id_next(void);
+void demography_dyn_id_rebase(const WorldEconomy *econ);
+
 #endif /* SCPS_DEMOGRAPHY_H */

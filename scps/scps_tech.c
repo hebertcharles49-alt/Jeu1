@@ -312,6 +312,7 @@ float tech_cost(TechId id, float population){
     int t=n->tier; if (t<0) t=0; if (t>5) t=5;
     float popf = (population>0.f?population:0.f)/POP_REF;   /* coût ∝ pop totale (size-neutral vs revenu) */
     if (popf<COST_POP_FLOOR) popf=COST_POP_FLOOR;
+    if (!(popf<1e6f)) popf=1e6f;   /* une pop inf/NaN ne doit pas geler la recherche (coût inf) */
     return BASE_COST[t] * COST_SCALE * popf;
 }
 

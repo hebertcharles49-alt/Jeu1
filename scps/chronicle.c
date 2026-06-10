@@ -171,6 +171,7 @@ static void sim_init(Sim *s, World *w) {
     legitimacy_init(s->wl, w, s->econ); prosperity_init(s->wp, w);
     trade_network_build(s->net, w, s->econ);
     statecraft_init(s->sc, w); agency_init(s->ag); diplo_init(s->dp); routes_init(s->rn);
+    diplo_seed_rng(s->dp, w->seed);   /* la fronde tire sa graine du monde (séquence par sim) */
     intertrade_reset();   /* embargos décrétés + flux inter-pays : RAZ par sim */
     /* RAZ PLEINE PLAGE (SCPS_MAX_COUNTRY, pas n_countries) : n_countries GRANDIT par
      * sécession en cours de sim — la sim suivante repart plus bas. Sans ça, les slots
@@ -192,6 +193,7 @@ static void sim_init(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);
+    demography_dyn_id_rebase(s->econ);   /* compteur de drift_id : repart au socle par sim */
     revolt_init(s->rs); warhost_init(s->host); missions_init(s->missions);
     campaign_init(s->camp, w, s->econ);                  /* armées de campagne : table de terrain + RAZ */
     s->camp_rng = w->seed ^ 0xCA117A11u;                 /* graine de campagne, propre à la sim */
@@ -752,5 +754,6 @@ int main(int argc, char **argv){
     free(w); free(s.econ); free(s.wp); free(s.wl); free(s.net); free(s.ts); free(s.sc);
     free(s.ag); free(s.ev); free(s.drift); free(s.labor); free(s.dp); free(s.rn);
     warhost_free(s.host); free(s.camp); free(s.ai); free(s.ai_on); free(s.rs); free(s.host);
+    free(s.missions);   /* fuyait (6 496 o, vu par LeakSanitizer) */
     return 0;
 }

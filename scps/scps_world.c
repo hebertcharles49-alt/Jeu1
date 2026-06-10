@@ -1847,6 +1847,7 @@ static void build_hierarchy(World *w, int want_empires, int want_cities) {
         Region *rg=&w->region[r];
         rg->continent=w->province[p].continent;
         if (rg->n_provinces<12) rg->province_ids[rg->n_provinces++]=(int16_t)p;
+        else fprintf(stderr,"scps_world: région %d sature province_ids (12) — territoire %d non listé\n",r,p);
     }
     w->n_regions=nreg;
 
@@ -1871,6 +1872,7 @@ static void build_hierarchy(World *w, int want_empires, int want_cities) {
         Country *ct=&w->country[c];
         ct->continent=w->region[r].continent;
         if (ct->n_regions<12) ct->region_ids[ct->n_regions++]=(int16_t)r;
+        else fprintf(stderr,"scps_world: pays %d sature region_ids (12) — région %d non listée\n",c,r);
     }
     w->n_countries=ncty;
 

@@ -43,6 +43,15 @@
 #include "scps_missions.h"  /* missions décennales : rythme + injection de ressources */
 #include "scps_factions.h"  /* §4 : leviers de factions (reset/decay par sim) */
 #include <stdlib.h>
+/* mkdir portable (la sauvegarde crée saves/ sans passer par system(), qui
+ * échouait sous Windows : cmd.exe ne connaît pas `mkdir -p`). */
+#ifdef _WIN32
+# include <direct.h>
+# define scps_mkdir(p) _mkdir(p)
+#else
+# include <sys/stat.h>
+# define scps_mkdir(p) mkdir((p), 0755)
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -665,6 +674,7 @@ static void sim_rebuild(Sim *s, World *w) {
     statecraft_init(s->sc, w);
     agency_init(s->ag);
     diplo_init(s->dp);
+    diplo_seed_rng(s->dp, w->seed);   /* la fronde tire sa graine du MONDE (sinon même séquence à chaque partie) */
     routes_init(s->rn);
     intertrade_reset();   /* embargos décrétés + flux : RAZ par partie */
     /* RAZ PLEINE PLAGE : n_countries grandit par sécession ; à la RÉGÉNÉRATION (touche R)
@@ -680,6 +690,7 @@ static void sim_rebuild(Sim *s, World *w) {
         if (s->ai_on[c]) ai_actor_init(&s->ai[c], w, s->econ, c, w->seed ^ (uint32_t)(c*2654435761u));
     }
     demography_attach(w, s->econ, s->drift);             /* 1 groupe substrat/région (non-régression) */
+    demography_dyn_id_rebase(s->econ);                   /* compteur de drift_id au-dessus de l'existant */
     events_init(s->ev, w, w->seed);
     labor_init(s->labor, w);
     labor_seed_from_world(s->labor, w, s->econ, s->player);
@@ -2337,7 +2348,8 @@ static bool sv_r(FILE *f, uint32_t tag, void *p, size_t sz){
 }
 /* sauve la partie ENTIÈRE dans un slot ; renvoie false si l'écriture échoue. */
 static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
-    { int rc_=system("mkdir -p saves"); (void)rc_; }
+    if (slot<1 || slot>3) return false;
+    scps_mkdir("saves");                         /* EEXIST inoffensif ; l'échec réel tombe au fopen */
     FILE *f=fopen(save_slot_path(slot),"w+b");   /* w+ : la post-passe de chiffrement RELIT le payload */
     if (!f) return false;
     SaveHeader h; memset(&h,0,sizeof h);
@@ -2347,9 +2359,8 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
     { int nreg=0; for (int r=0;r<s->econ->n_regions;r++) if (s->econ->region[r].owner==s->player) nreg++;
       snprintf(h.line,sizeof h.line,"An %d — %s, %d région(s)",
                s->year, (s->player>=0&&s->player<w->n_countries)?w->country[s->player].name:"?", nreg); }
-    fwrite(&h,sizeof h,1,f);
+    bool ok = fwrite(&h,sizeof h,1,f)==1;        /* disque plein → échec NET, pas silencieux */
     long p0=ftell(f);
-    bool ok=true;
     ok&=sv_w(f,SV_TAG('W','R','L','D'), w,        sizeof *w);
     ok&=sv_w(f,SV_TAG('E','C','O','N'), s->econ,  sizeof *s->econ);
     ok&=sv_w(f,SV_TAG('P','R','O','S'), s->wp,    sizeof *s->wp);
@@ -2390,24 +2401,74 @@ static bool game_save(int slot, World *w, Sim *s, const WorldParams *params){
       fseek(f,p0,SEEK_SET);
       if (fread(buf,1,h.payload,f)!=h.payload){ free(buf); fclose(f); return false; }
       h.plain_ck = scrypt_fnv1a(buf,h.payload);
-      h.nonce = ((uint64_t)time(NULL)<<32) ^ (uint64_t)SDL_GetTicks()
-              ^ ((uint64_t)params->seed<<13) ^ (uint64_t)(uintptr_t)buf;
+      /* Nonce : modèle « obfuscation, pas secret » (la clé vit dans le binaire) —
+       * l'unicité n'est requise que pour éviter un keystream identique entre deux
+       * sauvegardes ; le compteur monotone couvre les sauvegardes rapprochées. */
+      { static uint64_t seq=0; ++seq;
+        h.nonce = ((uint64_t)time(NULL)<<32) ^ (uint64_t)SDL_GetTicks()
+                ^ ((uint64_t)params->seed<<13) ^ (uint64_t)(uintptr_t)buf
+                ^ (seq<<48) ^ (uint64_t)clock(); }
       h.flags = SAVE_F_CRYPT;
       scrypt_stream(h.nonce, buf, h.payload);
       fseek(f,p0,SEEK_SET);
       ok &= fwrite(buf,1,h.payload,f)==h.payload;
       free(buf); }
-    fseek(f,0,SEEK_SET); fwrite(&h,sizeof h,1,f);
-    fclose(f);
+    fseek(f,0,SEEK_SET);
+    ok &= fwrite(&h,sizeof h,1,f)==1;            /* l'en-tête final (payload/nonce/empreinte) doit passer */
+    if (fclose(f)!=0) ok=false;                  /* le flush peut échouer (disque plein) */
     return ok;
 }
+/* Garde-fou post-chargement : le moteur entier boucle sur ces comptes et indices
+ * en LEUR FAISANT CONFIANCE (n_countries ≤ 56, cell.province < n_provinces…).
+ * L'empreinte FNV-1a n'est pas un MAC (la clé vit dans le binaire) : un fichier
+ * FORGÉ passe l'intégrité — on revalide donc les invariants avant de déclarer
+ * la partie prête. Refus net, comme le reste du chargeur. */
+static bool save_sane(const World *w, const Sim *s, int player){
+    if (w->n_provinces <0 || w->n_provinces >SCPS_MAX_PROV)      return false;
+    if (w->n_regions   <0 || w->n_regions   >SCPS_MAX_REG)       return false;
+    if (w->n_countries <0 || w->n_countries >SCPS_MAX_COUNTRY)   return false;
+    if (w->n_continents<0 || w->n_continents>SCPS_MAX_CONTINENT) return false;
+    if (w->n_rivers    <0 || w->n_rivers    >SCPS_MAX_RIVERS)    return false;
+    for (int i=0;i<w->n_rivers;i++)
+        if (w->river[i].len<0 || w->river[i].len>SCPS_RIVER_MAXLEN) return false;
+    if (player<0 || player>=w->n_countries) return false;
+    for (int i=0;i<SCPS_N;i++){ const Cell *c=&w->cell[i];
+        if (c->province >= w->n_provinces || c->region    >= w->n_regions ||
+            c->country  >= w->n_countries || c->continent >= w->n_continents) return false; }
+    for (int p=0;p<w->n_provinces;p++){ const Province *pr=&w->province[p];
+        if (pr->region >= w->n_regions || pr->country >= w->n_countries) return false; }
+    for (int r=0;r<w->n_regions;r++){ const Region *rg=&w->region[r];
+        if (rg->n_provinces<0 || rg->n_provinces>12 || rg->country>=w->n_countries) return false;
+        for (int k=0;k<rg->n_provinces;k++)
+            if (rg->province_ids[k]<0 || rg->province_ids[k]>=w->n_provinces) return false; }
+    for (int c=0;c<w->n_countries;c++){ const Country *ct=&w->country[c];
+        if (ct->n_regions<0 || ct->n_regions>12 || ct->capital_prov>=w->n_provinces) return false;
+        for (int k=0;k<ct->n_regions;k++)
+            if (ct->region_ids[k]<0 || ct->region_ids[k]>=w->n_regions) return false; }
+    if (s->econ->n_regions<0 || s->econ->n_regions>SCPS_MAX_REG) return false;
+    for (int r=0;r<s->econ->n_regions;r++){ const RegionEconomy *re=&s->econ->region[r];
+        if (re->owner >= w->n_countries) return false;
+        if (re->pop.n_groups<0 || re->pop.n_groups>SCPS_MAX_GROUPS) return false; }
+    if (s->rn->n<0 || s->rn->n>SCPS_MAX_ROUTES) return false;
+    for (int i=0;i<s->rn->n;i++){ const TradeRoute *rt=&s->rn->route[i];
+        if (rt->ra<0 || rt->ra>=s->econ->n_regions || rt->rb<0 || rt->rb>=s->econ->n_regions) return false; }
+    for (int i=0;i<SCPS_MAX_COUNTRY;i++){ const FieldArmy *a=&s->camp->army[i];
+        if (!a->active) continue;
+        if (a->owner<0 || a->owner>=w->n_countries) return false;
+        if (a->loc <0 || a->loc >=s->econ->n_regions) return false;
+        if (a->dest>=s->econ->n_regions || a->next>=s->econ->n_regions) return false; }
+    return true;
+}
 /* charge un slot. 0 = ok ; 1 = absent/corrompu ; 2 = « ère antérieure » (version). */
+#define SAVE_MAX_PAYLOAD (256u<<20)   /* plafond de vraisemblance : pas de malloc(4 Go) sur en-tête forgé */
 static int game_load(int slot, World *w, Sim *s, WorldParams *params){
+    if (slot<1 || slot>3) return 1;
     FILE *f=fopen(save_slot_path(slot),"rb");
     if (!f) return 1;
     SaveHeader h;
     if (fread(&h,sizeof h,1,f)!=1 || h.magic!=SAVE_MAGIC){ fclose(f); return 1; }
     if (h.version!=SAVE_VERSION){ fclose(f); return 2; }
+    if (h.payload==0 || h.payload>SAVE_MAX_PAYLOAD){ fclose(f); return 1; }
     /* payload → mémoire ; déchiffré si marqué ; l'EMPREINTE du clair fait foi
      * (un octet altéré — chiffré ou non — et le chargement REFUSE net). */
     { uint8_t *buf=(uint8_t*)malloc(h.payload?h.payload:1);
@@ -2445,7 +2506,10 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     { SaveMisc m;
       ok&=sv_r(f,SV_TAG('M','I','S','C'), &m, sizeof m);
       if (ok){ s->day=m.day; s->year=m.year; s->player=m.player; s->prev_dawned=m.prev_dawned;
-               s->camp_rng=m.camp_rng; g_player_race=(SpeciesArchetype)m.race; g_setup_ethos=m.ethos;
+               s->camp_rng=m.camp_rng;
+               if (m.race <0 || m.race >=(int32_t)RACE_COUNT)  m.race =(int32_t)RACE_HUMAIN;
+               if (m.ethos<0 || m.ethos>=(int32_t)ETHOS_COUNT) m.ethos=0;
+               g_player_race=(SpeciesArchetype)m.race; g_setup_ethos=m.ethos;
                memcpy(s->prev_owner_mo,m.prev_owner,sizeof m.prev_owner); } }
     ok&=sv_r(f,SV_TAG('I','T','R','D'), NULL,0); ok&=intertrade_load(f);
     ok&=sv_r(f,SV_TAG('A','G','Y','S'), NULL,0); ok&=agency_load(f);
@@ -2453,6 +2517,8 @@ static int game_load(int slot, World *w, Sim *s, WorldParams *params){
     ok&=sv_r(f,SV_TAG('F','A','C','T'), NULL,0); ok&=faction_load(f);
     long p1=ftell(f); fclose(f);
     if (!ok || (uint32_t)(p1-p0)!=h.payload) return 1;     /* taille/section : refus net */
+    if (!save_sane(w, s, s->player)) return 1;             /* invariants du moteur : refus net */
+    demography_dyn_id_rebase(s->econ);                     /* drift_id dynamiques au-dessus du chargé */
     *params=h.params;
     s->ready=true;
     return 0;

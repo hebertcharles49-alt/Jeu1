@@ -64,6 +64,13 @@ void diplo_init(DiploState *d){
     for (int c=0;c<SCPS_MAX_COUNTRY;c++) d->suzerain[c]=-1;   /* tous libres au départ */
     d->fronde_suz=-1; d->fronde_lead=-1; d->fronde_rng=0x9E3779B9u;
 }
+/* La graine du MONDE entre dans la fronde : sans elle, chaque partie rejouait la
+ * même séquence d'intimidations/ligues. (fronde_rng vit dans DiploState → la
+ * sauvegarde la préserve ; on ne sème qu'à la création d'une partie.) */
+void diplo_seed_rng(DiploState *d, uint32_t seed){
+    d->fronde_rng = 0x9E3779B9u ^ seed;
+    if (!d->fronde_rng) d->fronde_rng = 1u;
+}
 
 /* ═══ SUZERAINETÉ (brief leviers §3) — quatre contrats, trois voies, la rupture ═══ */
 const char *diplo_contrat_name(SuzContrat c){

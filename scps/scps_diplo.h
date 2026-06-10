@@ -109,6 +109,9 @@ void diplo_suzerainty_tick(DiploState *d, const World *w, WorldEconomy *econ,
 float diplo_vassal_grief(const DiploState *d, int vassal);   /* [0..1] nu — à BANDER côté readout */
 
 void diplo_init(DiploState *d);
+/* graine de fronde ∝ monde (à appeler à la CRÉATION d'une partie, après init —
+ * la sauvegarde préserve fronde_rng, on ne re-sème pas au chargement). */
+void diplo_seed_rng(DiploState *d, uint32_t seed);
 /* sauvegarde : statiques du module (cooldown d'intimidation de la fronde). */
 void diplo_save_statics(FILE *f);
 bool diplo_load_statics(FILE *f);
