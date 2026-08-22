@@ -1,0 +1,18 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# Dossiers de plateforme générés par la CI (flutter create)
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+test/
+
+# IDE
+.idea/
+*.iml

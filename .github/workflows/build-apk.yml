@@ -1,0 +1,64 @@
+name: Build Sciensters APK
+
+on:
+  push:
+    branches:
+      - "claude/appli-ludique-physique-chimie-o5ql6g"
+      - "main"
+    paths:
+      - "sciensters/**"
+      - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sciensters
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Génère les fichiers Android manquants (non versionnés dans le dépôt).
+      - name: Générer le projet Android
+        run: flutter create --platforms android --project-name sciensters --org com.sciensters .
+
+      - name: Nom d'application lisible
+        run: sed -i 's/android:label="sciensters"/android:label="Sciensters"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Analyse du code
+        run: flutter analyze lib
+
+      - name: Compiler l'APK
+        run: flutter build apk --release
+
+      - name: Publier l'APK en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sciensters-apk
+          path: sciensters/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Publier l'APK en release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sciensters-apk
+          name: "Sciensters — dernier APK"
+          body: "APK le plus récent de Sciensters. Télécharge app-release.apk sur ton téléphone Android et installe-le."
+          prerelease: true
+          files: sciensters/build/app/outputs/flutter-apk/app-release.apk
