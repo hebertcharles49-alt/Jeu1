@@ -13,8 +13,8 @@ void softFeedback() {
   HapticFeedback.lightImpact();
 }
 
-/// Structure commune à tous les mini-jeux : même disposition partout
-/// pour que l'enfant retrouve toujours ses repères.
+/// Structure commune à tous les mini-jeux et énigmes : même disposition
+/// partout pour que l'enfant retrouve toujours ses repères.
 /// - Bandeau de consigne : UNE phrase courte, gros texte.
 /// - Bouton indice (ampoule) toujours au même endroit.
 /// - Jamais de chrono, jamais de score négatif.
@@ -37,7 +37,7 @@ class GameScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: color.withOpacity(0.08),
+      backgroundColor: color.withValues(alpha: 0.08),
       appBar: AppBar(
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: color,
@@ -114,23 +114,47 @@ void showOops(BuildContext context, String message) {
     );
 }
 
-/// Écran de victoire : capture ou évolution du Scienster, puis retour à la carte.
-Future<void> showVictory(BuildContext context, String gameId) async {
-  final app = AppState.instance;
-  final oldStage = app.stageFor(gameId);
-  await app.recordWin(gameId);
-  final newStage = app.stageFor(gameId);
-  final creature = creatureForGame(gameId);
-  final stage = creature.stageInfo(newStage == 0 ? 1 : newStage);
-  final zone = zoneForGame(gameId);
+/// Message de réussite intermédiaire (vert, tout doux).
+void showNice(BuildContext context, String message) {
+  softFeedback();
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 17, color: Colors.black87)),
+        backgroundColor: const Color(0xFFD9F2DD),
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+}
 
-  final bool captured = oldStage == 0;
+/// Écran de victoire d'un niveau : capture ou évolution du Scienster,
+/// puis retour à la zone.
+Future<void> showVictory(
+    BuildContext context, String zoneId, int level) async {
+  final app = AppState.instance;
+  final oldStage = app.stageForZone(zoneId);
+  final alreadyDone = app.isLevelDone(zoneId, level);
+  await app.completeLevel(zoneId, level);
+  final newStage = app.stageForZone(zoneId);
+  final creature = creatureForZone(zoneId);
+  final stage = creature.stageInfo(newStage == 0 ? 1 : newStage);
+  final zone = zoneById(zoneId);
+
+  final bool captured = oldStage == 0 && newStage > 0;
   final bool evolved = !captured && newStage > oldStage;
   final String titleText = captured
       ? '✨ ${stage.name} capturé !'
       : evolved
           ? '🌟 Évolution ! Voici ${stage.name} !'
-          : '⭐ Bravo, ${stage.name} est ravi !';
+          : alreadyDone
+              ? '⭐ Encore bravo, ${stage.name} est fier de toi !'
+              : '⭐ Niveau $level réussi !';
 
   softFeedback();
   if (!context.mounted) return;
@@ -189,19 +213,34 @@ Future<void> showVictory(BuildContext context, String gameId) async {
                         height: 1.3),
                   ),
                   const SizedBox(height: 16),
+                  // Progression des 5 niveaux de la zone
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
-                      3,
-                      (i) => Icon(
-                        i < AppState.instance.starsFor(gameId)
-                            ? Icons.star_rounded
-                            : Icons.star_border_rounded,
-                        color: const Color(0xFFFFC93D),
-                        size: 36,
+                      AppState.maxLevel,
+                      (i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Icon(
+                          i < AppState.instance.levelReached(zoneId)
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          color: const Color(0xFFFFC93D),
+                          size: 32,
+                        ),
                       ),
                     ),
                   ),
+                  if (app.levelReached(zoneId) < AppState.maxLevel)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Un nouveau défi t\'attend !',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.grey.shade600),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   FilledButton(
                     style: FilledButton.styleFrom(
@@ -215,7 +254,7 @@ Future<void> showVictory(BuildContext context, String gameId) async {
                       softFeedback();
                       Navigator.of(context).pop();
                     },
-                    child: const Text('Retour à la carte 🗺️',
+                    child: const Text('Continuer 🗺️',
                         style: TextStyle(fontSize: 18)),
                   ),
                 ],

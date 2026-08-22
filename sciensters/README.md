@@ -15,13 +15,24 @@ Le Professeur Pixel a fait exploser son laboratoire : ses créatures, les
 **Sciensters**, se sont échappées ! Pour les capturer et les faire évoluer
 (façon Pokédex), il faut résoudre des défis scientifiques :
 
-| Zone | Matière | Défi | Scienster |
+| Zone | Matière | Niveau 1 (manipulation) | Scienster |
 |---|---|---|---|
 | ⚡ Vallée Électrique | Physique | Fermer un circuit électrique | Volty → Voltar → Voltrym |
 | 🧪 Marais des Potions | Chimie | Les états de l'eau (glace/eau/vapeur) | Gouttix → Vaporix → Nuagix |
 | 🌿 Forêt Vivante | SVT | Reconstruire une chaîne alimentaire | Renardeau → Renardor → Renargent |
 
-Chaque victoire donne une étoile ⭐ et fait évoluer la créature (3 stades).
+Chaque zone compte **5 niveaux à difficulté croissante** (du CM2 à la 5e),
+débloqués un par un : niveau 1 = jeu de manipulation, niveaux 2 à 5 =
+énigmes (QCM à gros boutons et jeux de tri) toujours accessibles — une
+question par écran, un indice disponible, une erreur donne un
+encouragement et on réessaie. La créature évolue aux niveaux 1, 3 et 5.
+
+Contenus couverts : conducteurs/isolants, circuits série et dérivation,
+symboles électriques, court-circuit (physique) ; changements d'état et
+leurs noms, paliers de température, mélanges homogènes/hétérogènes,
+dissolution et conservation de la masse (chimie) ; producteurs et
+consommateurs, régimes alimentaires, décomposeurs, vertébrés/invertébrés,
+photosynthèse et respiration (SVT).
 
 ## Obtenir l'APK
 
@@ -43,17 +54,19 @@ fait automatiquement).
 ```
 lib/
 ├── main.dart                  # Point d'entrée + thème
-├── core/app_state.dart        # Progression + réglages (sauvegarde locale)
+├── core/app_state.dart        # Progression par niveaux + réglages (local)
 ├── creatures/creatures.dart   # Zones, Sciensters, sprites pixel art
+├── content/enigmes.dart       # Énigmes des niveaux 2 à 5 (données pures)
 ├── ui/                        # Carte-monde, zones, Scienxdex, réglages
 └── games/
-    ├── game_framework.dart    # Base commune des mini-jeux (consigne,
-    │                          #   indices, victoire, zéro pression)
-    ├── circuit_game.dart      # Physique
-    ├── etats_eau_game.dart    # Chimie
-    └── chaine_alimentaire_game.dart  # SVT
+    ├── game_framework.dart    # Base commune (consigne, indices,
+    │                          #   victoire, zéro pression)
+    ├── enigme_screen.dart     # Moteur générique QCM + tri (niveaux 2-5)
+    ├── circuit_game.dart      # Physique — niveau 1
+    ├── etats_eau_game.dart    # Chimie — niveau 1
+    └── chaine_alimentaire_game.dart  # SVT — niveau 1
 ```
 
-Pour ajouter un mini-jeu : créer un écran dans `games/` avec `GameScaffold`,
-déclarer son `gameId` dans `AppState.gameIds`, sa zone et sa créature dans
-`creatures.dart`.
+Pour ajouter des énigmes : compléter simplement `content/enigmes.dart`
+(aucun code d'interface à écrire). Pour un nouveau jeu de manipulation :
+créer un écran dans `games/` avec `GameScaffold`.

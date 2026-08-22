@@ -24,8 +24,10 @@ class CollectionScreen extends StatelessWidget {
           listenable: AppState.instance,
           builder: (context, _) {
             final app = AppState.instance;
-            final capturedCount =
-                creatures.where((c) => app.stageFor(c.gameId) > 0).length;
+            final capturedCount = creatures
+                .where((c) =>
+                    app.stageForZone(zoneForGame(c.gameId).id) > 0)
+                .length;
             return SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -50,7 +52,7 @@ class CollectionScreen extends StatelessWidget {
   Widget _creatureCard(BuildContext context, Creature creature) {
     final app = AppState.instance;
     final zone = zoneForGame(creature.gameId);
-    final stage = app.stageFor(creature.gameId);
+    final stage = app.stageForZone(zone.id);
     final captured = stage > 0;
     final info = creature.stageInfo(captured ? stage : 1);
 
@@ -136,13 +138,13 @@ class CollectionScreen extends StatelessWidget {
                   Row(
                     children: [
                       ...List.generate(
-                        3,
+                        AppState.maxLevel,
                         (i) => Icon(
-                          i < app.starsFor(creature.gameId)
+                          i < app.levelReached(zone.id)
                               ? Icons.star_rounded
                               : Icons.star_border_rounded,
                           color: const Color(0xFFFFC93D),
-                          size: 22,
+                          size: 20,
                         ),
                       ),
                       const SizedBox(width: 8),

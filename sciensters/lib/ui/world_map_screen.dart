@@ -54,7 +54,7 @@ class WorldMapScreen extends StatelessWidget {
                         const Icon(Icons.star_rounded,
                             color: Color(0xFFFFC93D), size: 28),
                         Text(
-                          ' ${app.totalStars} / 9 étoiles',
+                          ' ${app.totalLevelsDone} / 15 niveaux réussis',
                           style: const TextStyle(
                               fontSize: 18, fontWeight: FontWeight.bold),
                         ),
@@ -101,8 +101,8 @@ class WorldMapScreen extends StatelessWidget {
 
   Widget _zoneCard(BuildContext context, Zone zone) {
     final app = AppState.instance;
-    final creature = creatureForGame(zone.gameId);
-    final stage = app.stageFor(zone.gameId);
+    final creature = creatureForZone(zone.id);
+    final stage = app.stageForZone(zone.id);
     final captured = stage > 0;
     return GestureDetector(
       onTap: () {
@@ -141,13 +141,13 @@ class WorldMapScreen extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: List.generate(
-                      3,
+                      AppState.maxLevel,
                       (i) => Icon(
-                        i < app.starsFor(zone.gameId)
+                        i < app.levelReached(zone.id)
                             ? Icons.star_rounded
                             : Icons.star_border_rounded,
                         color: const Color(0xFFFFC93D),
-                        size: 24,
+                        size: 22,
                       ),
                     ),
                   ),

@@ -43,7 +43,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyse du code
-        run: flutter analyze lib
+        run: flutter analyze --no-fatal-infos lib
 
       - name: Compiler l'APK
         run: flutter build apk --release

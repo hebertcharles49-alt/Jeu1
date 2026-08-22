@@ -124,7 +124,7 @@ class _ChaineAlimentaireGameState extends State<ChaineAlimentaireGame> {
             won = true;
             await Future<void>.delayed(const Duration(milliseconds: 800));
             if (mounted) {
-              await showVictory(context, 'chaine');
+              await showVictory(context, 'svt', 1);
             }
           }
         } else {

@@ -71,7 +71,7 @@ class _EtatsEauGameState extends State<EtatsEauGame> {
         setState(() => won = true);
         await Future<void>.delayed(const Duration(milliseconds: 600));
         if (mounted) {
-          await showVictory(context, 'etats_eau');
+          await showVictory(context, 'chimie', 1);
         }
         return;
       }

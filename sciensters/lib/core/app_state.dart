@@ -1,42 +1,54 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// État global : progression (victoires par jeu) + réglages.
+/// État global : progression (niveaux par zone) + réglages.
 /// Tout est sauvegardé localement sur l'appareil, rien ne sort du téléphone.
 class AppState extends ChangeNotifier {
   AppState._();
   static final AppState instance = AppState._();
 
-  static const gameIds = ['circuit', 'etats_eau', 'chaine'];
+  static const zoneIds = ['physique', 'chimie', 'svt'];
+  static const maxLevel = 5;
 
   late SharedPreferences _prefs;
   bool soundOn = true;
-  final Map<String, int> _wins = {};
+  final Map<String, int> _levels = {};
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     soundOn = _prefs.getBool('soundOn') ?? true;
-    for (final id in gameIds) {
-      _wins[id] = _prefs.getInt('wins_$id') ?? 0;
+    for (final id in zoneIds) {
+      _levels[id] = _prefs.getInt('level_$id') ?? 0;
     }
   }
 
-  int winsFor(String gameId) => _wins[gameId] ?? 0;
+  /// Plus haut niveau terminé dans la zone (0 = aucun, max 5).
+  int levelReached(String zoneId) => _levels[zoneId] ?? 0;
 
-  /// Étoiles affichées : plafonnées à 3.
-  int starsFor(String gameId) => winsFor(gameId).clamp(0, 3);
+  bool isLevelUnlocked(String zoneId, int level) =>
+      level <= levelReached(zoneId) + 1;
 
-  /// Stade d'évolution de la créature liée au jeu :
-  /// 0 = pas capturée, 1..3 = stades d'évolution.
-  int stageFor(String gameId) => winsFor(gameId).clamp(0, 3);
+  bool isLevelDone(String zoneId, int level) => level <= levelReached(zoneId);
 
-  int get totalStars =>
-      gameIds.fold(0, (sum, id) => sum + starsFor(id));
+  /// Stade d'évolution de la créature de la zone :
+  /// 0 = pas capturée, 1 dès le niveau 1, 2 dès le niveau 3, 3 au niveau 5.
+  int stageForZone(String zoneId) {
+    final reached = levelReached(zoneId);
+    if (reached >= maxLevel) return 3;
+    if (reached >= 3) return 2;
+    if (reached >= 1) return 1;
+    return 0;
+  }
 
-  Future<void> recordWin(String gameId) async {
-    _wins[gameId] = winsFor(gameId) + 1;
-    await _prefs.setInt('wins_$gameId', _wins[gameId]!);
-    notifyListeners();
+  int get totalLevelsDone =>
+      zoneIds.fold(0, (sum, id) => sum + levelReached(id));
+
+  Future<void> completeLevel(String zoneId, int level) async {
+    if (level > levelReached(zoneId)) {
+      _levels[zoneId] = level;
+      await _prefs.setInt('level_$zoneId', level);
+      notifyListeners();
+    }
   }
 
   Future<void> setSound(bool value) async {
@@ -46,9 +58,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> resetProgress() async {
-    for (final id in gameIds) {
-      _wins[id] = 0;
-      await _prefs.remove('wins_$id');
+    for (final id in zoneIds) {
+      _levels[id] = 0;
+      await _prefs.remove('level_$id');
     }
     notifyListeners();
   }

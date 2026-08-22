@@ -61,7 +61,7 @@ class _CircuitGameState extends State<CircuitGame> {
       won = true;
       await Future<void>.delayed(const Duration(milliseconds: 900));
       if (mounted) {
-        await showVictory(context, 'circuit');
+        await showVictory(context, 'physique', 1);
       }
     }
   }
@@ -91,7 +91,8 @@ class _CircuitGameState extends State<CircuitGame> {
                 boxShadow: lit
                     ? [
                         BoxShadow(
-                          color: const Color(0xFFFFE24F).withOpacity(0.9),
+                          color: const Color(0xFFFFE24F)
+                              .withValues(alpha: 0.9),
                           blurRadius: 40,
                           spreadRadius: 10,
                         )

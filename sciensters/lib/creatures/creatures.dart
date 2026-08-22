@@ -54,6 +54,11 @@ const zones = [
 Zone zoneForGame(String gameId) =>
     zones.firstWhere((z) => z.gameId == gameId);
 
+Zone zoneById(String zoneId) => zones.firstWhere((z) => z.id == zoneId);
+
+Creature creatureForZone(String zoneId) =>
+    creatureForGame(zoneById(zoneId).gameId);
+
 /// Un stade d'évolution d'un Scienster.
 class CreatureStage {
   final String name;
