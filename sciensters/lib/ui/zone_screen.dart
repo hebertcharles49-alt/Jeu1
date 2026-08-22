@@ -1,42 +1,54 @@
 import 'package:flutter/material.dart';
 
 import '../content/enigmes.dart';
+import '../content/missions.dart';
 import '../core/app_state.dart';
 import '../creatures/creatures.dart';
 import '../games/chaine_alimentaire_game.dart';
 import '../games/circuit_game.dart';
+import '../games/circuit_puzzle_game.dart';
+import '../games/ecosystem_game.dart';
 import '../games/enigme_screen.dart';
 import '../games/etats_eau_game.dart';
 import '../games/game_framework.dart';
+import '../games/potion_lab_game.dart';
 import 'pixel_art.dart';
 
 /// Écran d'une zone : le Scienster de la zone + les 5 niveaux
-/// (déblocage progressif, difficulté croissante du CM2 à la 5e).
+/// (déblocage progressif, difficulté croissante du CM2 à la 5e)
+/// + le Quiz du Professeur en bonus.
 class ZoneScreen extends StatelessWidget {
   final Zone zone;
 
   const ZoneScreen({super.key, required this.zone});
 
-  Widget _level1Game() {
-    switch (zone.gameId) {
-      case 'circuit':
-        return const CircuitGame();
-      case 'etats_eau':
-        return const EtatsEauGame();
-      case 'chaine':
+  Widget _gameForLevel(int level) {
+    if (level == 1) {
+      switch (zone.gameId) {
+        case 'circuit':
+          return const CircuitGame();
+        case 'etats_eau':
+          return const EtatsEauGame();
+        case 'chaine':
+        default:
+          return const ChaineAlimentaireGame();
+      }
+    }
+    switch (zone.id) {
+      case 'physique':
+        return CircuitPuzzleGame(zone: zone, level: level);
+      case 'chimie':
+        return PotionLabGame(zone: zone, level: level);
+      case 'svt':
       default:
-        return const ChaineAlimentaireGame();
+        return EcosystemGame(zone: zone, level: level);
     }
   }
 
   void _openLevel(BuildContext context, int level) {
     softFeedback();
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => level == 1
-            ? _level1Game()
-            : EnigmeScreen(zone: zone, level: level),
-      ),
+      MaterialPageRoute<void>(builder: (_) => _gameForLevel(level)),
     );
   }
 
@@ -119,6 +131,9 @@ class ZoneScreen extends StatelessWidget {
                   // Les 5 niveaux
                   for (var level = 1; level <= AppState.maxLevel; level++)
                     _levelCard(context, level),
+                  const SizedBox(height: 4),
+                  // Bonus : le Quiz du Professeur
+                  _bonusCard(context),
                 ],
               ),
             );
@@ -138,9 +153,26 @@ class ZoneScreen extends StatelessWidget {
       title = zone.gameTitle;
       emoji = '🎮';
     } else {
-      final data = enigmeLevelFor(zone.id, level);
-      title = data.title;
-      emoji = data.emoji;
+      final meta = levelMeta[zone.id]![level]!;
+      title = meta.title;
+      emoji = meta.emoji;
+    }
+    final String subtitle;
+    if (done) {
+      subtitle = 'Réussi ! Tu peux rejouer quand tu veux.';
+    } else if (!unlocked) {
+      subtitle = 'Termine le niveau ${level - 1} pour l\'ouvrir.';
+    } else if (level == 1) {
+      subtitle = 'Un défi à manipuler !';
+    } else {
+      switch (zone.id) {
+        case 'physique':
+          subtitle = 'Puzzle de câblage sur la grille !';
+        case 'chimie':
+          subtitle = 'Expériences au labo de potions !';
+        default:
+          subtitle = 'Gère ton écosystème, saison après saison !';
+      }
     }
 
     return GestureDetector(
@@ -178,13 +210,7 @@ class ZoneScreen extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    done
-                        ? 'Réussi ! Tu peux rejouer quand tu veux.'
-                        : unlocked
-                            ? level == 1
-                                ? 'Un défi à manipuler !'
-                                : 'Des énigmes de plus en plus fortes !'
-                            : 'Termine le niveau ${level - 1} pour l\'ouvrir.',
+                    subtitle,
                     style: TextStyle(
                         fontSize: 13,
                         color: done
@@ -200,6 +226,53 @@ class ZoneScreen extends StatelessWidget {
             else if (unlocked)
               Icon(Icons.play_circle_fill_rounded,
                   color: zone.color, size: 34),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bonusCard(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        softFeedback();
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                EnigmeScreen(zone: zone, data: bonusQuizFor(zone.id)),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3EDFB),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF9C6ADE), width: 3),
+        ),
+        child: const Row(
+          children: [
+            Text('🧠', style: TextStyle(fontSize: 32)),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'BONUS — Quiz du Professeur',
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'Pour les champions : réponds aux questions du '
+                    'Professeur Pixel !',
+                    style: TextStyle(fontSize: 13, color: Colors.blueGrey),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.play_circle_fill_rounded,
+                color: Color(0xFF9C6ADE), size: 34),
           ],
         ),
       ),

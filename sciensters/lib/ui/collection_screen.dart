@@ -88,6 +88,15 @@ class CollectionScreen extends StatelessWidget {
                             color: Colors.grey.shade700,
                             height: 1.3),
                       ),
+                      if (stage >= 2) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          '🌱 ${creature.evolutionFact}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 14, height: 1.3),
+                        ),
+                      ],
                     ],
                   ),
                   actions: [

@@ -535,3 +535,14 @@ const Map<String, List<EnigmeLevel>> enigmesByZone = {
 
 EnigmeLevel enigmeLevelFor(String zoneId, int level) =>
     enigmesByZone[zoneId]!.firstWhere((l) => l.level == level);
+
+/// Le "Quiz du Professeur Pixel" : toutes les énigmes de la zone,
+/// jouées en bonus (hors progression des niveaux).
+EnigmeLevel bonusQuizFor(String zoneId) => EnigmeLevel(
+      level: 0,
+      title: 'Quiz du Professeur',
+      emoji: '🧠',
+      enigmes: [
+        for (final level in enigmesByZone[zoneId]!) ...level.enigmes,
+      ],
+    );

@@ -4,40 +4,45 @@ import '../content/enigmes.dart';
 import '../creatures/creatures.dart';
 import 'game_framework.dart';
 
-/// Écran générique d'un niveau d'énigmes (niveaux 2 à 5 de chaque zone).
-/// Enchaîne les énigmes une par une : QCM à gros boutons ou jeu de tri.
-/// Une erreur affiche un encouragement + un indice, jamais d'échec.
+/// Écran générique d'une série d'énigmes : QCM à gros boutons ou jeux
+/// de tri, enchaînés un par un. Utilisé pour le "Quiz du Professeur"
+/// (bonus, hors progression). Une erreur affiche un encouragement
+/// + un indice, jamais d'échec.
 class EnigmeScreen extends StatefulWidget {
   final Zone zone;
-  final int level;
+  final EnigmeLevel data;
+  final bool bonus;
 
-  const EnigmeScreen({super.key, required this.zone, required this.level});
+  const EnigmeScreen({
+    super.key,
+    required this.zone,
+    required this.data,
+    this.bonus = true,
+  });
 
   @override
   State<EnigmeScreen> createState() => _EnigmeScreenState();
 }
 
 class _EnigmeScreenState extends State<EnigmeScreen> {
-  late final EnigmeLevel data;
   int index = 0;
   bool locked = false; // bloque les taps pendant les transitions
 
   // État du tri en cours : ids (index d'item) déjà placés.
   final Set<int> sorted = {};
 
+  EnigmeLevel get data => widget.data;
   Enigme get current => data.enigmes[index];
-
-  @override
-  void initState() {
-    super.initState();
-    data = enigmeLevelFor(widget.zone.id, widget.level);
-  }
 
   Future<void> _advance() async {
     await Future<void>.delayed(const Duration(milliseconds: 1300));
     if (!mounted) return;
     if (index == data.enigmes.length - 1) {
-      await showVictory(context, widget.zone.id, widget.level);
+      if (widget.bonus) {
+        await _bonusDone();
+      } else {
+        await showVictory(context, widget.zone.id, data.level);
+      }
     } else {
       setState(() {
         index++;
@@ -45,6 +50,31 @@ class _EnigmeScreenState extends State<EnigmeScreen> {
         sorted.clear();
       });
     }
+  }
+
+  Future<void> _bonusDone() async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('🧠 Quiz terminé !', textAlign: TextAlign.center),
+        content: const Text(
+          'Le Professeur Pixel est impressionné : tu connais ta science '
+          'sur le bout des doigts ! 🎓',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 17, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Merci !', style: TextStyle(fontSize: 18)),
+          ),
+        ],
+      ),
+    );
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _onQcmTap(int choice) {
@@ -86,9 +116,9 @@ class _EnigmeScreenState extends State<EnigmeScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            // Progression dans le niveau : une pastille par énigme.
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Progression : une pastille par énigme.
+            Wrap(
+              alignment: WrapAlignment.center,
               children: List.generate(
                 data.enigmes.length,
                 (i) => Padding(

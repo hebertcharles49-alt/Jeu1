@@ -22,17 +22,23 @@ Le Professeur Pixel a fait exploser son laboratoire : ses créatures, les
 | 🌿 Forêt Vivante | SVT | Reconstruire une chaîne alimentaire | Renardeau → Renardor → Renargent |
 
 Chaque zone compte **5 niveaux à difficulté croissante** (du CM2 à la 5e),
-débloqués un par un : niveau 1 = jeu de manipulation, niveaux 2 à 5 =
-énigmes (QCM à gros boutons et jeux de tri) toujours accessibles — une
-question par écran, un indice disponible, une erreur donne un
-encouragement et on réessaie. La créature évolue aux niveaux 1, 3 et 5.
+débloqués un par un et rejouables. Niveau 1 = jeu de manipulation, puis :
 
-Contenus couverts : conducteurs/isolants, circuits série et dérivation,
-symboles électriques, court-circuit (physique) ; changements d'état et
-leurs noms, paliers de température, mélanges homogènes/hétérogènes,
-dissolution et conservation de la masse (chimie) ; producteurs et
-consommateurs, régimes alimentaires, décomposeurs, vertébrés/invertébrés,
-photosynthèse et respiration (SVT).
+- **Physique** : puzzles de câblage sur grille façon redstone (budget de
+  câbles, rochers, interrupteurs), jusqu'aux **portes logiques ET / OU**
+  validées par une vraie table de vérité animée (bouton TESTER).
+- **Chimie** : un labo de potions interactif (bécher animé, thermomètre à
+  paliers) — ébullition, dissolution, saturation, tour de densité
+  miel/eau/huile, évaporation… et le **dentifrice d'éléphant** en finale !
+- **SVT** : une simulation d'écosystème au tour par tour (herbe 🌿,
+  lapins 🐰, renards 🦊) : invasion de lapins, renards affamés, grande
+  sécheresse — on agit chaque saison pour garder l'équilibre.
+
+La créature évolue aux niveaux 1, 3 et 5, et chaque évolution est reliée
+à son équivalent réel (cycle de l'eau, croissance, métamorphose, foudre).
+En bonus dans chaque zone : le **Quiz du Professeur** (QCM + jeux de tri),
+hors progression. Toujours accessible : un indice partout, une erreur =
+un encouragement, jamais de chrono.
 
 ## Obtenir l'APK
 

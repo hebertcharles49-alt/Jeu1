@@ -204,7 +204,7 @@ Future<void> showVictory(
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    creature.funFact,
+                    evolved ? creature.evolutionFact : creature.funFact,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                         fontSize: 14,

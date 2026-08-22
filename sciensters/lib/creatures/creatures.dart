@@ -77,6 +77,9 @@ class Creature {
   final String id;
   final String gameId;
   final String funFact;
+
+  /// L'équivalent RÉEL de cette évolution dans la nature.
+  final String evolutionFact;
   final Map<String, Color> palette;
   final List<CreatureStage> stages; // 3 stades
 
@@ -84,6 +87,7 @@ class Creature {
     required this.id,
     required this.gameId,
     required this.funFact,
+    required this.evolutionFact,
     required this.palette,
     required this.stages,
   });
@@ -98,6 +102,9 @@ const creatures = [
     gameId: 'circuit',
     funFact:
         'Le savais-tu ? L\'électricité voyage presque à la vitesse de la lumière !',
+    evolutionFact:
+        'Dans la vraie nature aussi, l\'électricité "grandit" : un nuage se '
+        'charge peu à peu… jusqu\'à l\'éclair géant : la foudre !',
     palette: {
       'Y': Color(0xFFFFE24F),
       'B': Color(0xFF2B2B2B),
@@ -165,6 +172,10 @@ const creatures = [
     gameId: 'etats_eau',
     funFact:
         'Le savais-tu ? L\'eau est la seule matière qu\'on trouve naturellement en solide, liquide ET gaz sur Terre !',
+    evolutionFact:
+        'Cette évolution existe pour de vrai : c\'est le CYCLE DE L\'EAU ! '
+        'La goutte s\'évapore en vapeur, puis se condense en nuage… '
+        'et retombe en pluie.',
     palette: {
       'A': Color(0xFF4FC3F7),
       'K': Color(0xFF2B2B2B),
@@ -227,6 +238,10 @@ const creatures = [
     gameId: 'chaine',
     funFact:
         'Le savais-tu ? Sans les plantes, aucune chaîne alimentaire ne pourrait exister : elles fabriquent leur nourriture grâce au soleil !',
+    evolutionFact:
+        'Dans la vraie nature, on parle de CROISSANCE : le renardeau devient '
+        'adulte. Et certains animaux se MÉTAMORPHOSENT complètement : '
+        'têtard → grenouille, chenille → papillon !',
     palette: {
       'O': Color(0xFFFF8A50),
       'K': Color(0xFF2B2B2B),
