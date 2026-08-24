@@ -7,8 +7,9 @@ octobre 2008 : 5 boules parmi 49 + 1 numéro Chance parmi 10).
 
 | Fichier | Rôle |
 |---|---|
-| `data/loto_tirages.csv` | Historique consolidé : **2711 tirages, du 06/10/2008 au 31/01/2026**, sans trou |
+| `data/loto_tirages.csv` | Historique consolidé : **2711 tirages, du 06/10/2008 au 31/01/2026**, sans trou (boules triées `b1-b5` **et** ordre de sortie machine `d1-d5`) |
 | `predict_loto.py` | Analyse + génération de grilles (aucune dépendance, Python ≥ 3.8) |
+| `test_biais.py` | Batterie de 15 tests de détection de biais (Monte-Carlo exact, Holm, facteur de Bayes, analyse de puissance) |
 | `update_data.py` | Met à jour le CSV depuis le fichier officiel FDJ (accès internet requis) |
 
 ## Usage
@@ -58,6 +59,36 @@ p ≈ 0,95 : les boules sortent de façon parfaitement uniforme. **Le Loto n'est
 pas prédictible** ; chaque grille a exactement 1 chance sur 19 068 840 au
 rang 1. L'outil sert à explorer les statistiques et à générer des grilles
 « informées » (au sens des stratégies ci-dessus), pas à promettre un gain.
+
+## Y a-t-il un biais ? (`test_biais.py`)
+
+Batterie de 15 tests sur les 2711 tirages, avec trois précautions rarement
+prises : (1) le chi² naïf sur un tirage **sans remise** est déflaté d'un
+facteur (K−m)/(K−1) = 44/48 — corrigé ici ; (2) la distribution nulle de
+chaque statistique est obtenue par **Monte-Carlo du processus exact**
+(3000 historiques simulés) ; (3) **correction de Holm** des comparaisons
+multiples.
+
+| Test | p-value |
+|---|---|
+| T1 Uniformité des 49 boules (MC) | 0,898 |
+| T2 Uniformité du n° Chance | 0,553 |
+| T3 Stabilité temporelle (5 ères, MC) | 0,547 |
+| T4 Stabilité temporelle Chance | 0,363 |
+| T5 Effet du jour de tirage (MC) | 0,593 |
+| T6 Biais de position de sortie machine (×5) | 0,52 – 0,93 |
+| T7 Répétitions entre tirages consécutifs (MC) | 0,096 |
+| T8 Parité (MC) | 0,428 |
+| T9 Numéros consécutifs (MC) | 0,413 |
+| T10 Boule la plus / moins sortie (MC) | 0,414 / 0,925 |
+
+**0 / 15 significatif après Holm.** Le facteur de Bayes est écrasant : les
+données sont au moins 10² fois (et jusqu'à 10⁵³ fois selon le prior) plus
+probables sous le modèle uniforme que sous un modèle biaisé. L'analyse de
+puissance montre qu'un biais relatif < 16 % par boule serait de toute façon
+indétectable avec 2711 tirages — et qu'un biais même de +15 % sur 5 boules
+laisserait l'espérance de gain lourdement négative (1/9,5 M au rang 1 pour
+~50 % des mises redistribuées).
 
 ## Sources des données
 
