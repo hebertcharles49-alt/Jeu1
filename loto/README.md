@@ -10,6 +10,8 @@ octobre 2008 : 5 boules parmi 49 + 1 numéro Chance parmi 10).
 | `data/loto_tirages.csv` | Historique consolidé : **2711 tirages, du 06/10/2008 au 31/01/2026**, sans trou (boules triées `b1-b5` **et** ordre de sortie machine `d1-d5`) |
 | `predict_loto.py` | Analyse + génération de grilles (aucune dépendance, Python ≥ 3.8) |
 | `test_biais.py` | Batterie de 15 tests de détection de biais (Monte-Carlo exact, Holm, facteur de Bayes, analyse de puissance) |
+| `test_peinture.py` | Tests dirigés de l'hypothèse « masse de peinture/gravure » : corrélation fréquence↔encre (proxy 7-segments), 1 vs 2 chiffres, position de sortie↔encre |
+| `sim_physique.py` | Simulation physique d'un boulier (tambour rotatif 2D, 49 boules, collisions, gravité) : dose-réponse Δm/m → biais de sortie, extrapolée à l'écart d'encre réel |
 | `update_data.py` | Met à jour le CSV depuis le fichier officiel FDJ (accès internet requis) |
 
 ## Usage
