@@ -193,15 +193,16 @@ def main():
             light = freq_rel[np.argsort(masses)[:10]].mean()
             print(f"  Δm/m = {rel_dm:5.0%} : corr(masse,fréq) = {r:+.3f} ; "
                   f"10 lourdes {heavy:.3f} vs 10 légères {light:.3f} "
-                  f"(1.000 = uniforme)")
+                  f"(1.000 = uniforme) ; pente = {slope:+.2f}")
         else:
             spread = float(freq_rel.std())
             print(f"  Δm/m =    0% (contrôle) : dispersion des fréquences "
                   f"σ={spread:.3f} — bruit d'échantillonnage pur")
 
     if slopes:
-        # sensibilité : biais relatif par unité de Δm/m (moyenne des pentes)
-        k = sum(s / d for d, s in [(d, s) for d, s in slopes]) / len(slopes)
+        # la pente de régression est déjà exprimée « par unité de Δm/m » :
+        # on moyenne simplement les pentes des configurations amplifiées
+        k = sum(s for _, s in slopes) / len(slopes)
         print(f"\n  Pente ajustée : biais relatif ≈ {k:+.2f} x (Δm/m)")
         real_dm = 3.0e-4    # ~25 mg d'encre/gravure sur 80 g
         real_bias = k * real_dm
